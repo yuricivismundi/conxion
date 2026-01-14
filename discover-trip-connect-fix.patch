@@ -1,0 +1,99 @@
+diff --git a/app/discover/page.tsx b/app/discover/page.tsx
+index 1111111..2222222 100644
+--- a/app/discover/page.tsx
++++ b/app/discover/page.tsx
+@@ -1,5 +1,5 @@
+ // /app/discover/page.tsx
+ "use client";
+ 
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { supabase } from "@/lib/supabase/client";
+@@ -880,6 +880,7 @@ export default function DiscoverPage() {
+   const [connectOpen, setConnectOpen] = useState(false);
+   const [connectTarget, setConnectTarget] = useState<Profile | null>(null);
+   const [connectContext, setConnectContext] = useState<ConnectContext>("member");
+   const [connectTripId, setConnectTripId] = useState<string | null>(null);
+   const reasonsForTarget = useMemo(() => {
+     if (!connectTarget) return [];
+ 
+@@ -1568,8 +1569,10 @@ async function requestConnectWithReason(args: {
+ }
+ 
+-    setAllProfiles((prev) => prev.filter((p) => p.user_id !== args.targetId));
++    if (args.context === "member") {
++      setAllProfiles((prev) => prev.filter((p) => p.user_id !== args.targetId));
++    }
+     setConnectionStatusByUserId((prev) => ({ ...prev, [args.targetId]: "pending" }));
+   }
+ 
+@@ -1850,11 +1853,12 @@ return (
+     onConnect={() => {
+       setConnectTarget(p);
+       setConnectContext("member");
++      setConnectTripId(null);
+       setConnectOpen(true);
+     }}
+   />
+ 
+@@ -1916,6 +1920,7 @@ return (
+       onConnect={() => {
+         const pseudoProfile: Profile = {
+           user_id: t.user_id,
+           display_name: t.display_name,
+           city: "",
+           country: null,
+           roles: t.roles ?? [],
+           languages: t.languages ?? [],
+           interests: t.interests ?? [],
+           availability: t.availability ?? [],
+           connections_count: 0,
+           dance_skills: {},
+           avatar_url: t.avatar_url,
+           verified: t.verified,
+           verified_label: t.verified_label,
+           created_at: t.created_at ?? null,
+         };
+         setConnectTarget(pseudoProfile);
+         setConnectContext("traveller");
++        setConnectTripId(t.id);
+         setConnectOpen(true);
+       }}
+     />
+ 
+@@ -1987,10 +1992,12 @@ return (
+   onClose={() => {
+     if (busyId) return;
+     setConnectOpen(false);
+     setConnectTarget(null);
++    setConnectTripId(null);
+   }}
+   targetName={connectTarget?.display_name ?? "—"}
+   targetRoles={connectTarget?.roles ?? []}
+   context={connectContext}
+   reasons={reasonsForTarget}
+   loading={!!busyId && busyId === connectTarget?.user_id}
+   onConfirm={(reasonKey: string) => {
+     const target = connectTarget;
+     if (!target) return;
+ 
+-    const reasonRole = (target.roles?.[0] ?? "").toString();
++    const reasonRole =
++      connectContext === "traveller"
++        ? "trip"
++        : (target.roles?.[0] ?? "").toString();
+ 
+     requestConnectWithReason({
+       targetId: target.user_id,
+       reasonKey,
+       context: connectContext,
+       reasonRole,
+       note: null,
+-      tripId: null,
++      tripId: connectContext === "traveller" ? connectTripId : null,
+     });
+ 
+     setConnectOpen(false);
+     setConnectTarget(null);
++    setConnectTripId(null);
+   }}
+ />
