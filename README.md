@@ -1,36 +1,135 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ConXion — MVP
 
-## Getting Started
+ConXion is a **Next.js + Supabase** application focused on building trusted connections in the dance community.
 
-First, run the development server:
+This repository is currently in **MVP development mode** and optimized for:
+- Local-first development
+- Fast iteration
+- Clear separation between client and backend responsibilities
 
+---
+
+## Tech Stack
+
+- **Next.js (App Router)**
+- **Supabase** (Auth, Database, Storage)
+- **Tailwind CSS**
+- **TypeScript**
+
+---
+
+## Requirements
+
+- Node.js **18+**
+- npm / pnpm / yarn
+- A Supabase project
+
+---
+
+## Local Development Setup
+
+### 1️⃣ Install dependencies
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2️⃣ Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create a file at the root of the project:
 
-## Learn More
+**`.env.local`**
+```env
+# Public (safe for browser)
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 
-To learn more about Next.js, take a look at the following resources:
+# Server-only (DO NOT expose to client)
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+#### Important rules
+- `NEXT_PUBLIC_*` variables are exposed to the browser.
+- `SUPABASE_SERVICE_ROLE_KEY` must **never** be used in client components.
+- Service role key is reserved for:
+  - Admin scripts
+  - Seed data
+  - Moderation tooling
+  - Server-only API routes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+### 3️⃣ Run the app
+```bash
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open:
+- http://localhost:3000
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## Supabase Client Setup
+
+### Browser-safe client
+`/lib/supabase/client.ts`
+```ts
+import { createClient } from "@supabase/supabase-js";
+
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+```
+
+---
+
+## Deployment (Vercel – recommended)
+
+### Environment variables in Vercel
+Add the following in **Vercel → Project → Settings → Environment Variables**:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Only add `SUPABASE_SERVICE_ROLE_KEY` when you explicitly need server-only features.
+
+---
+
+## Git Safety
+
+Make sure these files are **never committed**:
+
+`.gitignore`
+```gitignore
+.env.local
+.env.*
+```
+
+Always verify before committing:
+```bash
+git status
+```
+
+---
+
+## MVP Notes
+
+- Supabase Row Level Security (RLS) is mandatory for all client-accessible tables
+- Demo / seed profiles should use `profiles.is_test = true`
+- No free DMs — all chats must be contextual (member / trip / event)
+
+---
+
+## Status
+
+🚧 Active MVP development  
+Not production-ready yet
+
+---
+
+If you are joining the project:
+1. Ask for Supabase project access
+2. Copy `.env.local` values
+3. Run locally first — do not deploy without approval
