@@ -1,10 +1,68 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Country, City } from "country-state-city";
 import { readOnboardingDraft } from "@/lib/onboardingDraft";
 
 const ROLE_PREFS = ["Leader", "Follower", "Switch"] as const;
 type RolePref = (typeof ROLE_PREFS)[number];
+
+const ROLES = [
+  "Social dancer / Student",
+  "Organizer",
+  "Studio Owner",
+  "Promoter",
+  "DJ",
+  "Artist",
+  "Teacher",
+] as const;
+
+type Role = (typeof ROLES)[number];
+
+const INTERESTS = [
+  "Dance at local socials and events",
+  "Find practice partners",
+  "Get tips on the local dance scene",
+  "Collaborate on video projects",
+  "Find buddies for workshops, socials, accommodations, or rides",
+  "Collaborate with artists/teachers for events/festivals",
+  "Organize recurring local events",
+  "Secure sponsorships and org collabs",
+  "Offer volunteer roles for events",
+  "Recruit guest dancers",
+  "Promote special workshops and events",
+  "Organize classes and schedules",
+  "Collaborate with other studio owners",
+  "Secure sponsorships and hire talent",
+  "Partner to promote festivals",
+  "Refer artists, DJs, and teachers",
+  "Co-promote local parties/socials",
+  "Exchange guest lists and shoutouts",
+  "Share promo materials and audiences",
+  "Produce new songs and tracks",
+  "Collaborate on tracks or live sets",
+  "Network for festival gigs",
+  "DJ international and local events",
+  "Feature in promo videos/socials",
+  "Offer private/group lessons",
+  "Teach regular classes",
+  "Lead festival workshops",
+  "Co-teach sessions",
+  "Exchange tips, curricula, and student referrals",
+] as const;
+
+type Interest = (typeof INTERESTS)[number];
+
+const AVAILABILITY = [
+  "Weekdays",
+  "Weekends",
+  "DayTime",
+  "Evenings",
+  "Travel for Events",
+  "I’d rather not say",
+] as const;
+
+type Availability = (typeof AVAILABILITY)[number];
 
 const LANGUAGES = [
   "English",
@@ -39,9 +97,23 @@ type Style = (typeof STYLES)[number];
 export type ConnectionsFilters = {
   country: string;
   cities: string[]; // max 3
+
+  // dance role preference (Leader/Follower/Switch)
   rolePref?: RolePref;
+
+  // Step-1 roles (Teacher, Organizer, etc.)
+  roles: Role[];
+
   verifiedOnly: boolean;
+
+  // max 3
   languages: Language[];
+
+  // single select
+  interest?: Interest;
+
+  availability: Availability[];
+
   styles: Record<Style, { enabled: boolean; level?: Level; otherText?: string }>;
 };
 
@@ -52,6 +124,30 @@ const DEFAULT_STYLES: ConnectionsFilters["styles"] = {
   Zouk: { enabled: false },
   Other: { enabled: false, otherText: "" },
 };
+
+const DEFAULT_FILTERS: ConnectionsFilters = {
+  country: "",
+  cities: [],
+  rolePref: undefined,
+  roles: [],
+  verifiedOnly: false,
+  languages: [],
+  interest: undefined,
+  availability: [],
+  styles: DEFAULT_STYLES,
+};
+
+function normalizeFilters(v: ConnectionsFilters): ConnectionsFilters {
+  // Merge with defaults to avoid runtime errors if parent passes older shape.
+  return {
+    ...DEFAULT_FILTERS,
+    ...v,
+    roles: Array.isArray((v as any).roles) ? ((v as any).roles as Role[]) : [],
+    languages: Array.isArray(v.languages) ? v.languages : [],
+    availability: Array.isArray((v as any).availability) ? ((v as any).availability as Availability[]) : [],
+    styles: { ...DEFAULT_STYLES, ...(v.styles ?? {}) },
+  };
+}
 
 export default function ConnectionsFiltersDrawer({
   open,
@@ -68,25 +164,39 @@ export default function ConnectionsFiltersDrawer({
   onApply: () => void;
   onClear: () => void;
 }) {
-  const [local, setLocal] = useState<ConnectionsFilters>(value);
+  const [local, setLocal] = useState<ConnectionsFilters>(() => normalizeFilters(value));
 
   // Prefill from onboarding draft once (country/city as defaults)
   useEffect(() => {
     if (!open) return;
 
     const d = readOnboardingDraft();
-    setLocal((prev) => ({
-      ...prev,
-      country: prev.country || (d.country ?? ""),
-      cities: prev.cities.length ? prev.cities : d.city ? [d.city] : [],
-    }));
+    setLocal((prevRaw) => {
+      const prev = normalizeFilters(prevRaw as any);
+      return {
+        ...prev,
+        country: prev.country || (d.country ?? ""),
+        cities: prev.cities.length ? prev.cities : d.city ? [d.city] : [],
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // keep local synced when parent changes
-  useEffect(() => setLocal(value), [value]);
+  useEffect(() => setLocal(normalizeFilters(value)), [value]);
 
   const citiesCount = useMemo(() => `${local.cities.length}/3`, [local.cities.length]);
+
+  const countriesAll = useMemo(() => Country.getAllCountries(), []);
+  const countryNames = useMemo(() => countriesAll.map((c) => c.name), [countriesAll]);
+
+  const iso = countriesAll.find((c) => c.name === local.country)?.isoCode ?? "";
+  const cityNames = useMemo(() => {
+    if (!iso) return [];
+    return (City.getCitiesOfCountry(iso) ?? []).map((c) => c.name);
+  }, [iso]);
+
+  const [cityPick, setCityPick] = useState<string>("");
 
   function commit(next: ConnectionsFilters) {
     setLocal(next);
@@ -129,12 +239,24 @@ export default function ConnectionsFiltersDrawer({
             <div className="space-y-3">
               <label className="block">
                 <span className="text-sm font-medium mb-1.5 block text-white/80">Country</span>
-                <input
+                <select
                   value={local.country}
-                  onChange={(e) => commit({ ...local, country: e.target.value })}
-                  placeholder="e.g. Spain"
+                  onChange={(e) => {
+                    // reset cities when country changes
+                    commit({ ...local, country: e.target.value, cities: [] });
+                    setCityPick("");
+                  }}
                   className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                />
+                >
+                  <option value="" disabled>
+                    Select country…
+                  </option>
+                  {countryNames.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block">
@@ -144,17 +266,49 @@ export default function ConnectionsFiltersDrawer({
                     {citiesCount}
                   </span>
                 </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <select
+                    value={cityPick}
+                    onChange={(e) => setCityPick(e.target.value)}
+                    disabled={!local.country || cityNames.length === 0 || local.cities.length >= 3}
+                    className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {!local.country
+                        ? "Select country first"
+                        : local.cities.length >= 3
+                        ? "Max 3 cities"
+                        : cityNames.length === 0
+                        ? "No cities found"
+                        : "Select a city…"}
+                    </option>
+                    {cityNames
+                      .filter((c) => !local.cities.includes(c))
+                      .map((c, idx) => (
+                        <option key={`${c}-${idx}`} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                  </select>
 
-                {/* MVP: simple “add city” input */}
-                <CityAdder
-                  disabled={local.cities.length >= 3}
-                  onAdd={(city) => {
-                    if (local.cities.length >= 3) return;
-                    if (local.cities.some((c) => c.toLowerCase() === city.toLowerCase())) return;
-                    commit({ ...local, cities: [...local.cities, city] });
-                  }}
-                />
-
+                  <button
+                    type="button"
+                    disabled={!cityPick || local.cities.length >= 3}
+                    onClick={() => {
+                      if (!cityPick) return;
+                      if (local.cities.length >= 3) return;
+                      commit({ ...local, cities: [...local.cities, cityPick] });
+                      setCityPick("");
+                    }}
+                    className={
+                      !cityPick || local.cities.length >= 3
+                        ? "w-full sm:w-auto rounded-xl px-4 py-3 text-xs font-bold bg-white/10 text-white/40 cursor-not-allowed"
+                        : "w-full sm:w-auto rounded-xl px-4 py-3 text-xs font-bold border border-white/10 text-white/70 hover:text-white hover:border-white/20"
+                    }
+                  >
+                    Add
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2 mt-3">
                   {local.cities.map((c) => (
                     <button
@@ -190,6 +344,38 @@ export default function ConnectionsFiltersDrawer({
                     className={[
                       "flex-1 py-2.5 text-sm font-semibold rounded-xl transition",
                       active ? "bg-white/[0.08] text-white" : "text-white/50 hover:text-white",
+                    ].join(" ")}
+                  >
+                    {r}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Roles */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[#00F5FF]">👤</span>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white/50">Roles</h3>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {ROLES.map((r) => {
+                const active = local.roles.includes(r);
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => {
+                      const next = active ? local.roles.filter((x) => x !== r) : [...local.roles, r];
+                      commit({ ...local, roles: next });
+                    }}
+                    className={[
+                      "px-3 py-1.5 rounded-full border text-xs font-medium transition",
+                      active
+                        ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]"
+                        : "border-white/10 text-white/60 hover:border-white/20",
                     ].join(" ")}
                   >
                     {r}
@@ -303,6 +489,54 @@ export default function ConnectionsFiltersDrawer({
               <h3 className="text-sm font-bold uppercase tracking-wider text-white/50">More filters</h3>
             </div>
 
+            {/* Interest (single select) */}
+            <div>
+              <div className="text-sm font-medium mb-3 block text-white/80">Interest</div>
+              <select
+                value={local.interest ?? ""}
+                onChange={(e) => commit({ ...local, interest: (e.target.value as Interest) || undefined })}
+                className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+              >
+                <option value="">Any interest</option>
+                {INTERESTS.map((i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 text-[11px] text-white/35">Pick one.</div>
+            </div>
+
+            {/* Availability */}
+            <div>
+              <div className="text-sm font-medium mb-3 block text-white/80">Availability</div>
+              <div className="flex flex-wrap gap-2">
+                {AVAILABILITY.map((a) => {
+                  const active = local.availability.includes(a);
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => {
+                        const next = active
+                          ? local.availability.filter((x) => x !== a)
+                          : [...local.availability, a];
+                        commit({ ...local, availability: next });
+                      }}
+                      className={[
+                        "px-3 py-1.5 rounded-full border text-xs font-medium transition",
+                        active
+                          ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]"
+                          : "border-white/10 text-white/60 hover:border-white/20",
+                      ].join(" ")}
+                    >
+                      {a}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Languages */}
             <div>
               <div className="text-sm font-medium mb-3 block text-white/80">Languages</div>
@@ -386,45 +620,6 @@ export default function ConnectionsFiltersDrawer({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function CityAdder({
-  disabled,
-  onAdd,
-}: {
-  disabled: boolean;
-  onAdd: (city: string) => void;
-}) {
-  const [v, setV] = useState("");
-
-  return (
-    <div className="flex gap-2">
-      <input
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        placeholder={disabled ? "Max reached" : "Add city…"}
-        disabled={disabled}
-        className="flex-1 rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
-      />
-      <button
-        type="button"
-        disabled={disabled || !v.trim()}
-        onClick={() => {
-          const city = v.trim();
-          if (!city) return;
-          onAdd(city);
-          setV("");
-        }}
-        className={
-          disabled || !v.trim()
-            ? "rounded-xl px-4 py-3 text-xs font-bold bg-white/10 text-white/40 cursor-not-allowed"
-            : "rounded-xl px-4 py-3 text-xs font-bold border border-white/10 text-white/70 hover:text-white hover:border-white/20"
-        }
-      >
-        Add
-      </button>
     </div>
   );
 }

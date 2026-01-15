@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Country, City } from "country-state-city";
 import { supabase } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -228,8 +228,8 @@ const DEMO_MEMBERS: MemberCard[] = [
   },
 ];
 
-function Pill({ children, active }: { children: React.ReactNode; active?: boolean }) {
-  return (
+function Pill({ children, active }: { children: ReactNode; active?: boolean }) {
+      return (
     <span
       className={[
         "text-[10px] px-2 py-0.5 rounded-full border",
@@ -756,7 +756,9 @@ export default function ConnectionsPage() {
                         key={l}
                         type="button"
                         onClick={() =>
-                          setFilters((p) => (on ? { ...p, langs: p.langs.filter((x) => x !== l) } : { ...p, langs: [...p.langs, l] }))
+                          setFilters((p) => (on
+  ? { ...p, langs: p.langs.filter((x) => x !== l) }
+  : { ...p, langs: [...p.langs, l].slice(0, 3) }))
                         }
                         className={[
                           "rounded-full px-3 py-2 text-[11px] font-extrabold uppercase tracking-wider transition border",
