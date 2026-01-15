@@ -45,8 +45,9 @@ export default function AuthPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email: emailClean,
       options: {
-        // ✅ IMPORTANT: land on onboarding step 1 (profile)
-        emailRedirectTo: `${window.location.origin}/onboarding/profile`,
+        // ✅ IMPORTANT: always land on auth callback so the session is exchanged and persisted.
+        // Then the callback route will redirect to the correct post-login route.
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
 

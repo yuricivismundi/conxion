@@ -31,7 +31,7 @@ const LANGUAGES = [
   "Russian",
   "Ukrainian",
   "Polish",
-  "Swedish",
+  "Swedish",    
   "Finnish",
 ] as const;
 
