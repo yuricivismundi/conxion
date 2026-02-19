@@ -1,11 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
 export default function AuthPage() {
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -79,51 +77,34 @@ export default function AuthPage() {
         }}
       >
         <div className="flex items-center justify-center">
-          {!logoFailed ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={logoSrc}
-                alt="ConXion"
-                className="h-24 sm:h-28 md:h-42 w-auto select-none"
-                onError={() => {
-                  if (logoSrc.endsWith(".svg")) {
-                    setLogoSrc("/branding/conxion-logo.png");
-                    return;
-                  }
-                  setLogoFailed(true);
-                }}
-              />
-            </>
-          ) : (
-            <div
-              className="text-3xl sm:text-4xl md:text-5xl font-black italic tracking-tight"
-              style={{
-                backgroundImage: `linear-gradient(90deg, ${brand.cyan} 0%, ${brand.magenta} 100%)`,
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                color: "transparent",
-              }}
-            >
-              CONXION
-            </div>
-          )}
-        </div>
-        
-
-        {searchParams.get("error") ? (
+        {!logoFailed ? (
+          <img
+            src={logoSrc}
+            alt="ConXion"
+            className="h-24 sm:h-28 md:h-42 w-auto select-none"
+            onError={() => {
+              if (logoSrc.endsWith(".svg")) {
+                setLogoSrc("/branding/conxion-logo.png");
+                return;
+              }
+              setLogoFailed(true);
+            }}
+          />
+        ) : (
           <div
-            className="mb-3 rounded-xl border px-3 py-2 text-xs"
+            className="text-3xl sm:text-4xl md:text-5xl font-black italic tracking-tight"
             style={{
-              borderColor: brand.danger,
-              color: brand.danger,
-              backgroundColor: brand.dangerBg,
+              backgroundImage: `linear-gradient(90deg, ${brand.cyan} 0%, ${brand.magenta} 100%)`,
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
             }}
           >
-            {searchParams.get("error")}
-            {searchParams.get("error_description") ? `: ${searchParams.get("error_description")}` : ""}
+            CONXION
           </div>
-        ) : null}
+        )}
+      </div>
+        
 
         {!sent ? (
           <form onSubmit={sendMagicLink} className="mt-3 space-y-2">
@@ -142,11 +123,11 @@ export default function AuthPage() {
                 placeholder="you@email.com"
                 onFocus={(e) => {
                   e.currentTarget.style.borderColor = brand.cyan;
-                  e.currentTarget.style.boxShadow = `0 0 0 4px rgba(56,229,215,0.12)`;
+                  (e.currentTarget.style as any).boxShadow = `0 0 0 4px rgba(56,229,215,0.12)`;
                 }}
                 onBlur={(e) => {
                   e.currentTarget.style.borderColor = brand.borderStrong;
-                  e.currentTarget.style.boxShadow = "none";
+                  (e.currentTarget.style as any).boxShadow = "none";
                 }}
               />
             </label>
@@ -238,21 +219,18 @@ export default function AuthPage() {
             © {new Date().getFullYear()} ConXion
           </span>
           {!shortLogoFailed ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={shortLogoSrc}
-                alt="ConXion"
-                className="h-12 w-auto opacity-90"
-                onError={() => {
-                  if (shortLogoSrc.endsWith(".svg")) {
-                    setShortLogoSrc("/branding/conxion-short-logo.png");
-                    return;
-                  }
-                  setShortLogoFailed(true);
-                }}
-              />
-            </>
+            <img
+              src={shortLogoSrc}
+              alt="ConXion"
+              className="h-12 w-auto opacity-90"
+              onError={() => {
+                if (shortLogoSrc.endsWith(".svg")) {
+                  setShortLogoSrc("/branding/conxion-short-logo.png");
+                  return;
+                }
+                setShortLogoFailed(true);
+              }}
+            />
           ) : (
             <span
               className="text-[12px] font-black italic"

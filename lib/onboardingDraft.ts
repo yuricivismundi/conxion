@@ -9,12 +9,6 @@ export type OnboardingDraft = {
   interests?: string[];
   styles?: string[];
 
-  // Structured interests/styles (step 2)
-  interestsByRole?: Record<string, string[]>;
-  styleLevels?: Record<string, string>;
-  otherStyleEnabled?: boolean;
-  otherStyleName?: string;
-
   langs?: string[];
   avail?: Record<string, boolean>;
 

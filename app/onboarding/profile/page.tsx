@@ -171,8 +171,8 @@ export default function OnboardingProfilePage() {
         avatarStatus: "pending",
         avatarDataUrl: signedUrl,
       });
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+    } catch (e: any) {
+      setError(e?.message ?? "Upload failed");
     } finally {
       setUploading(false);
     }
