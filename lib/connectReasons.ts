@@ -1,6 +1,6 @@
 // /lib/connectReasons.ts
 
-export type ConnectContext = "member" | "traveller";
+export type ConnectContext = "member" | "trip" | "traveller";
 
 export type ReasonItem = {
   key: string; // stable key for DB

@@ -50,6 +50,62 @@ type Profile = {
   verified_label: string | null;
 };
 
+type BlockedUser = {
+  connId: string;
+  userId: string;
+  name: string;
+  city: string;
+  country: string | null;
+  avatarUrl: string | null;
+  status: string;
+};
+
+type ProfileRow = {
+  user_id?: string;
+  display_name?: string;
+  city?: string;
+  country?: string | null;
+  nationality?: string | null;
+  roles?: unknown;
+  languages?: unknown;
+  interests?: unknown;
+  availability?: unknown;
+  dance_skills?: unknown;
+  instagram_handle?: string | null;
+  whatsapp_handle?: string | null;
+  youtube_url?: string | null;
+  avatar_url?: string | null;
+  verified?: boolean | null;
+  verified_label?: string | null;
+};
+
+type TripRow = {
+  id?: string;
+  user_id?: string;
+  destination_country?: string | null;
+  destination_city?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  purpose?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
+type ConnectionRow = {
+  id?: string;
+  requester_id?: string;
+  target_id?: string;
+  status?: string | null;
+};
+
+type ProfileLite = {
+  user_id: string;
+  display_name?: string | null;
+  city?: string | null;
+  country?: string | null;
+  avatar_url?: string | null;
+};
+
 const STYLE_ORDER = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
 
 function titleCase(s: string) {
@@ -101,6 +157,11 @@ function toIsoDate(d: string | Date) {
   return x.toISOString().slice(0, 10);
 }
 
+const isString = (value: unknown): value is string => typeof value === "string";
+const isTripPurpose = (value: unknown): value is TripPurpose =>
+  value === "Holiday Trip" || value === "Dance Festival";
+const isTripStatus = (value: unknown): value is TripStatus => value === "active" || value === "inactive";
+
 function formatDateShort(iso: string) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map((p) => parseInt(p, 10));
@@ -116,6 +177,9 @@ export default function MePage() {
 
   const [trips, setTrips] = useState<Trip[]>([]);
   const [tripsTab, setTripsTab] = useState<"active" | "inactive">("active");
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [blockedError, setBlockedError] = useState<string | null>(null);
+  const [unblockBusy, setUnblockBusy] = useState<string | null>(null);
 
   const locationText = useMemo(() => {
     if (!me) return "—";
@@ -213,15 +277,27 @@ export default function MePage() {
         return;
       }
 
-      const row: any = data;
+      const row = data as ProfileRow;
       const normalized: Profile = {
-        ...row,
-        roles: Array.isArray(row.roles) ? row.roles : [],
-        languages: Array.isArray(row.languages) ? row.languages : [],
-        interests: Array.isArray(row.interests) ? row.interests : [],
-        availability: Array.isArray(row.availability) ? row.availability : [],
-        dance_skills: (row.dance_skills ?? {}) as DanceSkills,
-        verified: !!row.verified,
+        user_id: row.user_id ?? "",
+        display_name: row.display_name ?? "—",
+        city: row.city ?? "—",
+        country: row.country ?? null,
+        nationality: row.nationality ?? null,
+        roles: Array.isArray(row.roles) ? row.roles.filter(isString) : [],
+        languages: Array.isArray(row.languages) ? row.languages.filter(isString) : [],
+        interests: Array.isArray(row.interests) ? row.interests.filter(isString) : [],
+        availability: Array.isArray(row.availability) ? row.availability.filter(isString) : [],
+        dance_skills:
+          row.dance_skills && typeof row.dance_skills === "object"
+            ? (row.dance_skills as DanceSkills)
+            : {},
+        instagram_handle: row.instagram_handle ?? null,
+        whatsapp_handle: row.whatsapp_handle ?? null,
+        youtube_url: row.youtube_url ?? null,
+        avatar_url: row.avatar_url ?? null,
+        verified: Boolean(row.verified),
+        verified_label: row.verified_label ?? null,
       };
 
       setMe(normalized);
@@ -239,18 +315,75 @@ export default function MePage() {
         console.warn("Failed to load trips:", tripsErr.message);
         setTrips([]);
       } else {
-        const list = (tripsData ?? []).map((t: any) => ({
-          id: t.id,
-          user_id: t.user_id,
-          destination_country: t.destination_country ?? "",
-          destination_city: t.destination_city ?? "",
-          start_date: toIsoDate(t.start_date),
-          end_date: toIsoDate(t.end_date),
-          purpose: (t.purpose ?? "Holiday Trip") as TripPurpose,
-          status: (t.status ?? "active") as any,
-          created_at: t.created_at ?? null,
-        })) as Trip[];
+        const list = (tripsData ?? []).map((t) => {
+          const row = t as TripRow;
+          const purpose = isTripPurpose(row.purpose) ? row.purpose : "Holiday Trip";
+          const status = isTripStatus(row.status) ? row.status : "active";
+          return {
+            id: row.id ?? "",
+            user_id: row.user_id ?? "",
+            destination_country: row.destination_country ?? "",
+            destination_city: row.destination_city ?? "",
+            start_date: toIsoDate(row.start_date ?? ""),
+            end_date: toIsoDate(row.end_date ?? ""),
+            purpose,
+            status,
+            created_at: row.created_at ?? null,
+          };
+        }) as Trip[];
         setTrips(list);
+      }
+
+      try {
+        const { data: blockedRows, error: blockedErr } = await supabase
+          .from("connections")
+          .select("id,requester_id,target_id,status,blocked_by")
+          .eq("blocked_by", user.id)
+          .limit(200);
+
+        if (blockedErr) {
+          setBlockedError(blockedErr.message);
+          setBlockedUsers([]);
+        } else {
+          const rows = (blockedRows ?? []) as ConnectionRow[];
+          const otherIds = Array.from(
+            new Set(rows.map((r) => (r.requester_id === user.id ? r.target_id : r.requester_id)))
+          );
+
+          let profilesById: Record<string, ProfileLite> = {};
+          if (otherIds.length) {
+            const { data: profs, error: profErr } = await supabase
+              .from("profiles")
+              .select("user_id,display_name,city,country,avatar_url")
+              .in("user_id", otherIds);
+            if (!profErr) {
+              profilesById = Object.fromEntries(
+                (profs ?? []).map((p) => {
+                  const row = p as ProfileLite;
+                  return [row.user_id, row];
+                })
+              );
+            }
+          }
+
+          const mapped: BlockedUser[] = rows.map((r) => {
+            const otherId = r.requester_id === user.id ? r.target_id : r.requester_id;
+            const safeOtherId = otherId ?? "";
+            const prof: ProfileLite | null = safeOtherId ? profilesById[safeOtherId] ?? null : null;
+            return {
+              connId: r.id ?? "",
+              userId: safeOtherId,
+              name: prof?.display_name ?? "Unknown",
+              city: prof?.city ?? "—",
+              country: prof?.country ?? null,
+              avatarUrl: prof?.avatar_url ?? null,
+              status: r.status ?? "blocked",
+            };
+          });
+          setBlockedUsers(mapped);
+        }
+      } catch (err: unknown) {
+        setBlockedError(err instanceof Error ? err.message : "Failed to load blocked users.");
       }
 
       setLoading(false);
@@ -296,6 +429,41 @@ export default function MePage() {
   }, [me?.whatsapp_handle]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading…</div>;
+
+  async function unblockUser(connId: string) {
+    setUnblockBusy(connId);
+    setBlockedError(null);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token ?? "";
+      if (!accessToken) {
+        setUnblockBusy(null);
+        setBlockedError("Missing auth session token.");
+        return;
+      }
+
+      const response = await fetch("/api/connections/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ connId, action: "unblock" }),
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      setUnblockBusy(null);
+      if (!response.ok || !result?.ok) {
+        setBlockedError(result?.error ?? "Failed to unblock user.");
+        return;
+      }
+
+      setBlockedUsers((prev) => prev.filter((u) => u.connId !== connId));
+    } catch (err) {
+      setUnblockBusy(null);
+      setBlockedError(err instanceof Error ? err.message : "Failed to unblock user.");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 p-6">
@@ -492,8 +660,8 @@ export default function MePage() {
               </div>
             </div>
 
-            {/* Contacts */}
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 sm:col-span-2">
+          {/* Contacts */}
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 sm:col-span-2">
               <div className="font-medium flex items-center gap-2">📇 Contacts</div>
 
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -547,6 +715,51 @@ export default function MePage() {
                 Contacts are visible to <span className="font-medium">you</span>. Other users unlock them only after mutual connection.
               </div>
             </div>
+          </div>
+
+          {/* Blocked users */}
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 sm:col-span-2">
+            <div className="font-medium flex items-center gap-2">🚫 Blocked users</div>
+            <div className="mt-1 text-xs text-zinc-500">You can unblock people at any time.</div>
+
+            {blockedError ? (
+              <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+                {blockedError}
+              </div>
+            ) : null}
+
+            {blockedUsers.length === 0 ? (
+              <div className="mt-3 text-sm text-zinc-600">No blocked users.</div>
+            ) : (
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {blockedUsers.map((u) => (
+                  <div key={u.connId} className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3">
+                    <div className="relative h-12 w-12 rounded-full overflow-hidden border border-zinc-200 bg-zinc-100 shrink-0">
+                      {u.avatarUrl ? (
+                        <Image src={u.avatarUrl} alt={u.name} fill className="object-cover" sizes="48px" />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center text-zinc-400 text-xs">No photo</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-zinc-900 truncate">{u.name}</div>
+                      <div className="text-xs text-zinc-600 truncate">
+                        {u.city}
+                        {u.country ? `, ${u.country}` : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => unblockUser(u.connId)}
+                      className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-zinc-50"
+                      disabled={unblockBusy === u.connId}
+                    >
+                      {unblockBusy === u.connId ? "Unblocking..." : "Unblock"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {profileIssues.length > 0 && (
