@@ -22,6 +22,20 @@ type ProfileRow = {
   dance_skills: DanceSkills;
 };
 
+type ProfileRowDb = {
+  user_id?: string;
+  display_name?: string | null;
+  city?: string | null;
+  country?: string | null;
+  verified?: boolean | null;
+  verified_label?: string | null;
+  roles?: unknown;
+  languages?: unknown;
+  dance_skills?: unknown;
+};
+
+const isString = (value: unknown): value is string => typeof value === "string";
+
 const STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
 const LEVELS = ["beginner", "intermediate", "advanced"] as const;
 
@@ -88,17 +102,18 @@ export default function AdminPage() {
       return;
     }
 
-    const rows = (data ?? []) as any[];
+    const rows = (data ?? []) as ProfileRowDb[];
     const normalized: ProfileRow[] = rows.map((r) => ({
-      user_id: r.user_id,
+      user_id: r.user_id ?? "",
       display_name: r.display_name ?? "—",
       city: r.city ?? "—",
       country: r.country ?? null,
-      verified: !!r.verified,
+      verified: Boolean(r.verified),
       verified_label: r.verified_label ?? null,
-      roles: Array.isArray(r.roles) ? r.roles : [],
-      languages: Array.isArray(r.languages) ? r.languages : [],
-      dance_skills: (r.dance_skills ?? {}) as DanceSkills,
+      roles: Array.isArray(r.roles) ? r.roles.filter(isString) : [],
+      languages: Array.isArray(r.languages) ? r.languages.filter(isString) : [],
+      dance_skills:
+        r.dance_skills && typeof r.dance_skills === "object" ? (r.dance_skills as DanceSkills) : {},
     }));
 
     setProfiles(normalized);
@@ -149,7 +164,7 @@ export default function AdminPage() {
     setBusyUserId(userId);
     setMsg(null);
 
-    const payload: any = {};
+    const payload: Partial<ProfileRow> = {};
 
     if (typeof patch.verified === "boolean") payload.verified = patch.verified;
     if (patch.verified_label !== undefined) payload.verified_label = patch.verified_label;
@@ -233,10 +248,10 @@ export default function AdminPage() {
 
   if (authErr) {
     return (
-      <div className="min-h-screen bg-zinc-50 p-6">
+      <div className="min-h-screen bg-[#0A0A0A] p-6 text-slate-100">
         <div className="mx-auto max-w-5xl">
           <Nav title="Admin" />
-          <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{authErr}</p>
+          <p className="mt-4 text-sm text-rose-100 bg-rose-500/10 border border-rose-300/35 rounded-xl p-3">{authErr}</p>
         </div>
       </div>
     );
@@ -244,19 +259,19 @@ export default function AdminPage() {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-zinc-50 p-6">
+      <div className="min-h-screen bg-[#0A0A0A] p-6 text-slate-100">
         <div className="mx-auto max-w-5xl">
           <Nav title="Admin" />
-          <div className="mt-6 rounded-2xl bg-white border border-zinc-200 p-6">
+          <div className="mt-6 rounded-2xl bg-[#121212] border border-white/10 p-6">
             <h1 className="text-xl font-semibold">Not allowed</h1>
-            <p className="mt-2 text-zinc-600">
+            <p className="mt-2 text-slate-400">
               This page is only for admins. Add your user_id to{" "}
-              <code className="px-2 py-1 rounded bg-zinc-100">admins</code>.
+              <code className="px-2 py-1 rounded bg-black/25">admins</code>.
             </p>
 
             {meId && (
-              <p className="mt-4 text-sm text-zinc-600">
-                Your user_id: <code className="px-2 py-1 rounded bg-zinc-100">{meId}</code>
+              <p className="mt-4 text-sm text-slate-400">
+                Your user_id: <code className="px-2 py-1 rounded bg-black/25">{meId}</code>
               </p>
             )}
           </div>
@@ -266,33 +281,33 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6">
+    <div className="min-h-screen bg-[#0A0A0A] p-6 text-slate-100">
       <div className="mx-auto max-w-6xl">
         <Nav title="Admin" />
 
         {msg && (
-          <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{msg}</p>
+          <p className="mt-4 text-sm text-rose-100 bg-rose-500/10 border border-rose-300/35 rounded-xl p-3">{msg}</p>
         )}
 
-        <div className="mt-6 rounded-2xl bg-white border border-zinc-200 p-6">
+        <div className="mt-6 rounded-2xl bg-[#121212] border border-white/10 p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-xl font-semibold">Manage profiles</h1>
-              <p className="text-sm text-zinc-600">
+              <p className="text-sm text-slate-400">
                 Verify users + set roles/languages + verify per-dance style levels.
               </p>
             </div>
 
             <div className="flex gap-2">
               <input
-                className="w-full sm:w-80 rounded-xl border border-zinc-300 px-4 py-2 outline-none focus:ring-2 focus:ring-red-500"
+                className="w-full sm:w-80 rounded-xl border border-white/15 bg-black/20 px-4 py-2 text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35"
                 placeholder="Search name, city, country, id..."
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
               />
               <button
                 onClick={loadAllProfiles}
-                className="rounded-xl border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50"
+                className="rounded-xl border border-white/15 px-4 py-2 text-sm hover:bg-[#0A0A0A]"
               >
                 Refresh
               </button>
@@ -306,7 +321,7 @@ export default function AdminPage() {
               const locked = DISABLE_SELF_EDIT && isMe;
 
               return (
-                <div key={p.user_id} className="rounded-2xl border border-zinc-200 bg-white p-5">
+                <div key={p.user_id} className="rounded-2xl border border-white/10 bg-[#121212] p-5">
                   {/* Header */}
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
@@ -314,27 +329,27 @@ export default function AdminPage() {
                         <div className="text-lg font-semibold truncate">{p.display_name || "—"}</div>
                         {p.verified ? <VerifiedBadge /> : null}
                         {p.verified && p.verified_label ? (
-                          <span className="text-xs rounded-full border border-red-200 bg-red-50 px-3 py-1 text-red-700">
+                          <span className="text-xs rounded-full border border-rose-300/35 bg-rose-500/10 px-3 py-1 text-rose-100">
                             {p.verified_label}
                           </span>
                         ) : null}
                         {locked ? (
-                          <span className="text-xs rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600">
+                          <span className="text-xs rounded-full border border-white/10 bg-[#0A0A0A] px-3 py-1 text-slate-400">
                             You
                           </span>
                         ) : null}
                       </div>
 
-                      <div className="text-sm text-zinc-600">
+                      <div className="text-sm text-slate-400">
                         {(p.city || "—") + (p.country ? `, ${p.country}` : "")}
                       </div>
-                      <div className="mt-1 text-xs text-zinc-500 truncate">{p.user_id}</div>
+                      <div className="mt-1 text-xs text-slate-500 truncate">{p.user_id}</div>
                     </div>
 
                     {/* Verify controls */}
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <input
-                        className="rounded-xl border border-zinc-300 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-red-500 disabled:bg-zinc-100"
+                        className="rounded-xl border border-white/15 bg-black/20 px-4 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35 disabled:bg-black/25"
                         placeholder="Verified label (optional)"
                         defaultValue={p.verified_label ?? ""}
                         disabled={!p.verified || busy || locked}
@@ -345,7 +360,7 @@ export default function AdminPage() {
                         <button
                           onClick={() => toggleVerified(p.user_id, false)}
                           disabled={busy || locked}
-                          className="rounded-xl border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:opacity-60"
+                          className="rounded-xl border border-white/15 px-4 py-2 text-sm hover:bg-[#0A0A0A] disabled:opacity-60"
                         >
                           {busy ? "Saving…" : "Remove badge"}
                         </button>
@@ -353,7 +368,7 @@ export default function AdminPage() {
                         <button
                           onClick={() => toggleVerified(p.user_id, true)}
                           disabled={busy || locked}
-                          className="rounded-xl bg-red-700 text-white px-4 py-2 text-sm hover:bg-red-800 disabled:opacity-60"
+                          className="rounded-xl bg-cyan-300/20 text-white px-4 py-2 text-sm hover:bg-cyan-300/30 disabled:opacity-60"
                         >
                           {busy ? "Saving…" : "Verify"}
                         </button>
@@ -363,8 +378,8 @@ export default function AdminPage() {
 
                   {/* Roles + Languages */}
                   <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                      <div className="text-sm font-medium text-zinc-800">Roles</div>
+                    <div className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-4">
+                      <div className="text-sm font-medium text-slate-200">Roles</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {ROLE_OPTIONS.map((r) => {
                           const active = (p.roles ?? []).includes(r);
@@ -377,8 +392,8 @@ export default function AdminPage() {
                               className={[
                                 "rounded-full px-3 py-1.5 text-xs border transition",
                                 active
-                                  ? "bg-red-700 text-white border-red-700"
-                                  : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-100",
+                                  ? "bg-cyan-300/20 text-white border-cyan-300/35"
+                                  : "bg-[#121212] text-slate-200 border-white/15 hover:bg-black/25",
                                 busy || locked ? "opacity-60 cursor-not-allowed" : "",
                               ].join(" ")}
                             >
@@ -389,8 +404,8 @@ export default function AdminPage() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                      <div className="text-sm font-medium text-zinc-800">Languages</div>
+                    <div className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-4">
+                      <div className="text-sm font-medium text-slate-200">Languages</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {LANGUAGE_OPTIONS.map((l) => {
                           const active = (p.languages ?? []).includes(l);
@@ -403,8 +418,8 @@ export default function AdminPage() {
                               className={[
                                 "rounded-full px-3 py-1.5 text-xs border transition",
                                 active
-                                  ? "bg-red-700 text-white border-red-700"
-                                  : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-100",
+                                  ? "bg-cyan-300/20 text-white border-cyan-300/35"
+                                  : "bg-[#121212] text-slate-200 border-white/15 hover:bg-black/25",
                                 busy || locked ? "opacity-60 cursor-not-allowed" : "",
                               ].join(" ")}
                             >
@@ -417,8 +432,8 @@ export default function AdminPage() {
                   </div>
 
                   {/* Dance skills */}
-                  <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4">
-                    <div className="text-sm font-medium text-zinc-800">Dance skills (per style)</div>
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-[#121212] p-4">
+                    <div className="text-sm font-medium text-slate-200">Dance skills (per style)</div>
                     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {STYLES.map((style) => {
                         const s = (p.dance_skills ?? {})[style] ?? {};
@@ -426,11 +441,11 @@ export default function AdminPage() {
                         const v = !!s.verified;
 
                         return (
-                          <div key={style} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                          <div key={style} className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-4">
                             <div className="flex items-center justify-between">
                               <div className="text-sm font-semibold">{style}</div>
 
-                              <label className="inline-flex items-center gap-2 text-xs text-zinc-700">
+                              <label className="inline-flex items-center gap-2 text-xs text-slate-300">
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4"
@@ -444,7 +459,7 @@ export default function AdminPage() {
 
                             <div className="mt-3 flex items-center gap-3">
                               <select
-                                className="w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-500 disabled:bg-zinc-100"
+                                className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-cyan-300/35 disabled:bg-black/25"
                                 value={lvl}
                                 disabled={busy || locked}
                                 onChange={(e) => setSkillLevel(p.user_id, style, e.target.value)}
@@ -460,7 +475,7 @@ export default function AdminPage() {
                               {v ? <VerifiedBadge size={18} /> : null}
                             </div>
 
-                            <div className="mt-2 text-xs text-zinc-500">
+                            <div className="mt-2 text-xs text-slate-500">
                               Tip: turn on “Level verified” only if a school/admin validated it.
                             </div>
                           </div>
@@ -472,25 +487,25 @@ export default function AdminPage() {
               );
             })}
 
-            {filtered.length === 0 && <div className="text-zinc-600">No profiles found.</div>}
+            {filtered.length === 0 && <div className="text-slate-400">No profiles found.</div>}
           </div>
         </div>
 
         {/* Setup reminder */}
-        <div className="mt-6 rounded-2xl bg-white border border-zinc-200 p-6">
+        <div className="mt-6 rounded-2xl bg-[#121212] border border-white/10 p-6">
           <h2 className="text-lg font-semibold">Setup (one-time)</h2>
 
-          <ol className="mt-3 list-decimal pl-6 space-y-2 text-sm text-zinc-700">
+          <ol className="mt-3 list-decimal pl-6 space-y-2 text-sm text-slate-300">
             <li>
-              Create table <code className="px-2 py-1 rounded bg-zinc-100">admins</code> with{" "}
-              <code className="px-2 py-1 rounded bg-zinc-100">user_id uuid primary key</code>.
+              Create table <code className="px-2 py-1 rounded bg-black/25">admins</code> with{" "}
+              <code className="px-2 py-1 rounded bg-black/25">user_id uuid primary key</code>.
             </li>
             <li>
-              Add your user_id into <code className="px-2 py-1 rounded bg-zinc-100">admins</code>.
+              Add your user_id into <code className="px-2 py-1 rounded bg-black/25">admins</code>.
             </li>
             <li>
               Ensure your RLS allows admins to update:{" "}
-              <code className="px-2 py-1 rounded bg-zinc-100">
+              <code className="px-2 py-1 rounded bg-black/25">
                 verified, verified_label, roles, languages, dance_skills
               </code>
               .
