@@ -180,11 +180,23 @@ async function insertNotificationCompat(params: {
   ];
 
   let lastError: { message: string; code?: string } | null = null;
+  const serviceAny = params.service as unknown as {
+    from: (table: string) => {
+      insert: (values: Record<string, unknown>) => {
+        select: (columns: string) => {
+          single: () => Promise<{
+            error: { message: string; code?: string } | null;
+            data?: { id?: string } | null;
+          }>;
+        };
+      };
+    };
+  };
 
   for (const candidate of payloadCandidates) {
     const payload = { ...candidate };
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const insertRes = await params.service.from("notifications").insert(payload).select("id").single();
+      const insertRes = await serviceAny.from("notifications").insert(payload).select("id").single();
       if (!insertRes.error) {
         return { ok: true as const, notificationId: (insertRes.data as { id?: string } | null)?.id ?? null };
       }
