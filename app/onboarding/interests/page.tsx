@@ -80,7 +80,8 @@ const LEVELS = [
 
 const CORE_STYLES = ["Bachata", "Salsa", "Kizomba", "Zouk"] as const;
 
-type CoreStyle = (typeof CORE_STYLES)[number];
+type StyleName = (typeof CORE_STYLES)[number] | "Other";
+
 type StyleLevel = (typeof LEVELS)[number] | "";
 
 type InterestsByRole = Record<string, string[]>;
@@ -89,9 +90,6 @@ type ScrollState = {
   canLeft: boolean;
   canRight: boolean;
 };
-
-const isCoreStyle = (value: string): value is CoreStyle => CORE_STYLES.includes(value as CoreStyle);
-const isStyleLevel = (value: string): value is StyleLevel => value === "" || (LEVELS as readonly string[]).includes(value);
 
 function uniq<T>(arr: T[]) {
   return Array.from(new Set(arr));
@@ -129,9 +127,8 @@ export default function OnboardingInterestsPage() {
   // ------------------------------
   // Hydrate from draft
   // ------------------------------
-  /* eslint-disable react-hooks/set-state-in-effect -- hydration from persisted draft. */
   useEffect(() => {
-    const d = readOnboardingDraft();
+    const d = readOnboardingDraft() as any;
 
     const draftRoles: string[] = Array.isArray(d.roles) ? d.roles : [];
     setRoles(draftRoles);
@@ -139,10 +136,7 @@ export default function OnboardingInterestsPage() {
     // interestsByRole (preferred)
     const dIbr = d.interestsByRole;
     if (dIbr && typeof dIbr === "object") {
-      const normalized = Object.fromEntries(
-        Object.entries(dIbr).map(([k, v]) => [k, Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []])
-      );
-      setInterestsByRole(normalized as InterestsByRole);
+      setInterestsByRole(dIbr as InterestsByRole);
     } else {
       // Fallback: if only flat interests exist, don't guess assignment.
       setInterestsByRole({});
@@ -151,11 +145,7 @@ export default function OnboardingInterestsPage() {
     // style levels (preferred)
     const dLevels = d.styleLevels;
     if (dLevels && typeof dLevels === "object") {
-      const next: Record<string, StyleLevel> = {};
-      Object.entries(dLevels).forEach(([k, v]) => {
-        if (typeof v === "string" && isStyleLevel(v)) next[k] = v;
-      });
-      setStyleLevels(next);
+      setStyleLevels(dLevels as Record<string, StyleLevel>);
     }
 
     // selected styles
@@ -169,11 +159,10 @@ export default function OnboardingInterestsPage() {
     setOtherStyleName(dOtherName);
 
     setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Ensure interestsByRole has keys for each role (after roles hydrate)
-  /* eslint-disable react-hooks/set-state-in-effect -- derived state sync. */
   useEffect(() => {
     if (!hydrated) return;
     setInterestsByRole((prev) => {
@@ -188,7 +177,6 @@ export default function OnboardingInterestsPage() {
       return next;
     });
   }, [hydrated, roles]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Persist to draft
   useEffect(() => {
@@ -218,12 +206,12 @@ export default function OnboardingInterestsPage() {
       styles: resolvedStyles,
 
       // preferred structured fields
-      interestsByRole,
-      styleLevels: nextLevels,
+      interestsByRole: interestsByRole as any,
+      styleLevels: nextLevels as any,
 
-      otherStyleEnabled,
-      otherStyleName,
-    });
+      otherStyleEnabled: otherStyleEnabled as any,
+      otherStyleName: otherStyleName as any,
+    } as any);
   }, [hydrated, interestsByRole, selectedStyles, styleLevels, otherStyleEnabled, otherStyleName]);
 
   // ------------------------------
@@ -289,7 +277,6 @@ export default function OnboardingInterestsPage() {
   }
 
   // Apply other style name to selections (when user finishes typing)
-  /* eslint-disable react-hooks/set-state-in-effect -- keep selection in sync with free text. */
   useEffect(() => {
     if (!hydrated) return;
     if (!otherStyleEnabled) return;
@@ -300,13 +287,12 @@ export default function OnboardingInterestsPage() {
     setSelectedStyles((prev) => {
       const withoutOld = prev.filter((s) => s !== "Other");
       // remove any previous other that no longer matches
-      const cleaned = withoutOld.filter((s) => !(!!s && !isCoreStyle(s) && s !== name));
+      const cleaned = withoutOld.filter((s) => !(!CORE_STYLES.includes(s as any) && s !== name));
       if (!name) return cleaned;
       if (cleaned.includes(name)) return cleaned;
       return [...cleaned, name];
     });
   }, [hydrated, otherStyleEnabled, otherStyleName]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ------------------------------
   // Scroll arrows per role row
@@ -352,8 +338,12 @@ export default function OnboardingInterestsPage() {
   const stylesOk = useMemo(() => {
     // must have at least one style selected with a level
     const resolvedOther = otherStyleEnabled ? otherStyleName.trim() : "";
-    const coreSelected = selectedStyles.filter((s) => isCoreStyle(s));
-    const resolvedStyles = uniq([...coreSelected, ...(resolvedOther ? [resolvedOther] : [])].filter(Boolean));
+    const resolvedStyles = uniq(
+      selectedStyles
+        .filter((s) => CORE_STYLES.includes(s as any))
+        .concat(resolvedOther ? [resolvedOther] : [])
+        .filter(Boolean)
+    );
 
     if (resolvedStyles.length < 1) return false;
 
@@ -417,10 +407,7 @@ export default function OnboardingInterestsPage() {
                     <select
                       className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2 text-[12px] text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                       value={styleLevels[s] ?? ""}
-                      onChange={(e) => {
-                        const nextValue = e.target.value;
-                        setLevel(s, isStyleLevel(nextValue) ? nextValue : "");
-                      }}
+                      onChange={(e) => setLevel(s, e.target.value as StyleLevel)}
                     >
                       <option value="">Level…</option>
                       {LEVELS.map((l) => (
@@ -461,10 +448,7 @@ export default function OnboardingInterestsPage() {
                     <select
                       className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2 text-[12px] text-[#E0E0E0] outline-none focus:border-[#FF00FF]/60 focus:ring-1 focus:ring-[#FF00FF]/30"
                       value={styleLevels[otherStyleName.trim()] ?? ""}
-                      onChange={(e) => {
-                        const nextValue = e.target.value;
-                        setLevel(otherStyleName.trim(), isStyleLevel(nextValue) ? nextValue : "");
-                      }}
+                      onChange={(e) => setLevel(otherStyleName.trim(), e.target.value as StyleLevel)}
                     >
                       <option value="">Level…</option>
                       {LEVELS.map((l) => (

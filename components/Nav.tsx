@@ -1,9 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 type NavProps = { title?: string };
@@ -12,189 +10,83 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+function IconGlobe({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M12 2a10 10 0 1 0 .001 20.001A10 10 0 0 0 12 2Zm7.93 9h-3.17a15.6 15.6 0 0 0-1.21-6.07A8.02 8.02 0 0 1 19.93 11ZM12 4c.98 0 2.47 2.4 3 7H9c.53-4.6 2.02-7 3-7ZM4.07 13h3.17c.24 2.21.7 4.26 1.21 6.07A8.02 8.02 0 0 1 4.07 13Zm3.17-2H4.07a8.02 8.02 0 0 1 4.38-6.07c-.51 1.81-.97 3.86-1.21 6.07ZM12 20c-.98 0-2.47-2.4-3-7h6c-.53 4.6-2.02 7-3 7Zm3.55-.93c.51-1.81.97-3.86 1.21-6.07h3.17a8.02 8.02 0 0 1-4.38 6.07ZM16.76 11c-.24-2.21-.7-4.26-1.21-6.07A8.02 8.02 0 0 1 19.93 11h-3.17Z" />
+    </svg>
+  );
+}
+
+function IconUsers({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M16 11a4 4 0 1 0-3.999-4A4 4 0 0 0 16 11Zm-8 0a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.33 0-6 1.34-6 4v1h12v-1c0-2.66-2.67-4-6-4Zm8 0c-.36 0-.71.03-1.05.08 1.77.79 3.05 2.16 3.05 3.92v1h6v-1c0-2.66-2.67-4-6-4Z" />
+    </svg>
+  );
+}
+
+function IconUser({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z" />
+    </svg>
+  );
+}
+
 export default function Nav({ title }: NavProps) {
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const userId = data.user?.id;
-        if (!userId) {
-          if (!cancelled) setIsAdmin(false);
-          return;
-        }
-
-        const { data: admin, error: adminErr } = await supabase
-          .from("admins")
-          .select("user_id")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (!cancelled) {
-          setIsAdmin(Boolean(admin) && !adminErr);
-        }
-      } catch {
-        if (!cancelled) setIsAdmin(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const onPointer = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onPointer);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointer);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, []);
 
   const tabs = [
-    { href: "/connections", label: "Discover", icon: "groups" },
-    { href: "/connections/requests", label: "Connections", icon: "handshake" },
-    { href: "/messages", label: "Messages", icon: "chat" },
-    { href: "/events", label: "Events", icon: "calendar_today" },
+    { href: "/discover", label: "Discover", icon: IconGlobe },
+    // ✅ changed from /connections to /requests
+    { href: "/requests", label: "Connections", icon: IconUsers },
+    { href: "/me", label: "Me", icon: IconUser },
   ];
 
   async function signOut() {
-    try {
-      await supabase.auth.signOut();
-    } catch {
-      // ignore sign-out network errors and continue with local redirect.
-    }
+    await supabase.auth.signOut();
     window.location.assign("/auth");
   }
 
-  const activeTab = (() => {
-    if (pathname?.startsWith("/my-space")) return "/my-space";
-    if (pathname?.startsWith("/messages")) return "/messages";
-    if (pathname?.startsWith("/connections/requests")) return "/connections/requests";
-    if (pathname?.startsWith("/connections")) return "/connections";
-    if (pathname?.startsWith("/events")) return "/events";
-    return "";
-  })();
-
   return (
-    <header className="sticky top-0 z-50 border-b border-[#2A2A2A] bg-[#0A0A0A]/95 backdrop-blur-md">
-      <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center justify-between px-4">
-        <div className="flex items-center gap-4 lg:gap-7">
-          <Link href="/connections" className="flex items-center">
-            <div className="relative h-12 w-16 overflow-hidden rounded-2xl bg-[#0A0A0A]">
-              <Image src="/branding/conxion-nav-favicon-black-bg.png" alt="ConXion" fill className="object-cover" priority />
-            </div>
-          </Link>
+    <div className="w-full">
+      <div className="flex items-center justify-between gap-3">
+        {/* Optional brand/logo (put file in /public/logo.png) */}
+        <Link href="/discover" className="flex items-center gap-2">
+          <div className="h-9 w-9 rounded-2xl bg-gradient-to-br from-red-700 to-red-500 flex items-center justify-center text-white font-bold">
+            ∞
+          </div>
+          {title ? <div className="text-lg font-semibold text-zinc-900">{title}</div> : null}
+        </Link>
 
-          <nav className="hidden items-center gap-4 md:flex lg:gap-6">
-            {tabs.map((tab) => {
-              const active = activeTab === tab.href;
-              return (
-                <Link
-                  key={tab.href}
-                  href={tab.href}
-                  className={cx(
-                    "group relative flex items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium transition-colors",
-                    active ? "text-white" : "text-gray-500 hover:text-white"
-                  )}
-                >
-                  <span
-                    className={cx(
-                      "material-symbols-outlined text-[22px]",
-                      active ? "text-[#22d3ee]" : "group-hover:text-[#22d3ee]"
-                    )}
-                  >
-                    {tab.icon}
-                  </span>
-                  <span>{tab.label}</span>
-                  {active ? (
-                    <span className="absolute -bottom-[22px] left-0 right-0 h-[2px] bg-[#22d3ee] shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
-                  ) : null}
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
+        <button onClick={signOut} className="text-sm font-medium text-red-700 hover:text-red-800 underline">
+          Sign out
+        </button>
+      </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <Link
-            href="/my-space"
-            className={cx(
-              "group relative flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm font-medium transition-colors",
-              activeTab === "/my-space" ? "text-white" : "text-gray-500 hover:text-white"
-            )}
-          >
-            <span
+      {/* Tab bar */}
+      <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-2 flex items-center gap-2">
+        {tabs.map((t) => {
+          const active = pathname === t.href || pathname?.startsWith(t.href + "/");
+          const Ico = t.icon;
+          return (
+            <Link
+              key={t.href}
+              href={t.href}
               className={cx(
-                "material-symbols-outlined text-[22px]",
-                activeTab === "/my-space" ? "text-[#22d3ee]" : "group-hover:text-[#22d3ee]"
+                "flex-1 rounded-xl px-3 py-2.5 flex items-center justify-center gap-2 text-sm font-medium transition",
+                active
+                  ? "bg-gradient-to-r from-red-700 to-red-600 text-white shadow-sm"
+                  : "bg-white text-zinc-700 hover:bg-zinc-50"
               )}
             >
-              dashboard
-            </span>
-            <span className="hidden sm:inline">My Space</span>
-            {activeTab === "/my-space" ? (
-              <span className="absolute -bottom-[22px] left-0 right-0 h-[2px] bg-[#22d3ee] shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
-            ) : null}
-          </Link>
-
-          <div className="relative" ref={menuRef}>
-            <button
-              type="button"
-              onClick={() => setMenuOpen((prev) => !prev)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              className="group flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-white"
-            >
-              <span className="material-symbols-outlined text-[22px] group-hover:text-[#22d3ee]">settings</span>
-              <span className="hidden sm:inline">Settings</span>
-              <span className="material-symbols-outlined text-lg">expand_more</span>
-            </button>
-
-            {menuOpen ? (
-              <div
-                role="menu"
-                className="absolute right-0 top-[46px] w-48 rounded-2xl border border-white/10 bg-[#121414] p-1 text-sm shadow-[0_20px_45px_rgba(0,0,0,0.35)]"
-              >
-                {isAdmin ? (
-                  <Link
-                    href="/admin/space"
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
-                  >
-                    Admin Space
-                  </Link>
-                ) : null}
-                <Link
-                  href="/me/edit"
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
-                >
-                  Profile Settings
-                </Link>
-                <button
-                  type="button"
-                  onClick={signOut}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/70 hover:bg-white/5 hover:text-white"
-                >
-                  Log out
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
+              <Ico className={cx("h-5 w-5", active ? "text-white" : "text-zinc-500")} />
+              <span className="hidden sm:inline">{t.label}</span>
+            </Link>
+          );
+        })}
       </div>
-      {title ? <div className="mx-auto w-full max-w-[1440px] px-6 pb-3 text-sm text-white/55">{title}</div> : null}
-    </header>
+    </div>
   );
 }
