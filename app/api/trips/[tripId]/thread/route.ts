@@ -34,7 +34,7 @@ function getServiceClient() {
 }
 
 async function ensureThreadParticipantCompat(params: {
-  service: ReturnType<typeof createClient>;
+  service: ReturnType<typeof getServiceClient>;
   threadId: string;
   userId: string;
   includeLastReadAt?: boolean;
@@ -72,7 +72,7 @@ async function ensureThreadParticipantCompat(params: {
 }
 
 async function resolveTripThreadId(params: {
-  service: ReturnType<typeof createClient>;
+  service: ReturnType<typeof getServiceClient>;
   tripId: string;
   actorId: string;
 }) {
@@ -199,7 +199,11 @@ export async function POST(req: Request, context: RouteContext) {
       .filter(Boolean);
 
     const participantIds = Array.from(
-      new Set([trip.user_id, meId, explicitRequesterId, ...acceptedRequesterIds].filter(Boolean))
+      new Set(
+        [trip.user_id, meId, explicitRequesterId, ...acceptedRequesterIds].filter(
+          (value): value is string => typeof value === "string" && value.length > 0
+        )
+      )
     );
 
     for (const userId of participantIds) {

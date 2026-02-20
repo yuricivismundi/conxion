@@ -139,7 +139,7 @@ function applyNotificationMissingColumnCompatibilitySwap(
 }
 
 async function insertNotificationCompat(params: {
-  service: ReturnType<typeof createClient>;
+  service: ReturnType<typeof getServiceClient>;
   userId: string;
   actorId: string;
   kind: string;

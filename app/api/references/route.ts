@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-type SupabaseUserClient = ReturnType<typeof createClient>;
-type SupabaseAdminClient = ReturnType<typeof createClient>;
+type SupabaseUserClient = ReturnType<typeof createClient<any>>;
+type SupabaseAdminClient = ReturnType<typeof createClient<any>>;
 
 const REFERENCE_COLUMNS_CACHE_TTL_MS = 60_000;
 let cachedReferenceColumns:

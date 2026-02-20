@@ -1012,16 +1012,17 @@ export default function MessagesPage() {
             .limit(500),
         ]);
 
-        let acceptedOutgoingRes = acceptedOutgoingPrimaryRes;
+        let acceptedOutgoingRows = (acceptedOutgoingPrimaryRes.data ?? []) as TripRequestRow[];
         if (acceptedOutgoingPrimaryRes.error) {
           const msg = acceptedOutgoingPrimaryRes.error.message.toLowerCase();
           if (msg.includes("column") || msg.includes("schema cache")) {
-            acceptedOutgoingRes = await supabase
+            const acceptedOutgoingFallbackRes = await supabase
               .from("trip_requests")
               .select(tripRequestColumnsFallback)
               .eq("requester_id", user.id)
               .eq("status", "accepted")
               .limit(500);
+            acceptedOutgoingRows = (acceptedOutgoingFallbackRes.data ?? []) as TripRequestRow[];
           }
         }
 
@@ -1063,7 +1064,7 @@ export default function MessagesPage() {
         }
 
         const acceptedTripRows = [
-          ...((acceptedOutgoingRes.data ?? []) as TripRequestRow[]),
+          ...acceptedOutgoingRows,
           ...((acceptedIncomingRes.data ?? []) as TripRequestRow[]),
         ].filter((row) => (row.trip_id ?? "").length > 0);
 
