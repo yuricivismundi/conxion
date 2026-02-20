@@ -14,6 +14,8 @@ const TRIP_HERO_BUCKET = "trip-heroes";
 const COUNTRY_FILE_OVERRIDES: Record<string, string> = {
   "dominican republic": "dominican.webp",
   "dominican": "dominican.webp",
+  "estonia": "generic.webp",
+  "eesti": "generic.webp",
   "espana": "spain.webp",
   "españa": "spain.webp",
   "france": "france.webp",
@@ -58,6 +60,7 @@ export function getTripHeroStorageFolderUrl(country?: string | null): string {
   if (!base || !country) return "";
   const key = country.trim().toLowerCase();
   const filename = COUNTRY_FILE_OVERRIDES[key] ?? `${slugify(country)}.jpg`;
+  if (filename.toLowerCase() === "generic.webp") return "";
   if (!filename || filename === ".jpg") return "";
   return `${base}/storage/v1/object/public/${TRIP_HERO_BUCKET}/countries/${filename}`;
 }

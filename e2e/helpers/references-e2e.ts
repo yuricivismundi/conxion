@@ -103,7 +103,7 @@ function sanitizeNamespace(raw: string) {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 48);
+    .slice(0, 12);
 }
 
 function withNamespacedEmail(baseEmail: string) {

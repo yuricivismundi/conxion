@@ -27,6 +27,8 @@ function env(name) {
   return process.env[name] || DOTENV[name] || "";
 }
 
+const E2E_TRIP_PURPOSE = "Social Dancing";
+
 function sanitizeNamespace(raw) {
   return String(raw || "")
     .trim()
@@ -34,7 +36,7 @@ function sanitizeNamespace(raw) {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 48);
+    .slice(0, 12);
 }
 
 function withNamespacedEmail(baseEmail) {
@@ -224,7 +226,7 @@ async function createTrip(adminClient, ownerId) {
     .from("trips")
     .select("id")
     .eq("user_id", ownerId)
-    .eq("purpose", "E2E Trip Request Smoke")
+    .eq("purpose", E2E_TRIP_PURPOSE)
     .order("start_date", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -247,7 +249,7 @@ async function createTrip(adminClient, ownerId) {
         destination_country: "Estonia",
         start_date: toIsoDateParts(startDate),
         end_date: toIsoDateParts(endDate),
-        purpose: "E2E Trip Request Smoke",
+        purpose: E2E_TRIP_PURPOSE,
         status: "active",
       })
       .eq("id", existingAnyId);
@@ -260,7 +262,7 @@ async function createTrip(adminClient, ownerId) {
     destination_country: "Estonia",
     start_date: toIsoDateParts(startDate),
     end_date: toIsoDateParts(endDate),
-    purpose: "E2E Trip Request Smoke",
+    purpose: E2E_TRIP_PURPOSE,
     status: "active",
     note: "Deterministic trips smoke seed",
   };
@@ -299,7 +301,7 @@ async function createTrip(adminClient, ownerId) {
             destination_country: "Estonia",
             start_date: toIsoDateParts(startDate),
             end_date: toIsoDateParts(endDate),
-            purpose: "E2E Trip Request Smoke",
+            purpose: E2E_TRIP_PURPOSE,
             status: "active",
           })
           .eq("id", anyTripId);

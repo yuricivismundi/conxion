@@ -60,6 +60,8 @@ type TripLookupRow = {
   end_date?: string | null;
 };
 
+const E2E_TRIP_PURPOSE = "Social Dancing";
+
 let cachedDotenv: Record<string, string> | null = null;
 
 function loadDotEnvLocal(): Record<string, string> {
@@ -103,7 +105,7 @@ function sanitizeNamespace(raw: string) {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 48);
+    .slice(0, 12);
 }
 
 function withNamespacedEmail(baseEmail: string) {
@@ -595,7 +597,7 @@ async function createTripScenario(
     .from("trips")
     .select("id,user_id,status,start_date,end_date")
     .eq("user_id", ownerId)
-    .eq("purpose", "E2E Trip Request Smoke")
+    .eq("purpose", E2E_TRIP_PURPOSE)
     .order("start_date", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -652,7 +654,7 @@ async function createTripScenario(
     destination_country: "Estonia",
     start_date: toIsoDateParts(startDate),
     end_date: toIsoDateParts(endDate),
-    purpose: "E2E Trip Request Smoke",
+    purpose: E2E_TRIP_PURPOSE,
     status: "active",
     note: "E2E trip request scenario",
   };
