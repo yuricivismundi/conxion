@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
-export default function AuthPage() {
+function AuthPageContent() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -269,5 +269,23 @@ export default function AuthPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function AuthPageFallback() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-2 p-6 bg-[#0B0D10] text-[#EAF0FF]">
+      <div className="relative w-full max-w-md rounded-[28px] px-6 pt-5 pb-6 border border-white/10 bg-[#12161D]">
+        <p className="text-sm font-semibold text-center">Loading sign in…</p>
+      </div>
+    </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<AuthPageFallback />}>
+      <AuthPageContent />
+    </Suspense>
   );
 }
