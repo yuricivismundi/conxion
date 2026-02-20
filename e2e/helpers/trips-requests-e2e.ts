@@ -96,6 +96,32 @@ function env(name: string): string {
   return loadDotEnvLocal()[name] ?? "";
 }
 
+function sanitizeNamespace(raw: string) {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail: string) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function isLikelyAlreadyExistsError(message: string) {
   const text = message.toLowerCase();
   return text.includes("already registered") || text.includes("already exists") || text.includes("duplicate");
@@ -391,8 +417,12 @@ function buildSeedContext(): SeedContext {
     supabaseUrl,
     anonKey,
     serviceRoleKey,
-    ownerEmail: env("PLAYWRIGHT_E2E_TRIP_OWNER_EMAIL") || "conxion.e2e.trip.owner@local.test",
-    requesterEmail: env("PLAYWRIGHT_E2E_TRIP_REQUESTER_EMAIL") || "conxion.e2e.trip.requester@local.test",
+    ownerEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_TRIP_OWNER_EMAIL") || "conxion.e2e.trip.owner@local.test"
+    ),
+    requesterEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_TRIP_REQUESTER_EMAIL") || "conxion.e2e.trip.requester@local.test"
+    ),
     password: env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345",
     ownerName: "Trip Owner E2E",
     requesterName: "Trip Requester E2E",

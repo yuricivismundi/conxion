@@ -97,17 +97,22 @@ test("recipient accepts pending sync", async ({ page }) => {
 
   await card.getByTestId("sync-action-accept").click();
   await failIfSyncErrorVisible(page);
-  await expect(card.getByTestId("sync-status")).toContainText(/accepted/i, { timeout: 15_000 });
 
   const persisted = await waitForConnectionSyncStatus({
     scenario,
     syncId: scenario.pendingSyncId,
     status: "accepted",
-    timeoutMs: 10_000,
+    timeoutMs: 15_000,
   });
   if (!persisted) {
     hardFail("Accepted sync status was not persisted.");
   }
+
+  await page.reload();
+  await page.waitForLoadState("domcontentloaded");
+  await expect(syncCardById(page, scenario.pendingSyncId).getByTestId("sync-status")).toContainText(/accepted/i, {
+    timeout: 15_000,
+  });
 });
 
 test("recipient declines pending sync", async ({ page }) => {
@@ -121,17 +126,22 @@ test("recipient declines pending sync", async ({ page }) => {
 
   await card.getByTestId("sync-action-decline").click();
   await failIfSyncErrorVisible(page);
-  await expect(card.getByTestId("sync-status")).toContainText(/declined/i, { timeout: 15_000 });
 
   const persisted = await waitForConnectionSyncStatus({
     scenario,
     syncId: scenario.pendingSyncId,
     status: "declined",
-    timeoutMs: 10_000,
+    timeoutMs: 15_000,
   });
   if (!persisted) {
     hardFail("Declined sync status was not persisted.");
   }
+
+  await page.reload();
+  await page.waitForLoadState("domcontentloaded");
+  await expect(syncCardById(page, scenario.pendingSyncId).getByTestId("sync-status")).toContainText(/declined/i, {
+    timeout: 15_000,
+  });
 });
 
 test("requester cancels pending sync", async ({ page }) => {
@@ -176,9 +186,24 @@ test("accepted sync can be completed and keeps reference CTA after reload", asyn
 
   await card.getByTestId("sync-action-accept").click();
   await failIfSyncErrorVisible(page);
-  await expect(card.getByTestId("sync-status")).toContainText(/accepted/i, { timeout: 15_000 });
 
-  await card.getByTestId("sync-action-complete").click();
+  const acceptedPersisted = await waitForConnectionSyncStatus({
+    scenario,
+    syncId: scenario.pendingSyncId,
+    status: "accepted",
+    timeoutMs: 15_000,
+  });
+  if (!acceptedPersisted) {
+    hardFail("Accepted sync status was not persisted before completion.");
+  }
+
+  await page.reload();
+  await page.waitForLoadState("domcontentloaded");
+  await expect(syncCardById(page, scenario.pendingSyncId).getByTestId("sync-status")).toContainText(/accepted/i, {
+    timeout: 15_000,
+  });
+
+  await syncCardById(page, scenario.pendingSyncId).getByTestId("sync-action-complete").click();
   await expect(page.getByTestId("confirmation-dialog")).toBeVisible({ timeout: 8_000 });
   await page.getByTestId("confirmation-confirm").click();
   await failIfSyncErrorVisible(page);

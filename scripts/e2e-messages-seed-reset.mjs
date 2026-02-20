@@ -27,6 +27,36 @@ function env(name) {
   return process.env[name] || DOTENV[name] || "";
 }
 
+const LOCAL_REACTIONS_STORAGE_KEY = "cx_messages_reactions_local_v1";
+const LOCAL_MANUAL_UNREAD_STORAGE_KEY = "cx_messages_manual_unread_v1";
+const LOCAL_THREAD_DRAFTS_STORAGE_KEY = "cx_messages_thread_drafts_v1";
+
+function sanitizeNamespace(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function missingSchemaError(message) {
   const text = String(message || "").toLowerCase();
   return (
@@ -254,8 +284,12 @@ async function run() {
     );
   }
 
-  const primaryEmail = env("PLAYWRIGHT_E2E_EMAIL") || "conxion.e2e.messages.primary@local.test";
-  const secondaryEmail = env("PLAYWRIGHT_E2E_PEER_EMAIL") || "conxion.e2e.messages.peer@local.test";
+  const primaryEmail = withNamespacedEmail(
+    env("PLAYWRIGHT_E2E_EMAIL") || "conxion.e2e.messages.primary@local.test"
+  );
+  const secondaryEmail = withNamespacedEmail(
+    env("PLAYWRIGHT_E2E_PEER_EMAIL") || "conxion.e2e.messages.peer@local.test"
+  );
   const password = env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345";
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey, {

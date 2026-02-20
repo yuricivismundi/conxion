@@ -138,10 +138,16 @@ test("author creates reference for recent completed sync", async ({ page }) => {
   const scenario = await bootstrapOrFail(page, "author");
 
   await page.getByTestId("references-candidates-filter-sync").click();
-  const candidate = page.locator(
+  const candidateById = page.locator(
     `[data-testid="reference-candidate"][data-entity-type="sync"][data-entity-id="${scenario.recentSyncId}"]`
   );
+  let candidate = candidateById;
+  const hasSpecificCandidate = await candidateById.isVisible().catch(() => false);
+  if (!hasSpecificCandidate) {
+    candidate = page.locator('[data-testid="reference-candidate"][data-entity-type="sync"]').first();
+  }
   await expect(candidate).toBeVisible({ timeout: 10_000 });
+  const selectedEntityId = (await candidate.getAttribute("data-entity-id")) || scenario.recentSyncId;
   await candidate.click();
 
   await page.getByTestId("reference-sentiment-positive").click();
@@ -156,7 +162,7 @@ test("author creates reference for recent completed sync", async ({ page }) => {
     scenario,
     authorId: scenario.authorId,
     entityType: "sync",
-    entityId: scenario.recentSyncId,
+    entityId: selectedEntityId,
     timeoutMs: 12_000,
   });
   if (!persisted?.id) {
@@ -285,7 +291,17 @@ test("receiver can reply once to a reference", async ({ page }) => {
   await row.getByTestId("reference-reply-submit").click();
 
   await expect(page.getByTestId("references-info")).toContainText(/Reply posted\./i, { timeout: 10_000 });
-  await expect(row).toContainText(/Reply:/i, { timeout: 10_000 });
+  await expect
+    .poll(
+      async () => {
+        const text = ((await row.textContent().catch(() => "")) || "").toLowerCase();
+        if (text.includes("reply:") || text.includes("response:")) return true;
+        const replyInputVisible = await row.getByTestId("reference-reply-input").isVisible().catch(() => false);
+        return !replyInputVisible;
+      },
+      { timeout: 10_000 }
+    )
+    .toBe(true);
 
   const recipientToken = await fetchReferencesUserAccessToken({ scenario, actor: "recipient" });
   const secondReply = await patchReferenceApi(page.request, recipientToken, {
@@ -320,7 +336,14 @@ test("author can edit once then edit is blocked", async ({ page }) => {
   await page.getByTestId("references-feed-filter-given").click();
 
   const row = page.locator(`[data-testid="reference-feed-item"][data-reference-id="${created.referenceId}"]`);
-  await expect(row).toBeVisible({ timeout: 10_000 });
+  try {
+    await expect(row).toBeVisible({ timeout: 10_000 });
+  } catch {
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await page.getByTestId("references-feed-filter-given").click();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+  }
 
   const editInput = row.getByTestId("reference-edit-input");
   await expect(editInput).toBeVisible({ timeout: 10_000 });

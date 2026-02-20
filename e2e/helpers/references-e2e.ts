@@ -96,6 +96,32 @@ function env(name: string): string {
   return loadDotEnvLocal()[name] ?? "";
 }
 
+function sanitizeNamespace(raw: string) {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail: string) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function isLikelyAlreadyExistsError(message: string) {
   const text = message.toLowerCase();
   return text.includes("already registered") || text.includes("already exists") || text.includes("duplicate");
@@ -323,8 +349,12 @@ function buildSeedContext(): SeedContext {
     supabaseUrl,
     anonKey,
     serviceRoleKey,
-    authorEmail: env("PLAYWRIGHT_E2E_REFERENCE_AUTHOR_EMAIL") || "conxion.e2e.reference.author@local.test",
-    recipientEmail: env("PLAYWRIGHT_E2E_REFERENCE_RECIPIENT_EMAIL") || "conxion.e2e.reference.recipient@local.test",
+    authorEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_REFERENCE_AUTHOR_EMAIL") || "conxion.e2e.reference.author@local.test"
+    ),
+    recipientEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_REFERENCE_RECIPIENT_EMAIL") || "conxion.e2e.reference.recipient@local.test"
+    ),
     password: env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345",
     authorName: "Reference Author E2E",
     recipientName: "Reference Recipient E2E",
@@ -510,6 +540,68 @@ async function resetReferencesState(
       .in(recipientColumn, [params.authorId, params.recipientId]);
     if (clearByRecipient.error && !isMissingSchemaError(clearByRecipient.error.message)) {
       throw clearByRecipient.error;
+    }
+  }
+
+  const candidateIds = new Set<string>();
+  const collectIds = (rows: Array<{ id?: string | null }> | null | undefined) => {
+    (rows ?? []).forEach((row) => {
+      if (typeof row.id === "string" && row.id) {
+        candidateIds.add(row.id);
+      }
+    });
+  };
+
+  for (const authorColumn of ["author_id", "from_user_id", "source_id"]) {
+    const byAuthor = await adminClient
+      .from("references")
+      .select("id")
+      .in(authorColumn, [params.authorId, params.recipientId])
+      .limit(2000);
+    if (!byAuthor.error) {
+      collectIds((byAuthor.data ?? []) as Array<{ id?: string | null }>);
+      continue;
+    }
+    if (!isMissingSchemaError(byAuthor.error.message)) {
+      throw byAuthor.error;
+    }
+  }
+
+  for (const recipientColumn of ["recipient_id", "to_user_id", "target_id"]) {
+    const byRecipient = await adminClient
+      .from("references")
+      .select("id")
+      .in(recipientColumn, [params.authorId, params.recipientId])
+      .limit(2000);
+    if (!byRecipient.error) {
+      collectIds((byRecipient.data ?? []) as Array<{ id?: string | null }>);
+      continue;
+    }
+    if (!isMissingSchemaError(byRecipient.error.message)) {
+      throw byRecipient.error;
+    }
+  }
+
+  for (const connectionColumn of ["connection_id", "connection_request_id"]) {
+    const byConnection = await adminClient
+      .from("references")
+      .select("id")
+      .eq(connectionColumn, params.connectionId)
+      .limit(2000);
+    if (!byConnection.error) {
+      collectIds((byConnection.data ?? []) as Array<{ id?: string | null }>);
+      continue;
+    }
+    if (!isMissingSchemaError(byConnection.error.message)) {
+      throw byConnection.error;
+    }
+  }
+
+  if (candidateIds.size > 0) {
+    const ids = Array.from(candidateIds);
+    const clearByIds = await adminClient.from("references").delete().in("id", ids);
+    if (clearByIds.error && !isMissingSchemaError(clearByIds.error.message)) {
+      throw clearByIds.error;
     }
   }
 

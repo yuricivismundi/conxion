@@ -82,6 +82,32 @@ function env(name: string): string {
   return loadDotEnvLocal()[name] ?? "";
 }
 
+function sanitizeNamespace(raw: string) {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail: string) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function isLikelyAlreadyExistsError(message: string) {
   const text = message.toLowerCase();
   return text.includes("already registered") || text.includes("already exists") || text.includes("duplicate");
@@ -103,6 +129,41 @@ function shouldFallbackSyncRpc(message: string) {
   return text.includes("function") || text.includes("relation") || text.includes("schema cache") || text.includes("column");
 }
 
+function isRetryableNetworkError(error: unknown) {
+  const message =
+    error instanceof Error
+      ? `${error.name} ${error.message} ${String((error as { code?: unknown }).code ?? "")} ${String(
+          (error as { cause?: { code?: unknown; message?: unknown } }).cause?.code ?? ""
+        )} ${String((error as { cause?: { message?: unknown } }).cause?.message ?? "")}`
+      : String(error ?? "");
+  const text = message.toLowerCase();
+  return (
+    text.includes("fetch failed") ||
+    text.includes("connect timeout") ||
+    text.includes("und_err_connect_timeout") ||
+    text.includes("etimedout") ||
+    text.includes("econnreset") ||
+    text.includes("socket hang up") ||
+    text.includes("network")
+  );
+}
+
+async function withNetworkRetries<T>(fn: () => Promise<T>, attempts = 4, baseDelayMs = 350): Promise<T> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryableNetworkError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * attempt));
+    }
+  }
+  throw lastError ?? new Error("network_retry_failed");
+}
+
 function buildSeedContext(): SeedContext {
   const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
   const anonKey = env("NEXT_PUBLIC_SUPABASE_ANON_KEY");
@@ -120,8 +181,12 @@ function buildSeedContext(): SeedContext {
     supabaseUrl,
     anonKey,
     serviceRoleKey,
-    requesterEmail: env("PLAYWRIGHT_E2E_SYNC_REQUESTER_EMAIL") || "conxion.e2e.sync.requester@local.test",
-    recipientEmail: env("PLAYWRIGHT_E2E_SYNC_RECIPIENT_EMAIL") || "conxion.e2e.sync.recipient@local.test",
+    requesterEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_SYNC_REQUESTER_EMAIL") || "conxion.e2e.sync.requester@local.test"
+    ),
+    recipientEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_SYNC_RECIPIENT_EMAIL") || "conxion.e2e.sync.recipient@local.test"
+    ),
     password: env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345",
     requesterName: "Sync Requester E2E",
     recipientName: "Sync Recipient E2E",
@@ -134,7 +199,7 @@ async function findUserIdByEmail(
 ): Promise<string | null> {
   const normalized = email.trim().toLowerCase();
   for (let page = 1; page <= 5; page += 1) {
-    const listed = await adminClient.auth.admin.listUsers({ page, perPage: 200 });
+    const listed = await withNetworkRetries(() => adminClient.auth.admin.listUsers({ page, perPage: 200 }));
     if (listed.error) throw listed.error;
     const match = listed.data.users.find((item) => (item.email ?? "").toLowerCase() === normalized);
     if (match?.id) return match.id;
@@ -158,12 +223,14 @@ async function ensureUser(
   let userId = await findUserIdByEmail(adminClient, params.email);
 
   if (!userId) {
-    const created = await adminClient.auth.admin.createUser({
-      email: params.email,
-      password: params.password,
-      email_confirm: true,
-      user_metadata: { display_name: params.displayName },
-    });
+    const created = await withNetworkRetries(() =>
+      adminClient.auth.admin.createUser({
+        email: params.email,
+        password: params.password,
+        email_confirm: true,
+        user_metadata: { display_name: params.displayName },
+      })
+    );
     if (created.error && !isLikelyAlreadyExistsError(created.error.message)) throw created.error;
     if (!created.error) userId = created.data.user.id;
   }
@@ -173,11 +240,13 @@ async function ensureUser(
   }
   if (!userId) throw new Error(`Unable to resolve user id for ${params.email}`);
 
-  const updated = await adminClient.auth.admin.updateUserById(userId, {
-    email_confirm: true,
-    password: params.password,
-    user_metadata: { display_name: params.displayName },
-  });
+  const updated = await withNetworkRetries(() =>
+    adminClient.auth.admin.updateUserById(userId, {
+      email_confirm: true,
+      password: params.password,
+      user_metadata: { display_name: params.displayName },
+    })
+  );
   if (updated.error) throw updated.error;
 
   const profileUpsert = await adminClient.from("profiles").upsert(
@@ -395,18 +464,22 @@ async function ensureSyncScenario(params: { seedPending: boolean }): Promise<Boo
     primaryStyle: "salsa",
   });
 
-  const requesterSignIn = await requesterClient.auth.signInWithPassword({
-    email: context.requesterEmail,
-    password: context.password,
-  });
+  const requesterSignIn = await withNetworkRetries(() =>
+    requesterClient.auth.signInWithPassword({
+      email: context.requesterEmail,
+      password: context.password,
+    })
+  );
   if (requesterSignIn.error || !requesterSignIn.data.session) {
     throw requesterSignIn.error ?? new Error("Failed to sign in requester for sync seed.");
   }
 
-  const recipientSignIn = await recipientClient.auth.signInWithPassword({
-    email: context.recipientEmail,
-    password: context.password,
-  });
+  const recipientSignIn = await withNetworkRetries(() =>
+    recipientClient.auth.signInWithPassword({
+      email: context.recipientEmail,
+      password: context.password,
+    })
+  );
   if (recipientSignIn.error || !recipientSignIn.data.session) {
     throw recipientSignIn.error ?? new Error("Failed to sign in recipient for sync seed.");
   }
@@ -509,4 +582,3 @@ export async function waitForConnectionSyncStatus(params: {
 
   return false;
 }
-

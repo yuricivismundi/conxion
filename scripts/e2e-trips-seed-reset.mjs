@@ -27,6 +27,32 @@ function env(name) {
   return process.env[name] || DOTENV[name] || "";
 }
 
+function sanitizeNamespace(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function shouldFallbackTripRequestRpc(message) {
   const text = String(message || "").toLowerCase();
   return (
@@ -488,8 +514,12 @@ async function run() {
     );
   }
 
-  const ownerEmail = env("PLAYWRIGHT_E2E_TRIP_OWNER_EMAIL") || "conxion.e2e.trip.owner@local.test";
-  const requesterEmail = env("PLAYWRIGHT_E2E_TRIP_REQUESTER_EMAIL") || "conxion.e2e.trip.requester@local.test";
+  const ownerEmail = withNamespacedEmail(
+    env("PLAYWRIGHT_E2E_TRIP_OWNER_EMAIL") || "conxion.e2e.trip.owner@local.test"
+  );
+  const requesterEmail = withNamespacedEmail(
+    env("PLAYWRIGHT_E2E_TRIP_REQUESTER_EMAIL") || "conxion.e2e.trip.requester@local.test"
+  );
   const password = env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345";
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey, {

@@ -72,6 +72,32 @@ function env(name: string): string {
   return loadDotEnvLocal()[name] ?? "";
 }
 
+function sanitizeNamespace(raw: string) {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail: string) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function isLikelyAlreadyExistsError(message: string) {
   const text = message.toLowerCase();
   return text.includes("already registered") || text.includes("already exists") || text.includes("duplicate");
@@ -105,8 +131,10 @@ function buildSeedContext(): SeedContext {
     supabaseUrl,
     anonKey,
     serviceRoleKey,
-    primaryEmail: env("PLAYWRIGHT_E2E_EMAIL") || "conxion.e2e.messages.primary@local.test",
-    secondaryEmail: env("PLAYWRIGHT_E2E_PEER_EMAIL") || "conxion.e2e.messages.peer@local.test",
+    primaryEmail: withNamespacedEmail(env("PLAYWRIGHT_E2E_EMAIL") || "conxion.e2e.messages.primary@local.test"),
+    secondaryEmail: withNamespacedEmail(
+      env("PLAYWRIGHT_E2E_PEER_EMAIL") || "conxion.e2e.messages.peer@local.test"
+    ),
     password: env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345",
   };
 }

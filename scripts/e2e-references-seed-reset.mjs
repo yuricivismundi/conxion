@@ -27,6 +27,32 @@ function env(name) {
   return process.env[name] || DOTENV[name] || "";
 }
 
+function sanitizeNamespace(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+function withNamespacedEmail(baseEmail) {
+  const explicit = env("PLAYWRIGHT_E2E_NAMESPACE");
+  const implicit =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
+      : "";
+  const namespace = sanitizeNamespace(explicit || implicit);
+  if (!namespace) return baseEmail;
+
+  const at = baseEmail.indexOf("@");
+  if (at <= 0) return baseEmail;
+  const local = baseEmail.slice(0, at).split("+")[0];
+  const domain = baseEmail.slice(at + 1);
+  return `${local}+${namespace}@${domain}`;
+}
+
 function isLikelyAlreadyExistsError(message) {
   const text = String(message || "").toLowerCase();
   return text.includes("already registered") || text.includes("already exists") || text.includes("duplicate");
@@ -188,6 +214,67 @@ async function resetReferencesState(adminClient, { connectionId, authorId, recip
     }
   }
 
+  const candidateIds = new Set();
+  const collectIds = (rows) => {
+    (rows || []).forEach((row) => {
+      if (typeof row?.id === "string" && row.id) {
+        candidateIds.add(row.id);
+      }
+    });
+  };
+
+  for (const authorColumn of ["author_id", "from_user_id", "source_id"]) {
+    const byAuthor = await adminClient
+      .from("references")
+      .select("id")
+      .in(authorColumn, [authorId, recipientId])
+      .limit(2000);
+    if (!byAuthor.error) {
+      collectIds(byAuthor.data);
+      continue;
+    }
+    if (!isMissingSchemaError(byAuthor.error.message)) {
+      throw byAuthor.error;
+    }
+  }
+
+  for (const recipientColumn of ["recipient_id", "to_user_id", "target_id"]) {
+    const byRecipient = await adminClient
+      .from("references")
+      .select("id")
+      .in(recipientColumn, [authorId, recipientId])
+      .limit(2000);
+    if (!byRecipient.error) {
+      collectIds(byRecipient.data);
+      continue;
+    }
+    if (!isMissingSchemaError(byRecipient.error.message)) {
+      throw byRecipient.error;
+    }
+  }
+
+  for (const connectionColumn of ["connection_id", "connection_request_id"]) {
+    const byConnection = await adminClient
+      .from("references")
+      .select("id")
+      .eq(connectionColumn, connectionId)
+      .limit(2000);
+    if (!byConnection.error) {
+      collectIds(byConnection.data);
+      continue;
+    }
+    if (!isMissingSchemaError(byConnection.error.message)) {
+      throw byConnection.error;
+    }
+  }
+
+  if (candidateIds.size > 0) {
+    const clearByIds = await adminClient.from("references").delete().in("id", Array.from(candidateIds));
+    if (clearByIds.error && !isMissingSchemaError(clearByIds.error.message)) {
+      throw clearByIds.error;
+    }
+  }
+
   const clearNotifications = await adminClient
     .from("notifications")
     .delete()
@@ -298,9 +385,12 @@ async function run() {
     );
   }
 
-  const authorEmail = env("PLAYWRIGHT_E2E_REFERENCE_AUTHOR_EMAIL") || "conxion.e2e.reference.author@local.test";
-  const recipientEmail =
-    env("PLAYWRIGHT_E2E_REFERENCE_RECIPIENT_EMAIL") || "conxion.e2e.reference.recipient@local.test";
+  const authorEmail = withNamespacedEmail(
+    env("PLAYWRIGHT_E2E_REFERENCE_AUTHOR_EMAIL") || "conxion.e2e.reference.author@local.test"
+  );
+  const recipientEmail = withNamespacedEmail(
+    env("PLAYWRIGHT_E2E_REFERENCE_RECIPIENT_EMAIL") || "conxion.e2e.reference.recipient@local.test"
+  );
   const password = env("PLAYWRIGHT_E2E_PASSWORD") || "ConXionE2E!12345";
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey, {
