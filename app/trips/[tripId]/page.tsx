@@ -3,15 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Plus_Jakarta_Sans } from "next/font/google";
 import Nav from "@/components/Nav";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
 import { supabase } from "@/lib/supabase/client";
-
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
 
 type Tab = "requests" | "chat" | "details";
 type ConfirmAction = "decline_request" | "cancel_request";
@@ -616,7 +610,7 @@ export default function TripDetailsPage() {
 
   return (
     <div
-      className={`${plusJakarta.className} min-h-screen bg-[radial-gradient(circle_at_top,_#10272b,_#071316_45%,_#05090b_100%)] text-white`}
+      className="font-sans min-h-screen bg-[radial-gradient(circle_at_top,_#10272b,_#071316_45%,_#05090b_100%)] text-white"
     >
       <Nav />
 

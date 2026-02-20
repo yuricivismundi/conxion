@@ -1,17 +1,11 @@
 "use client";
 
-import { Plus_Jakarta_Sans } from "next/font/google";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
 import Nav from "@/components/Nav";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
-
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
 
 type ConnectionStatus = "pending" | "accepted" | "blocked" | "declined";
 type ConnectContext = "member" | "trip" | "traveller" | null;
@@ -967,7 +961,7 @@ export default function ConnectionsRequestsPage() {
   };
 
   return (
-    <div className={`${plusJakarta.className} min-h-screen bg-[#0A0A0A] text-white relative`}>
+    <div className="font-sans min-h-screen bg-[#0A0A0A] text-white relative">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_60%_at_20%_-10%,rgba(13,242,242,0.18),transparent_60%),radial-gradient(70%_55%_at_85%_0%,rgba(242,13,177,0.16),transparent_55%)]" />
       <div className="relative z-10 flex h-screen flex-col overflow-hidden">
         <Nav />

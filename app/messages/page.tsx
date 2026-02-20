@@ -2,17 +2,11 @@
 
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus_Jakarta_Sans } from "next/font/google";
 import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import { supabase } from "@/lib/supabase/client";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
-
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
 
 type ThreadKind = "connection" | "trip";
 type FilterTab = "all" | "connections" | "trips" | "archived";
@@ -2373,7 +2367,7 @@ export default function MessagesPage() {
   );
 
   return (
-    <div className={`${plusJakarta.className} h-screen bg-[#0A0A0A] text-white flex flex-col overflow-hidden`}>
+    <div className="font-sans h-screen bg-[#0A0A0A] text-white flex flex-col overflow-hidden">
       <Nav />
 
       <main className="flex-1 min-h-0 flex overflow-hidden">
