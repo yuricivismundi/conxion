@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import { supabase } from "@/lib/supabase/client";
@@ -224,7 +224,7 @@ function entityTypeBadge(entityType: string) {
   return "border-slate-300/25 bg-slate-400/10 text-slate-100";
 }
 
-export default function ReferencesPage() {
+function ReferencesPageContent() {
   const searchParams = useSearchParams();
   const initialConnectionId = (searchParams.get("connectionId") ?? "").trim();
 
@@ -1090,5 +1090,26 @@ export default function ReferencesPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+function ReferencesPageFallback() {
+  return (
+    <div className="min-h-screen bg-[#0A0A0A] text-white">
+      <Nav />
+      <main className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-6 sm:px-6 lg:px-8">
+        <div className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
+          Loading references...
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default function ReferencesPage() {
+  return (
+    <Suspense fallback={<ReferencesPageFallback />}>
+      <ReferencesPageContent />
+    </Suspense>
   );
 }

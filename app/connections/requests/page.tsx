@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
@@ -217,7 +217,7 @@ function normalizeTrip(row: Record<string, unknown>): TripRow {
   };
 }
 
-export default function ConnectionsRequestsPage() {
+function ConnectionsRequestsPageContent() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"incoming" | "outgoing">("incoming");
   const [requestKind, setRequestKind] = useState<"connections" | "trips">("connections");
@@ -1257,5 +1257,26 @@ export default function ConnectionsRequestsPage() {
       />
 
     </div>
+  );
+}
+
+function ConnectionsRequestsPageFallback() {
+  return (
+    <div className="font-sans min-h-screen bg-[#0A0A0A] text-white relative">
+      <Nav />
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/70">
+          Loading connection requests...
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ConnectionsRequestsPage() {
+  return (
+    <Suspense fallback={<ConnectionsRequestsPageFallback />}>
+      <ConnectionsRequestsPageContent />
+    </Suspense>
   );
 }

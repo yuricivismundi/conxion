@@ -1,6 +1,6 @@
 "use client";
 
-import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
@@ -348,7 +348,7 @@ function shouldFallbackPrefs(message: string) {
 
 const remoteImageLoader = ({ src }: ImageLoaderProps) => src;
 
-export default function MessagesPage() {
+function MessagesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [threads, setThreads] = useState<ThreadRow[]>([]);
@@ -3746,5 +3746,26 @@ export default function MessagesPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+function MessagesPageFallback() {
+  return (
+    <div className="font-sans h-screen bg-[#0A0A0A] text-white flex flex-col overflow-hidden">
+      <Nav />
+      <div className="flex-1 p-4 sm:p-6">
+        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/70">
+          Loading messages...
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function MessagesPage() {
+  return (
+    <Suspense fallback={<MessagesPageFallback />}>
+      <MessagesPageContent />
+    </Suspense>
   );
 }

@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 
-export default function EventPublishedPage() {
+function EventPublishedPageContent() {
   const params = useSearchParams();
   const eventId = params.get("event") ?? "";
 
@@ -50,5 +50,24 @@ export default function EventPublishedPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+function EventPublishedPageFallback() {
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#10272b,_#071316_45%,_#05090b_100%)] text-slate-100">
+      <Nav />
+      <main className="mx-auto flex w-full max-w-[980px] flex-col items-center px-4 py-16 text-center sm:px-6 lg:px-8">
+        <p className="text-slate-300">Loading event details...</p>
+      </main>
+    </div>
+  );
+}
+
+export default function EventPublishedPage() {
+  return (
+    <Suspense fallback={<EventPublishedPageFallback />}>
+      <EventPublishedPageContent />
+    </Suspense>
   );
 }
