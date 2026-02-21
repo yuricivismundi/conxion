@@ -97,6 +97,61 @@ Only add `SUPABASE_SERVICE_ROLE_KEY` when you explicitly need server-only featur
 
 ---
 
+## One-Project MVP Mode (Recommended on Free Tier)
+
+If you only have one hosted Supabase project, use this model:
+
+- Hosted Supabase project = production data
+- Local development = `localhost` app
+- Cloud E2E workflows = disabled by default (safety), enable only when you intentionally want them
+
+### 1) Supabase Auth URL Configuration
+
+In Supabase Dashboard -> Authentication -> URL Configuration:
+
+- `Site URL`:
+  - your real app domain (or current Vercel preview domain for MVP)
+- `Redirect URLs`:
+  - `http://localhost:3000/auth/callback`
+  - `https://*.vercel.app/auth/callback`
+  - `https://YOUR_DOMAIN/auth/callback`
+
+### 2) Vercel Environment Variables
+
+Set these in Vercel (Development / Preview / Production as needed):
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+### 3) GitHub Actions Safety Gate
+
+All E2E workflows in this repo respect repository variable:
+
+- `RUN_CLOUD_E2E`
+
+Behavior:
+
+- unset / `0`: cloud E2E jobs are skipped safely and pass quickly
+- `1`: cloud E2E jobs run fully (including seed reset scripts)
+
+Set it at:
+
+- GitHub -> Settings -> Secrets and variables -> Actions -> Variables -> New repository variable
+- Name: `RUN_CLOUD_E2E`
+- Value: `0` (default MVP safe mode)
+
+Turn on only when you want cloud E2E:
+
+- set `RUN_CLOUD_E2E=1`, run checks, then set back to `0`.
+
+### 4) E2E Data Safety
+
+- Keep all `PLAYWRIGHT_E2E_*` accounts isolated from real users.
+- Never run destructive reset scripts against real user accounts.
+
+---
+
 ## Git Safety
 
 Make sure these files are **never committed**:

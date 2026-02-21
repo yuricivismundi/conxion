@@ -20,6 +20,15 @@ const AVAIL = [
 
 type AvailKey = (typeof AVAIL)[number]["key"];
 
+const DEFAULT_AVAIL: Record<AvailKey, boolean> = {
+  weekdays: true,
+  weekends: true,
+  daytime: false,
+  evenings: false,
+  travel: false,
+  rather_not_say: false,
+};
+
 const LANGUAGES = [
   "English",
   "Spanish",
@@ -43,17 +52,11 @@ export default function OnboardingFinalizePage() {
   const [langs, setLangs] = useState<Language[]>(["English", "Spanish"]);
   const [langPick, setLangPick] = useState<"" | Language>("");
 
-  const [avail, setAvail] = useState<Record<AvailKey, boolean>>({
-    weekdays: true,
-    weekends: true,
-    daytime: false,
-    evenings: false,
-    travel: false,
-    rather_not_say: false,
-  });
+  const [avail, setAvail] = useState<Record<AvailKey, boolean>>(DEFAULT_AVAIL);
 
   const [hydrated, setHydrated] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- hydration from persisted draft. */
   useEffect(() => {
     const d = readOnboardingDraft();
 
@@ -65,16 +68,17 @@ export default function OnboardingFinalizePage() {
 
     if (d.avail && typeof d.avail === "object") {
       // Keep only known availability keys
-      const next: Record<AvailKey, boolean> = { ...avail };
+      const next: Record<AvailKey, boolean> = { ...DEFAULT_AVAIL };
+      const incoming = d.avail as Record<string, boolean>;
       (Object.keys(next) as AvailKey[]).forEach((k) => {
-        next[k] = Boolean((d.avail as any)[k]);
+        next[k] = Boolean(incoming[k]);
       });
       setAvail(next);
     }
 
     setHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!hydrated) return;
