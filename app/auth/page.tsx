@@ -1,10 +1,12 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
 function AuthPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -31,6 +33,15 @@ function AuthPageContent() {
     }),
     []
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash ?? "";
+    const hasAccessToken = /(^|[?#&])access_token=/.test(hash.replace(/^#/, "?"));
+    const hasRefreshToken = /(^|[?#&])refresh_token=/.test(hash.replace(/^#/, "?"));
+    if (!hasAccessToken || !hasRefreshToken) return;
+    router.replace(`/auth/callback${hash}`);
+  }, [router]);
 
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();
