@@ -80,7 +80,7 @@ function AuthCallbackContent() {
 
       setMessage("Signed in. Redirecting...");
       setDetail(null);
-      router.replace("/connections/requests");
+      router.replace("/connections");
     })();
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [router, searchParams]);
