@@ -1,116 +1,220 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+
+type AuthMode = "signup" | "login";
+
+type SentState = {
+  email: string;
+  mode: AuthMode;
+};
+
+const BRAND = {
+  bg: "#060A10",
+  surface: "rgba(14,18,27,0.88)",
+  text: "#EAF0FF",
+  muted: "rgba(234,240,255,0.58)",
+  border: "rgba(255,255,255,0.12)",
+  borderStrong: "rgba(255,255,255,0.2)",
+  cyan: "#38E5D7",
+  magenta: "#FF2BD6",
+  danger: "#FF4D6D",
+  dangerBg: "rgba(255,77,109,0.10)",
+};
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getPublicAppUrl() {
+  const envValue = process.env.NEXT_PUBLIC_APP_URL;
+  if (envValue && /^https?:\/\//i.test(envValue.trim())) {
+    return envValue.trim().replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "";
+}
+
+async function checkEmailExists(email: string) {
+  const res = await fetch("/api/auth/check-email", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+
+  const payload = (await res.json().catch(() => null)) as { exists?: boolean; error?: string } | null;
+  if (!res.ok || !payload || typeof payload.exists !== "boolean") {
+    throw new Error(payload?.error || "Could not verify account status right now.");
+  }
+  return payload.exists;
+}
+
+async function requestMagicLink(email: string, mode: AuthMode) {
+  const appUrl = getPublicAppUrl();
+  if (!appUrl) throw new Error("App URL is not configured.");
+
+  const response = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: mode === "signup",
+      emailRedirectTo: `${appUrl}/auth/callback`,
+    },
+  });
+  if (response.error) {
+    throw new Error(response.error.message);
+  }
+}
 
 function AuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const [mode, setMode] = useState<AuthMode>("signup");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sentState, setSentState] = useState<SentState | null>(null);
+  const [suggestedMode, setSuggestedMode] = useState<AuthMode | null>(null);
+  const [resendIn, setResendIn] = useState(30);
   const [logoSrc, setLogoSrc] = useState("/branding/conxion-logo.svg");
   const [logoFailed, setLogoFailed] = useState(false);
-  const [shortLogoSrc, setShortLogoSrc] = useState("/branding/conxion-short-logo.png");
-  const [shortLogoFailed, setShortLogoFailed] = useState(false);
 
-  // ConXion brand tokens (kept inline for MVP speed)
-  const brand = useMemo(
-    () => ({
-      bg: "#0B0D10",
-      surface: "#12161D",
-      text: "#EAF0FF",
-      muted: "rgba(234,240,255,0.55)",
-      border: "rgba(255,255,255,0.10)",
-      borderStrong: "rgba(255,255,255,0.16)",
-      cyan: "#38E5D7",
-      magenta: "#FF2BD6",
-      danger: "#FF4D6D",
-      dangerBg: "rgba(255,77,109,0.10)",
-    }),
-    []
-  );
+  const modeLabel = useMemo(() => (mode === "signup" ? "Sign up" : "Log in"), [mode]);
+
+  useEffect(() => {
+    if (!sentState || resendIn <= 0) return;
+    const timeout = window.setTimeout(() => setResendIn((prev) => Math.max(prev - 1, 0)), 1000);
+    return () => window.clearTimeout(timeout);
+  }, [sentState, resendIn]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const hash = window.location.hash ?? "";
-    const hasAccessToken = /(^|[?#&])access_token=/.test(hash.replace(/^#/, "?"));
-    const hasRefreshToken = /(^|[?#&])refresh_token=/.test(hash.replace(/^#/, "?"));
-    if (!hasAccessToken || !hasRefreshToken) return;
-    router.replace(`/auth/callback${hash}`);
-  }, [router]);
+    let cancelled = false;
 
-  async function sendMagicLink(e: React.FormEvent) {
-    e.preventDefault();
+    const hash = window.location.hash ?? "";
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+    const hasAccessToken = Boolean(hashParams.get("access_token"));
+    const hasRefreshToken = Boolean(hashParams.get("refresh_token"));
+    const hasCode = Boolean(searchParams.get("code"));
+    const hasCallbackError = Boolean(searchParams.get("error") || searchParams.get("error_description"));
+    const query = searchParams.toString();
+
+    if ((hasAccessToken && hasRefreshToken) || hasCode || hasCallbackError) {
+      const queryPart = query ? `?${query}` : "";
+      router.replace(`/auth/callback${queryPart}${hash}`);
+      return;
+    }
+
+    (async () => {
+      const sessionRes = await supabase.auth.getSession();
+      if (cancelled) return;
+
+      const userId = sessionRes.data.session?.user?.id ?? null;
+      if (!userId) return;
+
+      const profileRes = await supabase.from("profiles").select("user_id").eq("user_id", userId).maybeSingle();
+      if (cancelled) return;
+
+      if (profileRes.data) {
+        router.replace("/connections");
+        return;
+      }
+      router.replace("/onboarding/profile");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, searchParams]);
+
+  async function submitAuth(event: React.FormEvent) {
+    event.preventDefault();
+
     setLoading(true);
     setError(null);
+    setSuggestedMode(null);
 
-    const emailClean = email.trim();
-    if (!emailClean) {
+    try {
+      const normalized = normalizeEmail(email);
+      if (!normalized) throw new Error("Please enter your email.");
+
+      const exists = await checkEmailExists(normalized);
+      if (mode === "signup" && exists) {
+        setSuggestedMode("login");
+        throw new Error("This email already has an account. Log in instead.");
+      }
+      if (mode === "login" && !exists) {
+        setSuggestedMode("signup");
+        throw new Error("No account found for this email. Sign up first.");
+      }
+
+      await requestMagicLink(normalized, mode);
+      setSentState({ email: normalized, mode });
+      setResendIn(30);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not send secure link.");
+    } finally {
       setLoading(false);
-      setError("Please enter your email.");
-      return;
     }
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email: emailClean,
-      options: {
-        // ✅ IMPORTANT: always land on auth callback so the session is exchanged and persisted.
-        // Then the callback route will redirect to the correct post-login route.
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    setSent(true);
   }
 
+  async function resend() {
+    if (!sentState || resendIn > 0 || loading) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestedMode(null);
+
+    try {
+      await requestMagicLink(sentState.email, sentState.mode);
+      setResendIn(30);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not resend secure link.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const waitingMode = sentState?.mode ?? mode;
+  const waitingActionText = waitingMode === "signup" ? "sign-up" : "login";
+
   return (
-    <div
-      className="min-h-screen flex flex-col items-center justify-center gap-2 p-6"
-      style={{ backgroundColor: brand.bg, color: brand.text }}
-    >
-      {/* Top Logo */}
-      
+    <div className="relative min-h-screen overflow-hidden px-6 py-12 flex items-center justify-center" style={{ backgroundColor: BRAND.bg, color: BRAND.text }}>
       <div
-        className="relative w-full max-w-md rounded-[28px] px-6 pt-5 pb-6 border"
-        style={{
-          backgroundColor: brand.surface,
-          borderColor: brand.border,
-          boxShadow: `0 0 40px rgba(56,229,215,0.06)`,
-        }}
-      >
-        <div className="flex items-center justify-center">
+        className="pointer-events-none absolute -top-48 -left-44 h-[620px] w-[620px] rounded-full blur-[120px]"
+        style={{ background: "radial-gradient(circle, rgba(56,229,215,0.12) 0%, transparent 68%)" }}
+      />
+      <div
+        className="pointer-events-none absolute -bottom-48 -right-44 h-[620px] w-[620px] rounded-full blur-[130px]"
+        style={{ background: "radial-gradient(circle, rgba(255,43,214,0.11) 0%, transparent 68%)" }}
+      />
+
+      <div className="relative z-10 w-full max-w-[460px]">
+        <div className="mb-8 flex flex-col items-center text-center">
           {!logoFailed ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={logoSrc}
-                alt="ConXion"
-                className="h-24 sm:h-28 md:h-42 w-auto select-none"
-                onError={() => {
-                  if (logoSrc.endsWith(".svg")) {
-                    setLogoSrc("/branding/conxion-logo.png");
-                    return;
-                  }
-                  setLogoFailed(true);
-                }}
-              />
-            </>
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoSrc}
+              alt="ConXion"
+              className="h-28 w-auto select-none"
+              onError={() => {
+                if (logoSrc.endsWith(".svg")) {
+                  setLogoSrc("/branding/conxion-short-logo.png");
+                  return;
+                }
+                setLogoFailed(true);
+              }}
+            />
           ) : (
             <div
-              className="text-3xl sm:text-4xl md:text-5xl font-black italic tracking-tight"
+              className="text-4xl font-black italic tracking-tight"
               style={{
-                backgroundImage: `linear-gradient(90deg, ${brand.cyan} 0%, ${brand.magenta} 100%)`,
+                backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
                 WebkitBackgroundClip: "text",
                 backgroundClip: "text",
                 color: "transparent",
@@ -119,164 +223,175 @@ function AuthPageContent() {
               CONXION
             </div>
           )}
+          <h1 className="mt-3 text-3xl font-extrabold tracking-tight text-white">Welcome to ConXion</h1>
         </div>
-        
 
-        {searchParams.get("error") ? (
-          <div
-            className="mb-3 rounded-xl border px-3 py-2 text-xs"
-            style={{
-              borderColor: brand.danger,
-              color: brand.danger,
-              backgroundColor: brand.dangerBg,
-            }}
-          >
-            {searchParams.get("error")}
-            {searchParams.get("error_description") ? `: ${searchParams.get("error_description")}` : ""}
-          </div>
-        ) : null}
-
-        {!sent ? (
-          <form onSubmit={sendMagicLink} className="mt-3 space-y-2">
-            <label className="block text-xs font-semibold tracking-wider uppercase" style={{ color: brand.muted }}>
-              Email
-              <input
-                className="mt-1 w-full rounded-2xl px-4 py-3 outline-none border bg-transparent"
-                style={{
-                  borderColor: brand.borderStrong,
-                  color: brand.text,
-                }}
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@email.com"
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = brand.cyan;
-                  e.currentTarget.style.boxShadow = `0 0 0 4px rgba(56,229,215,0.12)`;
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = brand.borderStrong;
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
-            </label>
-
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                id="remember"
-                type="checkbox"
-                defaultChecked
-                className="h-4 w-4 rounded border"
-                style={{ accentColor: brand.cyan }}
-              />
-              <label htmlFor="remember" className="text-[11px]" style={{ color: brand.muted }}>
-                Remember this device
-              </label>
+        <div className="rounded-3xl border p-7 sm:p-8" style={{ backgroundColor: BRAND.surface, borderColor: BRAND.border }}>
+          {error ? (
+            <div
+              className="mb-4 rounded-xl border px-3 py-2 text-sm"
+              style={{ borderColor: "rgba(255,77,109,0.35)", backgroundColor: BRAND.dangerBg, color: BRAND.danger }}
+            >
+              {error}
             </div>
+          ) : null}
 
-            {error && (
-              <div
-                className="rounded-2xl border p-3 text-sm"
+          {!sentState ? (
+            <form onSubmit={submitAuth} className="space-y-6">
+              <div className="inline-flex rounded-xl border border-white/10 bg-black/20 p-1 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("signup");
+                    setError(null);
+                    setSuggestedMode(null);
+                  }}
+                  className="rounded-lg px-4 py-2 transition"
+                  style={{
+                    backgroundColor: mode === "signup" ? "rgba(56,229,215,0.18)" : "transparent",
+                    color: mode === "signup" ? BRAND.text : BRAND.muted,
+                  }}
+                >
+                  Sign up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("login");
+                    setError(null);
+                    setSuggestedMode(null);
+                  }}
+                  className="rounded-lg px-4 py-2 transition"
+                  style={{
+                    backgroundColor: mode === "login" ? "rgba(255,43,214,0.16)" : "transparent",
+                    color: mode === "login" ? BRAND.text : BRAND.muted,
+                  }}
+                >
+                  Log in
+                </button>
+              </div>
+
+              <div>
+                <h2 className="text-xl font-bold text-white">{mode === "signup" ? "Create your account" : "Welcome back"}</h2>
+                <p className="mt-1 text-sm" style={{ color: BRAND.muted }}>
+                  {mode === "signup"
+                    ? "Use your email to get a secure sign-up link."
+                    : "Use your email to get a secure login link."}
+                </p>
+              </div>
+
+              <label className="block text-xs font-semibold uppercase tracking-wider" style={{ color: BRAND.muted }}>
+                Email
+                <input
+                  className="mt-2 w-full rounded-2xl border bg-transparent px-4 py-3.5 text-base outline-none placeholder:text-white/35"
+                  style={{ borderColor: BRAND.borderStrong, color: BRAND.text }}
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@email.com"
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-2xl py-3.5 text-lg font-black transition disabled:opacity-60"
                 style={{
-                  borderColor: "rgba(255,77,109,0.35)",
-                  backgroundColor: brand.dangerBg,
-                  color: brand.danger,
+                  backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
+                  color: "#05080c",
+                  boxShadow: "0 0 24px rgba(56,229,215,0.2)",
                 }}
               >
-                {error}
-              </div>
-            )}
+                {loading ? "Sending..." : `${modeLabel} with magic link`}
+              </button>
 
-            <button
-              disabled={loading}
-              className="w-full rounded-2xl py-3.5 font-black transition disabled:opacity-60"
-              style={{
-                backgroundImage: `linear-gradient(90deg, ${brand.cyan} 0%, ${brand.magenta} 100%)`,
-                color: brand.bg,
-                boxShadow: `0 0 22px rgba(56,229,215,0.18)`,
-              }}
-              type="submit"
-            >
-              {loading ? "Sending…" : "Send magic link"}
-            </button>
-
-            <p className="text-[11px] leading-relaxed" style={{ color: brand.muted }}>
-              We’ll email you a secure sign-in link. Open it on this device to continue.
-              <br />
-              <span className="font-semibold" style={{ color: brand.muted }}>
-                You’ll stay signed in on this device.
-              </span>
-            </p>
-          </form>
-        ) : (
-          <div
-            className="mt-6 rounded-2xl border p-4"
-            style={{
-              borderColor: brand.borderStrong,
-              backgroundColor: "rgba(0,0,0,0.20)",
-            }}
-          >
-            <p className="font-semibold" style={{ color: brand.text }}>
-              Check your email
-            </p>
-            <p className="text-sm mt-1" style={{ color: brand.muted }}>
-              We sent you a login link. Open it on this device to continue onboarding.
-              <br />
-              <span className="font-semibold" style={{ color: brand.muted }}>
-                We’ll remember this device.
-              </span>
-            </p>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSent(false);
-                setError(null);
-              }}
-              className="mt-4 text-sm font-semibold"
-              style={{
-                color: brand.cyan,
-              }}
-            >
-              Use a different email
-            </button>
-          </div>
-        )}
-
-        <div className="mt-8 flex items-center justify-between">
-          <span className="text-[10px] tracking-widest uppercase" style={{ color: "rgba(234,240,255,0.35)" }}>
-            © {new Date().getFullYear()} ConXion
-          </span>
-          {!shortLogoFailed ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={shortLogoSrc}
-                alt="ConXion"
-                className="h-12 w-auto opacity-90"
-                onError={() => {
-                  if (shortLogoSrc.endsWith(".svg")) {
-                    setShortLogoSrc("/branding/conxion-short-logo.png");
-                    return;
-                  }
-                  setShortLogoFailed(true);
-                }}
-              />
-            </>
+              {suggestedMode ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode(suggestedMode);
+                    setError(null);
+                    setSuggestedMode(null);
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-semibold transition hover:border-white/20"
+                  style={{ color: BRAND.cyan }}
+                >
+                  Switch to {suggestedMode === "signup" ? "Sign up" : "Log in"}
+                </button>
+              ) : null}
+            </form>
           ) : (
-            <span
-              className="text-[12px] font-black italic"
-              style={{
-                backgroundImage: `linear-gradient(90deg, ${brand.cyan} 0%, ${brand.magenta} 100%)`,
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                color: "transparent",
-              }}
-            >
-              X
-            </span>
+            <div className="text-center">
+              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-black/20">
+                <span className="material-symbols-outlined text-3xl" style={{ color: BRAND.cyan }}>
+                  mark_email_unread
+                </span>
+              </div>
+
+              <h2 className="text-2xl font-bold text-white">Check your email</h2>
+              <p className="mt-2 text-sm" style={{ color: BRAND.muted }}>
+                We sent your secure {waitingActionText} link to:
+              </p>
+              <div className="mx-auto mt-3 inline-flex rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5">
+                <span className="text-sm font-semibold" style={{ color: BRAND.cyan }}>
+                  {sentState.email}
+                </span>
+              </div>
+
+              <div className="mt-7 flex items-center justify-center gap-2 text-xs" style={{ color: BRAND.muted }}>
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: BRAND.cyan }} />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: BRAND.cyan, animationDelay: "120ms" }} />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: BRAND.cyan, animationDelay: "240ms" }} />
+                <span>Waiting for confirmation...</span>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <button
+                  type="button"
+                  disabled={resendIn > 0 || loading}
+                  onClick={() => {
+                    void resend();
+                  }}
+                  className="w-full rounded-xl border px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ borderColor: BRAND.borderStrong, color: BRAND.text, backgroundColor: "rgba(0,0,0,0.2)" }}
+                >
+                  {resendIn > 0 ? `Resend link in ${resendIn}s` : loading ? "Resending..." : "Resend link"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSentState(null);
+                    setError(null);
+                    setSuggestedMode(null);
+                  }}
+                  className="w-full rounded-xl px-4 py-2 text-sm font-semibold transition"
+                  style={{ color: BRAND.cyan }}
+                >
+                  Use a different email
+                </button>
+                <a className="block text-xs font-medium hover:underline" href="mailto:support@conxion.social" style={{ color: BRAND.muted }}>
+                  Trouble accessing email?
+                </a>
+              </div>
+
+              <div className="mt-8 border-t border-white/10 pt-5 text-[11px]" style={{ color: BRAND.muted }}>
+                This link expires shortly for your safety.
+              </div>
+            </div>
           )}
+        </div>
+
+        <div className="mt-7 flex items-center justify-center gap-6 text-[11px] uppercase tracking-wider" style={{ color: BRAND.muted }}>
+          <Link href="/privacy" className="hover:text-white transition-colors">
+            Privacy
+          </Link>
+          <Link href="/terms" className="hover:text-white transition-colors">
+            Terms
+          </Link>
+          <Link href="/support" className="hover:text-white transition-colors">
+            Support
+          </Link>
         </div>
       </div>
     </div>
@@ -285,10 +400,8 @@ function AuthPageContent() {
 
 function AuthPageFallback() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-2 p-6 bg-[#0B0D10] text-[#EAF0FF]">
-      <div className="relative w-full max-w-md rounded-[28px] px-6 pt-5 pb-6 border border-white/10 bg-[#12161D]">
-        <p className="text-sm font-semibold text-center">Loading sign in…</p>
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-[#060A10] text-white">
+      <p className="text-sm text-white/70">Loading...</p>
     </div>
   );
 }

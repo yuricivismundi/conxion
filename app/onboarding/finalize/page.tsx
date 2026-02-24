@@ -5,9 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import OnboardingShell from "@/components/OnboardingShell";
 import {
   clearOnboardingDraft,
+  type OnboardingDraft,
   readOnboardingDraft,
   writeOnboardingDraft,
 } from "@/lib/onboardingDraft";
+import { supabase } from "@/lib/supabase/client";
 
 const AVAIL = [
   { key: "weekdays", title: "Weekdays" },
@@ -19,6 +21,9 @@ const AVAIL = [
 ] as const;
 
 type AvailKey = (typeof AVAIL)[number]["key"];
+type DanceSkillPayload = {
+  level: string;
+};
 
 const DEFAULT_AVAIL: Record<AvailKey, boolean> = {
   weekdays: true,
@@ -28,6 +33,45 @@ const DEFAULT_AVAIL: Record<AvailKey, boolean> = {
   travel: false,
   rather_not_say: false,
 };
+
+const AVAILABILITY_LABELS: Record<AvailKey, string> = {
+  weekdays: "Week Days",
+  weekends: "Weekends",
+  daytime: "Day Time",
+  evenings: "Evenings",
+  travel: "Travel for Events",
+  rather_not_say: "Rather not say",
+};
+
+const DEFAULT_LEVEL = "Improver (3–9 months)";
+const CORE_STYLE_KEYS = new Set(["bachata", "salsa", "kizomba", "zouk", "tango"]);
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function buildDanceSkills(draft: OnboardingDraft): Record<string, DanceSkillPayload> {
+  const styles = toStringArray(draft.styles);
+  const styleLevels =
+    draft.styleLevels && typeof draft.styleLevels === "object"
+      ? (draft.styleLevels as Record<string, unknown>)
+      : {};
+
+  const result: Record<string, DanceSkillPayload> = {};
+
+  for (const style of styles) {
+    const normalizedStyle = style.trim().toLowerCase();
+    if (!normalizedStyle) continue;
+    const rawLevel = styleLevels[style];
+    const normalizedLevel = typeof rawLevel === "string" && rawLevel.trim().length > 0 ? rawLevel.trim() : DEFAULT_LEVEL;
+    result[normalizedStyle] = { level: normalizedLevel };
+  }
+
+  return result;
+}
 
 const LANGUAGES = [
   "English",
@@ -55,6 +99,8 @@ export default function OnboardingFinalizePage() {
   const [avail, setAvail] = useState<Record<AvailKey, boolean>>(DEFAULT_AVAIL);
 
   const [hydrated, setHydrated] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   /* eslint-disable react-hooks/set-state-in-effect -- hydration from persisted draft. */
   useEffect(() => {
@@ -102,6 +148,102 @@ export default function OnboardingFinalizePage() {
 
   const hasAvailability = useMemo(() => Object.values(avail).some(Boolean), [avail]);
   const canComplete = langs.length > 0 && hasAvailability;
+
+  async function completeProfile() {
+    if (!canComplete || saving) return;
+
+    setSaveError(null);
+    setSaving(true);
+
+    try {
+      const authRes = await supabase.auth.getUser();
+      const user = authRes.data.user;
+      if (!user) {
+        router.replace("/auth");
+        return;
+      }
+
+      const draft = readOnboardingDraft();
+      const displayName = typeof draft.displayName === "string" ? draft.displayName.trim() : "";
+      const country = typeof draft.country === "string" ? draft.country.trim() : "";
+      const city = typeof draft.city === "string" ? draft.city.trim() : "";
+      const roles = toStringArray(draft.roles);
+
+      const languages = Array.from(new Set(langs.map((item) => item.trim()).filter((item) => item.length > 0)));
+      const interestsFlat = toStringArray(draft.interests);
+      const structuredInterestMap =
+        draft.interestsByRole && typeof draft.interestsByRole === "object"
+          ? (draft.interestsByRole as Record<string, unknown>)
+          : {};
+      const interestsStructured = Object.values(structuredInterestMap).flatMap((value) => toStringArray(value));
+      const interests = Array.from(new Set([...interestsFlat, ...interestsStructured]));
+      const availability = (Object.entries(avail) as Array<[AvailKey, boolean]>)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => AVAILABILITY_LABELS[key]);
+
+      const danceSkills = buildDanceSkills(draft);
+      const danceStyles = Object.keys(danceSkills);
+      const hasOtherStyle =
+        Boolean(draft.otherStyleEnabled) || danceStyles.some((styleKey) => !CORE_STYLE_KEYS.has(styleKey));
+
+      if (displayName.length < 2) {
+        throw new Error("Display name is missing. Please complete Step 1 again.");
+      }
+      if (city.length < 1 || country.length < 2) {
+        throw new Error("City or country is missing. Please complete Step 1 again.");
+      }
+      if (roles.length < 1) {
+        throw new Error("Please select at least one role.");
+      }
+      if (languages.length < 1) {
+        throw new Error("Please add at least one language.");
+      }
+      if (availability.length < 1) {
+        throw new Error("Please select at least one availability option.");
+      }
+      if (danceStyles.length < 1) {
+        throw new Error("Please select at least one dance style and level in Step 2.");
+      }
+
+      const avatarPath = typeof draft.avatarPath === "string" && draft.avatarPath.trim() ? draft.avatarPath.trim() : null;
+      const avatarStatus =
+        draft.avatarStatus === "approved" || draft.avatarStatus === "rejected" || draft.avatarStatus === "pending"
+          ? draft.avatarStatus
+          : "pending";
+
+      const upsertRes = await supabase.from("profiles").upsert(
+        {
+          user_id: user.id,
+          auth_user_id: user.id,
+          display_name: displayName,
+          city,
+          country,
+          roles,
+          languages,
+          interests,
+          availability,
+          dance_styles: danceStyles,
+          dance_skills: danceSkills,
+          has_other_style: hasOtherStyle,
+          avatar_path: avatarPath,
+          avatar_status: avatarStatus,
+        },
+        { onConflict: "user_id" }
+      );
+
+      if (upsertRes.error) {
+        throw new Error(upsertRes.error.message);
+      }
+
+      clearOnboardingDraft();
+      router.replace("/auth/success?next=%2Fconnections&context=onboarding");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not complete onboarding.";
+      setSaveError(message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <OnboardingShell
@@ -200,6 +342,10 @@ export default function OnboardingFinalizePage() {
           </div>
         </section>
 
+        {saveError ? (
+          <div className="rounded-xl border border-rose-300/35 bg-rose-500/10 p-3 text-sm text-rose-100">{saveError}</div>
+        ) : null}
+
         {/* Actions */}
         <div className="flex items-center gap-4 border-t border-white/5 pt-6">
           <button
@@ -212,24 +358,22 @@ export default function OnboardingFinalizePage() {
 
           <button
             type="button"
-            disabled={!canComplete}
+            disabled={!canComplete || saving}
             onClick={() => {
-              // TODO: write to Supabase + set onboarding_complete
-              clearOnboardingDraft();
-              router.push("/connections");
+              void completeProfile();
             }}
             className={
-              canComplete
+              canComplete && !saving
                 ? "flex-1 rounded-2xl py-4 font-black uppercase tracking-wide text-[#0A0A0A] shadow-[0_0_28px_rgba(0,245,255,0.22)]"
                 : "flex-1 rounded-2xl py-4 font-black uppercase tracking-wide bg-white/10 text-white/40 cursor-not-allowed"
             }
             style={
-              canComplete
+              canComplete && !saving
                 ? { backgroundImage: "linear-gradient(90deg, #00F5FF 0%, #FF00FF 100%)" }
                 : undefined
             }
           >
-            Complete Profile
+            {saving ? "Completing..." : "Complete Profile"}
           </button>
         </div>
 

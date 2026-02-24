@@ -1,32 +1,49 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+
+const BRAND = {
+  bg: "#060A10",
+  surface: "rgba(14,18,27,0.88)",
+  text: "#EAF0FF",
+  muted: "rgba(234,240,255,0.58)",
+  border: "rgba(255,255,255,0.12)",
+  cyan: "#38E5D7",
+  magenta: "#FF2BD6",
+  danger: "#FF4D6D",
+  dangerBg: "rgba(255,77,109,0.10)",
+};
 
 function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [message, setMessage] = useState("Finishing sign-in...");
+  const [message, setMessage] = useState("Verifying secure link...");
   const [detail, setDetail] = useState<string | null>(null);
+  const [progress, setProgress] = useState(20);
+  const [redirectPath, setRedirectPath] = useState<string | null>(null);
+  const [logoSrc, setLogoSrc] = useState("/branding/conxion-logo.svg");
+  const [logoFailed, setLogoFailed] = useState(false);
 
-  const debug = (() => {
-    if (typeof window === "undefined") return null;
-    const code = searchParams.get("code");
-    const errorParam = searchParams.get("error");
-    const errorDesc = searchParams.get("error_description");
-    const href = window.location.href;
-    const hash = window.location.hash;
+  const hasError = useMemo(() => Boolean(detail), [detail]);
 
-    if (!href) return null;
-    return [
-      `href=${href}`,
-      `code=${code ?? ""}`,
-      `error=${errorParam ?? ""}`,
-      `error_description=${errorDesc ?? ""}`,
-      `hash=${hash}`,
-    ].join("\n");
-  })();
+  useEffect(() => {
+    if (hasError || redirectPath) return;
+    if (progress >= 92) return;
+    const timeout = window.setTimeout(() => {
+      setProgress((value) => Math.min(value + 6, 92));
+    }, 200);
+    return () => window.clearTimeout(timeout);
+  }, [hasError, progress, redirectPath]);
+
+  useEffect(() => {
+    if (!redirectPath) return;
+    const timeout = window.setTimeout(() => {
+      router.replace(redirectPath);
+    }, 420);
+    return () => window.clearTimeout(timeout);
+  }, [redirectPath, router]);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- auth callback flow updates local UI state. */
@@ -42,11 +59,14 @@ function AuthCallbackContent() {
     }
 
     (async () => {
+      setMessage("Validating secure link...");
+      setDetail(null);
+
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
+        const exchange = await supabase.auth.exchangeCodeForSession(code);
+        if (exchange.error) {
           setMessage("Sign-in failed.");
-          setDetail(error.message);
+          setDetail(exchange.error.message);
           return;
         }
       } else {
@@ -55,46 +75,138 @@ function AuthCallbackContent() {
         const refreshToken = hashParams.get("refresh_token");
 
         if (!accessToken || !refreshToken) {
-          setMessage("No session found in URL.");
-          setDetail("Magic link missing code or token. Try opening the link in the same browser.");
+          setMessage("Sign-in failed.");
+          setDetail("Magic link token is missing or expired. Request a new link.");
           return;
         }
 
-        const { error } = await supabase.auth.setSession({
+        const sessionResult = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
-        if (error) {
+        if (sessionResult.error) {
           setMessage("Sign-in failed.");
-          setDetail(error.message);
+          setDetail(sessionResult.error.message);
           return;
         }
       }
 
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr || !sessionData?.session) {
-        setMessage("Session not found after exchange.");
-        setDetail(sessionErr?.message ?? "No session returned. Try opening the magic link in the same browser.");
+      setMessage("Loading your account...");
+      setProgress(72);
+
+      const sessionResult = await supabase.auth.getSession();
+      if (sessionResult.error || !sessionResult.data.session) {
+        setMessage("Sign-in failed.");
+        setDetail(sessionResult.error?.message ?? "Session not found. Request a new link.");
         return;
       }
 
-      setMessage("Signed in. Redirecting...");
+      const userId = sessionResult.data.session.user?.id;
+      if (!userId) {
+        setMessage("Sign-in failed.");
+        setDetail("User ID missing from session.");
+        return;
+      }
+
+      setMessage("Preparing your workspace...");
+      const profile = await supabase.from("profiles").select("user_id").eq("user_id", userId).maybeSingle();
+      if (profile.error) {
+        setMessage("Signed in, but profile lookup failed.");
+        setDetail(profile.error.message);
+        return;
+      }
+
+      const nextPath = profile.data ? "/connections" : "/onboarding/profile";
+      setMessage("You're in. Redirecting...");
+      setProgress(100);
       setDetail(null);
-      router.replace("/connections");
+      setRedirectPath(nextPath);
     })();
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [router, searchParams]);
+  }, [searchParams]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] text-white px-6">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#161b1b]/60 p-6 text-center">
-        <p className="text-sm font-semibold">{message}</p>
-        {detail ? <p className="mt-2 text-xs text-white/60">{detail}</p> : null}
-        {debug ? (
-          <pre className="mt-4 max-h-48 overflow-auto rounded-xl border border-white/10 bg-black/40 p-3 text-[10px] text-white/50 text-left whitespace-pre-wrap">
-            {debug}
-          </pre>
-        ) : null}
+    <div className="relative min-h-screen overflow-hidden px-6 py-12 flex items-center justify-center" style={{ backgroundColor: BRAND.bg, color: BRAND.text }}>
+      <div
+        className="pointer-events-none absolute -top-48 -left-44 h-[620px] w-[620px] rounded-full blur-[120px]"
+        style={{ background: "radial-gradient(circle, rgba(56,229,215,0.12) 0%, transparent 68%)" }}
+      />
+      <div
+        className="pointer-events-none absolute -bottom-48 -right-44 h-[620px] w-[620px] rounded-full blur-[130px]"
+        style={{ background: "radial-gradient(circle, rgba(255,43,214,0.11) 0%, transparent 68%)" }}
+      />
+
+      <div className="relative z-10 w-full max-w-[460px] text-center">
+        {!logoFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={logoSrc}
+            alt="ConXion"
+            className="mx-auto h-24 w-auto select-none"
+            onError={() => {
+              if (logoSrc.endsWith(".svg")) {
+                setLogoSrc("/branding/conxion-short-logo.png");
+                return;
+              }
+              setLogoFailed(true);
+            }}
+          />
+        ) : (
+          <div
+            className="mx-auto text-4xl font-black italic tracking-tight"
+            style={{
+              backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+            }}
+          >
+            CONXION
+          </div>
+        )}
+
+        <div className="mt-7 rounded-3xl border p-8" style={{ backgroundColor: BRAND.surface, borderColor: BRAND.border }}>
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-white/15 bg-black/25">
+            <span className="material-symbols-outlined text-4xl" style={{ color: hasError ? BRAND.danger : BRAND.cyan }}>
+              {hasError ? "error" : "check"}
+            </span>
+          </div>
+
+          <h1 className="text-3xl font-black tracking-tight text-white">{hasError ? "Authentication error" : "You’re in"}</h1>
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: hasError ? BRAND.danger : BRAND.muted }}>
+            {hasError ? detail : message}
+          </p>
+
+          {!hasError ? (
+            <div className="mt-8">
+              <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-wider" style={{ color: BRAND.muted }}>
+                <span>Securing session</span>
+                <span className="font-bold text-white">{progress}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${progress}%`,
+                    backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => router.replace("/auth")}
+              className="mt-7 w-full rounded-2xl py-3 text-base font-bold"
+              style={{
+                backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
+                color: "#05080c",
+              }}
+            >
+              Back to auth
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -102,10 +214,8 @@ function AuthCallbackContent() {
 
 function AuthCallbackFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] text-white px-6">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#161b1b]/60 p-6 text-center">
-        <p className="text-sm font-semibold">Finishing sign-in...</p>
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-[#060A10] text-white px-6">
+      <p className="text-sm text-white/70">Finishing sign-in...</p>
     </div>
   );
 }
