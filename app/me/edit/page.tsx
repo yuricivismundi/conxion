@@ -2,28 +2,77 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import {
+  getCachedCitiesOfCountry,
+  getCachedCountriesAll,
+  getCitiesOfCountry,
+  getCountriesAll,
+  type CountryEntry,
+} from "@/lib/country-city-client";
+import { getAvatarStorageUrl, resolveAvatarUrl } from "@/lib/avatar-storage";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Nav from "@/components/Nav";
-import CountryCitySelect from "@/components/CountryCitySelect";
+import VerifiedBadge from "@/components/VerifiedBadge";
+import GetVerifiedButton from "@/components/verification/GetVerifiedButton";
+import ProfileMediaManager from "@/components/profile/ProfileMediaManager";
+import TeacherInfoManager from "@/components/teacher/TeacherInfoManager";
+import {
+  HOSTING_GUEST_GENDER_OPTIONS,
+  HOSTING_SLEEPING_ARRANGEMENT_OPTIONS,
+  type HostingPreferredGuestGender,
+  type HostingSleepingArrangement,
+  normalizeHostingPreferredGuestGender,
+  normalizeHostingSleepingArrangement,
+} from "@/lib/hosting/preferences";
+import {
+  normalizeProfileUsernameInput,
+  suggestProfileUsername,
+  validateProfileUsername,
+} from "@/lib/profile-username";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
 
 const LEVELS = [
   "Beginner (0–3 months)",
   "Improver (3–9 months)",
   "Intermediate (9–24 months)",
   "Advanced (2+ years)",
-  "Master (teacher/competitor - 3+ years)",
+  "Teacher/Competitor (3+ years)",
 ] as const;
 
-type Level = (typeof LEVELS)[number];
+const CORE_STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
 
-const STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
-type Style = (typeof STYLES)[number];
+const ROLE_OPTIONS = [
+  "Social dancer / Student",
+  "Organizer",
+  "Studio Owner",
+  "Promoter",
+  "DJ",
+  "Artist",
+  "Teacher",
+] as const;
 
-const ROLES = ["Social dancer / Student", "Organiser", "DJ", "Artist", "Teacher"] as const;
-type Role = (typeof ROLES)[number];
+const INTEREST_OPTIONS = [
+  "Dance at local socials and events",
+  "Find practice partners",
+  "Get tips on the local dance scene",
+  "Collaborate on video projects",
+  "Find buddies for workshops, socials, accommodations, or rides",
+  "Private Lessons",
+  "Group lessons",
+] as const;
 
-const LANGUAGES = [
+const AVAILABILITY_OPTIONS = [
+  "Week Days",
+  "Weekends",
+  "Day Time",
+  "Evenings",
+  "Travel for Events",
+  "Rather not say",
+] as const;
+
+const LANGUAGE_OPTIONS = [
   "English",
   "Spanish",
   "Italian",
@@ -37,631 +86,2266 @@ const LANGUAGES = [
   "Swedish",
   "Finnish",
 ] as const;
-type Language = (typeof LANGUAGES)[number];
 
-const INTERESTS = [
-  "Practice / Dance Partner",
-  "Video Collabs",
-  "Social Dance Party",
-  "Festival Travel Buddy",
-  "Private Lessons",
-  "Group lessons",
-] as const;
-type Interest = (typeof INTERESTS)[number];
-
-const AVAILABILITY = ["Week Days", "Weekends", "Evenings", "Day Time"] as const;
-type Availability = (typeof AVAILABILITY)[number];
+const USERNAME_CHANGE_COOLDOWN_DAYS = 90;
+const USERNAME_CHANGE_COOLDOWN_MS = USERNAME_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 
 type DanceSkill = {
-  level?: Level | "";
-  verified?: boolean; // admin can set later
+  level?: string;
+  verified?: boolean;
 };
 
 type Profile = {
   user_id: string;
   display_name: string;
+  username?: string | null;
+  username_changed_at?: string | null;
   city: string;
   country: string | null;
   nationality: string | null;
-
-  // keep for compatibility / filtering
   dance_styles: string[] | null;
   dance_skills: Record<string, DanceSkill> | null;
-
-  roles: Role[] | null;
-  languages: Language[] | null;
-  interests: Interest[] | null;
-  availability: Availability[] | null;
-
+  roles: string[] | null;
+  languages: string[] | null;
+  interests: string[] | null;
+  availability: string[] | null;
   instagram_handle: string | null;
-  whatsapp_handle: string | null; // NEW
-  youtube_url: string | null; // NEW
-
+  whatsapp_handle: string | null;
+  youtube_url: string | null;
   avatar_url: string | null;
+  avatar_path?: string | null;
+  is_verified?: boolean | null;
+  verification_type?: string | null;
+  verified?: boolean | null;
+  verified_label?: string | null;
+  can_host?: boolean | null;
+  hosting_status?: string | null;
+  max_guests?: number | null;
+  hosting_last_minute_ok?: boolean | null;
+  hosting_preferred_guest_gender?: HostingPreferredGuestGender | null;
+  hosting_kid_friendly?: boolean | null;
+  hosting_pet_friendly?: boolean | null;
+  hosting_smoking_allowed?: boolean | null;
+  hosting_sleeping_arrangement?: HostingSleepingArrangement | null;
+  hosting_guest_share?: string | null;
+  hosting_transit_access?: string | null;
+  hosting_notes?: string | null;
+  house_rules?: string | null;
 };
 
 type ProfileUpdate = {
   display_name: string;
+  username: string;
   country: string | null;
   city: string;
   nationality: string | null;
   dance_styles: string[];
   dance_skills: Record<string, DanceSkill>;
-  roles: Role[];
-  languages: Language[];
-  interests: Interest[];
-  availability: Availability[];
+  roles: string[];
+  languages: string[];
+  interests: string[];
+  availability: string[];
   instagram_handle: string | null;
   whatsapp_handle: string | null;
   youtube_url: string | null;
+  can_host: boolean;
+  hosting_status: string;
+  max_guests: number | null;
+  hosting_last_minute_ok: boolean;
+  hosting_preferred_guest_gender: HostingPreferredGuestGender;
+  hosting_kid_friendly: boolean;
+  hosting_pet_friendly: boolean;
+  hosting_smoking_allowed: boolean;
+  hosting_sleeping_arrangement: HostingSleepingArrangement;
+  hosting_guest_share: string | null;
+  hosting_transit_access: string | null;
+  hosting_notes: string | null;
+  house_rules: string | null;
 };
+
+type SnapshotValues = {
+  displayName: string;
+  username: string;
+  country: string;
+  city: string;
+  nationality: string;
+  danceSkills: Record<string, DanceSkill>;
+  roles: string[];
+  languages: string[];
+  interests: string[];
+  availability: string[];
+  instagramHandle: string;
+  whatsappHandle: string;
+  youtubeUrl: string;
+  acceptingHosting: boolean;
+  hostingStatus: string;
+  maxGuests: string;
+  hostingLastMinuteOk: boolean;
+  hostingPreferredGuestGender: HostingPreferredGuestGender;
+  hostingKidFriendly: boolean;
+  hostingPetFriendly: boolean;
+  hostingSmokingAllowed: boolean;
+  hostingSleepingArrangement: HostingSleepingArrangement;
+  hostingGuestShare: string;
+  hostingTransitAccess: string;
+  hostingNotes: string;
+  houseRules: string;
+  avatarUrl: string | null;
+};
+
+type EditProfileTab = "profile" | "media" | "hosting" | "teacher_services";
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+}
+
+function uniqueOrdered(items: string[]) {
+  return Array.from(new Set(items));
+}
+
+function mergeKnownWithCurrent(known: readonly string[], current: string[]) {
+  const extras = current.filter((item) => !known.includes(item));
+  return [...known, ...extras];
+}
+
+function titleCase(value: string) {
+  if (!value) return value;
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function styleSort(a: string, b: string) {
+  const ai = CORE_STYLES.indexOf(a as (typeof CORE_STYLES)[number]);
+  const bi = CORE_STYLES.indexOf(b as (typeof CORE_STYLES)[number]);
+  const aCore = ai !== -1;
+  const bCore = bi !== -1;
+
+  if (aCore && bCore) return ai - bi;
+  if (aCore) return -1;
+  if (bCore) return 1;
+  return a.localeCompare(b);
+}
+
+function normalizeHandle(value: string) {
+  const trimmed = value.trim().replaceAll(" ", "");
+  return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+}
+
+function normalizeStyleKey(style: string) {
+  return style.trim().toLowerCase();
+}
+
+function isMissingSchemaError(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("schema cache") ||
+    text.includes("does not exist") ||
+    text.includes("could not find the table") ||
+    text.includes("relation")
+  );
+}
+
+function sanitizeDanceSkillsForSave(input: Record<string, DanceSkill>) {
+  const next: Record<string, DanceSkill> = {};
+  for (const [style, raw] of Object.entries(input)) {
+    const key = normalizeStyleKey(style);
+    if (!key) continue;
+    const level = typeof raw?.level === "string" ? raw.level.trim() : "";
+    next[key] = {
+      level,
+      ...(raw?.verified ? { verified: true } : {}),
+    };
+  }
+  return next;
+}
+
+function serializeDraft(values: SnapshotValues) {
+  const danceSkills = sanitizeDanceSkillsForSave(values.danceSkills);
+  const sortedSkills = Object.fromEntries(Object.keys(danceSkills).sort(styleSort).map((style) => [style, danceSkills[style]]));
+
+  return JSON.stringify({
+    displayName: values.displayName.trim(),
+    username: normalizeProfileUsernameInput(values.username),
+    country: values.country.trim(),
+    city: values.city.trim(),
+    nationality: values.nationality.trim(),
+    danceSkills: sortedSkills,
+    roles: [...values.roles].sort((a, b) => a.localeCompare(b)),
+    languages: [...values.languages].sort((a, b) => a.localeCompare(b)),
+    interests: [...values.interests].sort((a, b) => a.localeCompare(b)),
+    availability: [...values.availability].sort((a, b) => a.localeCompare(b)),
+    instagramHandle: normalizeHandle(values.instagramHandle),
+    whatsappHandle: values.whatsappHandle.trim(),
+    youtubeUrl: values.youtubeUrl.trim(),
+    acceptingHosting: values.acceptingHosting,
+    hostingStatus: values.hostingStatus.trim(),
+    maxGuests: values.maxGuests.trim(),
+    hostingLastMinuteOk: values.hostingLastMinuteOk,
+    hostingPreferredGuestGender: values.hostingPreferredGuestGender,
+    hostingKidFriendly: values.hostingKidFriendly,
+    hostingPetFriendly: values.hostingPetFriendly,
+    hostingSmokingAllowed: values.hostingSmokingAllowed,
+    hostingSleepingArrangement: values.hostingSleepingArrangement,
+    hostingGuestShare: values.hostingGuestShare.trim(),
+    hostingTransitAccess: values.hostingTransitAccess.trim(),
+    hostingNotes: values.hostingNotes.trim(),
+    houseRules: values.houseRules.trim(),
+    avatarUrl: values.avatarUrl?.trim() ?? "",
+  });
+}
+
+const CROP_FRAME_SIZE = 320;
+const MAX_DISPLAY_NAME_LENGTH = 48;
+const MAX_NATIONALITY_LENGTH = 40;
+const MAX_CUSTOM_STYLE_LENGTH = 32;
+const TOTAL_PROFILE_SECTIONS = 4;
+
+async function makePreviewMatchedCroppedBlob(params: {
+  src: string;
+  mime: string;
+  preview: { renderWidth: number; renderHeight: number; offsetX: number; offsetY: number };
+}) {
+  const image = new window.Image();
+  image.decoding = "async";
+
+  const loaded = await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Could not read image."));
+    image.src = params.src;
+  });
+  void loaded;
+
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) throw new Error("Invalid image dimensions.");
+
+  const canvas = document.createElement("canvas");
+  const outputSize = 1024;
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not initialize image cropper.");
+
+  const scaleOut = outputSize / CROP_FRAME_SIZE;
+  const outWidth = params.preview.renderWidth * scaleOut;
+  const outHeight = params.preview.renderHeight * scaleOut;
+  const outOffsetX = params.preview.offsetX * scaleOut;
+  const outOffsetY = params.preview.offsetY * scaleOut;
+
+  const left = outputSize / 2 - outWidth / 2 + outOffsetX;
+  const top = outputSize / 2 - outHeight / 2 + outOffsetY;
+
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.clearRect(0, 0, outputSize, outputSize);
+  context.drawImage(image, left, top, outWidth, outHeight);
+
+  const mime = params.mime.startsWith("image/") ? params.mime : "image/jpeg";
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((value) => resolve(value), mime, 0.92);
+  });
+
+  if (!blob) throw new Error("Could not create cropped image.");
+  return blob;
+}
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
+
+function formatLongDate(value: Date) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(value);
+}
 
 export default function EditMePage() {
   const router = useRouter();
 
+  const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const countryNames = useMemo(() => countriesAll.map((entry) => entry.name), [countriesAll]);
+
   const [meId, setMeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveStage, setSaveStage] = useState<"idle" | "saving" | "redirecting">("idle");
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [initialUsername, setInitialUsername] = useState("");
+  const [usernameChangedAt, setUsernameChangedAt] = useState<string | null>(null);
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
   const [nationality, setNationality] = useState("");
 
-  // per-style skills map
-  const [danceSkills, setDanceSkills] = useState<Partial<Record<Style, DanceSkill>>>({});
+  const [danceSkills, setDanceSkills] = useState<Record<string, DanceSkill>>({});
+  const [customStyleDraft, setCustomStyleDraft] = useState("");
+  const [otherStyleEnabled, setOtherStyleEnabled] = useState(false);
+  const [pendingVerificationStyles, setPendingVerificationStyles] = useState<Set<string>>(new Set());
+  const [verificationBusyStyle, setVerificationBusyStyle] = useState<string | null>(null);
+  const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
+  const [verificationFeatureAvailable, setVerificationFeatureAvailable] = useState(true);
 
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [languages, setLanguages] = useState<Language[]>([]);
-  const [langPick, setLangPick] = useState<Language | "">("");
+  const [roles, setRoles] = useState<string[]>([]);
+  const [interests, setInterests] = useState<string[]>([]);
+  const [availability, setAvailability] = useState<string[]>([]);
 
-  const [interests, setInterests] = useState<Interest[]>([]);
-  const [availability, setAvailability] = useState<Availability[]>([]);
+  const [languages, setLanguages] = useState<string[]>([]);
+  const [languageDraft, setLanguageDraft] = useState("");
 
-  // Contacts
   const [instagramHandle, setInstagramHandle] = useState("");
-  const [whatsappHandle, setWhatsappHandle] = useState(""); // NEW
-  const [youtubeUrl, setYoutubeUrl] = useState(""); // NEW
+  const [whatsappHandle, setWhatsappHandle] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [acceptingHosting, setAcceptingHosting] = useState(false);
+  const [hostingStatus, setHostingStatus] = useState("inactive");
+  const [maxGuests, setMaxGuests] = useState("");
+  const [hostingLastMinuteOk, setHostingLastMinuteOk] = useState(false);
+  const [hostingPreferredGuestGender, setHostingPreferredGuestGender] = useState<HostingPreferredGuestGender>("any");
+  const [hostingKidFriendly, setHostingKidFriendly] = useState(false);
+  const [hostingPetFriendly, setHostingPetFriendly] = useState(false);
+  const [hostingSmokingAllowed, setHostingSmokingAllowed] = useState(false);
+  const [hostingSleepingArrangement, setHostingSleepingArrangement] = useState<HostingSleepingArrangement>("not_specified");
+  const [hostingGuestShare, setHostingGuestShare] = useState("");
+  const [hostingTransitAccess, setHostingTransitAccess] = useState("");
+  const [hostingNotes, setHostingNotes] = useState("");
+  const [houseRules, setHouseRules] = useState("");
+  const [paymentVerified, setPaymentVerified] = useState(false);
+  const [activeTab, setActiveTab] = useState<EditProfileTab>("profile");
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
 
-  const normalizedIg = useMemo(() => {
-    const raw = instagramHandle.trim().replaceAll(" ", "");
-    return raw.startsWith("@") ? raw.slice(1) : raw;
-  }, [instagramHandle]);
+  const [cropSource, setCropSource] = useState<string | null>(null);
+  const [cropMime, setCropMime] = useState("image/jpeg");
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropPanX, setCropPanX] = useState(0);
+  const [cropPanY, setCropPanY] = useState(0);
+  const [cropNaturalSize, setCropNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  useBodyScrollLock(Boolean(photoOpen || cropSource || saveStage !== "idle"));
 
+  const [initialSnapshot, setInitialSnapshot] = useState("");
+
+  const selectedStyles = useMemo(() => Object.keys(danceSkills).sort(styleSort), [danceSkills]);
+  const roleOptions = useMemo(() => mergeKnownWithCurrent(ROLE_OPTIONS, roles), [roles]);
+  const interestOptions = useMemo(() => mergeKnownWithCurrent(INTEREST_OPTIONS, interests), [interests]);
+  const availabilityOptions = useMemo(
+    () => mergeKnownWithCurrent(AVAILABILITY_OPTIONS, availability),
+    [availability]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      serializeDraft({
+        displayName,
+        username,
+        country,
+        city,
+        nationality,
+        danceSkills,
+        roles,
+        languages,
+        interests,
+        availability,
+        instagramHandle,
+        whatsappHandle,
+        youtubeUrl,
+        acceptingHosting,
+        hostingStatus,
+        maxGuests,
+        hostingLastMinuteOk,
+        hostingPreferredGuestGender,
+        hostingKidFriendly,
+        hostingPetFriendly,
+        hostingSmokingAllowed,
+        hostingSleepingArrangement,
+        hostingGuestShare,
+        hostingTransitAccess,
+        hostingNotes,
+        houseRules,
+        avatarUrl,
+      }),
+    [
+      displayName,
+      username,
+      country,
+      city,
+      nationality,
+      danceSkills,
+      roles,
+      languages,
+      interests,
+      availability,
+      instagramHandle,
+      whatsappHandle,
+      youtubeUrl,
+      acceptingHosting,
+      hostingStatus,
+      maxGuests,
+      hostingLastMinuteOk,
+      hostingPreferredGuestGender,
+      hostingKidFriendly,
+      hostingPetFriendly,
+      hostingSmokingAllowed,
+      hostingSleepingArrangement,
+      hostingGuestShare,
+      hostingTransitAccess,
+      hostingNotes,
+      houseRules,
+      avatarUrl,
+    ]
+  );
+
+  const hasUnsavedChanges = initialSnapshot.length > 0 && currentSnapshot !== initialSnapshot;
+
+  const normalizedIg = useMemo(() => normalizeHandle(instagramHandle), [instagramHandle]);
   const normalizedWa = useMemo(() => whatsappHandle.trim(), [whatsappHandle]);
   const normalizedYt = useMemo(() => youtubeUrl.trim(), [youtubeUrl]);
-
-  const selectedStyles = useMemo(() => Object.keys(danceSkills) as Style[], [danceSkills]);
-
-  const isLevel = (value: string): value is Level => LEVELS.includes(value as Level);
-  const isRole = (value: string): value is Role => ROLES.includes(value as Role);
-  const isLanguage = (value: string): value is Language => LANGUAGES.includes(value as Language);
-  const isInterest = (value: string): value is Interest => INTERESTS.includes(value as Interest);
-  const isAvailability = (value: string): value is Availability => AVAILABILITY.includes(value as Availability);
+  const displayNameLength = displayName.length;
+  const nationalityLength = nationality.length;
+  const customStyleLength = customStyleDraft.length;
+  const normalizedDisplayName = useMemo(() => displayName.trim().slice(0, MAX_DISPLAY_NAME_LENGTH), [displayName]);
+  const suggestedUsername = useMemo(() => suggestProfileUsername(displayName), [displayName]);
+  const normalizedUsername = useMemo(() => normalizeProfileUsernameInput(username), [username]);
+  const normalizedInitialUsername = useMemo(() => normalizeProfileUsernameInput(initialUsername), [initialUsername]);
+  const usernameError = useMemo(() => validateProfileUsername(normalizedUsername), [normalizedUsername]);
+  const usernameChanged = normalizedUsername !== normalizedInitialUsername;
+  const usernameLockedUntil = useMemo(() => {
+    if (!usernameChangedAt) return null;
+    const changedAt = new Date(usernameChangedAt);
+    if (Number.isNaN(changedAt.getTime())) return null;
+    return new Date(changedAt.getTime() + USERNAME_CHANGE_COOLDOWN_MS);
+  }, [usernameChangedAt]);
+  const usernameChangeLocked = useMemo(
+    () => Boolean(usernameLockedUntil && usernameLockedUntil.getTime() > Date.now()),
+    [usernameLockedUntil]
+  );
+  const usernameCooldownMessage = useMemo(() => {
+    if (!usernameChangeLocked || !usernameLockedUntil) return null;
+    return `Username changes are limited to once every ${USERNAME_CHANGE_COOLDOWN_DAYS} days. Next change: ${formatLongDate(usernameLockedUntil)}.`;
+  }, [usernameChangeLocked, usernameLockedUntil]);
+  const normalizedNationality = useMemo(() => nationality.trim().slice(0, MAX_NATIONALITY_LENGTH), [nationality]);
+  const normalizedCountry = useMemo(() => country.trim(), [country]);
+  const normalizedCity = useMemo(() => city.trim(), [city]);
+  const stylesMissingLevel = useMemo(
+    () => selectedStyles.filter((style) => !(danceSkills[style]?.level ?? "").trim()),
+    [danceSkills, selectedStyles]
+  );
+  const sectionBasicsComplete = normalizedDisplayName.length >= 2 && normalizedCountry.length > 0 && normalizedCity.length > 0;
+  const sectionDanceComplete = selectedStyles.length > 0 && stylesMissingLevel.length === 0;
+  const sectionRolesComplete = roles.length > 0;
+  const sectionContactsComplete = languages.length > 0;
+  const sectionCompletion = useMemo(
+    () => [
+      { id: "basics", label: "Basics", done: sectionBasicsComplete },
+      { id: "dna", label: "Dance DNA", done: sectionDanceComplete },
+      { id: "roles", label: "Roles", done: sectionRolesComplete },
+      { id: "languages", label: "Languages", done: sectionContactsComplete },
+    ],
+    [sectionBasicsComplete, sectionDanceComplete, sectionRolesComplete, sectionContactsComplete]
+  );
+  const completedSections = useMemo(() => sectionCompletion.filter((item) => item.done).length, [sectionCompletion]);
+  const sectionProgressPercent = useMemo(
+    () => Math.round((completedSections / TOTAL_PROFILE_SECTIONS) * 100),
+    [completedSections]
+  );
+  const saveBarMessage =
+    saveStage === "saving"
+      ? "Saving profile..."
+      : saveStage === "redirecting"
+        ? "Saved. Redirecting to account settings..."
+        : hasUnsavedChanges
+          ? "You have unsaved changes."
+          : "All changes saved.";
 
   useEffect(() => {
+    if (!error) return;
+    const timeoutId = window.setTimeout(() => setError(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [error]);
+
+  useEffect(() => {
+    if (!verificationNotice) return;
+    const timeoutId = window.setTimeout(() => setVerificationNotice(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [verificationNotice]);
+
+  const editTabs: Array<{ id: EditProfileTab; label: string }> = [
+    { id: "profile", label: "Profile info" },
+    { id: "media", label: "Media" },
+    { id: "hosting", label: "Hosting" },
+    { id: "teacher_services", label: "Teacher services" },
+  ];
+
+  const countryIso = useMemo(() => countriesAll.find((entry) => entry.name === country)?.isoCode ?? "", [countriesAll, country]);
+
+  const cityOptions = useMemo(() => {
+    if (!city) return availableCities;
+    if (availableCities.includes(city)) return availableCities;
+    return [city, ...availableCities];
+  }, [availableCities, city]);
+
+  const cropPreview = useMemo(() => {
+    if (!cropSource || !cropNaturalSize) return null;
+
+    const minSide = Math.min(cropNaturalSize.width, cropNaturalSize.height);
+    if (!minSide) return null;
+
+    const scale = (CROP_FRAME_SIZE / minSide) * Math.max(cropZoom, 1);
+    const renderWidth = cropNaturalSize.width * scale;
+    const renderHeight = cropNaturalSize.height * scale;
+
+    const maxOffsetX = Math.max((renderWidth - CROP_FRAME_SIZE) / 2, 0);
+    const maxOffsetY = Math.max((renderHeight - CROP_FRAME_SIZE) / 2, 0);
+
+    return {
+      renderWidth,
+      renderHeight,
+      maxOffsetX,
+      maxOffsetY,
+      offsetX: cropPanX * maxOffsetX,
+      offsetY: cropPanY * maxOffsetY,
+    };
+  }, [cropNaturalSize, cropPanX, cropPanY, cropSource, cropZoom]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (countriesAll.length > 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCountriesAll()
+      .then((countries) => {
+        if (cancelled) return;
+        setCountriesAll(countries);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCountriesAll([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countriesAll.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!countryIso) {
+      setAvailableCities([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cachedCities = getCachedCitiesOfCountry(countryIso);
+    if (cachedCities.length > 0) {
+      setAvailableCities(cachedCities);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCitiesOfCountry(countryIso)
+      .then((nextCities) => {
+        if (cancelled) return;
+        setAvailableCities(nextCities);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAvailableCities([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countryIso]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       setLoading(true);
       setError(null);
 
-      const { data: auth } = await supabase.auth.getUser();
-      const user = auth.user;
-      if (!user) return router.replace("/auth");
+      const authRes = await supabase.auth.getUser();
+      const user = authRes.data.user;
+      if (!user) {
+        router.replace("/auth");
+        return;
+      }
+      if (cancelled) return;
 
       setMeId(user.id);
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const profileRes = await supabase.from("profiles").select("*").eq("user_id", user.id).maybeSingle();
+      if (cancelled) return;
 
-      if (error) {
-        setError(error.message);
+      if (profileRes.error) {
+        setError(profileRes.error.message);
         setLoading(false);
         return;
       }
 
-      if (!data) {
+      if (!profileRes.data) {
         router.replace("/onboarding");
         return;
       }
 
-      const p = data as Profile;
+      const profile = profileRes.data as Profile;
 
-      setDisplayName(p.display_name ?? "");
-      setCountry(p.country ?? "");
-      setCity(p.city ?? "");
-      setNationality(p.nationality ?? "");
+      const nextDisplayName = (profile.display_name ?? "").slice(0, MAX_DISPLAY_NAME_LENGTH);
+      const nextUsername = normalizeProfileUsernameInput(profile.username ?? suggestProfileUsername(nextDisplayName));
+      const nextCountry = profile.country ?? "";
+      const nextCity = profile.city ?? "";
+      const nextNationality = (profile.nationality ?? "").slice(0, MAX_NATIONALITY_LENGTH);
+      const nextRoles = toStringArray(profile.roles);
+      const nextInterests = toStringArray(profile.interests);
+      const nextAvailability = toStringArray(profile.availability);
+      const nextLanguages = toStringArray(profile.languages);
+      const nextInstagram = profile.instagram_handle ?? "";
+      const nextWhatsapp = profile.whatsapp_handle ?? "";
+      const nextYoutube = profile.youtube_url ?? "";
+      const nextAcceptingHosting = profile.can_host === true;
+      const nextHostingStatus = (profile.hosting_status ?? "inactive").trim() || "inactive";
+      const nextMaxGuests =
+        typeof profile.max_guests === "number" && Number.isFinite(profile.max_guests) ? String(profile.max_guests) : "";
+      const nextHostingLastMinuteOk = profile.hosting_last_minute_ok === true;
+      const nextHostingPreferredGuestGender = normalizeHostingPreferredGuestGender(profile.hosting_preferred_guest_gender);
+      const nextHostingKidFriendly = profile.hosting_kid_friendly === true;
+      const nextHostingPetFriendly = profile.hosting_pet_friendly === true;
+      const nextHostingSmokingAllowed = profile.hosting_smoking_allowed === true;
+      const nextHostingSleepingArrangement = normalizeHostingSleepingArrangement(profile.hosting_sleeping_arrangement);
+      const nextHostingGuestShare = profile.hosting_guest_share ?? "";
+      const nextHostingTransitAccess = profile.hosting_transit_access ?? "";
+      const nextHostingNotes = profile.hosting_notes ?? "";
+      const nextHouseRules = profile.house_rules ?? "";
+      const nextAvatarUrl = resolveAvatarUrl({
+        avatarUrl: profile.avatar_url,
+        avatarPath: profile.avatar_path,
+      });
 
-      // Prefer dance_skills, fallback to dance_styles (older users)
-      const ds: Record<string, DanceSkill> = p.dance_skills ?? {};
-      if (ds && Object.keys(ds).length > 0) {
-        setDanceSkills(ds);
+      const dbSkills =
+        profile.dance_skills && typeof profile.dance_skills === "object"
+          ? (profile.dance_skills as Record<string, DanceSkill>)
+          : {};
+
+      let nextDanceSkills: Record<string, DanceSkill>;
+      if (Object.keys(dbSkills).length > 0) {
+        nextDanceSkills = dbSkills;
       } else {
-        const styles = p.dance_styles ?? [];
-        const fallback: Partial<Record<Style, DanceSkill>> = {};
-        styles.forEach((s) => {
-          if (STYLES.includes(s as Style)) fallback[s as Style] = { level: "" };
+        const fallback: Record<string, DanceSkill> = {};
+        toStringArray(profile.dance_styles).forEach((style) => {
+          const key = normalizeStyleKey(style);
+          if (!key) return;
+          fallback[key] = { level: "" };
         });
-        setDanceSkills(fallback);
+        nextDanceSkills = fallback;
       }
 
-      setRoles((p.roles ?? []).filter(isRole));
-      setLanguages((p.languages ?? []).filter(isLanguage));
-      setInterests((p.interests ?? []).filter(isInterest));
-      setAvailability((p.availability ?? []).filter(isAvailability));
+      setDisplayName(nextDisplayName);
+      setUsername(nextUsername);
+      setInitialUsername(nextUsername);
+      setUsernameChangedAt(typeof profile.username_changed_at === "string" ? profile.username_changed_at : null);
+      setCountry(nextCountry);
+      setCity(nextCity);
+      setNationality(nextNationality);
+      setDanceSkills(nextDanceSkills);
+      const existingOtherStyle =
+        Object.keys(nextDanceSkills).find((style) => !CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) ?? "";
+      setOtherStyleEnabled(Boolean(existingOtherStyle));
+      setCustomStyleDraft(existingOtherStyle);
+      setRoles(nextRoles);
+      setInterests(nextInterests);
+      setAvailability(nextAvailability);
+      setLanguages(nextLanguages);
+      setInstagramHandle(nextInstagram);
+      setWhatsappHandle(nextWhatsapp);
+      setYoutubeUrl(nextYoutube);
+      setAcceptingHosting(nextAcceptingHosting);
+      setHostingStatus(nextHostingStatus);
+      setMaxGuests(nextMaxGuests);
+      setHostingLastMinuteOk(nextHostingLastMinuteOk);
+      setHostingPreferredGuestGender(nextHostingPreferredGuestGender);
+      setHostingKidFriendly(nextHostingKidFriendly);
+      setHostingPetFriendly(nextHostingPetFriendly);
+      setHostingSmokingAllowed(nextHostingSmokingAllowed);
+      setHostingSleepingArrangement(nextHostingSleepingArrangement);
+      setHostingGuestShare(nextHostingGuestShare);
+      setHostingTransitAccess(nextHostingTransitAccess);
+      setHostingNotes(nextHostingNotes);
+      setHouseRules(nextHouseRules);
+      setPaymentVerified(profile?.verified === true);
+      setAvatarUrl(nextAvatarUrl);
 
-      // Contacts
-      setInstagramHandle(p.instagram_handle ?? "");
-      setWhatsappHandle(p.whatsapp_handle ?? ""); // NEW
-      setYoutubeUrl(p.youtube_url ?? ""); // NEW
+      const pendingRes = await supabase
+        .from("style_verification_requests")
+        .select("style,status")
+        .eq("user_id", user.id)
+        .eq("status", "pending");
 
-      setAvatarUrl(p.avatar_url ?? null);
+      if (!cancelled) {
+        if (pendingRes.error) {
+          if (isMissingSchemaError(pendingRes.error.message)) {
+            setVerificationFeatureAvailable(false);
+            setPendingVerificationStyles(new Set());
+          } else {
+            setError(pendingRes.error.message);
+          }
+        } else {
+          const pendingStyles = new Set(
+            (pendingRes.data ?? [])
+              .map((row) => {
+                const style = (row as { style?: unknown }).style;
+                return typeof style === "string" ? normalizeStyleKey(style) : "";
+              })
+              .filter(Boolean)
+          );
+          setPendingVerificationStyles(pendingStyles);
+          setVerificationFeatureAvailable(true);
+        }
+      }
+
+      setInitialSnapshot(
+        serializeDraft({
+          displayName: nextDisplayName,
+          username: nextUsername,
+          country: nextCountry,
+          city: nextCity,
+          nationality: nextNationality,
+          danceSkills: nextDanceSkills,
+          roles: nextRoles,
+          languages: nextLanguages,
+          interests: nextInterests,
+          availability: nextAvailability,
+          instagramHandle: nextInstagram,
+          whatsappHandle: nextWhatsapp,
+          youtubeUrl: nextYoutube,
+          acceptingHosting: nextAcceptingHosting,
+          hostingStatus: nextHostingStatus,
+          maxGuests: nextMaxGuests,
+          hostingLastMinuteOk: nextHostingLastMinuteOk,
+          hostingPreferredGuestGender: nextHostingPreferredGuestGender,
+          hostingKidFriendly: nextHostingKidFriendly,
+          hostingPetFriendly: nextHostingPetFriendly,
+          hostingSmokingAllowed: nextHostingSmokingAllowed,
+          hostingSleepingArrangement: nextHostingSleepingArrangement,
+          hostingGuestShare: nextHostingGuestShare,
+          hostingTransitAccess: nextHostingTransitAccess,
+          hostingNotes: nextHostingNotes,
+          houseRules: nextHouseRules,
+          avatarUrl: nextAvatarUrl,
+        })
+      );
 
       setLoading(false);
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
-  function toggle<T extends string>(list: T[], setList: (v: T[]) => void, value: T) {
-    setList(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    const onClickCapture = (event: MouseEvent) => {
+      if (!hasUnsavedChanges) return;
+      if (!(event.target instanceof Element)) return;
+
+      const anchor = event.target.closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      if (anchor.hasAttribute("data-ignore-unsaved-guard")) return;
+
+      const href = anchor.getAttribute("href") ?? "";
+      if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        return;
+      }
+
+      const nextUrl = new URL(anchor.href, window.location.href);
+      const currentUrl = new URL(window.location.href);
+      if (nextUrl.origin !== currentUrl.origin) return;
+
+      const sameDestination =
+        nextUrl.pathname === currentUrl.pathname && nextUrl.search === currentUrl.search && nextUrl.hash === currentUrl.hash;
+      if (sameDestination) return;
+
+      const leave = window.confirm("You have unsaved changes. Leave this page?");
+      if (!leave) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    document.addEventListener("click", onClickCapture, true);
+    return () => document.removeEventListener("click", onClickCapture, true);
+  }, [hasUnsavedChanges]);
+
+  function toggleString(list: string[], setter: (next: string[]) => void, value: string) {
+    setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
   }
 
-  function toggleStyle(style: Style) {
+  function toggleStyle(style: string) {
     setDanceSkills((prev) => {
       const next = { ...prev };
-      if (next[style]) delete next[style];
-      else next[style] = { level: "" };
+      if (next[style]) {
+        delete next[style];
+      } else {
+        next[style] = { level: "" };
+      }
+      return next;
+    });
+
+    setPendingVerificationStyles((prev) => {
+      if (!prev.has(style)) return prev;
+      const next = new Set(prev);
+      next.delete(style);
       return next;
     });
   }
 
-  function setStyleLevel(style: Style, level: "" | Level) {
+  function setStyleLevel(style: string, level: string) {
     setDanceSkills((prev) => ({
       ...prev,
-      [style]: { ...(prev[style] ?? {}), level },
+      [style]: {
+        ...(prev[style] ?? {}),
+        level,
+      },
     }));
   }
 
-  function addLanguage(value: Language) {
-    const v = value;
-    if (!v) return;
-    if (languages.length >= 3) return;
-    if (languages.includes(v)) return;
-    setLanguages((prev) => [...prev, v]);
-    setLangPick("");
-  }
-
-  function removeLanguage(value: Language) {
-    setLanguages((prev) => prev.filter((x) => x !== value));
-  }
-
-  async function onPickFile(file: File) {
+  async function requestStyleVerification(style: string) {
     if (!meId) return;
+
+    const currentSkill = danceSkills[style] ?? {};
+    const level = (currentSkill.level ?? "").trim();
+    if (!level) {
+      setError(`Please set a level for ${titleCase(style)} before requesting verification.`);
+      return;
+    }
+
+    if (!verificationFeatureAvailable) {
+      setError("Style verification requests are temporarily unavailable.");
+      return;
+    }
+
+    setVerificationBusyStyle(style);
+    setVerificationNotice(null);
     setError(null);
-    setUploading(true);
+
+    const insertRes = await supabase.from("style_verification_requests").insert({
+      user_id: meId,
+      style,
+      level,
+      status: "pending",
+    });
+
+    setVerificationBusyStyle(null);
+
+    if (insertRes.error) {
+      const message = insertRes.error.message ?? "Could not request verification.";
+      const duplicate = insertRes.error.code === "23505" || message.toLowerCase().includes("duplicate");
+
+      if (duplicate) {
+        setPendingVerificationStyles((prev) => new Set(prev).add(style));
+        setVerificationNotice(`${titleCase(style)} is already in verification queue.`);
+        return;
+      }
+
+      if (isMissingSchemaError(message)) {
+        setVerificationFeatureAvailable(false);
+        setError("Style verification requests are temporarily unavailable.");
+        return;
+      }
+
+      setError(message);
+      return;
+    }
+
+    setPendingVerificationStyles((prev) => new Set(prev).add(style));
+    setVerificationNotice(`${titleCase(style)} verification request submitted.`);
+  }
+
+  function toggleOtherStyle() {
+    setOtherStyleEnabled((prevEnabled) => {
+      const nextEnabled = !prevEnabled;
+      if (!nextEnabled) {
+        setCustomStyleDraft("");
+        setDanceSkills((prev) => {
+          const next: Record<string, DanceSkill> = {};
+          for (const [style, skill] of Object.entries(prev)) {
+            if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) {
+              next[style] = skill;
+            }
+          }
+          return next;
+        });
+        setPendingVerificationStyles((prev) => {
+          const next = new Set<string>();
+          for (const style of prev) {
+            if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) next.add(style);
+          }
+          return next;
+        });
+      }
+      return nextEnabled;
+    });
+  }
+
+  function onOtherStyleNameChange(value: string) {
+    const raw = value.slice(0, MAX_CUSTOM_STYLE_LENGTH);
+    const normalized = normalizeStyleKey(raw);
+    setCustomStyleDraft(raw);
+
+    setDanceSkills((prev) => {
+      const next: Record<string, DanceSkill> = {};
+      let previousOtherSkill: DanceSkill | undefined;
+
+      for (const [style, skill] of Object.entries(prev)) {
+        if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) {
+          next[style] = skill;
+        } else if (!previousOtherSkill) {
+          previousOtherSkill = skill;
+        }
+      }
+
+      if (normalized) {
+        next[normalized] = previousOtherSkill ?? { level: "" };
+      }
+
+      return next;
+    });
+
+    setPendingVerificationStyles((prev) => {
+      const next = new Set<string>();
+      for (const style of prev) {
+        if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) next.add(style);
+      }
+      if (normalized && prev.has(normalized)) next.add(normalized);
+      return next;
+    });
+  }
+
+  function addLanguage() {
+    const normalized = languageDraft.trim();
+    if (!normalized) return;
+    if (languages.includes(normalized)) {
+      setLanguageDraft("");
+      return;
+    }
+    if (languages.length >= 5) return;
+    setLanguages((prev) => [...prev, normalized]);
+    setLanguageDraft("");
+  }
+
+  async function onRawFilePicked(file: File) {
+    setError(null);
 
     try {
       if (!file.type.startsWith("image/")) throw new Error("Please upload an image.");
-      if (file.size > 5 * 1024 * 1024) throw new Error("Max size is 5MB.");
+      if (file.size > 5 * 1024 * 1024) throw new Error("Max image size is 5MB.");
 
-      const ext = file.name.split(".").pop() || "jpg";
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") resolve(reader.result);
+          else reject(new Error("Could not read image."));
+        };
+        reader.onerror = () => reject(new Error("Could not read image."));
+        reader.readAsDataURL(file);
+      });
+
+      const naturalSize = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const image = new window.Image();
+        image.onload = () => {
+          const width = image.naturalWidth || image.width;
+          const height = image.naturalHeight || image.height;
+          if (!width || !height) {
+            reject(new Error("Invalid image dimensions."));
+            return;
+          }
+          resolve({ width, height });
+        };
+        image.onerror = () => reject(new Error("Could not read image."));
+        image.src = dataUrl;
+      });
+
+      setCropMime(file.type || "image/jpeg");
+      setCropZoom(1);
+      setCropPanX(0);
+      setCropPanY(0);
+      setCropNaturalSize(naturalSize);
+      setCropSource(dataUrl);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not prepare image.");
+    }
+  }
+
+  async function confirmCropUpload() {
+    if (!cropSource || !meId || !cropPreview) return;
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const blob = await makePreviewMatchedCroppedBlob({
+        src: cropSource,
+        mime: cropMime,
+        preview: cropPreview,
+      });
+      const ext = cropMime.includes("png") ? "png" : cropMime.includes("webp") ? "webp" : "jpg";
       const path = `${meId}/${crypto.randomUUID()}.${ext}`;
 
-      const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
-      if (upErr) throw upErr;
+      const uploadRes = await supabase.storage.from("avatars").upload(path, blob, {
+        contentType: cropMime,
+        upsert: true,
+      });
+      if (uploadRes.error) throw uploadRes.error;
 
-      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-      const publicUrl = data.publicUrl;
-
-      const { error: dbErr } = await supabase.from("profiles").update({ avatar_url: publicUrl }).eq("user_id", meId);
-      if (dbErr) throw dbErr;
+      const publicUrl = getAvatarStorageUrl(path) ?? supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+      const updateRes = await supabase
+        .from("profiles")
+        .update({ avatar_url: publicUrl, avatar_path: path, avatar_status: "pending" })
+        .eq("user_id", meId);
+      if (updateRes.error) throw updateRes.error;
 
       setAvatarUrl(publicUrl);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Upload failed";
-      setError(message);
+      setCropSource(null);
+      setCropNaturalSize(null);
+
+      setInitialSnapshot(
+        serializeDraft({
+          displayName,
+          username,
+          country,
+          city,
+          nationality,
+          danceSkills,
+          roles,
+          languages,
+          interests,
+          availability,
+          instagramHandle,
+          whatsappHandle,
+          youtubeUrl,
+          acceptingHosting,
+          hostingStatus,
+          maxGuests,
+          hostingLastMinuteOk,
+          hostingPreferredGuestGender,
+          hostingKidFriendly,
+          hostingPetFriendly,
+          hostingSmokingAllowed,
+          hostingSleepingArrangement,
+          hostingGuestShare,
+          hostingTransitAccess,
+          hostingNotes,
+          houseRules,
+          avatarUrl: publicUrl,
+        })
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
   }
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (!meId) return;
 
-    if (!country || !city) {
+    if (normalizedDisplayName.length < 2) {
+      setError("Please enter your display name.");
+      return;
+    }
+
+    if (usernameError) {
+      setError(usernameError);
+      return;
+    }
+
+    if (usernameChanged && usernameChangeLocked) {
+      setError(usernameCooldownMessage ?? `Username changes are limited to once every ${USERNAME_CHANGE_COOLDOWN_DAYS} days.`);
+      return;
+    }
+
+    if (!normalizedCountry || !normalizedCity) {
       setError("Please select your country and city.");
       return;
     }
 
-    if (selectedStyles.length === 0) {
+    if (selectedStyles.length < 1) {
       setError("Please select at least one dance style.");
       return;
     }
 
+    if (roles.length < 1) {
+      setError("Please select at least one role.");
+      return;
+    }
+
     setSaving(true);
+    setSaveStage("saving");
     setError(null);
 
-    // Keep dance_styles in sync for easy filtering
-    const dance_styles = selectedStyles;
+    const sanitizedDanceSkills = sanitizeDanceSkillsForSave(danceSkills);
+    const maxGuestsValue = maxGuests.trim();
+    const parsedMaxGuests = maxGuestsValue ? Number(maxGuestsValue) : Number.NaN;
+
+    if (maxGuestsValue && (!Number.isFinite(parsedMaxGuests) || parsedMaxGuests < 0 || parsedMaxGuests > 20)) {
+      setSaving(false);
+      setSaveStage("idle");
+      setError("Max guests must be between 0 and 20.");
+      return;
+    }
 
     const payload: ProfileUpdate = {
-      display_name: displayName.trim(),
-      country: country.trim() || null,
-      city: city.trim(),
-      nationality: nationality.trim() || null,
-
-      dance_styles,
-      dance_skills: danceSkills as Record<string, DanceSkill>,
-
+      display_name: normalizedDisplayName,
+      username: normalizedUsername,
+      country: normalizedCountry || null,
+      city: normalizedCity,
+      nationality: normalizedNationality || null,
+      dance_styles: Object.keys(sanitizedDanceSkills).sort(styleSort),
+      dance_skills: sanitizedDanceSkills,
       roles,
       languages,
       interests,
       availability,
-
       instagram_handle: normalizedIg || null,
-
-      // NEW contacts
       whatsapp_handle: normalizedWa || null,
       youtube_url: normalizedYt || null,
+      can_host: acceptingHosting,
+      hosting_status: acceptingHosting ? (hostingStatus === "inactive" ? "available" : hostingStatus) : "inactive",
+      max_guests: maxGuestsValue ? parsedMaxGuests : null,
+      hosting_last_minute_ok: hostingLastMinuteOk,
+      hosting_preferred_guest_gender: hostingPreferredGuestGender,
+      hosting_kid_friendly: hostingKidFriendly,
+      hosting_pet_friendly: hostingPetFriendly,
+      hosting_smoking_allowed: hostingSmokingAllowed,
+      hosting_sleeping_arrangement: hostingSleepingArrangement,
+      hosting_guest_share: hostingGuestShare.trim() || null,
+      hosting_transit_access: hostingTransitAccess.trim() || null,
+      hosting_notes: hostingNotes.trim() || null,
+      house_rules: houseRules.trim() || null,
     };
 
-    const { error } = await supabase.from("profiles").update(payload).eq("user_id", meId);
+    const updateRes = await supabase.from("profiles").update(payload).eq("user_id", meId);
 
-    setSaving(false);
-
-    if (error) {
-      setError(error.message);
+    if (updateRes.error) {
+      setSaving(false);
+      setSaveStage("idle");
+      const message = updateRes.error.message ?? "Could not save profile.";
+      const duplicate = updateRes.error.code === "23505" || message.toLowerCase().includes("username");
+      setError(duplicate ? "That username is already taken." : message);
       return;
     }
 
-    router.replace("/me");
+    setSaveStage("redirecting");
+    if (usernameChanged) {
+      setInitialUsername(normalizedUsername);
+      setUsernameChangedAt(new Date().toISOString());
+    }
+    setInitialSnapshot(currentSnapshot);
+    await new Promise((resolve) => window.setTimeout(resolve, 650));
+    router.replace("/account-settings");
+  }
+
+  function handleLeaveToAccountSettings() {
+    if (hasUnsavedChanges) {
+      const leave = window.confirm("You have unsaved changes. Leave this page?");
+      if (!leave) return;
+    }
+    router.replace("/account-settings");
+  }
+
+  function handlePreviewPublic() {
+    if (hasUnsavedChanges) {
+      const leave = window.confirm("You have unsaved changes. Leave this page?");
+      if (!leave) return;
+    }
+    if (meId) {
+      router.replace(`/profile/${meId}`);
+      return;
+    }
+    router.replace("/account-settings");
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#11252a,_#071316_46%,_#05090b_100%)] text-slate-100">
-        <Nav title="Profile Settings" />
-        <div className="mx-auto flex min-h-[60vh] max-w-[1180px] items-center justify-center px-6">
-          <div className="rounded-2xl border border-white/10 bg-[#0d171a]/85 px-6 py-4 text-sm text-slate-300">
-            Loading profile...
+      <div className="min-h-screen bg-[#05080f] text-slate-100">
+        <Nav />
+        <div className="mx-auto max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+          <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-5 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
+              <div className="mx-auto h-56 w-56 animate-pulse rounded-3xl bg-white/10 sm:h-64 sm:w-64" />
+              <div className="mt-4 h-11 animate-pulse rounded-xl bg-white/10" />
+              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="h-3 w-24 animate-pulse rounded bg-white/10" />
+                <div className="mt-3 h-6 w-36 animate-pulse rounded bg-white/10" />
+                <div className="mt-2 h-4 w-28 animate-pulse rounded bg-white/10" />
+              </div>
+            </div>
+            <div className="space-y-6">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm">
+                  <div className="h-8 w-40 animate-pulse rounded bg-white/10" />
+                  <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                    <div className="h-14 animate-pulse rounded-xl bg-black/25" />
+                    <div className="h-14 animate-pulse rounded-xl bg-black/25" />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  const canAddMoreLanguages = languages.length < 3;
-
   return (
     <div
-      className="min-h-screen bg-[radial-gradient(circle_at_top,_#11252a,_#071316_46%,_#05090b_100%)] text-slate-100"
+      className="min-h-screen bg-[#05080f] text-slate-100"
       data-testid="profile-edit-page"
     >
-      <Nav title="Profile Settings" />
-      <main className="mx-auto max-w-[1180px] px-4 pb-16 pt-7 sm:px-6">
-        <section className="rounded-3xl border border-white/10 bg-[#0b1418]/86 p-6 shadow-[0_22px_70px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:p-8">
-          <header className="mb-6 border-b border-white/10 pb-4">
-            <h1 className="text-2xl font-extrabold tracking-tight text-white" data-testid="profile-edit-title">
-              Profile Settings
-            </h1>
-            <p className="mt-1 text-sm text-slate-300">
-              Keep your dancer card fresh so connections, trips, and references stay high quality.
-            </p>
-          </header>
+      <Nav />
 
-        {error && (
-            <p
-              className="mb-4 rounded-xl border border-rose-300/35 bg-rose-500/10 p-3 text-sm text-rose-100"
-              data-testid="profile-edit-error"
-            >
-              {error}
-            </p>
-        )}
-
-        {/* Bigger photo + smaller name */}
-        <div className="mt-2 flex items-start gap-5">
-          <div className="flex flex-col items-center gap-3">
-            <div className="relative h-32 w-32 overflow-hidden rounded-3xl border border-white/10 bg-black/25">
-              {avatarUrl ? (
-                <Image src={avatarUrl} alt="Avatar" fill className="object-cover" sizes="128px" />
-              ) : (
-                <div className="h-full w-full flex items-center justify-center text-slate-500 text-sm">No photo</div>
-              )}
-            </div>
-
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/15 px-4 py-2 text-sm hover:bg-[#0A0A0A]">
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) onPickFile(file);
-                }}
-              />
-              {uploading ? "Uploading…" : "Upload photo"}
-            </label>
-
-            {!avatarUrl && <div className="text-xs text-slate-400">Tip: profiles with a photo get more connections.</div>}
-          </div>
-
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-slate-300">
-              Display name
-              <input
-                className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35"
-                required
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                data-testid="profile-edit-display-name"
-              />
-            </label>
-
-            <div className="mt-4">
-              <CountryCitySelect
-                value={{ country, city }}
-                onChange={(v) => {
-                  setCountry(v.country);
-                  setCity(v.city);
-                }}
-              />
-            </div>
-
-            <label className="mt-4 block text-sm font-medium text-slate-300">
-              Nationality (optional)
-              <input
-                className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35"
-                value={nationality}
-                onChange={(e) => setNationality(e.target.value)}
-                placeholder="Mexican"
-              />
-            </label>
-          </div>
-        </div>
-
-        <form onSubmit={save} className="mt-8 space-y-6">
-          {/* Dance styles + per-style level */}
-          <div>
-            <div className="text-sm font-medium text-slate-300">Dance styles + level</div>
-
-            <div className="mt-2 flex flex-wrap gap-2">
-              {STYLES.map((s) => {
-                const active = !!danceSkills[s];
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => toggleStyle(s)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm border transition",
-                      active
-                        ? "bg-cyan-300/20 text-white border-cyan-300/35"
-                        : "bg-[#121212] text-slate-200 border-white/15 hover:bg-[#0A0A0A]",
-                    ].join(" ")}
-                  >
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-
-            {selectedStyles.length > 0 && (
-              <div className="mt-4 space-y-3">
-                {selectedStyles.map((style) => (
-                  <div
-                    key={style}
-                    className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#0A0A0A] p-4"
-                  >
-                    <div className="font-medium text-white capitalize">{style}</div>
-
-                    <select
-                      className="w-64 rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-cyan-300/35"
-                      value={danceSkills[style]?.level ?? ""}
-                      onChange={(e) => {
-                        const nextValue = e.target.value;
-                        setStyleLevel(style, nextValue === "" || isLevel(nextValue) ? nextValue : "");
-                      }}
-                    >
-                      <option value="">Select level</option>
-                      {LEVELS.map((l) => (
-                        <option key={l} value={l}>
-                          {l}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-                <div className="text-xs text-slate-500">Tip: set the level for each style you want to be discovered for.</div>
-              </div>
-            )}
-          </div>
-
-          {/* Roles */}
-          <div>
-            <div className="text-sm font-medium text-slate-300">Roles</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {ROLES.map((r) => {
-                const active = roles.includes(r);
-                return (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => toggle(roles, setRoles, r)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm border transition",
-                      active ? "bg-cyan-300/20 text-white border-cyan-300/35" : "bg-[#121212] text-slate-200 border-white/15 hover:bg-[#0A0A0A]",
-                    ].join(" ")}
-                  >
-                    {r}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Interests */}
-          <div>
-            <div className="text-sm font-medium text-slate-300">Interests</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {INTERESTS.map((x) => {
-                const active = interests.includes(x);
-                return (
-                  <button
-                    key={x}
-                    type="button"
-                    onClick={() => toggle(interests, setInterests, x)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm border transition",
-                      active ? "bg-cyan-300/20 text-white border-cyan-300/35" : "bg-[#121212] text-slate-200 border-white/15 hover:bg-[#0A0A0A]",
-                    ].join(" ")}
-                  >
-                    {x}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Availability */}
-          <div>
-            <div className="text-sm font-medium text-slate-300">Availability</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {AVAILABILITY.map((x) => {
-                const active = availability.includes(x);
-                return (
-                  <button
-                    key={x}
-                    type="button"
-                    onClick={() => toggle(availability, setAvailability, x)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm border transition",
-                      active ? "bg-cyan-300/20 text-white border-cyan-300/35" : "bg-[#121212] text-slate-200 border-white/15 hover:bg-[#0A0A0A]",
-                    ].join(" ")}
-                  >
-                    {x}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Languages (max 3) */}
-          <div>
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-slate-300">Languages</div>
-              <div className="text-xs text-slate-500">Max 3</div>
-            </div>
-
-            <div className="mt-2 flex gap-2">
-              <select
-                className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-cyan-300/35 disabled:bg-black/25"
-                value={langPick}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  setLangPick(nextValue === "" || LANGUAGES.includes(nextValue as Language) ? (nextValue as Language | "") : "");
-                }}
-                disabled={!canAddMoreLanguages}
-              >
-                <option value="">{canAddMoreLanguages ? "Select a language…" : "Max reached"}</option>
-                {LANGUAGES.filter((l) => !languages.includes(l)).map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
+      <main className="mx-auto max-w-[1240px] px-4 pb-28 pt-6 sm:px-6 lg:px-8">
+        <form onSubmit={save} className="grid min-w-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+          <aside className="min-w-0 xl:self-start">
+            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-5 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Profile preview</p>
 
               <button
                 type="button"
-                className={[
-                  "rounded-xl px-4 py-3 text-sm font-medium",
-                  canAddMoreLanguages && langPick ? "bg-cyan-300/20 text-white hover:bg-cyan-300/30" : "bg-white/10 text-slate-400 cursor-not-allowed",
-                ].join(" ")}
-                disabled={!canAddMoreLanguages || !langPick}
                 onClick={() => {
-                  if (!langPick) return;
-                  addLanguage(langPick);
+                  if (avatarUrl) setPhotoOpen(true);
                 }}
+                className="mt-4 block w-full"
+                title={avatarUrl ? "Open photo" : "Add a photo"}
               >
-                Add
+                <div className="relative mx-auto h-52 w-52 overflow-hidden rounded-3xl border border-white/10 bg-black/30 sm:h-64 sm:w-64 lg:h-72 lg:w-72">
+                  {avatarUrl ? (
+                    <Image src={avatarUrl} alt="Profile avatar" fill className="object-cover object-center" sizes="288px" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">No photo yet</div>
+                  )}
+                  {paymentVerified ? (
+                    <div className="absolute right-2.5 top-2.5 drop-shadow-lg">
+                      <VerifiedBadge size={26} title={VERIFIED_VIA_PAYMENT_LABEL} />
+                    </div>
+                  ) : null}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 py-3 text-left text-xs text-white/85">
+                    Click to enlarge
+                  </div>
+                </div>
               </button>
-            </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {languages.length ? (
-                languages.map((l) => (
-                  <button
-                    key={l}
-                    type="button"
-                    onClick={() => removeLanguage(l)}
-                    className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm hover:bg-[#0A0A0A]"
-                    title="Remove"
+              <label className="mt-4 inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/35">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void onRawFilePicked(file);
+                  }}
+                />
+                {uploading ? "Uploading..." : "Upload / replace photo"}
+              </label>
+
+              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Snapshot</p>
+                <div className="mt-3 space-y-3 text-sm text-slate-200">
+                  <div>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="min-w-0 break-words text-base font-semibold leading-tight text-white">{displayName || "Your name"}</p>
+                      {paymentVerified ? <VerifiedBadge size={16} title={VERIFIED_VIA_PAYMENT_LABEL} /> : null}
+                    </div>
+                    <p className="mt-0.5 text-slate-300">{[city, country].filter(Boolean).join(", ") || "City, Country"}</p>
+                  </div>
+
+                  <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3">
+                    <span className="material-symbols-outlined inline-flex h-8 w-8 shrink-0 items-center justify-center self-center leading-none text-[20px] text-cyan-300">badge</span>
+                    <div className="flex min-w-0 flex-wrap gap-1.5">
+                      {(roles.length > 0 ? roles : ["No role yet"]).slice(0, 3).map((role) => (
+                        <span
+                          key={role}
+                          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-[3px] text-[10px] font-medium text-white/75"
+                        >
+                          {role}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3">
+                    <span className="material-symbols-outlined inline-flex h-8 w-8 shrink-0 items-center justify-center self-center leading-none text-[20px] text-cyan-300">interests</span>
+                    <div className="flex min-w-0 flex-wrap gap-1.5">
+                      {(selectedStyles.length > 0 ? selectedStyles : ["No style yet"]).slice(0, 4).map((style) => (
+                        <span
+                          key={style}
+                          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-[3px] text-[10px] font-medium uppercase tracking-wider text-white/65"
+                        >
+                          {style}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3">
+                    <span className="material-symbols-outlined inline-flex h-8 w-8 shrink-0 items-center justify-center self-center leading-none text-[20px] text-cyan-300">translate</span>
+                    <div className="flex min-w-0 flex-wrap gap-1.5">
+                      {(languages.length > 0 ? languages : ["No language"]).slice(0, 5).map((language) => (
+                        <span
+                          key={language}
+                          className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] px-1.5 text-[9px] font-bold text-white/70"
+                          title={language}
+                        >
+                          {language.slice(0, 2).toUpperCase()}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePreviewPublic}
+                disabled={saving || uploading}
+                className="mt-4 w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 hover:bg-white/[0.07]"
+              >
+                Preview public profile
+              </button>
+
+              <div className="mt-4 rounded-2xl border border-fuchsia-300/25 bg-fuchsia-500/10 p-4">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-white">Profile verification</p>
+                </div>
+                {paymentVerified ? (
+                  <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-emerald-300/35 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100">
+                    <VerifiedBadge size={18} title={VERIFIED_VIA_PAYMENT_LABEL} />
+                    <span>Verified</span>
+                  </div>
+                ) : (
+                  <GetVerifiedButton
+                    className="mt-4 w-full rounded-xl border border-fuchsia-300/35 bg-gradient-to-r from-cyan-300/25 to-fuchsia-500/25 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+                    returnTo="/me/edit"
+                    onError={(message) => setError(message)}
                   >
-                    {l} <span className="text-slate-500">×</span>
-                  </button>
-                ))
+                    Get verified
+                  </GetVerifiedButton>
+                )}
+              </div>
+            </div>
+          </aside>
+
+	          <section className="min-w-0 space-y-6">
+              <header className="space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <h1 className="text-2xl font-extrabold tracking-tight text-white" data-testid="profile-edit-title">
+                    Edit your profile
+                  </h1>
+                  <span
+                    className={cx(
+                      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                      acceptingHosting
+                        ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                        : "border-white/15 bg-white/[0.03] text-slate-300"
+                    )}
+                  >
+                    {acceptingHosting ? "Hosting on" : "Hosting off"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {editTabs.map((tab) => {
+                    const active = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cx(
+                          "rounded-full border px-4 py-2 text-sm font-semibold transition",
+                          active
+                            ? "border-cyan-300/40 bg-cyan-300/14 text-cyan-100"
+                            : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                        )}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </header>
+
+	            {activeTab === "profile" || activeTab === "media" ? (
+              <div
+                className={cx(
+                  activeTab === "media"
+                    ? "space-y-3"
+                    : "rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7"
+                )}
+              >
+
+              {error ? (
+                <p
+                  className="rounded-xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
+                  data-testid="profile-edit-error"
+                >
+                  {error}
+                </p>
+              ) : null}
+
+              {verificationNotice ? (
+                <p className={cx("rounded-xl border border-cyan-300/35 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100", error ? "mt-3" : "")}>
+                  {verificationNotice}
+                </p>
+              ) : null}
+
+              {activeTab === "profile" ? (
+              <div className={cx("grid gap-4 lg:grid-cols-2", error || verificationNotice ? "mt-6" : "")}>
+                <label className="block text-sm font-medium text-slate-300">
+                  Display name
+                  <input
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value.slice(0, MAX_DISPLAY_NAME_LENGTH))}
+                    maxLength={MAX_DISPLAY_NAME_LENGTH}
+                    className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                    placeholder="How you appear to dancers"
+                    data-testid="profile-edit-display-name"
+                  />
+                  <div className="mt-1 text-right text-xs text-slate-500">
+                    {displayNameLength}/{MAX_DISPLAY_NAME_LENGTH}
+                  </div>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-300">
+                  Username
+                  <div
+                    className={cx(
+                      "mt-1.5 flex items-center rounded-xl border border-white/15 bg-black/25 px-4 py-3 focus-within:border-cyan-300/70 focus-within:ring-2 focus-within:ring-cyan-300/35",
+                      usernameChangeLocked ? "opacity-70" : ""
+                    )}
+                  >
+                    <span className="mr-2 text-slate-500">@</span>
+                    <input
+                      value={username}
+                      onChange={(event) => setUsername(normalizeProfileUsernameInput(event.target.value))}
+                      className="w-full bg-transparent text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
+                      placeholder={suggestedUsername || "your.name"}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      disabled={usernameChangeLocked}
+                    />
+                  </div>
+                  <div className={cx("mt-1 text-xs", usernameError ? "text-rose-300" : usernameCooldownMessage ? "text-amber-200" : "text-slate-500")}>
+                    {usernameError ??
+                      usernameCooldownMessage ??
+                      `Share link: conxion.social/u/${normalizedUsername || suggestedUsername || "your.name"}`}
+                  </div>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-300">
+                  Nationality (optional)
+                  <input
+                    value={nationality}
+                    onChange={(event) => setNationality(event.target.value.slice(0, MAX_NATIONALITY_LENGTH))}
+                    maxLength={MAX_NATIONALITY_LENGTH}
+                    className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                    placeholder="e.g. Mexican"
+                  />
+                  <div className="mt-1 text-right text-xs text-slate-500">
+                    {nationalityLength}/{MAX_NATIONALITY_LENGTH}
+                  </div>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-300">
+                  Country
+                  <select
+                    value={country}
+                    onChange={(event) => {
+                      const nextCountry = event.target.value;
+                      setCountry(nextCountry);
+                      setCity("");
+                    }}
+                    className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)]"
+                  >
+                    <option value="">Select country</option>
+                    {countryNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-300">
+                  City
+                  {country && cityOptions.length === 0 ? (
+                    <input
+                      value={city}
+                      onChange={(event) => setCity(event.target.value)}
+                      className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      placeholder="Type your city"
+                    />
+                  ) : (
+                    <select
+                      value={city}
+                      onChange={(event) => setCity(event.target.value)}
+                      disabled={!country}
+                      className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] disabled:opacity-55"
+                    >
+                      <option value="">{country ? "Select city" : "Pick country first"}</option>
+                      {cityOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+
+              </div>
+              ) : activeTab === "media" ? (
+                <div className={cx("min-w-0", error || verificationNotice ? "mt-3" : "")}>
+                  <ProfileMediaManager embedded />
+                </div>
+              ) : null}
+            </div>
+              ) : null}
+
+            {activeTab === "hosting" ? (
+            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white">Hosting preferences</h2>
+                </div>
+              </header>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Accepting hosting</p>
+                      <p className="mt-1 text-sm text-slate-400">Turn this on to appear in Hosting and receive guest requests.</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={acceptingHosting}
+                      onClick={() => {
+                        const nextAcceptingHosting = !acceptingHosting;
+                        setAcceptingHosting(nextAcceptingHosting);
+                        setHostingStatus((prev) => (nextAcceptingHosting ? (prev === "inactive" ? "available" : prev) : "inactive"));
+                      }}
+                      className={cx(
+                        "inline-flex min-h-11 items-center gap-3 rounded-full border px-3 py-2 text-sm font-semibold transition",
+                        acceptingHosting
+                          ? "border-cyan-300/45 bg-cyan-300/15 text-cyan-100"
+                          : "border-white/15 bg-white/[0.04] text-slate-300"
+                      )}
+                    >
+                      <span
+                        className={cx(
+                          "relative inline-flex h-6 w-11 rounded-full transition",
+                          acceptingHosting ? "bg-cyan-300/65" : "bg-white/15"
+                        )}
+                      >
+                        <span
+                          className={cx(
+                            "absolute top-0.5 h-5 w-5 rounded-full bg-white transition",
+                            acceptingHosting ? "left-[22px]" : "left-0.5"
+                          )}
+                        />
+                      </span>
+                      {acceptingHosting ? "On" : "Off"}
+                    </button>
+                  </div>
+                </div>
+
+                {acceptingHosting ? (
+                  <>
+                    <label className="block text-sm font-medium text-slate-300">
+                      Listing status
+                      <select
+                        value={hostingStatus}
+                        onChange={(event) => setHostingStatus(event.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      >
+                        <option value="available">Available</option>
+                        <option value="paused">Paused</option>
+                        <option value="inactive">Hidden</option>
+                      </select>
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300">
+                      Max guests
+                      <input
+                        type="number"
+                        min={0}
+                        max={20}
+                        value={maxGuests}
+                        onChange={(event) => setMaxGuests(event.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="e.g. 2"
+                      />
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300">
+                      Last-minute requests
+                      <select
+                        value={hostingLastMinuteOk ? "yes" : "no"}
+                        onChange={(event) => setHostingLastMinuteOk(event.target.value === "yes")}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      >
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300">
+                      Preferred guest gender
+                      <select
+                        value={hostingPreferredGuestGender}
+                        onChange={(event) => setHostingPreferredGuestGender(normalizeHostingPreferredGuestGender(event.target.value))}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      >
+                        {HOSTING_GUEST_GENDER_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300">
+                      Sleeping arrangement
+                      <select
+                        value={hostingSleepingArrangement}
+                        onChange={(event) => setHostingSleepingArrangement(normalizeHostingSleepingArrangement(event.target.value))}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      >
+                        {HOSTING_SLEEPING_ARRANGEMENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
+                      <button
+                        type="button"
+                        onClick={() => setHostingKidFriendly((prev) => !prev)}
+                        className={cx(
+                          "rounded-xl border px-4 py-3 text-left text-sm font-medium transition",
+                          hostingKidFriendly ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/20 text-slate-300"
+                        )}
+                      >
+                        Kid friendly: {hostingKidFriendly ? "Yes" : "No"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHostingPetFriendly((prev) => !prev)}
+                        className={cx(
+                          "rounded-xl border px-4 py-3 text-left text-sm font-medium transition",
+                          hostingPetFriendly ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/20 text-slate-300"
+                        )}
+                      >
+                        Pet friendly: {hostingPetFriendly ? "Yes" : "No"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHostingSmokingAllowed((prev) => !prev)}
+                        className={cx(
+                          "rounded-xl border px-4 py-3 text-left text-sm font-medium transition",
+                          hostingSmokingAllowed ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/20 text-slate-300"
+                        )}
+                      >
+                        Smoking allowed: {hostingSmokingAllowed ? "Yes" : "No"}
+                      </button>
+                    </div>
+
+                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
+                      What I can share with guests
+                      <textarea
+                        value={hostingGuestShare}
+                        onChange={(event) => setHostingGuestShare(event.target.value.slice(0, 500))}
+                        rows={3}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="Meals, local recommendations, time together, workspace, laundry, or anything else guests can expect."
+                      />
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
+                      Public transportation access
+                      <textarea
+                        value={hostingTransitAccess}
+                        onChange={(event) => setHostingTransitAccess(event.target.value.slice(0, 300))}
+                        rows={2}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="Metro, tram, buses, distance to station, or anything guests should know."
+                      />
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
+                      Hosting notes
+                      <textarea
+                        value={hostingNotes}
+                        onChange={(event) => setHostingNotes(event.target.value.slice(0, 500))}
+                        rows={4}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="Tell guests what to expect from your space."
+                      />
+                    </label>
+
+                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
+                      House rules
+                      <textarea
+                        value={houseRules}
+                        onChange={(event) => setHouseRules(event.target.value.slice(0, 500))}
+                        rows={4}
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="Share the important rules guests should know before they request hosting."
+                      />
+                    </label>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            ) : null}
+
+            {activeTab === "profile" ? (
+            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+              <header className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-white">Dance DNA</h2>
+                  <p className="mt-1 text-sm text-slate-300">Select your styles, set your level, and request verification.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cx(
+                      "rounded-full border px-3 py-1 text-xs font-semibold",
+                      sectionDanceComplete
+                        ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                        : "border-white/15 bg-white/[0.03] text-slate-300"
+                    )}
+                  >
+                    {sectionDanceComplete ? "✓ Ready" : "In progress"}
+                  </span>
+                  <span className="rounded-full border border-white/15 bg-white/[0.03] px-3 py-1 text-xs text-slate-300">
+                    {selectedStyles.length} selected
+                  </span>
+                </div>
+              </header>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                {CORE_STYLES.map((style) => {
+                  const active = !!danceSkills[style];
+                  return (
+                    <button
+                      key={style}
+                      type="button"
+                      onClick={() => toggleStyle(style)}
+                      className={cx(
+                        "rounded-full border px-4 py-2 text-sm font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                        active
+                          ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
+                          : "border-white/15 bg-black/20 text-slate-200 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                      )}
+                    >
+                      {titleCase(style)}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={toggleOtherStyle}
+                  className={cx(
+                    "rounded-full border px-4 py-2 text-sm font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                    otherStyleEnabled
+                      ? "border-fuchsia-300/45 bg-fuchsia-500/12 text-white shadow-[0_0_14px_rgba(217,70,239,0.2)]"
+                      : "border-white/15 bg-black/20 text-slate-200 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                  )}
+                >
+                  Other
+                </button>
+              </div>
+
+              {otherStyleEnabled ? (
+                <>
+                  <div className="mt-4">
+                    <input
+                      value={customStyleDraft}
+                      onChange={(event) => onOtherStyleNameChange(event.target.value)}
+                      maxLength={MAX_CUSTOM_STYLE_LENGTH}
+                      className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      placeholder="Other style name"
+                    />
+                  </div>
+                  <div className="mt-1 text-right text-xs text-slate-500">
+                    {customStyleLength}/{MAX_CUSTOM_STYLE_LENGTH}
+                  </div>
+                </>
+              ) : null}
+
+              {selectedStyles.length > 0 ? (
+                <div className="mt-5 space-y-3">
+                  {selectedStyles.map((style) => {
+                    const skill = danceSkills[style] ?? {};
+                    const isVerified = skill.verified === true;
+                    return (
+                      <article key={style} className="rounded-2xl border border-white/10 bg-black/25 p-4 sm:p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-base font-semibold text-white">{titleCase(style)}</p>
+                            {isVerified ? (
+                              <div className="mt-1 flex items-center gap-2 text-xs text-emerald-200">
+                                <VerifiedBadge size={14} />
+                                <span>Level verified</span>
+                              </div>
+                            ) : (
+                              <p className="mt-1 text-xs text-slate-400">Not verified</p>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => toggleStyle(style)}
+                            className="rounded-lg border border-white/15 px-3 py-1 text-xs text-slate-300 hover:bg-white/[0.06]"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="mt-4">
+                          <label className="block text-sm font-medium text-slate-300">
+                            Level
+                            <select
+                              value={skill.level ?? ""}
+                              onChange={(event) => setStyleLevel(style, event.target.value)}
+                              className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)]"
+                            >
+                              <option value="">Select level</option>
+                              {LEVELS.map((level) => (
+                                <option key={level} value={level}>
+                                  {level}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
               ) : (
-                <div className="text-sm text-slate-400">No languages selected.</div>
+                <p className="mt-5 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-400">
+                  Select at least one dance style to continue.
+                </p>
               )}
             </div>
-          </div>
+            ) : null}
 
-          {/* CONTACTS (NEW) */}
-          <div className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-5">
-            <div className="text-sm font-medium text-white">Contacts</div>
-            <div className="text-xs text-slate-400 mt-1">
-              These will be hidden for other users until mutual connection.
+            {activeTab === "profile" ? (
+            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white">Roles & preferences</h2>
+                  <p className="mt-1 text-sm text-slate-300">Define how people can collaborate with you.</p>
+                </div>
+                <span
+                  className={cx(
+                    "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                    sectionRolesComplete
+                      ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                      : "border-white/15 bg-white/[0.03] text-slate-300"
+                  )}
+                >
+                  {sectionRolesComplete ? "✓ Ready" : "In progress"}
+                </span>
+              </header>
+
+              <div className="mt-5 grid gap-6 xl:grid-cols-3">
+                <div>
+                  <p className="mb-2 text-sm font-medium text-slate-300">Roles</p>
+                  <div className="flex flex-wrap gap-2">
+                    {roleOptions.map((item) => {
+                      const active = roles.includes(item);
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => toggleString(roles, setRoles, item)}
+                          className={cx(
+                            "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                            active
+                              ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
+                              : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                          )}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-medium text-slate-300">Interests</p>
+                  <div className="flex flex-wrap gap-2">
+                    {interestOptions.map((item) => {
+                      const active = interests.includes(item);
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => toggleString(interests, setInterests, item)}
+                          className={cx(
+                            "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                            active
+                              ? "border-fuchsia-300/45 bg-fuchsia-500/12 text-white shadow-[0_0_14px_rgba(217,70,239,0.2)]"
+                              : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                          )}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-medium text-slate-300">Availability</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availabilityOptions.map((item) => {
+                      const active = availability.includes(item);
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => toggleString(availability, setAvailability, item)}
+                          className={cx(
+                            "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                            active
+                              ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
+                              : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                          )}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
+            ) : null}
 
-            <div className="mt-4 space-y-4">
-              <label className="block text-sm font-medium text-slate-300">
-                Instagram
-                <input
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35"
-                  value={instagramHandle}
-                  onChange={(e) => setInstagramHandle(e.target.value)}
-                  placeholder="@yourhandle"
-                />
-              </label>
+            {activeTab === "profile" ? (
+            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white">Languages</h2>
+                </div>
+                <span
+                  className={cx(
+                    "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                    sectionContactsComplete
+                      ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                      : "border-white/15 bg-white/[0.03] text-slate-300"
+                  )}
+                >
+                  {sectionContactsComplete ? "✓ Ready" : "Optional"}
+                </span>
+              </header>
 
-              <label className="block text-sm font-medium text-slate-300">
-                WhatsApp (phone or handle)
-                <input
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35"
-                  value={whatsappHandle}
-                  onChange={(e) => setWhatsappHandle(e.target.value)}
-                  placeholder="+34 600 000 000"
-                />
-              </label>
+              <div className="mt-5">
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-medium text-slate-300">Languages</p>
+                    <p className="text-xs text-slate-500">Max 5</p>
+                  </div>
 
-              <label className="block text-sm font-medium text-slate-300">
-                YouTube (url)
-                <input
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-300/35"
-                  value={youtubeUrl}
-                  onChange={(e) => setYoutubeUrl(e.target.value)}
-                  placeholder="https://youtube.com/@yourchannel"
-                />
-              </label>
+                  <div className="flex gap-2">
+                    <input
+                      value={languageDraft}
+                      onChange={(event) => setLanguageDraft(event.target.value)}
+                      list="language-options"
+                      className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                      placeholder="Add language"
+                    />
+                    <datalist id="language-options">
+                      {LANGUAGE_OPTIONS.map((item) => (
+                        <option key={item} value={item} />
+                      ))}
+                    </datalist>
+                    <button
+                      type="button"
+                      onClick={addLanguage}
+                      disabled={languages.length >= 5 || !languageDraft.trim()}
+                      className="rounded-xl border border-cyan-300/35 bg-cyan-300/15 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {languages.length > 0 ? (
+                      languages.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setLanguages((prev) => prev.filter((value) => value !== item))}
+                            className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white hover:bg-white/[0.08]"
+                            title="Remove"
+                          >
+                          {item} <span className="text-slate-400">×</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-400">No languages selected.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+            ) : null}
 
-          <button
-            disabled={saving || uploading}
-            className="w-full rounded-xl bg-cyan-300/20 text-white py-3 font-medium hover:bg-cyan-300/30 disabled:opacity-60"
-            type="submit"
-            data-testid="profile-edit-save"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
+            {activeTab === "teacher_services" ? <TeacherInfoManager embedded /> : null}
+
+            {activeTab === "profile" ? (
+            <div className="mt-2 rounded-2xl border border-white/10 bg-[#0d161b]/95 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.45)] backdrop-blur-md">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="w-full max-w-xl">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-slate-300">{saveBarMessage}</p>
+                    <span className="text-xs font-medium text-slate-300">
+                      {completedSections}/{TOTAL_PROFILE_SECTIONS} sections ready
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-500 transition-[width] duration-300 ease-out"
+                      style={{ width: `${sectionProgressPercent}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {sectionCompletion.map((item) => (
+                      <span
+                        key={item.id}
+                        className={cx(
+                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                          item.done
+                            ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                            : "border-white/15 bg-white/[0.03] text-slate-400"
+                        )}
+                      >
+                        {item.done ? "✓ " : ""}
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleLeaveToAccountSettings}
+                    disabled={saving || uploading}
+                    className="w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 hover:bg-white/[0.08] sm:w-auto"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving || uploading || !hasUnsavedChanges}
+                    className="w-full rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-5 py-2.5 text-sm font-bold text-[#071018] shadow-[0_0_18px_rgba(34,211,238,0.22)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                    data-testid="profile-edit-save"
+                  >
+                    {saving ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+            ) : null}
+
+            {activeTab === "hosting" ? (
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={handleLeaveToAccountSettings}
+                disabled={saving || uploading}
+                className="w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 hover:bg-white/[0.08] sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving || uploading || !hasUnsavedChanges}
+                className="w-full rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-5 py-2.5 text-sm font-bold text-[#071018] shadow-[0_0_18px_rgba(34,211,238,0.22)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                data-testid="profile-edit-save"
+              >
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+            ) : null}
+          </section>
         </form>
-        </section>
       </main>
+
+      {photoOpen && avatarUrl ? (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/85 px-4 py-4 sm:items-center" onClick={() => setPhotoOpen(false)}>
+          <div className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setPhotoOpen(false)}
+              className="absolute right-3 top-3 z-10 rounded-full border border-white/20 bg-black/45 px-3 py-1 text-sm text-white hover:bg-black/70"
+            >
+              Close
+            </button>
+            <div className="relative h-[min(75vh,calc(100dvh-6rem))] overflow-hidden rounded-2xl border border-white/15 bg-black">
+              <Image src={avatarUrl} alt="Profile avatar enlarged" fill className="object-contain" sizes="1200px" />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {saveStage !== "idle" ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-[#05080f]/92 px-4 py-4">
+          <div className="w-full max-w-md rounded-3xl border border-white/15 bg-[#0b1418] p-8 text-center shadow-[0_20px_60px_rgba(0,0,0,0.65)]">
+            <div className="mx-auto w-44">
+              <Image
+                src="/branding/CONXION-3-tight.png"
+                alt="ConXion"
+                width={352}
+                height={160}
+                className="h-auto w-full"
+                priority
+              />
+            </div>
+            <h3 className="mt-5 text-2xl font-extrabold text-white">
+              {saveStage === "saving" ? "Saving your profile" : "Profile saved"}
+            </h3>
+            <p className="mt-2 text-sm text-slate-300">
+              {saveStage === "saving" ? "Syncing changes across your profile..." : "Taking you to account settings..."}
+            </p>
+            <div className="mt-6 flex items-center justify-center gap-2">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-300" />
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-300 [animation-delay:140ms]" />
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-300 [animation-delay:280ms]" />
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-300 [animation-delay:420ms]" />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {cropSource ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/88 px-4 py-4 sm:items-center" onClick={() => setCropSource(null)}>
+          <div
+            className="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-white/15 bg-[#0b1418] shadow-[0_20px_50px_rgba(0,0,0,0.55)] sm:max-h-[min(92dvh,860px)] sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="min-h-0 overflow-y-auto overscroll-contain p-5">
+            <h3 className="text-lg font-bold text-white">Crop avatar</h3>
+            <p className="mt-1 text-sm text-slate-300">Adjust zoom and position, then confirm your square profile image.</p>
+
+            <div className="mt-4 flex justify-center">
+              <div className="relative h-[320px] w-[320px] overflow-hidden rounded-2xl border border-white/15 bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={cropSource}
+                  alt="Avatar crop preview"
+                  className="absolute left-1/2 top-1/2 max-w-none select-none"
+                  style={{
+                    width: cropPreview ? `${cropPreview.renderWidth}px` : undefined,
+                    height: cropPreview ? `${cropPreview.renderHeight}px` : undefined,
+                    transform: `translate(calc(-50% + ${cropPreview?.offsetX ?? 0}px), calc(-50% + ${cropPreview?.offsetY ?? 0}px))`,
+                  }}
+                  draggable={false}
+                />
+                <div className="pointer-events-none absolute inset-0 border border-cyan-300/50" />
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm font-medium text-slate-300">Zoom</label>
+              <input
+                type="range"
+                min={1}
+                max={4}
+                step={0.01}
+                value={cropZoom}
+                onChange={(event) => setCropZoom(Number(event.target.value))}
+                className="mt-2 w-full"
+              />
+              <label className="block text-sm font-medium text-slate-300">Horizontal position</label>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                step={1}
+                value={Math.round(cropPanX * 100)}
+                onChange={(event) => setCropPanX(Number(event.target.value) / 100)}
+                className="w-full"
+                disabled={!cropPreview || cropPreview.maxOffsetX === 0}
+              />
+              <label className="block text-sm font-medium text-slate-300">Vertical position</label>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                step={1}
+                value={Math.round(cropPanY * 100)}
+                onChange={(event) => setCropPanY(Number(event.target.value) / 100)}
+                className="w-full"
+                disabled={!cropPreview || cropPreview.maxOffsetY === 0}
+              />
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setCropSource(null);
+                  setCropNaturalSize(null);
+                }}
+                className="rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white/85 hover:bg-white/[0.08]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmCropUpload();
+                }}
+                disabled={uploading}
+                className="rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-5 py-2 text-sm font-bold text-[#071018] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {uploading ? "Uploading..." : "Use this crop"}
+              </button>
+            </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

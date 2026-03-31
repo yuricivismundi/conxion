@@ -234,7 +234,7 @@ export default function EventInboxPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#10272b,_#071316_45%,_#05090b_100%)] text-slate-100">
+    <div className="min-h-screen bg-[#05070c] text-slate-100">
       <Nav />
 
       <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">

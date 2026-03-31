@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { VERIFIED_VIA_PAYMENT_LABEL } from "@/lib/verification";
 import Nav from "@/components/Nav";
 import VerifiedBadge from "@/components/VerifiedBadge";
 
@@ -41,7 +43,7 @@ const LEVELS = ["beginner", "intermediate", "advanced"] as const;
 
 const ROLE_OPTIONS = ["Social dancer / Student", "Organiser", "DJ", "Artist", "Teacher"] as const;
 
-// Keep this MVP-simple. Add more later.
+// Keep this intentionally simple and extend as admin operations grow.
 const LANGUAGE_OPTIONS = [
   "English",
   "Spanish",
@@ -64,6 +66,13 @@ export default function AdminPage() {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // Photo review state
+  const [photoReviewOpenId, setPhotoReviewOpenId] = useState<string | null>(null);
+  const [photoReviewType, setPhotoReviewType] = useState<"cover" | "profile">("cover");
+  const [photoReviewMsg, setPhotoReviewMsg] = useState("");
+  const [photoReviewBusy, setPhotoReviewBusy] = useState(false);
+  const [photoReviewSent, setPhotoReviewSent] = useState<string | null>(null);
 
   // If true, admin cannot edit their own badge/fields (prevents “I verified myself” mistakes).
   const DISABLE_SELF_EDIT = true;
@@ -192,7 +201,7 @@ export default function AdminPage() {
   async function toggleVerified(userId: string, next: boolean) {
     const ok = await updateProfile(userId, {
       verified: next,
-      verified_label: next ? undefined : null, // if removing badge, clear label
+      verified_label: next ? VERIFIED_VIA_PAYMENT_LABEL : null,
     });
     return ok;
   }
@@ -243,6 +252,33 @@ export default function AdminPage() {
     await updateProfile(userId, { dance_skills: next });
   }
 
+  async function sendPhotoReview(userId: string) {
+    const message = photoReviewMsg.trim();
+    if (!message) return;
+    setPhotoReviewBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch("/api/admin/photo-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ userId, photoType: photoReviewType, message }),
+      });
+      const json = await res.json() as { ok: boolean; error?: string };
+      if (json.ok) {
+        setPhotoReviewSent(userId);
+        setPhotoReviewMsg("");
+        setPhotoReviewOpenId(null);
+      } else {
+        setMsg(json.error ?? "Failed to send photo review request.");
+      }
+    } catch {
+      setMsg("Network error sending photo review request.");
+    } finally {
+      setPhotoReviewBusy(false);
+    }
+  }
+
   // ---------- UI ----------
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading…</div>;
 
@@ -288,6 +324,38 @@ export default function AdminPage() {
         {msg && (
           <p className="mt-4 text-sm text-rose-100 bg-rose-500/10 border border-rose-300/35 rounded-xl p-3">{msg}</p>
         )}
+
+        {/* Verified members list */}
+        <div className="mt-6 rounded-2xl bg-[#121212] border border-white/10 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <VerifiedBadge size={18} />
+            <h2 className="text-base font-semibold text-white">Verified members</h2>
+            <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-slate-400">
+              {profiles.filter((p) => p.verified).length}
+            </span>
+          </div>
+          {profiles.filter((p) => p.verified).length === 0 ? (
+            <p className="text-sm text-slate-500">No verified members yet.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {profiles
+                .filter((p) => p.verified)
+                .map((p) => (
+                  <a
+                    key={p.user_id}
+                    href={`/profile/${p.user_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white transition hover:border-cyan-300/40 hover:bg-white/10"
+                  >
+                    <VerifiedBadge size={14} />
+                    <span>{p.display_name || p.user_id}</span>
+                    {p.city ? <span className="text-slate-500">· {p.city}</span> : null}
+                  </a>
+                ))}
+            </div>
+          )}
+        </div>
 
         <div className="mt-6 rounded-2xl bg-[#121212] border border-white/10 p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -482,6 +550,84 @@ export default function AdminPage() {
                         );
                       })}
                     </div>
+                  </div>
+                  {/* Photo review */}
+                  <div className="mt-4 border-t border-white/8 pt-4">
+                    {photoReviewOpenId === p.user_id ? (
+                      <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.06] p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">
+                            <span className="material-symbols-outlined text-[14px] align-middle mr-1">photo_camera</span>
+                            Photo review request
+                          </p>
+                          <Link
+                            href="/photo-guide"
+                            target="_blank"
+                            className="text-xs text-cyan-400 hover:text-cyan-300 underline"
+                          >
+                            Photo guide ↗
+                          </Link>
+                        </div>
+
+                        <div className="flex gap-2">
+                          {(["cover", "profile"] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setPhotoReviewType(t)}
+                              className={[
+                                "rounded-full px-3 py-1 text-xs font-semibold transition",
+                                photoReviewType === t
+                                  ? "bg-amber-400/20 text-amber-200 border border-amber-400/40"
+                                  : "border border-white/10 text-slate-400 hover:border-white/20",
+                              ].join(" ")}
+                            >
+                              {t === "cover" ? "Cover photo" : "Profile photo"}
+                            </button>
+                          ))}
+                        </div>
+
+                        <textarea
+                          rows={3}
+                          value={photoReviewMsg}
+                          onChange={(e) => setPhotoReviewMsg(e.target.value)}
+                          placeholder={`Explain what needs to change on their ${photoReviewType} photo…`}
+                          className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none resize-none"
+                        />
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void sendPhotoReview(p.user_id)}
+                            disabled={photoReviewBusy || !photoReviewMsg.trim()}
+                            className="rounded-xl bg-amber-400/20 border border-amber-400/30 px-4 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-400/30 disabled:opacity-50"
+                          >
+                            {photoReviewBusy ? "Sending…" : "Send request"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setPhotoReviewOpenId(null); setPhotoReviewMsg(""); }}
+                            className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-400 hover:border-white/20"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => { setPhotoReviewOpenId(p.user_id); setPhotoReviewSent(null); setPhotoReviewMsg(""); setPhotoReviewType("cover"); }}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-amber-400/30 hover:text-amber-300 transition"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">photo_camera</span>
+                          Request photo update
+                        </button>
+                        {photoReviewSent === p.user_id && (
+                          <span className="text-xs text-emerald-400">✓ Request sent</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -2,9 +2,10 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
+import PaginationControls from "@/components/PaginationControls";
 import { supabase } from "@/lib/supabase/client";
 import {
   type EventMemberRecord,
@@ -15,7 +16,6 @@ import {
   mapProfileRows,
 } from "@/lib/events/model";
 
-type AccessFilter = "all" | "public" | "private";
 type DatePreset = "any" | "today" | "tomorrow" | "this_weekend" | "this_week" | "next_week" | "this_month" | "custom";
 type InterestState = "interested" | "going" | "not_interested";
 
@@ -24,7 +24,9 @@ type DateRange = {
   end: string;
 };
 
-const REGULAR_EVENTS_BATCH = 6;
+const PUBLIC_EVENTS_CAP = 5;
+const EVENTS_PAGE_SIZE = 10;
+const PAST_EVENTS_CUTOFF_MONTHS = 3;
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -120,8 +122,10 @@ function datePresetLabel(preset: DatePreset, customFrom: string, customTo: strin
 
 function eventTypeBadge(eventType: string) {
   const normalized = eventType.toLowerCase();
-  if (normalized.includes("festival")) return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
-  if (normalized.includes("workshop") || normalized.includes("class")) return "border-emerald-300/35 bg-emerald-400/15 text-emerald-100";
+  if (normalized.includes("festival")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
+  if (normalized.includes("workshop") || normalized.includes("class") || normalized.includes("masterclass")) {
+    return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
+  }
   if (normalized.includes("social")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
   return "border-slate-300/30 bg-slate-400/15 text-slate-100";
 }
@@ -245,8 +249,9 @@ function compactLocation(event: EventRecord, isAuthenticated: boolean) {
   return [event.city, event.country].filter(Boolean).join(", ");
 }
 
-export default function EventsExplorePage() {
+function EventsExplorePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
@@ -261,6 +266,7 @@ export default function EventsExplorePage() {
   const [allMembers, setAllMembers] = useState<EventMemberRecord[]>([]);
   const [myMemberships, setMyMemberships] = useState<EventMemberRecord[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, LiteProfile>>({});
+  const [hostReferenceTotals, setHostReferenceTotals] = useState<Record<string, number>>({});
   const [connectedUserIds, setConnectedUserIds] = useState<string[]>([]);
 
   const [query, setQuery] = useState("");
@@ -268,7 +274,9 @@ export default function EventsExplorePage() {
   const [connectionsOnly, setConnectionsOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState("all");
   const [styleFilter, setStyleFilter] = useState("all");
-  const [accessFilter, setAccessFilter] = useState<AccessFilter>("all");
+  const [referencesFilter, setReferencesFilter] = useState<"all" | "has" | "none">("all");
+  const [countryFilter, setCountryFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
 
   const [datePreset, setDatePreset] = useState<DatePreset>("any");
   const [customDateFrom, setCustomDateFrom] = useState("");
@@ -276,17 +284,28 @@ export default function EventsExplorePage() {
 
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [dateCustomMode, setDateCustomMode] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [interestMenuEventId, setInterestMenuEventId] = useState<string | null>(null);
   const [shareMenuEventId, setShareMenuEventId] = useState<string | null>(null);
   const [interestStateByEvent, setInterestStateByEvent] = useState<Record<string, InterestState>>({});
-  const [visibleRegularCount, setVisibleRegularCount] = useState(REGULAR_EVENTS_BATCH);
-  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const [eventsPage, setEventsPage] = useState(1);
 
-  const effectiveAccessFilter: AccessFilter = !isAuthenticated && accessFilter === "private" ? "all" : accessFilter;
+  const requestedView = searchParams.get("view");
+  const viewForcesPastOnly = requestedView === "past";
+  const viewForcesOrganizingOnly = requestedView === "organizing";
+  const viewForcesMyEventsOnly = requestedView === "mine" || viewForcesOrganizingOnly;
+  const effectivePastOnly = isAuthenticated && viewForcesPastOnly;
+  const effectiveMyEventsOnly = viewForcesMyEventsOnly;
+  const effectiveOrganizingOnly = viewForcesOrganizingOnly;
+
+  const effectiveDatePreset: DatePreset = !isAuthenticated && datePreset === "custom" ? "any" : datePreset;
+  const effectiveCustomDateFrom = !isAuthenticated && datePreset === "custom" ? "" : customDateFrom;
+  const effectiveCustomDateTo = !isAuthenticated && datePreset === "custom" ? "" : customDateTo;
 
   const closeMenus = useCallback(() => {
     setDateMenuOpen(false);
     setDateCustomMode(false);
+    setFiltersOpen(false);
     setInterestMenuEventId(null);
     setShareMenuEventId(null);
   }, []);
@@ -317,9 +336,30 @@ export default function EventsExplorePage() {
     let eventRows: EventRecord[] = [];
 
     if (userId) {
+      const nowIso = new Date().toISOString();
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - PAST_EVENTS_CUTOFF_MONTHS);
+      const cutoffIso = cutoff.toISOString();
+      const eventsQuery = effectivePastOnly
+        ? supabase
+            .from("events")
+            .select("*")
+            .eq("status", "published")
+            .lt("ends_at", nowIso)
+            .gte("ends_at", cutoffIso)
+            .order("ends_at", { ascending: false })
+            .limit(300)
+        : supabase
+            .from("events")
+            .select("*")
+            .eq("status", "published")
+            .gte("ends_at", nowIso)
+            .order("starts_at", { ascending: true })
+            .limit(300);
+
       const [profileRes, eventsRes] = await Promise.all([
         supabase.from("profiles").select("city,country").eq("user_id", userId).maybeSingle(),
-        supabase.from("events").select("*").eq("status", "published").order("starts_at", { ascending: true }).limit(400),
+        eventsQuery,
       ]);
 
       if (profileRes.data) {
@@ -354,6 +394,7 @@ export default function EventsExplorePage() {
       setAllMembers([]);
       setMyMemberships([]);
       setProfilesById({});
+      setHostReferenceTotals({});
       setConnectedUserIds([]);
       setLoading(false);
       return;
@@ -363,6 +404,7 @@ export default function EventsExplorePage() {
       setAllMembers([]);
       setMyMemberships([]);
       setProfilesById({});
+      setHostReferenceTotals({});
       setConnectedUserIds([]);
       setLoading(false);
       return;
@@ -428,6 +470,19 @@ export default function EventsExplorePage() {
 
     const profileIds = Array.from(new Set([...hostIds, ...connectionIds]));
     if (profileIds.length) {
+      const profileFeedRes = await supabase.from("profiles_feed").select("id,ref_total_all").in("id", hostIds.slice(0, 600));
+      if (!profileFeedRes.error) {
+        const nextHostReferenceTotals: Record<string, number> = {};
+        ((profileFeedRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+          const id = typeof row.id === "string" ? row.id : "";
+          const total = typeof row.ref_total_all === "number" ? row.ref_total_all : 0;
+          if (id) nextHostReferenceTotals[id] = total;
+        });
+        setHostReferenceTotals(nextHostReferenceTotals);
+      } else {
+        setHostReferenceTotals({});
+      }
+
       const profilesRes = await supabase
         .from("profiles")
         .select("user_id,display_name,city,country,avatar_url")
@@ -440,10 +495,11 @@ export default function EventsExplorePage() {
       }
     } else {
       setProfilesById({});
+      setHostReferenceTotals({});
     }
 
     setLoading(false);
-  }, []);
+  }, [effectivePastOnly]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -501,16 +557,57 @@ export default function EventsExplorePage() {
     return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
   }, [events]);
 
-  const range = useMemo(() => resolveDateRange(datePreset, customDateFrom, customDateTo), [datePreset, customDateFrom, customDateTo]);
+  const countryOptions = useMemo(() => {
+    const set = new Set<string>();
+    events.forEach((event) => {
+      const normalized = event.country.trim();
+      if (normalized) set.add(normalized);
+    });
+    return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [events]);
+
+  const cityOptions = useMemo(() => {
+    const set = new Set<string>();
+    events.forEach((event) => {
+      const countryMatches = countryFilter === "all" || event.country.toLowerCase() === countryFilter.toLowerCase();
+      if (!countryMatches) return;
+      const normalized = event.city.trim();
+      if (normalized) set.add(normalized);
+    });
+    return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [countryFilter, events]);
+
+  const effectiveCityFilter = useMemo(() => {
+    if (countryFilter === "all" || cityFilter === "all") return "all";
+    return cityOptions.some((option) => option.toLowerCase() === cityFilter.toLowerCase()) ? cityFilter : "all";
+  }, [cityFilter, cityOptions, countryFilter]);
+
+  const range = useMemo(
+    () => resolveDateRange(effectiveDatePreset, effectiveCustomDateFrom, effectiveCustomDateTo),
+    [effectiveDatePreset, effectiveCustomDateFrom, effectiveCustomDateTo]
+  );
 
   const filteredEvents = useMemo(() => {
-    const queryText = query.trim().toLowerCase();
+    const queryText = isAuthenticated ? query.trim().toLowerCase() : "";
 
     return events.filter((event) => {
       if (!isAuthenticated && event.visibility !== "public") return false;
-      if (effectiveAccessFilter !== "all" && event.visibility !== effectiveAccessFilter) return false;
       if (typeFilter !== "all" && event.eventType !== typeFilter) return false;
       if (styleFilter !== "all" && !event.styles.some((style) => style.toLowerCase() === styleFilter.toLowerCase())) return false;
+      if (referencesFilter !== "all") {
+        const referenceTotal = Number(hostReferenceTotals[event.hostUserId] ?? 0);
+        if (referencesFilter === "has" && referenceTotal <= 0) return false;
+        if (referencesFilter === "none" && referenceTotal > 0) return false;
+      }
+      if (effectiveMyEventsOnly) {
+        const isHost = Boolean(meId && event.hostUserId === meId);
+        const hasMembership = Boolean(memberStatusByEvent[event.id]);
+        if (effectiveOrganizingOnly) {
+          if (!isHost) return false;
+        } else if (!isHost && !hasMembership) {
+          return false;
+        }
+      }
 
       const eventDate = event.startsAt.slice(0, 10);
       if (range.start && eventDate < range.start) return false;
@@ -521,6 +618,9 @@ export default function EventsExplorePage() {
         const countryMatch = myCountry && event.country.toLowerCase() === myCountry.toLowerCase();
         if (!cityMatch && !countryMatch) return false;
       }
+
+      if (countryFilter !== "all" && event.country.toLowerCase() !== countryFilter.toLowerCase()) return false;
+      if (effectiveCityFilter !== "all" && event.city.toLowerCase() !== effectiveCityFilter.toLowerCase()) return false;
 
       if (connectionsOnly) {
         const connectedCount = connectedAttendeesByEvent[event.id]?.length ?? 0;
@@ -547,55 +647,123 @@ export default function EventsExplorePage() {
   }, [
     connectedAttendeesByEvent,
     connectionsOnly,
-    effectiveAccessFilter,
     events,
     isAuthenticated,
     myCity,
     myCountry,
     myLocationOnly,
+    effectiveMyEventsOnly,
+    effectiveOrganizingOnly,
     profilesById,
     query,
     range.end,
     range.start,
+    referencesFilter,
+    memberStatusByEvent,
     styleFilter,
     typeFilter,
+    countryFilter,
+    effectiveCityFilter,
+    hostReferenceTotals,
+    meId,
   ]);
 
   const orderedEvents = useMemo(() => {
     return filteredEvents.slice().sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
   }, [filteredEvents]);
 
-  const featuredEvents = useMemo(() => orderedEvents.slice(0, 3), [orderedEvents]);
-  const regularEvents = useMemo(() => orderedEvents.slice(3), [orderedEvents]);
-  const visibleRegularEvents = useMemo(() => regularEvents.slice(0, visibleRegularCount), [regularEvents, visibleRegularCount]);
-  const hasMoreRegularEvents = visibleRegularCount < regularEvents.length;
+  const discoverEvents = useMemo(
+    () => (isAuthenticated ? orderedEvents : orderedEvents.slice(0, PUBLIC_EVENTS_CAP)),
+    [isAuthenticated, orderedEvents]
+  );
+  const totalEventPages = Math.max(1, Math.ceil(discoverEvents.length / EVENTS_PAGE_SIZE));
+  const currentEventsPage = Math.min(eventsPage, totalEventPages);
+  const pagedEvents = useMemo(
+    () => discoverEvents.slice((currentEventsPage - 1) * EVENTS_PAGE_SIZE, currentEventsPage * EVENTS_PAGE_SIZE),
+    [currentEventsPage, discoverEvents]
+  );
+  const featuredEvents = useMemo(
+    () => (currentEventsPage === 1 ? pagedEvents.slice(0, 3) : []),
+    [currentEventsPage, pagedEvents]
+  );
+  const regularEvents = useMemo(
+    () => (currentEventsPage === 1 ? pagedEvents.slice(3) : pagedEvents),
+    [currentEventsPage, pagedEvents]
+  );
+  const myEventsCount = useMemo(() => {
+    return meId ? events.filter((event) => event.hostUserId === meId).length : 0;
+  }, [events, meId]);
 
-  const loadMoreRegularEvents = useCallback(() => {
-    setVisibleRegularCount((current) => Math.min(current + REGULAR_EVENTS_BATCH, regularEvents.length));
-  }, [regularEvents.length]);
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (effectivePastOnly) count += 1;
+    if (countryFilter !== "all") count += 1;
+    if (effectiveCityFilter !== "all") count += 1;
+    if (styleFilter !== "all") count += 1;
+    if (referencesFilter !== "all") count += 1;
+    if (typeFilter !== "all") count += 1;
+    if (connectionsOnly) count += 1;
+    if (datePreset !== "any") count += 1;
+    if (isAuthenticated && myLocationOnly) count += 1;
+    if (isAuthenticated && query.trim().length > 0) count += 1;
+    return count;
+  }, [connectionsOnly, countryFilter, datePreset, effectiveCityFilter, effectivePastOnly, isAuthenticated, myLocationOnly, query, referencesFilter, styleFilter, typeFilter]);
 
+  const setEventsView = useCallback(
+    (view: "active" | "past") => {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (view === "past") {
+        nextParams.set("view", "past");
+      } else if (nextParams.get("view") === "past") {
+        nextParams.delete("view");
+      }
+      const queryString = nextParams.toString();
+      router.replace(queryString ? `/events?${queryString}` : "/events", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const resetFilters = useCallback(() => {
+    setCountryFilter("all");
+    setCityFilter("all");
+    setStyleFilter("all");
+    setReferencesFilter("all");
+    setTypeFilter("all");
+    setConnectionsOnly(false);
+    setDatePreset("any");
+    setCustomDateFrom("");
+    setCustomDateTo("");
+    setMyLocationOnly(false);
+    setQuery("");
+    if (viewForcesPastOnly) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.delete("view");
+      const queryString = nextParams.toString();
+      router.replace(queryString ? `/events?${queryString}` : "/events", { scroll: false });
+    }
+  }, [router, searchParams, viewForcesPastOnly]);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- reset listing pagination when filters change. */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVisibleRegularCount(REGULAR_EVENTS_BATCH);
-  }, [query, myLocationOnly, connectionsOnly, typeFilter, styleFilter, effectiveAccessFilter, datePreset, customDateFrom, customDateTo]);
-
-  useEffect(() => {
-    if (!hasMoreRegularEvents) return;
-    const node = loadMoreSentinelRef.current;
-    if (!node) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setVisibleRegularCount((current) => Math.min(current + REGULAR_EVENTS_BATCH, regularEvents.length));
-        }
-      },
-      { rootMargin: "260px 0px 260px 0px", threshold: 0 }
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasMoreRegularEvents, regularEvents.length]);
+    setEventsPage(1);
+  }, [
+    query,
+    myLocationOnly,
+    connectionsOnly,
+    typeFilter,
+    styleFilter,
+    countryFilter,
+    cityFilter,
+    referencesFilter,
+    effectiveDatePreset,
+    effectiveCustomDateFrom,
+    effectiveCustomDateTo,
+    effectivePastOnly,
+    effectiveMyEventsOnly,
+    effectiveOrganizingOnly,
+    isAuthenticated,
+  ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleShareAction = useCallback(
     async (eventId: string, action: "copy_link" | "share_feed" | "share_messenger" | "share_event" | "share_group" | "share_profile") => {
@@ -640,21 +808,24 @@ export default function EventsExplorePage() {
     []
   );
 
-  const dateOptions: Array<{ key: DatePreset; label: string }> = [
-    { key: "any", label: "Any date" },
-    { key: "today", label: "Today" },
-    { key: "tomorrow", label: "Tomorrow" },
-    { key: "this_weekend", label: "This weekend" },
-    { key: "this_week", label: "This week" },
-    { key: "next_week", label: "Next week" },
-    { key: "this_month", label: "This month" },
-    { key: "custom", label: "Custom date range" },
-  ];
+  const dateOptions: Array<{ key: DatePreset; label: string }> = useMemo(() => {
+    const base: Array<{ key: DatePreset; label: string }> = [
+      { key: "any", label: "Any date" },
+      { key: "today", label: "Today" },
+      { key: "tomorrow", label: "Tomorrow" },
+      { key: "this_weekend", label: "This weekend" },
+      { key: "this_week", label: "This week" },
+      { key: "next_week", label: "Next week" },
+      { key: "this_month", label: "This month" },
+    ];
+    if (isAuthenticated) base.push({ key: "custom", label: "Custom date range" });
+    return base;
+  }, [isAuthenticated]);
 
   const renderEventCard = (event: EventRecord, featured = false) => {
     const myMembership = memberStatusByEvent[event.id];
     const isHost = Boolean(meId && meId === event.hostUserId);
-    const hero = (isHost && event.coverUrl) || (event.coverStatus === "approved" ? event.coverUrl : null) || seededEventCover(event);
+    const hero = event.coverUrl || seededEventCover(event);
 
     const connectedMembersRaw = connectedAttendeesByEvent[event.id] ?? [];
     const connectedMembers = Array.from(new Map(connectedMembersRaw.map((row) => [row.userId, row])).values());
@@ -670,22 +841,23 @@ export default function EventsExplorePage() {
     const interestState =
       interestStateByEvent[event.id] ?? (myMembership?.status === "going" || myMembership?.status === "waitlist" ? "going" : "interested");
     const interestLabel = interestState === "going" ? "Going" : interestState === "not_interested" ? "Not interested" : "Interested";
+    const eventTitle = isAuthenticated ? event.title : "Public dance event";
 
     return (
       <article
         key={event.id}
         className={cx(
-          "relative flex h-full flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30",
+          "relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30",
           featured &&
             "border-cyan-300/35 bg-[linear-gradient(180deg,rgba(37,209,244,0.08)_0%,rgba(18,18,18,0.98)_40%)] shadow-[0_12px_32px_rgba(37,209,244,0.18)]"
         )}
-        onClick={(entry) => entry.stopPropagation()}
+        onClick={() => router.push(`/events/${event.id}`)}
       >
         {featured ? <div className="h-[2px] w-full bg-gradient-to-r from-cyan-300 via-fuchsia-400 to-cyan-200" /> : null}
 
         <Link href={`/events/${event.id}`} className="block">
           <div className={cx("relative h-[108px]", featured && "h-[112px]")}>
-            <img src={hero} alt={event.title} className="h-full w-full object-cover transition duration-700 hover:scale-105" />
+            <img src={hero} alt={eventTitle} className="h-full w-full object-cover transition duration-700 hover:scale-105" />
             <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
 
             <div className="absolute left-2 top-2 flex items-center gap-1.5">
@@ -714,7 +886,11 @@ export default function EventsExplorePage() {
           <div className="mb-0.5">
             <p className={cx("mb-0.5 text-[10px] font-semibold uppercase tracking-wide", timeline.textClass)}>{timeline.label}</p>
             <Link href={`/events/${event.id}`} className="block min-w-0 pr-[98px]">
-              <h2 className="line-clamp-2 min-h-[34px] text-[15px] font-bold leading-tight text-white">{event.title}</h2>
+              {isAuthenticated ? (
+                <h2 className="line-clamp-2 min-h-[34px] text-[15px] font-bold leading-tight text-white">{event.title}</h2>
+              ) : (
+                <div className="min-h-[34px]" />
+              )}
             </Link>
             <p className="mt-0.5 truncate text-[11px] font-semibold text-cyan-200/90">
               {rangeLabel}
@@ -770,7 +946,10 @@ export default function EventsExplorePage() {
             </div>
           </div>
 
-          <div className="mt-auto flex items-center gap-1.5 border-t border-white/10 pt-1">
+          <div
+            className="mt-auto flex items-center gap-1.5 border-t border-white/10 pt-1"
+            onClick={(entry) => entry.stopPropagation()}
+          >
             <div className="relative flex-1">
               <button
                 type="button"
@@ -790,14 +969,10 @@ export default function EventsExplorePage() {
               {interestMenuEventId === event.id ? (
                 <div className="absolute bottom-[46px] left-0 z-30 w-[260px] rounded-xl border border-white/10 bg-[#202326] p-2 shadow-2xl">
                   {!isAuthenticated ? (
-                    <button
-                      type="button"
-                      onClick={() => router.push(`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`)}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/8"
-                    >
+                    <div className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/75">
                       <span className="material-symbols-outlined text-[18px] text-cyan-300">lock</span>
-                      Sign in to save interest
-                    </button>
+                      Interest actions are available after authentication
+                    </div>
                   ) : (
                     <>
                       <button
@@ -975,22 +1150,61 @@ export default function EventsExplorePage() {
     );
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] text-white">
+        <Nav />
+        <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
+          <div className="animate-pulse space-y-6">
+            <div className="h-28 rounded-[28px] bg-white/[0.04] sm:h-36" />
+            <div className="h-12 rounded-full bg-white/[0.04]" />
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="h-[280px] rounded-2xl bg-white/[0.04]" />
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white">
       <Nav />
 
       <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8" onClick={closeMenus}>
-        <header className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-2xl font-bold tracking-tight text-white">Discover Events</h1>
+        {!isAuthenticated ? (
+          <section className="mb-5 overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_42%),linear-gradient(180deg,rgba(18,24,32,0.96),rgba(10,10,10,0.98))] p-5 sm:p-6">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/55">Public events</p>
+                <h1 className="mt-2 text-4xl font-black tracking-tight text-white sm:text-5xl">Events</h1>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-white/68 sm:text-base">
+                  Browse public dance events by location and date. Create an account to unlock the full event experience.
+                </p>
+              </div>
 
-          <div className="flex items-center gap-2">
-            {!isAuthenticated ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/75">
-                <span className="material-symbols-outlined text-[15px] text-cyan-300">lock</span>
-                Limited mode
-              </span>
-            ) : null}
+              <div className="flex flex-col items-start gap-2 rounded-2xl border border-cyan-300/18 bg-cyan-300/8 px-5 py-4 text-left xl:min-w-[280px]">
+                <p className="text-sm font-semibold text-white/72">Quick filters</p>
+                <p className="text-sm leading-6 text-white/58">Use country, city, and date to narrow public events.</p>
+                <Link
+                  href="/auth?mode=signup"
+                  className="inline-flex items-center justify-center rounded-full bg-[#00F5FF] px-5 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
+                >
+                  Create an account
+                </Link>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
+        <header className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-white/50">
+              Showing <span className="font-semibold text-white">{discoverEvents.length}</span>{" "}
+              {effectivePastOnly ? "past events" : "events"}
+            </p>
             {isAuthenticated ? (
               <Link
                 href="/events/new"
@@ -1000,225 +1214,476 @@ export default function EventsExplorePage() {
                 <span className="material-symbols-outlined text-[18px]">add</span>
                 Create Event
               </Link>
-            ) : (
-              <Link
-                href="/auth?next=/events"
-                className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-300/30"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <span className="material-symbols-outlined text-[18px]">login</span>
-                Sign in
-              </Link>
-            )}
+            ) : null}
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setFiltersOpen((value) => !value);
+                setDateMenuOpen(false);
+                setDateCustomMode(false);
+              }}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90 sm:w-auto"
+            >
+              <span className="material-symbols-outlined text-[18px]">tune</span>
+              Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+            </button>
           </div>
         </header>
 
-        <section
-          className="mb-6 rounded-2xl border border-white/10 bg-[#121212] p-3"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            <button
-              type="button"
-              onClick={() => setMyLocationOnly((value) => !value)}
-              disabled={!isAuthenticated || (!myCity && !myCountry)}
-              className={cx(
-                "inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-semibold transition",
-                myLocationOnly
-                  ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-100"
-                  : "border-white/10 bg-white/5 text-white/70 hover:text-white",
-                (!isAuthenticated || (!myCity && !myCountry)) && "cursor-not-allowed opacity-45"
-              )}
-            >
-              <span className="material-symbols-outlined text-[17px]">location_on</span>
-              My location
-            </button>
-
-            <div className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setDateMenuOpen((open) => !open);
-                  setDateCustomMode(false);
-                  setInterestMenuEventId(null);
-                  setShareMenuEventId(null);
-                }}
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 hover:text-white"
-              >
-                <span className="material-symbols-outlined text-[17px] text-cyan-300">calendar_month</span>
-                {datePresetLabel(datePreset, customDateFrom, customDateTo)}
-                <span className="material-symbols-outlined text-[16px]">expand_more</span>
-              </button>
-
-              {dateMenuOpen ? (
-                <div className="absolute left-0 top-full z-40 mt-2 w-[320px] rounded-2xl border border-white/10 bg-[#202326] p-3 shadow-2xl">
-                  {!dateCustomMode ? (
-                    <div className="space-y-1">
-                      {dateOptions.map((option) => {
-                        const selected = datePreset === option.key;
-                        return (
-                          <button
-                            key={option.key}
-                            type="button"
-                            onClick={() => {
-                              if (option.key === "custom") {
-                                setDatePreset("custom");
-                                setDateCustomMode(true);
-                                return;
-                              }
-                              setDatePreset(option.key);
-                              setDateMenuOpen(false);
-                            }}
-                            className={cx(
-                              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition",
-                              selected ? "bg-white/10 text-white" : "text-white/85 hover:bg-white/5"
-                            )}
-                          >
-                            <span>{option.label}</span>
-                            <span
-                              className={cx(
-                                "inline-flex h-5 w-5 items-center justify-center rounded-full border",
-                                selected ? "border-blue-400 text-blue-400" : "border-white/40 text-transparent"
-                              )}
-                            >
-                              ●
-                            </span>
-                          </button>
-                        );
-                      })}
+        {!isAuthenticated ? (
+          <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+              <div className="flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Quick filters</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <label className="block text-sm font-semibold text-white/88">
+                    Country
+                    <div className="relative mt-2">
+                      <select
+                        value={countryFilter === "all" ? "" : countryFilter}
+                        onChange={(event) => {
+                          setCountryFilter(event.target.value || "all");
+                          setCityFilter("all");
+                        }}
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      >
+                        <option value="">Any country</option>
+                        {countryOptions.filter((option) => option !== "all").map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
+                        expand_more
+                      </span>
                     </div>
-                  ) : (
-                    <div>
+                  </label>
+
+                  <label className="block text-sm font-semibold text-white/88">
+                    City
+                    <div className="relative mt-2">
+                      <select
+                        value={effectiveCityFilter === "all" ? "" : effectiveCityFilter}
+                        onChange={(event) => setCityFilter(event.target.value || "all")}
+                        disabled={cityOptions.filter((option) => option !== "all").length === 0}
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="">{countryFilter === "all" ? "Any city" : "Any city in country"}</option>
+                        {cityOptions.filter((option) => option !== "all").map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
+                        expand_more
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className="block text-sm font-semibold text-white/88">
+                    Date
+                    <div className="relative mt-2">
+                      <select
+                        value={datePreset}
+                        onChange={(event) => setDatePreset((event.target.value as DatePreset) || "any")}
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      >
+                        {dateOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
+                        expand_more
+                      </span>
+                    </div>
+                  </label>
+
+                  <div className="flex flex-col justify-end">
+                    <button
+                      type="button"
+                      onClick={resetFilters}
+                      className="inline-flex h-[50px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-white/85 transition hover:border-white/25 hover:bg-white/8"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-[60]">
+            <button aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} type="button" />
+
+            <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-[#0A0A0A] shadow-2xl">
+              <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+                <h2 className="text-2xl font-bold tracking-tight text-white">Filter Events</h2>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(false)}
+                  className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+                  aria-label="Close filters"
+                >
+                  <span className="material-symbols-outlined text-[22px]">close</span>
+                </button>
+              </div>
+
+              <div className="flex-1 space-y-7 overflow-y-auto px-6 py-6 pb-36">
+                {isAuthenticated ? (
+                  <section className="space-y-4">
+                    <div className="flex items-center gap-2 text-[#00F5FF]">
+                      <span className="material-symbols-outlined text-[20px]">search</span>
+                      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Search & Shortcuts</h3>
+                    </div>
+
+                    <label className="group relative block">
+                      <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/35 transition-colors group-focus-within:text-cyan-300">
+                        search
+                      </span>
+                      <input
+                        type="text"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Search events, cities, venues..."
+                        className="h-12 w-full rounded-2xl border border-white/10 bg-[#1B1B1B] pl-11 pr-4 text-sm text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                    </label>
+
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={() => setDateCustomMode(false)}
-                        className="mb-2 inline-flex items-center gap-1 text-sm text-white/75 hover:text-white"
+                        onClick={() => setMyLocationOnly((value) => !value)}
+                        disabled={!myCity && !myCountry}
+                        className={cx(
+                          "inline-flex min-h-12 items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition",
+                          myLocationOnly
+                            ? "border-cyan-300/40 bg-cyan-300/20 text-cyan-50"
+                            : "border-white/10 bg-white/[0.03] text-white/80 hover:text-white",
+                          (!myCity && !myCountry) && "cursor-not-allowed opacity-45"
+                        )}
+                        title={myCity || myCountry ? `Filter to ${[myCity, myCountry].filter(Boolean).join(", ")}` : "Location unavailable"}
                       >
-                        <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                        Back
+                        <span className="inline-flex items-center gap-2">
+                          <span className="material-symbols-outlined text-[18px]">location_on</span>
+                          My location
+                        </span>
+                        <span className="text-[11px] text-white/55">{myCity || myCountry ? "On map" : "No profile location"}</span>
                       </button>
-
-                      <div className="grid gap-2">
-                        <label className="text-xs text-white/65">
-                          From
-                          <input
-                            type="date"
-                            value={customDateFrom}
-                            onChange={(event) => setCustomDateFrom(event.target.value)}
-                            className="mt-1 w-full rounded-lg border border-white/15 bg-black/25 px-2.5 py-2 text-sm text-white"
-                          />
-                        </label>
-                        <label className="text-xs text-white/65">
-                          To
-                          <input
-                            type="date"
-                            value={customDateTo}
-                            onChange={(event) => setCustomDateTo(event.target.value)}
-                            className="mt-1 w-full rounded-lg border border-white/15 bg-black/25 px-2.5 py-2 text-sm text-white"
-                          />
-                        </label>
-                      </div>
 
                       <button
                         type="button"
                         onClick={() => {
-                          setDatePreset("custom");
-                          setDateMenuOpen(false);
-                          setDateCustomMode(false);
+                          setFiltersOpen(false);
+                          router.push("/events/my");
                         }}
-                        className="mt-3 w-full rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                        className="inline-flex min-h-12 items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-semibold text-white/85 hover:bg-white/[0.06]"
                       >
-                        Apply
+                        <span className="inline-flex items-center gap-2">
+                          <span className="material-symbols-outlined text-[18px]">calendar_month</span>
+                          My Events
+                        </span>
+                        <span className="rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-bold">{myEventsCount}</span>
                       </button>
                     </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            <label className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white/80">
-              <span className="material-symbols-outlined text-[17px] text-cyan-300">interests</span>
-              <span className="text-white/65">Style</span>
-              <select
-                value={styleFilter}
-                onChange={(event) => setStyleFilter(event.target.value)}
-                className="bg-transparent text-sm text-white outline-none"
-              >
-                {styleOptions.map((option) => (
-                  <option key={option} value={option} className="bg-[#13181b]">
-                    {option === "all" ? "All styles" : option}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white/80">
-              <span className="material-symbols-outlined text-[17px] text-cyan-300">category</span>
-              <span className="text-white/65">Type</span>
-              <select
-                value={typeFilter}
-                onChange={(event) => setTypeFilter(event.target.value)}
-                className="bg-transparent text-sm text-white outline-none"
-              >
-                {eventTypeOptions.map((option) => (
-                  <option key={option} value={option} className="bg-[#13181b]">
-                    {option === "all" ? "All types" : option}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button
-              type="button"
-              onClick={() => setConnectionsOnly((value) => !value)}
-              disabled={!isAuthenticated}
-              className={cx(
-                "inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-semibold transition",
-                connectionsOnly
-                  ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-100"
-                  : "border-white/10 bg-white/5 text-white/70 hover:text-white",
-                !isAuthenticated && "cursor-not-allowed opacity-45"
-              )}
-            >
-              <span className="material-symbols-outlined text-[17px]">group</span>
-              Connections
-            </button>
-
-            <label className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white/80">
-              <span className="material-symbols-outlined text-[17px] text-cyan-300">lock</span>
-              <select
-                value={effectiveAccessFilter}
-                onChange={(event) => setAccessFilter(event.target.value as AccessFilter)}
-                className="bg-transparent text-sm text-white outline-none"
-              >
-                <option value="all" className="bg-[#13181b]">
-                  Access: All
-                </option>
-                <option value="public" className="bg-[#13181b]">
-                  Public
-                </option>
-                {isAuthenticated ? (
-                  <option value="private" className="bg-[#13181b]">
-                    Private
-                  </option>
+                  </section>
                 ) : null}
-              </select>
-            </label>
 
-            <div className="relative ml-auto min-w-[220px] flex-1">
-              <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
-                search
-              </span>
-              <input
-                type="text"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Keyword search"
-                className="h-10 w-full rounded-xl border border-white/10 bg-black/25 py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
-              />
-            </div>
+                {isAuthenticated ? (
+                  <section className="space-y-4">
+                    <div className="flex items-center gap-2 text-[#00F5FF]">
+                      <span className="material-symbols-outlined text-[20px]">history</span>
+                      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event timeline</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        { key: "active", label: "Active events" },
+                        { key: "past", label: "Past events" },
+                      ] as const).map((option) => {
+                        const selected =
+                          (option.key === "past" && effectivePastOnly) || (option.key === "active" && !effectivePastOnly);
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => setEventsView(option.key)}
+                            className={cx(
+                              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                              selected
+                                ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                                : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2 text-[#00F5FF]">
+                    <span className="material-symbols-outlined text-[20px]">location_on</span>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Location</h3>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-white/90">Country</label>
+                    <div className="relative mt-2">
+                      <select
+                        value={countryFilter === "all" ? "" : countryFilter}
+                        onChange={(event) => {
+                          setCountryFilter(event.target.value || "all");
+                          setCityFilter("all");
+                        }}
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      >
+                        <option value="">Any country</option>
+                        {countryOptions.filter((option) => option !== "all").map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
+                        expand_more
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-semibold text-white/90">City</label>
+                      <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
+                        {effectiveCityFilter === "all" ? "0/1" : "1/1"}
+                      </span>
+                    </div>
+                    <div className="relative mt-2">
+                      <select
+                        value={effectiveCityFilter === "all" ? "" : effectiveCityFilter}
+                        onChange={(event) => setCityFilter(event.target.value || "all")}
+                        disabled={cityOptions.filter((option) => option !== "all").length === 0}
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="">{countryFilter === "all" ? "Any city" : "Any city in country"}</option>
+                        {cityOptions.filter((option) => option !== "all").map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
+                        expand_more
+                      </span>
+                    </div>
+                    {countryFilter === "all" ? (
+                      <p className="mt-2 text-[11px] text-white/45">Choose a country to narrow city options.</p>
+                    ) : null}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2 text-[#00F5FF]">
+                    <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Date</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {dateOptions.map((option) => {
+                      const selected = effectiveDatePreset === option.key;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => setDatePreset(option.key)}
+                          className={cx(
+                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                            selected
+                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {effectiveDatePreset === "custom" ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="text-sm font-semibold text-white/90">
+                        From
+                        <input
+                          type="date"
+                          value={customDateFrom}
+                          onChange={(event) => setCustomDateFrom(event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        />
+                      </label>
+                      <label className="text-sm font-semibold text-white/90">
+                        To
+                        <input
+                          type="date"
+                          value={customDateTo}
+                          onChange={(event) => setCustomDateTo(event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2 text-[#00F5FF]">
+                    <span className="material-symbols-outlined text-[20px]">category</span>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event Type</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {eventTypeOptions.map((option) => {
+                      const selected = typeFilter === option;
+                      const label = option === "all" ? "All" : option;
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setTypeFilter(option)}
+                          className={cx(
+                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                            selected
+                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2 text-[#00F5FF]">
+                    <span className="material-symbols-outlined text-[20px]">interests</span>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Dance Styles</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {styleOptions.map((option) => {
+                      const selected = styleFilter === option;
+                      const label = option === "all" ? "All" : option;
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setStyleFilter(option)}
+                          className={cx(
+                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                            selected
+                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2 text-[#00F5FF]">
+                    <span className="material-symbols-outlined text-[20px]">verified</span>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">References</h3>
+                  </div>
+                  <p className="text-[11px] text-white/45">Filter by whether the event organizer already has reference history.</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: "all", label: "All" },
+                      { key: "has", label: "Has references" },
+                      { key: "none", label: "No references" },
+                    ].map((option) => {
+                      const selected = referencesFilter === option.key;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => setReferencesFilter(option.key as "all" | "has" | "none")}
+                          className={cx(
+                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                            selected
+                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {isAuthenticated ? (
+                  <section className="space-y-4">
+                    <div className="flex items-center gap-2 text-[#00F5FF]">
+                      <span className="material-symbols-outlined text-[20px]">group</span>
+                      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Network</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { key: "all", label: "All" },
+                        { key: "friends", label: "Friends going" },
+                      ].map((option) => {
+                        const selected = option.key === "all" ? !connectionsOnly : connectionsOnly;
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => setConnectionsOnly(option.key === "friends")}
+                            className={cx(
+                              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                              selected
+                                ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                                : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
+
+              </div>
+
+              <div className="absolute inset-x-0 bottom-0 flex items-center gap-4 border-t border-white/10 bg-[#0A0A0A]/95 px-6 py-4 backdrop-blur">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="text-sm font-bold text-white/50 underline decoration-2 underline-offset-4 hover:text-white"
+                >
+                  Clear all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-extrabold text-[#0A0A0A] shadow-[0_0_24px_rgba(13,245,255,0.25)] transition hover:scale-[1.01]"
+                  style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
+                >
+                  <span className="material-symbols-outlined text-[18px]">search</span>
+                  Show Events
+                </button>
+              </div>
+            </aside>
           </div>
-        </section>
+        ) : null}
 
         {error ? (
           <div className="mb-4 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
@@ -1229,12 +1694,101 @@ export default function EventsExplorePage() {
         {actionInfo ? (
           <div className="mb-4 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">{actionInfo}</div>
         ) : null}
+        {effectivePastOnly || effectiveMyEventsOnly ? (
+          <div className="mb-4 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">
+            {effectivePastOnly
+              ? "Showing past published events."
+              : effectiveOrganizingOnly
+                ? "Showing only events you organize."
+                : "Showing only your events (hosted or joined)."}
+          </div>
+        ) : null}
 
         {loading ? (
-          <div className="rounded-2xl border border-white/10 bg-[#121212] p-8 text-center text-slate-300">Loading events...</div>
-        ) : orderedEvents.length === 0 ? (
+          <div className="space-y-4">
+            <section className="rounded-2xl border border-cyan-300/20 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.12),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.1),transparent_46%),#101214] p-3">
+              <div className="mb-3 h-5 w-36 animate-pulse rounded bg-white/10" />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div
+                    key={`event-featured-sk-${index}`}
+                    className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
+                  >
+                    <div className="h-44 bg-white/5" />
+                    <div className="space-y-3 p-4">
+                      <div className="h-4 w-24 rounded bg-white/10" />
+                      <div className="h-6 w-4/5 rounded bg-white/10" />
+                      <div className="h-4 w-3/5 rounded bg-white/10" />
+                      <div className="flex gap-2 pt-1">
+                        <div className="h-8 w-20 rounded-full bg-white/10" />
+                        <div className="h-8 w-24 rounded-full bg-white/10" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div
+                  key={`event-card-sk-${index}`}
+                  className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
+                >
+                  <div className="h-44 bg-white/5" />
+                  <div className="space-y-3 p-4">
+                    <div className="h-4 w-20 rounded bg-white/10" />
+                    <div className="h-5 w-11/12 rounded bg-white/10" />
+                    <div className="h-4 w-2/3 rounded bg-white/10" />
+                    <div className="flex gap-2 pt-1">
+                      <div className="h-7 w-16 rounded-full bg-white/10" />
+                      <div className="h-7 w-20 rounded-full bg-white/10" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </section>
+          </div>
+        ) : discoverEvents.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-[#121212] p-8 text-center text-slate-300">
-            No events found for the current filters.
+            <p>{effectivePastOnly ? "No past events found for the current filters." : "No events found for the current filters."}</p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              {isAuthenticated && !effectivePastOnly ? (
+                <>
+                  <Link
+                    href="/events/new"
+                    className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-300/30"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">add</span>
+                    Create Event
+                  </Link>
+                  <Link
+                    href="/events/past"
+                    className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white/85 hover:text-white"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">history</span>
+                    View Past Events
+                  </Link>
+                </>
+              ) : null}
+              {isAuthenticated && effectivePastOnly ? (
+                <Link
+                  href="/events"
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
+                >
+                  <span className="material-symbols-outlined text-[18px]">event</span>
+                  Back to Active Events
+                </Link>
+              ) : null}
+              {!isAuthenticated ? (
+                <Link
+                  href="/auth?mode=signup"
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/18 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-300/28"
+                >
+                  <span className="material-symbols-outlined text-[18px]">person_add</span>
+                  Create an account
+                </Link>
+              ) : null}
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
@@ -1252,25 +1806,57 @@ export default function EventsExplorePage() {
             {regularEvents.length ? (
               <>
                 <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                  {visibleRegularEvents.map((event) => renderEventCard(event))}
+                  {regularEvents.map((event) => renderEventCard(event))}
                 </section>
 
-                {hasMoreRegularEvents ? (
-                  <div className="relative pt-2">
-                    <div className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-[#0A0A0A]" />
-                    <div ref={loadMoreSentinelRef} className="h-1 w-full" />
-                    <div className="flex justify-center">
-                      <button
-                        type="button"
-                        onClick={loadMoreRegularEvents}
-                        className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/10 px-5 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20"
+                {!isAuthenticated && orderedEvents.length > discoverEvents.length ? (
+                  <div className="relative overflow-hidden rounded-2xl border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(16,22,30,0.94),rgba(10,10,10,0.99))] px-5 py-8">
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-[#0A0A0A] via-[#0A0A0A]/88 to-transparent" />
+                    <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="max-w-2xl">
+                        <p className="text-lg font-bold text-white">Create an account to keep exploring events</p>
+                        <p className="mt-1 text-sm leading-6 text-white/62">
+                          Sign up to continue browsing the full event feed, save interests, and unlock personalized discovery.
+                        </p>
+                      </div>
+                      <Link
+                        href="/auth?mode=signup"
+                        className="inline-flex items-center justify-center rounded-full bg-[#00F5FF] px-5 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
                       >
-                        View more
-                        <span className="material-symbols-outlined text-[16px]">expand_more</span>
-                      </button>
+                        Create an account
+                      </Link>
+                    </div>
+                    <div className="relative mt-6 grid grid-cols-1 gap-3 opacity-35 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                      {Array.from({ length: 4 }).map((_, index) => (
+                        <div
+                          key={`event-lock-preview-${index}`}
+                          className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212]"
+                          aria-hidden="true"
+                        >
+                          <div className="h-44 bg-white/5" />
+                          <div className="space-y-3 p-4">
+                            <div className="h-4 w-20 rounded bg-white/10" />
+                            <div className="h-5 w-11/12 rounded bg-white/10" />
+                            <div className="h-4 w-2/3 rounded bg-white/10" />
+                            <div className="flex gap-2 pt-1">
+                              <div className="h-7 w-16 rounded-full bg-white/10" />
+                              <div className="h-7 w-20 rounded-full bg-white/10" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ) : null}
+
+                <PaginationControls
+                  page={currentEventsPage}
+                  totalPages={totalEventPages}
+                  totalItems={discoverEvents.length}
+                  pageSize={EVENTS_PAGE_SIZE}
+                  itemLabel="events"
+                  onPageChange={(page) => setEventsPage(Math.max(1, Math.min(page, totalEventPages)))}
+                />
               </>
             ) : null}
           </div>
@@ -1279,5 +1865,77 @@ export default function EventsExplorePage() {
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-24 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A]/85 to-transparent" />
     </div>
+  );
+}
+
+export default function EventsExplorePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0A0A0A] text-white">
+          <Nav />
+          <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
+            <div className="space-y-4">
+              <section className="border-b border-white/6 pb-4">
+                <div className="no-scrollbar mx-auto flex w-full max-w-[560px] items-center gap-3 overflow-x-auto pb-1 sm:justify-center sm:gap-8">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div
+                      key={`events-tab-sk-${index}`}
+                      className="h-11 w-28 shrink-0 animate-pulse rounded-full border border-white/10 bg-white/5"
+                    />
+                  ))}
+                </div>
+              </section>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="h-5 w-28 animate-pulse rounded bg-white/10" />
+                  <div className="h-10 w-28 animate-pulse rounded-full border border-white/10 bg-white/5" />
+                  <div className="h-10 w-28 animate-pulse rounded-full border border-white/10 bg-white/5" />
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="h-11 w-full animate-pulse rounded-full border border-white/10 bg-white/5 lg:w-[320px]" />
+                  <div className="h-11 w-full animate-pulse rounded-full bg-[#00F5FF]/80 sm:w-[144px]" />
+                </div>
+              </div>
+              <section className="rounded-2xl border border-cyan-300/20 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.12),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.1),transparent_46%),#101214] p-3">
+                <div className="mb-3 h-5 w-36 animate-pulse rounded bg-white/10" />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div
+                      key={`event-fallback-featured-sk-${index}`}
+                      className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
+                    >
+                      <div className="h-44 bg-white/5" />
+                      <div className="space-y-3 p-4">
+                        <div className="h-4 w-24 rounded bg-white/10" />
+                        <div className="h-6 w-4/5 rounded bg-white/10" />
+                        <div className="h-4 w-3/5 rounded bg-white/10" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, index) => (
+                  <div
+                    key={`event-fallback-card-sk-${index}`}
+                    className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
+                  >
+                    <div className="h-44 bg-white/5" />
+                    <div className="space-y-3 p-4">
+                      <div className="h-4 w-20 rounded bg-white/10" />
+                      <div className="h-5 w-11/12 rounded bg-white/10" />
+                      <div className="h-4 w-2/3 rounded bg-white/10" />
+                    </div>
+                  </div>
+                ))}
+              </section>
+            </div>
+          </main>
+        </div>
+      }
+    >
+      <EventsExplorePageContent />
+    </Suspense>
   );
 }

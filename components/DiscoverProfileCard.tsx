@@ -99,17 +99,22 @@ export default function DiscoverProfileCard({
           <button
             type="button"
             onClick={onZoom}
-            className="shrink-0"
+            className="relative shrink-0"
             title={p.avatar_url ? "Click to enlarge" : ""}
           >
             <div className="h-40 w-40 overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100">
-  <Avatar
-    src={p.avatar_url}
-    alt="Avatar"
-    size={160}
-    className="h-40 w-40 rounded-2xl"
-  />
-</div>
+              <Avatar
+                src={p.avatar_url}
+                alt="Avatar"
+                size={160}
+                className="h-40 w-40 rounded-2xl"
+              />
+            </div>
+            {p.verified ? (
+              <span className="absolute right-2 top-2 drop-shadow-lg">
+                <VerifiedBadge size={22} />
+              </span>
+            ) : null}
           </button>
 
           <div className="min-w-0 flex-1">
@@ -117,7 +122,6 @@ export default function DiscoverProfileCard({
               <div className="truncate text-base font-semibold text-zinc-900">
                 {p.display_name}
               </div>
-              {p.verified ? <VerifiedBadge size={16} /> : null}
             </div>
 
             <div className="mt-0.5 text-xs text-zinc-600">

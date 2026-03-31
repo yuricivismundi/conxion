@@ -1,61 +1,198 @@
-// /app/profile/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase/client";
-import { useParams, useRouter } from "next/navigation";
+import { resolveAvatarUrl } from "@/lib/avatar-storage";
+import DashboardPage from "@/app/dashboard/page";
 import Nav from "@/components/Nav";
-import VerifiedBadge from "@/components/VerifiedBadge";
 import Avatar from "@/components/Avatar";
+import ProfileMediaShowcase from "@/components/profile/ProfileMediaShowcase";
+import TeacherBadge from "@/components/profile/TeacherBadge";
+import RequestInfoModal from "@/components/teacher/RequestInfoModal";
+import { DashboardEmbedModeProvider } from "@/components/dashboard/DashboardEmbedMode";
+import VerifiedBadge from "@/components/VerifiedBadge";
+import VerificationRequiredDialog from "@/components/verification/VerificationRequiredDialog";
+import GetVerifiedButton from "@/components/verification/GetVerifiedButton";
+import { normalizePublicAppUrl } from "@/lib/public-app-url";
+import { fetchProfileMedia } from "@/lib/profile-media/read-model";
+import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import { deriveConnectionState, isBlockedConnection } from "@/lib/connections/visibility";
-import { fetchVisibleConnections } from "@/lib/connections/read-model";
+import {
+  fetchProfileRequestResponseStats,
+  fetchVisibleConnections,
+  type ProfileRequestResponseStats,
+  type VisibleConnectionRow,
+} from "@/lib/connections/read-model";
+import {
+  FALLBACK_GRADIENT,
+  getTripHeroFallbackUrl,
+  getTripHeroStorageFolderUrl,
+  getTripHeroStorageUrl,
+} from "@/lib/city-hero-images";
+import { mapEventMemberRows, mapEventRows, type EventMemberRecord, type EventRecord } from "@/lib/events/model";
+import {
+  REFERENCE_CONTEXT_TAGS,
+  normalizeReferenceContextTag,
+  referenceContextFamily,
+  referenceContextLabel,
+  type ReferenceContextTag,
+} from "@/lib/activities/types";
+import { fetchReferencesForMember } from "@/lib/references/read-model";
+import {
+  formatGuestGenderPreference,
+  formatSleepingArrangement,
+  isHostingListingOpen,
+  normalizeHostingPreferredGuestGender,
+  normalizeHostingSleepingArrangement,
+  type HostingPreferredGuestGender,
+  type HostingSleepingArrangement,
+} from "@/lib/hosting/preferences";
+import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
+import { clearVerificationResume, loadVerificationResume } from "@/lib/verification-client";
+import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
+import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-username";
 
 type DanceSkill = { level?: string; verified?: boolean };
 type DanceSkills = Record<string, DanceSkill>;
 
-type Profile = {
-  user_id: string;
-  display_name: string;
+type ProfileData = {
+  userId: string;
+  username: string | null;
+  displayName: string;
   city: string;
-  country: string | null;
-
+  country: string;
+  avatarUrl: string | null;
+  verified: boolean;
+  verifiedLabel: string | null;
+  canHost: boolean;
+  hostingStatus: string | null;
+  maxGuests: number | null;
+  hostingLastMinuteOk: boolean;
+  hostingPreferredGuestGender: HostingPreferredGuestGender;
+  hostingKidFriendly: boolean;
+  hostingPetFriendly: boolean;
+  hostingSmokingAllowed: boolean;
+  hostingSleepingArrangement: HostingSleepingArrangement;
+  hostingGuestShare: string | null;
+  hostingTransitAccess: string | null;
   roles: string[];
   languages: string[];
-  dance_skills: DanceSkills;
-
-  // contacts
-  instagram_handle: string | null;
-  whatsapp_handle: string | null;
-  youtube_url: string | null;
-
-  avatar_url: string | null;
-
-  verified: boolean | null;
-  verified_label: string | null;
+  danceSkills: DanceSkills;
+  interests: string[];
+  availability: string[];
+  createdAt: string | null;
+  lastSeenAt: string | null;
+  instagramHandle: string | null;
+  whatsappHandle: string | null;
+  youtubeUrl: string | null;
 };
 
-type ProfileRow = {
-  user_id?: string;
-  display_name?: string | null;
-  city?: string;
-  country?: string | null;
-  roles?: unknown;
-  languages?: unknown;
-  dance_skills?: unknown;
-  instagram_handle?: string | null;
-  whatsapp_handle?: string | null;
-  youtube_url?: string | null;
-  avatar_url?: string | null;
-  verified?: boolean | null;
-  verified_label?: string | null;
-};
-
-type ConnectionRow = {
+type ReferenceItem = {
   id: string;
-  status: "pending" | "accepted" | "blocked";
-  requester_id: string;
-  target_id: string;
-  blocked_by?: string | null;
+  authorId: string;
+  recipientId: string;
+  direction: "received" | "given";
+  sentiment: "positive" | "neutral" | "negative";
+  context: ReferenceContextTag;
+  entityType: string;
+  body: string;
+  replyText: string | null;
+  createdAt: string;
+};
+
+type TripItem = {
+  id: string;
+  userId: string;
+  destinationCity: string;
+  destinationCountry: string;
+  startDate: string;
+  endDate: string;
+  purpose: string;
+  status: string;
+  createdAt: string | null;
+};
+
+type SyncItem = {
+  id: string;
+  connectionId: string;
+  status: string;
+  type: string;
+  completedAt: string | null;
+  scheduledAt: string | null;
+  note: string | null;
+};
+
+type SupabaseCountQueryResult = {
+  count: number | null;
+  error: { message: string } | null;
+};
+
+type SupabaseCompatClient = {
+  from: (table: string) => {
+    select: (
+      columns: string,
+      options?: { head?: boolean; count?: "exact" | "planned" | "estimated" }
+    ) => {
+      eq: (column: string, value: string) => Promise<SupabaseCountQueryResult>;
+    };
+  };
+};
+
+type ConnectionLite = {
+  id: string;
+  requesterId: string;
+  targetId: string;
+};
+
+type EventTimelineItem = {
+  event: EventRecord;
+  relation: "hosted" | "going" | "waitlist";
+  label: string;
+};
+
+type ReferenceContextFilter = "all" | ReferenceContextTag;
+type ReferenceDirectionFilter = "all" | "received" | "given";
+type ReferenceSortFilter = "latest" | "oldest";
+type TabKey = "overview" | "references" | "dance-tools" | "trips" | "events";
+const TAB_ORDER: TabKey[] = ["overview", "references", "trips", "events", "dance-tools"];
+type ToastKind = "success" | "error" | "info";
+type ToastItem = { id: number; kind: ToastKind; message: string };
+type ProfileActionMenuState = {
+  source: "desktop" | "mobile";
+  placement: "above" | "below";
+  anchorY: number;
+  left: number;
+  width: number;
+};
+type ProfileListItem = {
+  displayName: string;
+  avatarUrl: string | null;
+};
+
+const EMPTY_PROFILE_REQUEST_RESPONSE_STATS: ProfileRequestResponseStats = {
+  totalRequests: 0,
+  respondedRequests: 0,
+  pendingRequests: 0,
+  responseRate: 0,
+};
+
+const EMPTY_LAST_SYNCED_BY_TAB: Record<TabKey, string | null> = {
+  overview: null,
+  references: null,
+  "dance-tools": null,
+  trips: null,
+  events: null,
+};
+
+const TAB_LABELS: Record<TabKey, string> = {
+  overview: "Overview",
+  references: "References",
+  trips: "Trips",
+  events: "Events",
+  "dance-tools": "Dance Tools",
 };
 
 type ConnectionState =
@@ -64,445 +201,1072 @@ type ConnectionState =
   | { status: "accepted"; id: string }
   | { status: "blocked"; id: string };
 
-type ReferenceFilter = "all" | "sync" | "trip" | "event";
-
-type ReferenceRow = {
-  id: string;
-  author_id: string;
-  recipient_id: string;
-  sentiment: "positive" | "neutral" | "negative";
-  body: string;
-  context: string | null;
-  entity_type: string | null;
-  created_at: string;
-  reply_text: string | null;
-};
-
-type ReferenceRowDb = {
-  id?: string;
-  author_id?: string;
-  recipient_id?: string;
-  sentiment?: string;
-  body?: string | null;
-  context?: string | null;
-  entity_type?: string | null;
-  created_at?: string;
-  reply_text?: string | null;
-};
-
-const STYLE_ORDER = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
-
-function titleCase(s: string) {
-  if (!s) return s;
-  return s.slice(0, 1).toUpperCase() + s.slice(1);
-}
+const STYLE_ORDER = ["bachata", "salsa", "kizomba", "zouk", "tango", "other"] as const;
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-const isString = (value: unknown): value is string => typeof value === "string";
-
-function prettyUrl(u: string) {
-  try {
-    const url = new URL(u.startsWith("http") ? u : `https://${u}`);
-    return (url.hostname + url.pathname).replace(/\/$/, "");
-  } catch {
-    return u;
-  }
+function asRecord(value: unknown) {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
-function formatDate(value: string) {
+function pickString(row: Record<string, unknown>, keys: string[], fallback = "") {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return fallback;
+}
+
+function pickNullableString(row: Record<string, unknown>, keys: string[]) {
+  const value = pickString(row, keys);
+  return value || null;
+}
+
+function asStringArrayLoose(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+    return trimmed
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function isSchemaMissingMessage(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("schema cache") ||
+    text.includes("does not exist") ||
+    text.includes("could not find the table") ||
+    text.includes("relation")
+  );
+}
+
+function isColumnMissingMessage(message: string) {
+  const text = message.toLowerCase();
+  return text.includes("column") && text.includes("does not exist");
+}
+
+function parseDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDate(value: string | null | undefined) {
+  const date = parseDate(value);
+  if (!date) return "Not available";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
-function sentimentBadgeClasses(sentiment: ReferenceRow["sentiment"]) {
-  if (sentiment === "positive") return "border-green-200 bg-green-50 text-green-700";
-  if (sentiment === "negative") return "border-rose-200 bg-rose-50 text-rose-700";
-  return "border-zinc-200 bg-zinc-50 text-zinc-700";
+function formatMonthYear(value: string | null | undefined) {
+  const date = parseDate(value);
+  if (!date) return "Not available";
+  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(date);
 }
 
-// --- inline icons (no deps) ---
-function InstagramIcon({ className = "" }: { className?: string }) {
+function formatDateRange(start: string, end: string) {
+  const startDate = parseDate(start);
+  const endDate = parseDate(end);
+  if (!startDate || !endDate) return "Dates not set";
+
+  const startText = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(startDate);
+  const endText = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(endDate);
+  return `${startText} - ${endText}`;
+}
+
+function formatRelativeTime(value: string | null | undefined) {
+  const date = parseDate(value);
+  if (!date) return "Not available";
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) return "Just now";
+  const min = Math.floor(diffMs / 60_000);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
+
+function normalizeSentiment(value: string): "positive" | "neutral" | "negative" {
+  const lower = value.toLowerCase();
+  if (lower === "positive" || lower === "4" || lower === "5") return "positive";
+  if (lower === "negative" || lower === "1" || lower === "2") return "negative";
+  return "neutral";
+}
+
+function normalizeContext(value: string) {
+  return normalizeReferenceContextTag(value);
+}
+
+function titleCase(value: string) {
+  if (!value) return value;
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function formatDanceLevelLabel(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const base = trimmed.split("(")[0]?.trim() || trimmed;
+  if (base === "Teacher/Competitor") return "Teacher";
+  return base;
+}
+
+function slugifyName(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function sentimentBadge(sentiment: "positive" | "neutral" | "negative") {
+  if (sentiment === "positive") return "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
+  if (sentiment === "negative") return "border-rose-400/30 bg-rose-500/10 text-rose-200";
+  return "border-slate-400/30 bg-slate-500/10 text-slate-200";
+}
+
+const FOLLOW_TRACK_ACTIVITY_DEFAULTS = [
+  "travel_plans",
+  "hosting_availability",
+  "new_references",
+  "competition_results",
+] as const;
+
+function contextBadge(context: string) {
+  const family = referenceContextFamily(context);
+  if (family === "practice") return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
+  if (family === "travel" || family === "festival") return "border-violet-300/30 bg-violet-300/10 text-violet-100";
+  if (family === "event") return "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100";
+  if (family === "hosting") return "border-emerald-300/30 bg-emerald-300/10 text-emerald-100";
+  if (family === "collaboration") return "border-sky-300/30 bg-sky-300/10 text-sky-100";
+  return "border-white/20 bg-white/[0.05] text-slate-200";
+}
+
+function useCountUp(target: number, enabled: boolean, durationMs = 900) {
+  const [value, setValue] = useState(0);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const setOnFrame = (nextValue: number) => {
+      frameRef.current = window.requestAnimationFrame(() => {
+        setValue(nextValue);
+        frameRef.current = null;
+      });
+    };
+
+    if (!enabled) {
+      setOnFrame(target);
+      return () => {
+        if (frameRef.current !== null) {
+          window.cancelAnimationFrame(frameRef.current);
+          frameRef.current = null;
+        }
+      };
+    }
+
+    if (target <= 0) {
+      setOnFrame(0);
+      return () => {
+        if (frameRef.current !== null) {
+          window.cancelAnimationFrame(frameRef.current);
+          frameRef.current = null;
+        }
+      };
+    }
+
+    const startedAt = performance.now();
+
+    const tick = (now: number) => {
+      const progress = Math.min((now - startedAt) / durationMs, 1);
+      const eased = 1 - (1 - progress) ** 3;
+      setValue(Math.round(target * eased));
+      if (progress < 1) frameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    frameRef.current = window.requestAnimationFrame(tick);
+
+    return () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+  }, [target, enabled, durationMs]);
+
+  return value;
+}
+
+function EmptyPanel({
+  icon,
+  title,
+  detail,
+  ctaLabel,
+  onCta,
+}: {
+  icon: string;
+  title: string;
+  detail: string;
+  ctaLabel?: string;
+  onCta?: () => void;
+}) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
-      <path d="M7.5 2h9A5.5 5.5 0 0 1 22 7.5v9A5.5 5.5 0 0 1 16.5 22h-9A5.5 5.5 0 0 1 2 16.5v-9A5.5 5.5 0 0 1 7.5 2Zm0 2A3.5 3.5 0 0 0 4 7.5v9A3.5 3.5 0 0 0 7.5 20h9A3.5 3.5 0 0 0 20 16.5v-9A3.5 3.5 0 0 0 16.5 4h-9ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.6-2.2a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
-    </svg>
+    <div className="rounded-2xl border border-white/10 bg-[linear-gradient(160deg,rgba(34,211,238,0.08),rgba(0,0,0,0.25))] p-5 text-center shadow-[0_12px_26px_rgba(0,0,0,0.25)]">
+      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </div>
+      <p className="text-sm font-semibold text-slate-100">{title}</p>
+      <p className="mt-1 text-xs text-slate-400">{detail}</p>
+      {ctaLabel && onCta ? (
+        <button
+          type="button"
+          onClick={onCta}
+          className="mt-3 rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
+        >
+          {ctaLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
-function WhatsAppIcon({ className = "" }: { className?: string }) {
+function ProfilePageSkeleton() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
-      <path d="M12 2a9.6 9.6 0 0 0-8.3 14.4L2.8 22l5.8-1.8A9.6 9.6 0 1 0 12 2Zm0 2a7.6 7.6 0 0 1 0 15.2c-1.3 0-2.6-.3-3.7-1l-.3-.2-3.4 1 1.1-3.2-.2-.3A7.6 7.6 0 0 1 12 4Zm4.4 10.6c-.2-.1-1.2-.6-1.4-.7-.2-.1-.4-.1-.6.1-.2.2-.7.7-.9.9-.2.2-.3.2-.6.1-.2-.1-1-.4-1.9-1.2-.7-.6-1.2-1.4-1.3-1.6-.1-.2 0-.4.1-.5l.4-.5c.1-.2.1-.3.2-.5 0-.2 0-.3-.1-.5-.1-.1-.6-1.5-.8-2-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.2-.9.9-.9 2.2s.9 2.5 1 2.7c.1.2 1.7 2.7 4.1 3.8.6.3 1.1.4 1.5.5.6.2 1.2.2 1.6.1.5-.1 1.2-.5 1.4-1 .2-.5.2-.9.1-1-.1-.1-.2-.1-.4-.2Z" />
-    </svg>
+    <div className="min-h-screen bg-[#05070c] text-slate-100">
+      <Nav />
+
+      <main className="mx-auto w-full max-w-[1280px] px-4 pb-16 pt-6 sm:px-6 lg:px-8">
+        <section className="overflow-hidden rounded-[28px] border border-cyan-200/10 bg-[#0b141a]/70 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur">
+          <div className="h-28 bg-[linear-gradient(130deg,rgba(14,116,144,0.32),rgba(192,38,211,0.2))] sm:h-36" />
+
+          <div className="px-4 pb-6 sm:px-6 lg:px-8">
+            <div className="-mt-16 flex flex-col gap-5 sm:-mt-20 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex min-w-0 flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:text-left">
+                <div className="h-32 w-32 animate-pulse rounded-full border-4 border-[#071116] bg-white/10 sm:h-40 sm:w-40" />
+                <div className="min-w-0 space-y-3 pb-1">
+                  <div className="h-8 w-48 animate-pulse rounded-full bg-white/10 sm:w-60" />
+                  <div className="h-4 w-28 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-36 animate-pulse rounded-full bg-white/10" />
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <div className="h-11 w-28 animate-pulse rounded-xl border border-white/10 bg-white/[0.05]" />
+                <div className="h-11 w-32 animate-pulse rounded-xl bg-[linear-gradient(90deg,rgba(34,211,238,0.7),rgba(217,70,239,0.7))]" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div
+              key={`profile-metric-skeleton-${index}`}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 shadow-[0_10px_30px_rgba(0,0,0,0.22)]"
+            >
+              <div className="h-3 w-20 animate-pulse rounded bg-white/10" />
+              <div className="mt-3 h-8 w-14 animate-pulse rounded bg-white/10" />
+              <div className="mt-2 h-3 w-24 animate-pulse rounded bg-white/10" />
+            </div>
+          ))}
+        </section>
+
+        <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,360px)]">
+          <section className="space-y-6">
+            <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+              <div className="h-6 w-40 animate-pulse rounded bg-white/10" />
+              <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                <div className="space-y-3">
+                  <div className="h-4 w-20 animate-pulse rounded bg-white/10" />
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <div key={`role-skeleton-${index}`} className="h-8 w-24 animate-pulse rounded-full bg-white/[0.07]" />
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="h-4 w-24 animate-pulse rounded bg-white/10" />
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <div key={`language-skeleton-${index}`} className="h-8 w-20 animate-pulse rounded-full bg-white/[0.07]" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <div className="h-4 w-28 animate-pulse rounded bg-white/10" />
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div key={`style-skeleton-${index}`} className="h-8 w-24 animate-pulse rounded-full bg-white/[0.07]" />
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-6 border-t border-white/10 pt-5">
+                <div className="h-4 w-16 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 grid grid-cols-2 auto-rows-[136px] gap-3 sm:auto-rows-[168px] lg:grid-cols-4 lg:auto-rows-[178px]">
+                  <div className="col-span-2 row-span-2 animate-pulse rounded-[24px] bg-white/[0.06]" />
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={`media-skeleton-${index}`} className="animate-pulse rounded-[24px] bg-white/[0.06]" />
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={`info-skeleton-${index}`} className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <div className="h-3 w-20 animate-pulse rounded bg-white/10" />
+                    <div className="mt-3 h-4 w-28 animate-pulse rounded bg-white/10" />
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+
+          <aside className="space-y-6">
+            {Array.from({ length: 2 }).map((_, index) => (
+              <article key={`sidebar-skeleton-${index}`} className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                <div className="h-5 w-32 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 space-y-3">
+                  <div className="h-4 w-full animate-pulse rounded bg-white/10" />
+                  <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
+                  <div className="h-4 w-3/4 animate-pulse rounded bg-white/10" />
+                </div>
+              </article>
+            ))}
+          </aside>
+        </div>
+      </main>
+    </div>
   );
 }
 
-function YouTubeIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
-      <path d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.6 12 4.6 12 4.6s-5.7 0-7.5.5A3 3 0 0 0 2.4 7.2 31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8ZM10.2 15.3V8.7L15.9 12l-5.7 3.3Z" />
-    </svg>
-  );
+function mapReferenceRows(rows: unknown[], profileId: string): ReferenceItem[] {
+  const items: ReferenceItem[] = [];
+  const seen = new Set<string>();
+  rows.forEach((raw) => {
+    const row = asRecord(raw);
+    const id = pickString(row, ["id"]);
+    if (!id || seen.has(id)) return;
+    const authorId = pickString(row, ["author_id", "from_user_id", "source_id"]);
+    const recipientId = pickString(row, ["recipient_id", "to_user_id", "target_id"]);
+    const createdAt = pickString(row, ["created_at", "updated_at"]);
+    if (!id || !authorId || !recipientId || !createdAt) return;
+    const direction = recipientId === profileId ? "received" : authorId === profileId ? "given" : null;
+    if (!direction) return;
+    seen.add(id);
+
+    const sentimentRaw = pickString(row, ["sentiment", "rating"]);
+    const contextRaw = pickString(row, ["context_tag", "context", "entity_type"], "collaboration");
+    const normalizedContext = normalizeContext(contextRaw);
+    const body = pickString(row, ["text", "body", "feedback", "content"]) || "No additional details provided.";
+
+    items.push({
+      id,
+      authorId,
+      recipientId,
+      direction,
+      sentiment: normalizeSentiment(sentimentRaw || "neutral"),
+      context: normalizedContext,
+      entityType: normalizedContext,
+      body,
+      replyText: pickNullableString(row, ["reply_text"]),
+      createdAt,
+    });
+  });
+  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export default function ProfilePage() {
+function mapTripRows(rows: unknown[]): TripItem[] {
+  return rows
+    .map((raw) => {
+      const row = asRecord(raw);
+      const id = pickString(row, ["id"]);
+      if (!id) return null;
+
+      return {
+        id,
+        userId: pickString(row, ["user_id"]),
+        destinationCity: pickString(row, ["destination_city", "city"]),
+        destinationCountry: pickString(row, ["destination_country", "country"]),
+        startDate: pickString(row, ["start_date", "from_date"]),
+        endDate: pickString(row, ["end_date", "to_date"]),
+        purpose: pickString(row, ["purpose"], "Trip"),
+        status: pickString(row, ["status"], "active"),
+        createdAt: pickNullableString(row, ["created_at"]),
+      } satisfies TripItem;
+    })
+    .filter((row): row is TripItem => Boolean(row));
+}
+
+function mapSyncRows(rows: unknown[]): SyncItem[] {
+  return rows
+    .map((raw) => {
+      const row = asRecord(raw);
+      const id = pickString(row, ["id"]);
+      const connectionId = pickString(row, ["connection_id", "conn_id"]);
+      if (!id || !connectionId) return null;
+
+      return {
+        id,
+        connectionId,
+        status: pickString(row, ["status"], "accepted"),
+        type: pickString(row, ["type"], "Sync"),
+        completedAt: pickNullableString(row, ["completed_at"]),
+        scheduledAt: pickNullableString(row, ["scheduled_at", "created_at"]),
+        note: pickNullableString(row, ["note"]),
+      } satisfies SyncItem;
+    })
+    .filter((row): row is SyncItem => Boolean(row))
+    .sort((a, b) => (b.completedAt ?? b.scheduledAt ?? "").localeCompare(a.completedAt ?? a.scheduledAt ?? ""));
+}
+
+function mapConnectionSyncRows(rows: unknown[]): SyncItem[] {
+  return rows
+    .map((raw) => {
+      const row = asRecord(raw);
+      const id = pickString(row, ["id"]);
+      const connectionId = pickString(row, ["connection_id"]);
+      if (!id || !connectionId) return null;
+
+      const rawType = pickString(row, ["sync_type", "type"], "Activity");
+      const type =
+        rawType === "training"
+          ? "Practice"
+          : rawType === "social_dancing"
+            ? "Social Dance"
+            : rawType === "workshop"
+              ? "Workshop"
+              : titleCase(rawType.replaceAll("_", " "));
+
+      return {
+        id,
+        connectionId,
+        status: pickString(row, ["status"], "accepted"),
+        type,
+        completedAt: pickNullableString(row, ["completed_at"]),
+        scheduledAt: pickNullableString(row, ["scheduled_at", "created_at"]),
+        note: pickNullableString(row, ["note"]),
+      } satisfies SyncItem;
+    })
+    .filter((row): row is SyncItem => Boolean(row))
+    .sort((a, b) => (b.completedAt ?? b.scheduledAt ?? "").localeCompare(a.completedAt ?? a.scheduledAt ?? ""));
+}
+
+function MemberProfilePage() {
   const router = useRouter();
-  const params = useParams<{ id: string }>();
-  const profileId = params.id;
-
-  const [meId, setMeId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [state, setState] = useState<ConnectionState>({ status: "none" });
+  const searchParams = useSearchParams();
+  const params = useParams<{ id?: string | string[]; username?: string | string[] }>();
+  const supabaseCompat = supabase as unknown as SupabaseCompatClient;
+  const profileParam = params?.id;
+  const usernameParam = params?.username;
+  const routeProfileKey = Array.isArray(profileParam)
+    ? profileParam[0]
+    : Array.isArray(usernameParam)
+      ? usernameParam[0]
+      : profileParam ?? usernameParam;
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [referencesLoading, setReferencesLoading] = useState(false);
-  const [references, setReferences] = useState<ReferenceRow[]>([]);
-  const [referenceFilter, setReferenceFilter] = useState<ReferenceFilter>("all");
+  const [info, setInfo] = useState<string | null>(null);
+
+  const [meId, setMeId] = useState<string | null>(null);
+  const [viewerVerified, setViewerVerified] = useState(false);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [profileMedia, setProfileMedia] = useState<ProfileMediaItem[]>([]);
+  const [state, setState] = useState<ConnectionState>({ status: "none" });
+  const [verificationModalOpen, setVerificationModalOpen] = useState(false);
+
+  const [references, setReferences] = useState<ReferenceItem[]>([]);
+  const [referenceContextFilter, setReferenceContextFilter] = useState<ReferenceContextFilter>("all");
+  const [referenceDirectionFilter, setReferenceDirectionFilter] = useState<ReferenceDirectionFilter>("all");
+  const [referenceSortFilter, setReferenceSortFilter] = useState<ReferenceSortFilter>("latest");
   const [referenceAuthors, setReferenceAuthors] = useState<Record<string, string>>({});
+  const [authoredReferenceTypes, setAuthoredReferenceTypes] = useState<Set<ReferenceContextTag>>(new Set());
+  const [pendingReferenceTypes, setPendingReferenceTypes] = useState<Set<ReferenceContextTag>>(new Set());
 
-  const canReveal = state.status === "accepted";
+  const [trips, setTrips] = useState<TripItem[]>([]);
+  const [eventsTimeline, setEventsTimeline] = useState<EventTimelineItem[]>([]);
+  const [syncs, setSyncs] = useState<SyncItem[]>([]);
+  const [danceGoalsCount, setDanceGoalsCount] = useState(0);
+  const [danceCompetitionsCount, setDanceCompetitionsCount] = useState(0);
+  const [requestResponseStats, setRequestResponseStats] = useState<ProfileRequestResponseStats>(EMPTY_PROFILE_REQUEST_RESPONSE_STATS);
+  const [acceptedConnections, setAcceptedConnections] = useState<ConnectionLite[]>([]);
+  const [profilesById, setProfilesById] = useState<Record<string, ProfileListItem>>({});
+  const [viewerAcceptedUserIds, setViewerAcceptedUserIds] = useState<string[]>([]);
+  const [tab, setTab] = useState<TabKey>("overview");
+  const [avatarLightboxOpen, setAvatarLightboxOpen] = useState(false);
+  const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
+  const [animateMetrics, setAnimateMetrics] = useState(false);
+  const [tabTransitionLoading, setTabTransitionLoading] = useState(false);
+  const [supportingPanelsLoading, setSupportingPanelsLoading] = useState(false);
+  const [supportingDataError, setSupportingDataError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [followingBusy, setFollowingBusy] = useState(false);
+  const [contactFollowing, setContactFollowing] = useState(false);
+  const [followContactId, setFollowContactId] = useState<string | null>(null);
+  const [actionMenu, setActionMenu] = useState<ProfileActionMenuState | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [requestInfoOpen, setRequestInfoOpen] = useState(false);
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [teacherInquiryEnabled, setTeacherInquiryEnabled] = useState(false);
+  const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
+  const [lastSyncedByTab, setLastSyncedByTab] = useState<Record<TabKey, string | null>>(EMPTY_LAST_SYNCED_BY_TAB);
+  const panelSwitchTimerRef = useRef<number | null>(null);
+  const toastCounterRef = useRef(0);
 
-  const skillsList = useMemo(() => {
-    const skills = profile?.dance_skills ?? {};
+  const profileUserId = profile?.userId ?? (routeProfileKey && isUuidLike(routeProfileKey) ? routeProfileKey : null);
+  const isSelf = meId !== null && profileUserId === meId;
+  const isTeacherProfile = hasTeacherBadgeRole(profile?.roles);
+  const canRequestInfo = !isSelf && isTeacherProfile && teacherInquiryEnabled;
+  const canRevealContacts = isSelf || state.status === "accepted";
+  const panelLoading = tabTransitionLoading || (supportingPanelsLoading && !(tab === "dance-tools" && isSelf));
+  const hostingAvailable = useMemo(() => isHostingListingOpen(profile?.canHost === true, profile?.hostingStatus), [profile?.canHost, profile?.hostingStatus]);
+  const showHostingDetails = useMemo(
+    () =>
+      Boolean(
+        profile &&
+          (
+            profile.canHost ||
+            profile.hostingStatus ||
+            profile.maxGuests !== null ||
+            profile.hostingGuestShare ||
+            profile.hostingTransitAccess
+          )
+      ),
+    [profile]
+  );
+
+  const mobileSettingsLinks = useMemo(
+    () =>
+      [
+        { href: "/me/edit", label: "Profile settings", icon: "person_edit" },
+        { href: "/account-settings", label: "Account settings", icon: "settings" },
+        { href: "/notifications", label: "Notifications", icon: "notifications" },
+        { href: "/pricing", label: "Upgrade your plan", icon: "workspace_premium" },
+        ...(viewerIsAdmin ? [{ href: "/admin/space", label: "Admin control", icon: "admin_panel_settings" }] : []),
+      ],
+    [viewerIsAdmin]
+  );
+
+  const skillList = useMemo(() => {
+    const skills = profile?.danceSkills ?? {};
     const keys = Object.keys(skills);
-    if (keys.length === 0) return [];
+    if (!keys.length) return [] as Array<{ style: string; level: string; verified: boolean }>;
 
     const ordered: string[] = [];
-    for (const s of STYLE_ORDER) if (skills[s]) ordered.push(s);
-    for (const s of keys) if (!ordered.includes(s)) ordered.push(s);
+    for (const style of STYLE_ORDER) {
+      if (skills[style]) ordered.push(style);
+    }
+    keys.forEach((style) => {
+      if (!ordered.includes(style)) ordered.push(style);
+    });
 
     return ordered.map((style) => ({
       style,
-      level: skills[style]?.level ?? "",
-      verified: !!skills[style]?.verified,
+      level: (skills[style]?.level ?? "").trim(),
+      verified: skills[style]?.verified === true,
     }));
-  }, [profile?.dance_skills]);
+  }, [profile?.danceSkills]);
 
-  const igText = useMemo(() => {
-    const h = (profile?.instagram_handle ?? "").trim().replaceAll(" ", "");
-    if (!h) return "Not set";
-    return h.startsWith("@") ? h : `@${h}`;
-  }, [profile?.instagram_handle]);
-
-  const waText = useMemo(() => {
-    const h = (profile?.whatsapp_handle ?? "").trim();
-    return h ? h : "Not set";
-  }, [profile?.whatsapp_handle]);
-
-  const ytText = useMemo(() => {
-    const u = (profile?.youtube_url ?? "").trim();
-    return u ? prettyUrl(u) : "Not set";
-  }, [profile?.youtube_url]);
-
-  const igLink = useMemo(() => {
-    const handle = (profile?.instagram_handle ?? "").trim().replaceAll(" ", "");
-    if (!handle) return null;
-    const h = handle.startsWith("@") ? handle.slice(1) : handle;
-    return `https://instagram.com/${h}`;
-  }, [profile?.instagram_handle]);
-
-  const ytLink = useMemo(() => {
-    const u = (profile?.youtube_url ?? "").trim();
-    if (!u) return null;
-    return u.startsWith("http") ? u : `https://${u}`;
-  }, [profile?.youtube_url]);
-
-  const waLink = useMemo(() => {
-    const v = (profile?.whatsapp_handle ?? "").trim();
-    if (!v) return null;
-    const digits = v.replace(/[^\d]/g, "");
-    if (digits.length >= 8) return `https://wa.me/${digits}`;
-    return null;
-  }, [profile?.whatsapp_handle]);
-
-  const filteredReferences = useMemo(() => {
-    if (referenceFilter === "all") return references;
-    return references.filter((row) => {
-      const context = (row.entity_type ?? row.context ?? "connection").toLowerCase();
-      if (referenceFilter === "sync") return context === "sync";
-      if (referenceFilter === "trip") return context === "trip";
-      if (referenceFilter === "event") return context === "event";
-      return true;
-    });
-  }, [referenceFilter, references]);
-
-  const referenceCounts = useMemo(() => {
-    return references.reduce(
-      (acc, row) => {
-        if (row.sentiment === "positive") acc.positive += 1;
-        if (row.sentiment === "neutral") acc.neutral += 1;
-        if (row.sentiment === "negative") acc.negative += 1;
+  const referenceStats = useMemo(() => {
+    const byContext = REFERENCE_CONTEXT_TAGS.reduce(
+      (acc, tag) => {
+        acc[tag] = 0;
         return acc;
       },
-      { positive: 0, neutral: 0, negative: 0 }
+      {} as Record<ReferenceContextTag, number>
     );
+    const totals = {
+      total: references.length,
+      received: 0,
+      given: 0,
+      positive: 0,
+      neutral: 0,
+      negative: 0,
+      byContext,
+    };
+
+    references.forEach((row) => {
+      totals[row.direction] += 1;
+      totals[row.sentiment] += 1;
+      totals.byContext[row.context] += 1;
+    });
+
+    const trustScore = totals.total > 0 ? Math.round(((totals.positive + totals.neutral) / totals.total) * 100) : 0;
+
+    return {
+      ...totals,
+      trustScore,
+    };
   }, [references]);
 
-  async function refreshConnectionState(myUserId: string) {
-    let rows: ConnectionRow[] = [];
+  const filteredReferences = useMemo(() => {
+    const rows = references.filter((row) => {
+      const directionMatch = referenceDirectionFilter === "all" || row.direction === referenceDirectionFilter;
+      const contextMatch = referenceContextFilter === "all" || row.context === referenceContextFilter;
+      return directionMatch && contextMatch;
+    });
+    return rows.sort((a, b) =>
+      referenceSortFilter === "oldest"
+        ? a.createdAt.localeCompare(b.createdAt)
+        : b.createdAt.localeCompare(a.createdAt)
+    );
+  }, [referenceContextFilter, referenceDirectionFilter, referenceSortFilter, references]);
+  const visibleActivities = useMemo(
+    () =>
+      syncs.filter((item) => {
+        const status = (item.status || "").toLowerCase();
+        return Boolean(item.completedAt) || status === "accepted" || status === "active" || status === "scheduled";
+      }),
+    [syncs]
+  );
+
+  const hasReferenceFilters = referenceDirectionFilter !== "all" || referenceContextFilter !== "all";
+
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  const activeTrips = useMemo(
+    () =>
+      trips
+        .filter((trip) => trip.status !== "inactive" && trip.endDate && trip.endDate >= todayIso)
+        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
+    [todayIso, trips]
+  );
+
+  const pastTrips = useMemo(
+    () =>
+      trips
+        .filter((trip) => !trip.endDate || trip.endDate < todayIso || trip.status === "inactive")
+        .sort((a, b) => b.endDate.localeCompare(a.endDate)),
+    [todayIso, trips]
+  );
+
+  const upcomingEvents = useMemo(() => {
+    const now = Date.now();
+    return eventsTimeline.filter((item) => {
+      const startsAt = parseDate(item.event.startsAt);
+      return startsAt ? startsAt.getTime() >= now : false;
+    });
+  }, [eventsTimeline]);
+  const pastEvents = useMemo(() => {
+    const now = Date.now();
+    return eventsTimeline.filter((item) => {
+      const startsAt = parseDate(item.event.startsAt);
+      return startsAt ? startsAt.getTime() < now : true;
+    });
+  }, [eventsTimeline]);
+
+  const completedSyncs = useMemo(() => syncs.filter((item) => Boolean(item.completedAt)), [syncs]);
+  const pendingSyncReferenceCount = useMemo(
+    () => completedSyncs.filter((item) => pendingReferenceTypes.has(normalizeContext(item.type))).length,
+    [completedSyncs, pendingReferenceTypes]
+  );
+  const respondedRequestCount = requestResponseStats.respondedRequests;
+  const responseRate = requestResponseStats.responseRate;
+  const primaryInterest = useMemo(() => profile?.interests?.[0] ?? null, [profile?.interests]);
+  const availabilityLabel = useMemo(
+    () => (profile?.availability?.length ? profile.availability.join(" · ") : null),
+    [profile?.availability]
+  );
+  const shareUrl = useMemo(() => {
+    const appBase =
+      (typeof window !== "undefined" ? normalizePublicAppUrl(window.location.origin) : "") ||
+      normalizePublicAppUrl(process.env.NEXT_PUBLIC_APP_URL) ||
+      "";
+    const username = (profile?.username ?? "").trim();
+    if (username) return `${appBase}/u/${encodeURIComponent(username)}`;
+    if (!profileUserId) return "";
+    const encodedName = slugifyName(profile?.displayName ?? "");
+    return encodedName ? `${appBase}/profile/${profileUserId}?name=${encodedName}` : `${appBase}/profile/${profileUserId}`;
+  }, [profile?.displayName, profile?.username, profileUserId]);
+  const shareDisplayUrl = useMemo(() => shareUrl.replace(/^https?:\/\//, ""), [shareUrl]);
+
+  const mutualConnectionUserIds = useMemo(() => {
+    if (!profileUserId || !meId || meId === profileUserId) return [] as string[];
+    const viewerAccepted = new Set(viewerAcceptedUserIds.filter((userId) => userId && userId !== profileUserId));
+    const mutualIds = acceptedConnections
+      .map((row) => (row.requesterId === profileUserId ? row.targetId : row.requesterId))
+      .filter((userId) => userId && userId !== meId && viewerAccepted.has(userId));
+    return Array.from(new Set(mutualIds));
+  }, [acceptedConnections, meId, profileUserId, viewerAcceptedUserIds]);
+  const mutualProfiles = useMemo(
+    () => mutualConnectionUserIds.map((userId) => ({ userId, ...(profilesById[userId] ?? { displayName: "Member", avatarUrl: null }) })),
+    [mutualConnectionUserIds, profilesById]
+  );
+
+  const metricReferences = useCountUp(referenceStats.total, animateMetrics);
+  const metricPositiveRefs = useCountUp(referenceStats.positive, animateMetrics);
+  const metricResponseRate = useCountUp(responseRate, animateMetrics);
+  const metricRespondedRequests = useCountUp(respondedRequestCount, animateMetrics);
+  const metricActiveTrips = useCountUp(activeTrips.length, animateMetrics);
+  const metricPastTrips = useCountUp(pastTrips.length, animateMetrics);
+  const metricUpcomingEvents = useCountUp(upcomingEvents.length, animateMetrics);
+  const metricEvents = useCountUp(eventsTimeline.length, animateMetrics);
+  const metricDanceGoals = useCountUp(danceGoalsCount, animateMetrics);
+  const metricDanceCompetitions = useCountUp(danceCompetitionsCount, animateMetrics);
+  const metricCompletedSyncs = useCountUp(completedSyncs.length, animateMetrics);
+  const metricTotalSyncs = useCountUp(syncs.length, animateMetrics);
+  const visibleTabs = useMemo(
+    () =>
+      TAB_ORDER.map((key) => [key, TAB_LABELS[key]] as [TabKey, string]).filter(([key]) => {
+        if (key === "dance-tools") return isSelf;
+        return true;
+      }),
+    [isSelf]
+  );
+
+  const metricCards = useMemo(
+    () => {
+      const cards: Array<{ key: TabKey; icon: string; title: string; value: string; sub: string }> = [
+        {
+          key: "references",
+          icon: "rate_review",
+          title: "References",
+          value: `${metricReferences}`,
+          sub: `+ ${metricPositiveRefs} positive`,
+        },
+        {
+          key: "overview",
+          icon: "reply",
+          title: "Response rate",
+          value: `${metricResponseRate}%`,
+          sub: requestResponseStats.totalRequests > 0 ? `${metricRespondedRequests} handled` : "No requests yet",
+        },
+      ];
+
+      cards.push(
+        {
+          key: "trips",
+          icon: "travel_explore",
+          title: "Trips",
+          value: `${metricActiveTrips}`,
+          sub: `${metricPastTrips} attended`,
+        },
+        {
+          key: "events",
+          icon: "event",
+          title: "Events",
+          value: `${metricEvents}`,
+          sub: `${metricUpcomingEvents} upcoming`,
+        },
+        ...(isSelf
+          ? [
+              {
+                key: "dance-tools" as TabKey,
+                icon: "sports_gymnastics",
+                title: "Dance Tools",
+                value: `${metricDanceGoals} goals`,
+                sub: `${metricDanceCompetitions} competitions done`,
+              },
+            ]
+          : [])
+      );
+
+      return cards;
+    },
+    [
+      metricReferences,
+      metricPositiveRefs,
+      metricResponseRate,
+      metricRespondedRequests,
+      requestResponseStats.totalRequests,
+      metricDanceGoals,
+      metricDanceCompetitions,
+      isSelf,
+      metricActiveTrips,
+      metricPastTrips,
+      metricUpcomingEvents,
+      metricEvents,
+    ]
+  );
+
+  useEffect(() => {
+    if (visibleTabs.some(([key]) => key === tab)) return;
+    setTab("overview");
+  }, [tab, visibleTabs]);
+
+  useEffect(() => {
+    if (!shareDialogOpen) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShareDialogOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shareDialogOpen]);
+
+  function pushToast(kind: ToastKind, message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const id = toastCounterRef.current + 1;
+    toastCounterRef.current = id;
+    setToasts((prev) => [...prev, { id, kind, message: trimmed }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((item) => item.id !== id));
+    }, 3600);
+  }
+
+  function setInfoFeedback(message: string) {
+    setInfo(message);
+    setError(null);
+    pushToast("success", message);
+  }
+
+  function setErrorFeedback(message: string) {
+    setError(message);
+    pushToast("error", message);
+  }
+
+  async function copyShareLink() {
+    if (!shareUrl) return;
+
     try {
-      const visibleRows = await fetchVisibleConnections(supabase, myUserId);
-      rows = visibleRows
-        .map((row) => ({
-          id: row.id,
-          status: row.status as "pending" | "accepted" | "blocked",
-          requester_id: row.requester_id,
-          target_id: row.target_id,
-          blocked_by: row.blocked_by,
-        }))
-        .filter((row) => {
-          const pairA = row.requester_id === myUserId && row.target_id === profileId;
-          const pairB = row.requester_id === profileId && row.target_id === myUserId;
-          return pairA || pairB;
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        pushToast("success", "Profile link copied.");
+        return;
+      }
+
+      if (typeof document !== "undefined") {
+        const input = document.createElement("input");
+        input.value = shareUrl;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+        pushToast("success", "Profile link copied.");
+        return;
+      }
+
+      pushToast("info", "Copy is not supported on this device.");
+    } catch {
+      pushToast("error", "Could not copy the profile link.");
+    }
+  }
+
+  async function shareProfile() {
+    if (!profileUserId || !profile || !shareUrl) return;
+    const location = [profile.city, profile.country].filter(Boolean).join(", ");
+    const text = location
+      ? `Check out ${profile.displayName}'s ConXion profile from ${location}.`
+      : `Check out ${profile.displayName}'s ConXion profile.`;
+    const prefersNativeShare =
+      typeof window !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function" &&
+      window.matchMedia("(max-width: 767px), (pointer: coarse)").matches;
+
+    try {
+      if (prefersNativeShare) {
+        await navigator.share({
+          title: `${profile.displayName} on ConXion`,
+          text,
+          url: shareUrl,
         });
+        pushToast("success", "Profile shared.");
+        return;
+      }
+
+      setShareDialogOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load connection state.");
+      if (err instanceof Error && err.name === "AbortError") return;
+      pushToast("error", "Could not share profile. Try again.");
+    }
+  }
+
+  async function toggleFollowingMember() {
+    if (!meId || !profileUserId || !profile || isSelf) return;
+    const nextFollowing = !contactFollowing;
+    const danceStyles = Object.keys(profile.danceSkills ?? {}).filter((value) => value.trim().length > 0);
+
+    setFollowingBusy(true);
+    setError(null);
+    setInfo(null);
+
+    const basePayload = {
+      user_id: meId,
+      contact_type: "member",
+      linked_user_id: profileUserId,
+      name: profile.displayName || "Member",
+      role: profile.roles ?? [],
+      city: profile.city || null,
+      country: profile.country || null,
+      instagram: profile.instagramHandle || null,
+      whatsapp: profile.whatsappHandle || null,
+      email: null,
+      tags: [] as string[],
+      notes: null,
+    };
+
+    if (followContactId) {
+      const updateRes = await supabase
+        .from("dance_contacts")
+        .update({
+          is_following: nextFollowing,
+          track_activity: nextFollowing ? [...FOLLOW_TRACK_ACTIVITY_DEFAULTS] : [],
+        })
+        .eq("id", followContactId)
+        .eq("user_id", meId)
+        .select("id")
+        .maybeSingle();
+
+      if (updateRes.error) {
+        setFollowingBusy(false);
+        if (isColumnMissingMessage(updateRes.error.message)) {
+          setErrorFeedback("Following needs the relationship-layer SQL migration: scripts/sql/2026-03-17_network_relationship_layer.sql");
+          return;
+        }
+        if (isSchemaMissingMessage(updateRes.error.message)) {
+          setErrorFeedback("Dance Contacts is not ready yet. Run SQL migration: scripts/sql/2026-03-05_dashboard_dance_contacts.sql");
+          return;
+        }
+        setErrorFeedback(updateRes.error.message);
+        return;
+      }
+
+      setFollowingBusy(false);
+      setContactFollowing(nextFollowing);
+      setInfoFeedback(
+        nextFollowing
+          ? "Added to Following. You can add a private note later from Network > Following."
+          : "Removed from Following."
+      );
       return;
     }
 
-    setState(deriveConnectionState(rows, myUserId, profileId));
+    const insertPayload = {
+      ...basePayload,
+      meeting_context: null,
+      is_following: nextFollowing,
+      track_activity: nextFollowing ? [...FOLLOW_TRACK_ACTIVITY_DEFAULTS] : [],
+      dance_styles: danceStyles,
+    };
+
+    const upsertRes = await supabase
+      .from("dance_contacts")
+      .upsert(insertPayload, { onConflict: "user_id,linked_user_id" })
+      .select("id,is_following")
+      .single();
+
+    if (upsertRes.error) {
+      setFollowingBusy(false);
+      if (isColumnMissingMessage(upsertRes.error.message)) {
+        setErrorFeedback("Following needs the relationship-layer SQL migration: scripts/sql/2026-03-17_network_relationship_layer.sql");
+        return;
+      }
+      if (isSchemaMissingMessage(upsertRes.error.message)) {
+        setErrorFeedback("Dance Contacts is not ready yet. Run SQL migration: scripts/sql/2026-03-05_dashboard_dance_contacts.sql");
+        return;
+      }
+      setErrorFeedback(upsertRes.error.message);
+      return;
+    }
+
+    const upsertedRow = asRecord(upsertRes.data);
+    setFollowingBusy(false);
+    setFollowContactId(pickString(upsertedRow, ["id"]) || null);
+    setContactFollowing(nextFollowing);
+    setInfoFeedback("Added to Following. You can add a private note later from Network > Following.");
+  }
+
+  function closeActionMenu() {
+    setActionMenu(null);
+  }
+
+  async function signOutFromProfile() {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore sign-out network errors and continue with local redirect.
+    }
+    window.location.assign("/auth");
+  }
+
+  function openActionMenu(event: MouseEvent<HTMLButtonElement>, source: "desktop" | "mobile", placement: "above" | "below") {
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const width = 264;
+    const margin = 12;
+    const left = Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin));
+    const anchorY = placement === "below" ? rect.bottom + 8 : rect.top - 8;
+
+    setActionMenu((current) => {
+      if (
+        current &&
+        current.source === source &&
+        current.placement === placement &&
+        Math.abs(current.anchorY - anchorY) < 1 &&
+        Math.abs(current.left - left) < 1
+      ) {
+        return null;
+      }
+      return { source, placement, anchorY, left, width };
+    });
   }
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError(null);
+    if (!actionMenu) return;
 
-      const { data: auth } = await supabase.auth.getUser();
-      const user = auth.user;
-      if (!user) {
-        router.replace("/auth");
-        return;
-      }
-      setMeId(user.id);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeActionMenu();
+    };
+    const handleViewportChange = () => closeActionMenu();
 
-      // connections check first
-      let rows: ConnectionRow[] = [];
-      try {
-        const visibleRows = await fetchVisibleConnections(supabase, user.id);
-        rows = visibleRows
-          .map((row) => ({
-            id: row.id,
-            status: row.status as "pending" | "accepted" | "blocked",
-            requester_id: row.requester_id,
-            target_id: row.target_id,
-            blocked_by: row.blocked_by,
-          }))
-          .filter((row) => {
-            const pairA = row.requester_id === user.id && row.target_id === profileId;
-            const pairB = row.requester_id === profileId && row.target_id === user.id;
-            return pairA || pairB;
-          });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load connections.");
-        setLoading(false);
-        return;
-      }
-      if (rows.some((r) => isBlockedConnection(r))) {
-        router.replace("/connections");
-        return;
-      }
-
-      if (profileId === user.id) setState({ status: "accepted", id: "self" });
-      else setState(deriveConnectionState(rows, user.id, profileId));
-
-      // fetch profile
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select(
-          [
-            "user_id",
-            "display_name",
-            "city",
-            "country",
-            "roles",
-            "languages",
-            "dance_skills",
-            "instagram_handle",
-            "whatsapp_handle",
-            "youtube_url",
-            "avatar_url",
-            "verified",
-            "verified_label",
-          ].join(",")
-        )
-        .eq("user_id", profileId)
-        .maybeSingle();
-
-      if (profErr) {
-        setError(profErr.message);
-        setLoading(false);
-        return;
-      }
-
-      const row = (prof ?? null) as ProfileRow | null;
-      const normalized = row
-        ? ({
-            user_id: row.user_id ?? "",
-            display_name: row.display_name ?? "—",
-            city: row.city ?? "—",
-            country: row.country ?? null,
-            roles: Array.isArray(row.roles) ? row.roles.filter(isString) : [],
-            languages: Array.isArray(row.languages) ? row.languages.filter(isString) : [],
-            dance_skills:
-              row.dance_skills && typeof row.dance_skills === "object"
-                ? (row.dance_skills as DanceSkills)
-                : {},
-            instagram_handle: row.instagram_handle ?? null,
-            whatsapp_handle: row.whatsapp_handle ?? null,
-            youtube_url: row.youtube_url ?? null,
-            avatar_url: row.avatar_url ?? null,
-            verified: Boolean(row.verified),
-            verified_label: row.verified_label ?? null,
-          } as Profile)
-        : null;
-
-      setProfile(normalized);
-      setLoading(false);
-    })();
-  }, [profileId, router]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadReferences() {
-      if (!meId) return;
-      setReferencesLoading(true);
-
-      const referencesRes = await supabase
-        .from("references")
-        .select("id,author_id,recipient_id,sentiment,body,context,entity_type,created_at,reply_text")
-        .eq("recipient_id", profileId)
-        .order("created_at", { ascending: false })
-        .limit(150);
-
-      if (referencesRes.error) {
-        if (!cancelled) {
-          setReferences([]);
-          setReferenceAuthors({});
-          setReferencesLoading(false);
-        }
-        return;
-      }
-
-      const rows: ReferenceRow[] = [];
-      ((referencesRes.data ?? []) as ReferenceRowDb[]).forEach((row) => {
-        const id = row.id ?? "";
-        const authorId = row.author_id ?? "";
-        const recipientId = row.recipient_id ?? "";
-        const createdAt = row.created_at ?? "";
-        const sentiment = row.sentiment;
-        if (!id || !authorId || !recipientId || !createdAt) return;
-        if (sentiment !== "positive" && sentiment !== "neutral" && sentiment !== "negative") return;
-
-        rows.push({
-          id,
-          author_id: authorId,
-          recipient_id: recipientId,
-          sentiment,
-          body: row.body ?? "",
-          context: row.context ?? null,
-          entity_type: row.entity_type ?? null,
-          created_at: createdAt,
-          reply_text: row.reply_text ?? null,
-        });
-      });
-
-      const authorIds = Array.from(new Set(rows.map((row) => row.author_id))).filter(Boolean);
-      const authorsMap: Record<string, string> = {};
-      if (authorIds.length > 0) {
-        const authorsRes = await supabase.from("profiles").select("user_id,display_name").in("user_id", authorIds);
-        if (!authorsRes.error) {
-          ((authorsRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
-            const userId = typeof row.user_id === "string" ? row.user_id : "";
-            if (!userId) return;
-            authorsMap[userId] = typeof row.display_name === "string" && row.display_name.trim().length > 0 ? row.display_name : "Member";
-          });
-        }
-      }
-
-      if (!cancelled) {
-        setReferences(rows);
-        setReferenceAuthors(authorsMap);
-        setReferencesLoading(false);
-      }
-    }
-
-    void loadReferences();
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
 
     return () => {
-      cancelled = true;
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
     };
-  }, [meId, profileId]);
+  }, [actionMenu]);
 
-  async function connect() {
-    if (!meId) return;
-    setBusy(true);
-    setError(null);
+  function markPanelsSynced() {
+    const syncedAt = new Date().toISOString();
+    setLastSyncedByTab({
+      overview: syncedAt,
+      references: syncedAt,
+      "dance-tools": syncedAt,
+      trips: syncedAt,
+      events: syncedAt,
+    });
+  }
 
-    const { data: existing, error: exErr } = await supabase
-      .from("connections")
-      .select("id,status")
-      .eq("requester_id", profileId)
-      .eq("target_id", meId)
-      .maybeSingle();
-
-    if (exErr) {
-      setBusy(false);
-      setError(exErr.message);
-      return;
+  function handleTabChange(nextTab: TabKey) {
+    if (nextTab === tab) return;
+    if (panelSwitchTimerRef.current) {
+      window.clearTimeout(panelSwitchTimerRef.current);
+      panelSwitchTimerRef.current = null;
     }
-
-    if (existing && existing.status === "pending") {
-      try {
-        await callConnectionAction({ connId: existing.id, action: "accept" });
-      } catch (err) {
-        setBusy(false);
-        return setError(err instanceof Error ? err.message : "Failed to accept request.");
-      }
-      setBusy(false);
-      await refreshConnectionState(meId);
-      return;
-    }
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token ?? "";
-    if (!accessToken) {
-      setBusy(false);
-      setError("Missing auth session. Please sign in again.");
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/connect", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          requesterId: meId,
-          targetId: profileId,
-          payload: {
-            connect_context: "member",
-          },
-        }),
-      });
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-
-      setBusy(false);
-      if (!response.ok || !result?.ok) return setError(result?.error ?? "Failed to send request");
-      await refreshConnectionState(meId);
-    } catch (err) {
-      setBusy(false);
-      return setError(err instanceof Error ? err.message : "Failed to send request");
-    }
+    setTabTransitionLoading(true);
+    setTab(nextTab);
+    panelSwitchTimerRef.current = window.setTimeout(() => {
+      setLastSyncedByTab((prev) => ({ ...prev, [nextTab]: new Date().toISOString() }));
+      setTabTransitionLoading(false);
+      panelSwitchTimerRef.current = null;
+    }, 220);
   }
 
   async function callConnectionAction(payload: {
@@ -516,7 +1280,7 @@ export default function ProfilePage() {
   }) {
     const { data: sessionData } = await supabase.auth.getSession();
     const accessToken = sessionData.session?.access_token ?? "";
-    if (!accessToken) throw new Error("Missing auth session token");
+    if (!accessToken) throw new Error("Missing auth session token.");
 
     const response = await fetch("/api/connections/action", {
       method: "POST",
@@ -526,339 +1290,2267 @@ export default function ProfilePage() {
       },
       body: JSON.stringify(payload),
     });
+
     const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!response.ok || !result?.ok) {
-      throw new Error(result?.error ?? `Failed to ${payload.action}`);
-    }
+    if (!response.ok || !result?.ok) throw new Error(result?.error ?? `Failed to ${payload.action}.`);
   }
 
-  async function accept() {
-    if (!meId) return;
-    if (state.status !== "pending" || state.role !== "target") return;
+  async function refreshPairConnectionState(userId: string, visibleConnections?: VisibleConnectionRow[]) {
+    if (!profileUserId) return;
+
+    const rows =
+      visibleConnections ??
+      (await fetchVisibleConnections(supabase, userId).catch(() => [] as VisibleConnectionRow[]));
+
+    const pairRows = rows
+      .map((row) => ({
+        id: row.id,
+        status: row.status as "pending" | "accepted" | "blocked",
+        requester_id: row.requester_id,
+        target_id: row.target_id,
+        blocked_by: row.blocked_by,
+      }))
+      .filter((row) => {
+        const pairA = row.requester_id === userId && row.target_id === profileUserId;
+        const pairB = row.requester_id === profileUserId && row.target_id === userId;
+        return pairA || pairB;
+      });
+
+    if (profileUserId === userId) {
+      setState({ status: "accepted", id: "self" });
+      return;
+    }
+
+    if (pairRows.some((row) => isBlockedConnection(row))) {
+      const blocked = pairRows.find((row) => isBlockedConnection(row));
+      setState(blocked ? { status: "blocked", id: blocked.id } : { status: "blocked", id: "blocked" });
+      return;
+    }
+
+    setState(deriveConnectionState(pairRows, userId, profileUserId));
+  }
+
+  useEffect(() => {
+    return () => {
+      if (panelSwitchTimerRef.current) {
+        window.clearTimeout(panelSwitchTimerRef.current);
+        panelSwitchTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loading) setAnimateMetrics(true);
+  }, [loading]);
+
+  useEffect(() => {
+    const verificationState = searchParams.get("verification");
+    if (verificationState === "cancelled") {
+      clearVerificationResume();
+      return;
+    }
+    if (verificationState !== "success" || !profileUserId) return;
+
+    setInfo(VERIFICATION_SUCCESS_MESSAGE);
+    const resume = loadVerificationResume();
+    if (resume?.kind === "profile_hosting_request" && resume.profileId === profileUserId) {
+      clearVerificationResume();
+      router.replace(`/connections?mode=hosts&request_host=${encodeURIComponent(profileUserId)}`);
+    }
+  }, [profileUserId, router, searchParams]);
+
+  useEffect(() => {
+    if (!meId || !profileUserId || isSelf) {
+      setFollowContactId(null);
+      setContactFollowing(false);
+      return;
+    }
+    let cancelled = false;
+    async function run() {
+      let res = await supabase
+        .from("dance_contacts")
+        .select("id,is_following")
+        .eq("user_id", meId)
+        .eq("linked_user_id", profileUserId)
+        .limit(1)
+        .maybeSingle();
+      if (res.error && isColumnMissingMessage(res.error.message)) {
+        res = await supabase
+          .from("dance_contacts")
+          .select("id")
+          .eq("user_id", meId)
+          .eq("linked_user_id", profileUserId)
+          .limit(1)
+          .maybeSingle();
+      }
+      if (cancelled) return;
+      if (res.error) {
+        setFollowContactId(null);
+        setContactFollowing(false);
+        return;
+      }
+      const row = asRecord(res.data);
+      const nextId = pickString(row, ["id"]);
+      setFollowContactId(nextId || null);
+      setContactFollowing(row.is_following === true);
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [meId, profileUserId, isSelf]);
+
+  useEffect(() => {
+    if (!routeProfileKey) {
+      setLoading(false);
+      setError("Profile is missing.");
+      return;
+    }
+    const resolvedRouteProfileKey = routeProfileKey;
+
+    let cancelled = false;
+
+    async function load() {
+      let initialReady = false;
+      setLoading(true);
+      setTabTransitionLoading(false);
+      setSupportingPanelsLoading(false);
+      setError(null);
+      setSupportingDataError(null);
+      setTeacherInquiryEnabled(false);
+      setRequestInfoOpen(false);
+      setInfo(null);
+      setViewerVerified(false);
+      setViewerIsAdmin(false);
+      setProfile(null);
+      setState({ status: "none" });
+      setDanceGoalsCount(0);
+      setDanceCompetitionsCount(0);
+      setProfileMedia([]);
+      setRequestResponseStats(EMPTY_PROFILE_REQUEST_RESPONSE_STATS);
+      setViewerAcceptedUserIds([]);
+      setReferences([]);
+      setTrips([]);
+      setEventsTimeline([]);
+      setSyncs([]);
+      setAcceptedConnections([]);
+      setProfilesById({});
+      setReferenceAuthors({});
+      setAuthoredReferenceTypes(new Set());
+      setPendingReferenceTypes(new Set());
+      setLastSyncedByTab(EMPTY_LAST_SYNCED_BY_TAB);
+
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const user = auth.user;
+        if (!user) {
+          router.replace("/auth");
+          return;
+        }
+
+        const myUserId = user.id;
+        setMeId(myUserId);
+
+        const profileSelect = [
+          "user_id",
+          "username",
+          "display_name",
+          "city",
+          "country",
+          "avatar_url",
+          "avatar_path",
+          "verified",
+          "verified_label",
+          "can_host",
+          "hosting_status",
+          "max_guests",
+          "hosting_last_minute_ok",
+          "hosting_preferred_guest_gender",
+          "hosting_kid_friendly",
+          "hosting_pet_friendly",
+          "hosting_smoking_allowed",
+          "hosting_sleeping_arrangement",
+          "hosting_guest_share",
+          "hosting_transit_access",
+          "roles",
+          "languages",
+          "dance_skills",
+          "interests",
+          "availability",
+          "created_at",
+          "last_seen_at",
+          "instagram_handle",
+          "whatsapp_handle",
+          "youtube_url",
+        ].join(",");
+
+        const visibleConnectionsPromise = fetchVisibleConnections(supabase, myUserId).catch(() => [] as VisibleConnectionRow[]);
+        const viewerProfilePromise = supabase.from("profiles").select("verified,verified_label").eq("user_id", myUserId).maybeSingle();
+        const viewerAdminPromise = supabase.from("admins").select("user_id").eq("user_id", myUserId).maybeSingle();
+        const profilePromise = isUuidLike(resolvedRouteProfileKey)
+          ? supabase.from("profiles").select(profileSelect).eq("user_id", resolvedRouteProfileKey).maybeSingle()
+          : supabase
+              .from("profiles")
+              .select(profileSelect)
+              .eq("username", normalizeProfileUsernameInput(resolvedRouteProfileKey))
+              .maybeSingle();
+
+        const [profileRes, viewerProfileRes, viewerAdminRes, visibleConnections] = await Promise.all([
+          profilePromise,
+          viewerProfilePromise,
+          viewerAdminPromise,
+          visibleConnectionsPromise,
+        ]);
+
+        if (cancelled) return;
+
+        setViewerAcceptedUserIds(
+          Array.from(
+            new Set(
+              visibleConnections
+                .filter((row) => row.is_accepted_visible && row.other_user_id && row.other_user_id !== myUserId)
+                .map((row) => row.other_user_id)
+            )
+          )
+        );
+
+        if (profileRes.error) {
+          setError(profileRes.error.message);
+          return;
+        }
+
+        const profileRow = profileRes.data ? asRecord(profileRes.data) : null;
+        if (!profileRow) {
+          setError("Profile not found.");
+          return;
+        }
+
+        const resolvedProfileId = pickString(profileRow, ["user_id"]);
+        if (!resolvedProfileId) {
+          setError("Profile not found.");
+          return;
+        }
+        const resolvedRoles = asStringArrayLoose(profileRow.roles);
+        const isTeacherRoleProfile = hasTeacherBadgeRole(resolvedRoles);
+
+        const pairRows = visibleConnections
+          .map((row) => ({
+            id: row.id,
+            status: row.status as "pending" | "accepted" | "blocked",
+            requester_id: row.requester_id,
+            target_id: row.target_id,
+            blocked_by: row.blocked_by,
+          }))
+          .filter((row) => {
+            const pairA = row.requester_id === myUserId && row.target_id === resolvedProfileId;
+            const pairB = row.requester_id === resolvedProfileId && row.target_id === myUserId;
+            return pairA || pairB;
+          });
+
+        if (pairRows.some((row) => isBlockedConnection(row))) {
+          router.replace("/connections");
+          return;
+        }
+
+        if (!viewerProfileRes.error) {
+          setViewerVerified(isPaymentVerified((viewerProfileRes.data ?? null) as Record<string, unknown> | null));
+        }
+        if (!viewerAdminRes.error) {
+          setViewerIsAdmin(Boolean(viewerAdminRes.data));
+        }
+
+        if (resolvedProfileId === myUserId) {
+          setState({ status: "accepted", id: "self" });
+        } else {
+          setState(deriveConnectionState(pairRows, myUserId, resolvedProfileId));
+        }
+
+        const normalizedProfile: ProfileData = {
+          userId: resolvedProfileId,
+          username: pickNullableString(profileRow, ["username"]),
+          displayName: pickString(profileRow, ["display_name"], "Member"),
+          city: pickString(profileRow, ["city"]),
+          country: pickString(profileRow, ["country"]),
+          avatarUrl: resolveAvatarUrl({
+            avatarUrl: pickNullableString(profileRow, ["avatar_url"]),
+            avatarPath: pickNullableString(profileRow, ["avatar_path"]),
+          }),
+          verified: profileRow.verified === true,
+          verifiedLabel: isPaymentVerified(profileRow) ? VERIFIED_VIA_PAYMENT_LABEL : null,
+          canHost: profileRow.can_host === true,
+          hostingStatus: pickNullableString(profileRow, ["hosting_status"]),
+          maxGuests:
+            typeof profileRow.max_guests === "number" && Number.isFinite(profileRow.max_guests)
+              ? profileRow.max_guests
+              : null,
+          hostingLastMinuteOk: profileRow.hosting_last_minute_ok === true,
+          hostingPreferredGuestGender: normalizeHostingPreferredGuestGender(profileRow.hosting_preferred_guest_gender),
+          hostingKidFriendly: profileRow.hosting_kid_friendly === true,
+          hostingPetFriendly: profileRow.hosting_pet_friendly === true,
+          hostingSmokingAllowed: profileRow.hosting_smoking_allowed === true,
+          hostingSleepingArrangement: normalizeHostingSleepingArrangement(profileRow.hosting_sleeping_arrangement),
+          hostingGuestShare: pickNullableString(profileRow, ["hosting_guest_share"]),
+          hostingTransitAccess: pickNullableString(profileRow, ["hosting_transit_access"]),
+          roles: asStringArrayLoose(profileRow.roles),
+          languages: asStringArrayLoose(profileRow.languages),
+          danceSkills:
+            profileRow.dance_skills && typeof profileRow.dance_skills === "object"
+              ? (profileRow.dance_skills as DanceSkills)
+              : {},
+          interests: asStringArrayLoose(profileRow.interests),
+          availability: asStringArrayLoose(profileRow.availability),
+          createdAt: pickNullableString(profileRow, ["created_at"]),
+          lastSeenAt: pickNullableString(profileRow, ["last_seen_at"]),
+          instagramHandle: pickNullableString(profileRow, ["instagram_handle"]),
+          whatsappHandle: pickNullableString(profileRow, ["whatsapp_handle"]),
+          youtubeUrl: pickNullableString(profileRow, ["youtube_url"]),
+        };
+
+        setProfile(normalizedProfile);
+        initialReady = true;
+        setLoading(false);
+        setSupportingPanelsLoading(true);
+
+        void (async () => {
+          let hasSupportingDataIssue = false;
+          const markSupportingDataIssue = () => {
+            hasSupportingDataIssue = true;
+          };
+
+          try {
+            const profileMediaPromise = fetchProfileMedia(supabase, {
+              userId: resolvedProfileId,
+              viewerUserId: myUserId,
+              includeAllOwn: myUserId === resolvedProfileId,
+            }).catch((mediaError) => {
+              const message = mediaError instanceof Error ? mediaError.message : "Could not load profile media.";
+              if (!isSchemaMissingMessage(message)) {
+                console.warn("[profile] profile media query failed", message);
+                markSupportingDataIssue();
+              }
+              return [] as ProfileMediaItem[];
+            });
+            const requestResponseStatsPromise = fetchProfileRequestResponseStats(supabase, resolvedProfileId).catch((statsError) => {
+              const message = statsError instanceof Error ? statsError.message : "Could not load profile response stats.";
+              if (!isSchemaMissingMessage(message)) {
+                console.warn("[profile] response stats query failed", message);
+                markSupportingDataIssue();
+              }
+              return EMPTY_PROFILE_REQUEST_RESPONSE_STATS;
+            });
+            const teacherInquiryAvailabilityPromise = isTeacherRoleProfile
+              ? fetch(`/api/teacher-info/public/${encodeURIComponent(resolvedProfileId)}`, { cache: "no-store" })
+                  .then(async (response) => {
+                    const result = (await response.json().catch(() => null)) as { ok?: boolean; enabled?: boolean } | null;
+                    if (!response.ok || !result?.ok) {
+                      markSupportingDataIssue();
+                      return true;
+                    }
+                    return result.enabled === true;
+                  })
+                  .catch(() => {
+                    markSupportingDataIssue();
+                    return true;
+                  })
+              : Promise.resolve(false);
+            const danceCompetitionsCountPromise =
+              myUserId === resolvedProfileId
+                ? supabaseCompat.from("dance_competitions_user").select("id", { head: true, count: "exact" }).eq("user_id", resolvedProfileId)
+                : Promise.resolve({ count: 0, error: null });
+            const danceGoalsCountPromise =
+              myUserId === resolvedProfileId
+                ? supabaseCompat.from("dance_goals_user").select("id", { head: true, count: "exact" }).eq("user_id", resolvedProfileId)
+                : Promise.resolve({ count: 0, error: null });
+
+            const [
+              profileReferenceRows,
+              tripsRes,
+              hostedEventsRes,
+              memberEventsRes,
+              profileMediaRows,
+              profileRequestResponseStats,
+              teacherInquiryAvailable,
+              danceCompetitionsCountRes,
+              danceGoalsCountRes,
+              acceptedConnectionsDirect,
+              connectionSyncsByMemberRes,
+            ] = await Promise.all([
+              fetchReferencesForMember(supabase, {
+                memberId: resolvedProfileId,
+                select: "*",
+                perColumnLimit: 400,
+              }),
+              supabase
+                .from("trips")
+                .select("id,user_id,destination_city,destination_country,start_date,end_date,purpose,status,created_at")
+                .eq("user_id", resolvedProfileId)
+                .order("start_date", { ascending: false })
+                .limit(300),
+              supabase.from("events").select("*").eq("host_user_id", resolvedProfileId).order("starts_at", { ascending: false }).limit(300),
+              supabase.from("event_members").select("*").eq("user_id", resolvedProfileId).in("status", ["host", "going", "waitlist"]).limit(500),
+              profileMediaPromise,
+              requestResponseStatsPromise,
+              teacherInquiryAvailabilityPromise,
+              danceCompetitionsCountPromise,
+              danceGoalsCountPromise,
+              supabase
+                .from("connections")
+                .select("id,requester_id,target_id,status")
+                .or(`requester_id.eq.${resolvedProfileId},target_id.eq.${resolvedProfileId}`)
+                .eq("status", "accepted")
+                .limit(500),
+              supabase
+                .from("connection_syncs")
+                .select("id,connection_id,status,sync_type,scheduled_at,note,completed_at,created_at,requester_id,recipient_id")
+                .or(`requester_id.eq.${resolvedProfileId},recipient_id.eq.${resolvedProfileId}`)
+                .order("created_at", { ascending: false })
+                .limit(500),
+            ]);
+
+            if (cancelled) return;
+
+            setTeacherInquiryEnabled(teacherInquiryAvailable);
+            setProfileMedia(profileMediaRows);
+            setRequestResponseStats(profileRequestResponseStats);
+            if (danceCompetitionsCountRes?.error) {
+              if (!isSchemaMissingMessage(danceCompetitionsCountRes.error.message)) {
+                console.warn("[profile] dance competitions count query failed", danceCompetitionsCountRes.error.message);
+                markSupportingDataIssue();
+              }
+              setDanceCompetitionsCount(0);
+            } else {
+              setDanceCompetitionsCount(Math.max(0, danceCompetitionsCountRes?.count ?? 0));
+            }
+            if (danceGoalsCountRes?.error) {
+              if (!isSchemaMissingMessage(danceGoalsCountRes.error.message)) {
+                console.warn("[profile] dance goals count query failed", danceGoalsCountRes.error.message);
+                markSupportingDataIssue();
+              }
+              setDanceGoalsCount(0);
+            } else {
+              setDanceGoalsCount(Math.max(0, danceGoalsCountRes?.count ?? 0));
+            }
+
+            const nowIso = new Date().toISOString();
+            const [authoredRefsForPairRes, pendingPromptsRes] =
+              resolvedProfileId && myUserId !== resolvedProfileId
+                ? await Promise.all([
+                    supabase
+                      .from("references")
+                      .select("id,context_tag,context,entity_type")
+                      .eq("author_id", myUserId)
+                      .eq("recipient_id", resolvedProfileId)
+                      .limit(200),
+                    supabase
+                      .from("reference_requests")
+                      .select("id,context_tag,due_at,expires_at,status")
+                      .eq("user_id", myUserId)
+                      .eq("peer_user_id", resolvedProfileId)
+                      .eq("status", "pending")
+                      .lte("due_at", nowIso)
+                      .gte("expires_at", nowIso)
+                      .limit(200),
+                  ])
+                : [{ data: [], error: null }, { data: [], error: null }];
+
+            if (cancelled) return;
+
+            const authoredTypes = new Set<ReferenceContextTag>();
+            if (!authoredRefsForPairRes.error) {
+              for (const raw of ((authoredRefsForPairRes.data ?? []) as unknown[])) {
+                const row = asRecord(raw);
+                authoredTypes.add(normalizeContext(pickString(row, ["context_tag", "context", "entity_type"], "collaboration")));
+              }
+            } else if (!isSchemaMissingMessage(authoredRefsForPairRes.error.message)) {
+              markSupportingDataIssue();
+            }
+            setAuthoredReferenceTypes(authoredTypes);
+
+            const pendingTypes = new Set<ReferenceContextTag>();
+            if (!pendingPromptsRes.error) {
+              for (const raw of ((pendingPromptsRes.data ?? []) as unknown[])) {
+                const row = asRecord(raw);
+                pendingTypes.add(normalizeContext(pickString(row, ["context_tag"], "collaboration")));
+              }
+            } else if (!isSchemaMissingMessage(pendingPromptsRes.error.message)) {
+              markSupportingDataIssue();
+            }
+            setPendingReferenceTypes(pendingTypes);
+
+            const mappedRefs = mapReferenceRows(profileReferenceRows, resolvedProfileId);
+            setReferences(mappedRefs);
+
+            const mappedTrips = tripsRes.error ? [] : mapTripRows((tripsRes.data ?? []) as unknown[]);
+            setTrips(mappedTrips);
+
+            const hostedEvents = hostedEventsRes.error ? [] : mapEventRows((hostedEventsRes.data ?? []) as unknown[]);
+            const memberRows = memberEventsRes.error ? [] : mapEventMemberRows((memberEventsRes.data ?? []) as unknown[]);
+
+            const hostedEventIds = new Set(hostedEvents.map((event) => event.id));
+            const relatedEventIds = Array.from(
+              new Set(memberRows.map((row) => row.eventId).filter((eventId) => eventId && !hostedEventIds.has(eventId)))
+            );
+
+            let relatedEvents: EventRecord[] = [];
+            if (relatedEventIds.length > 0) {
+              const relatedEventsRes = await supabase.from("events").select("*").in("id", relatedEventIds);
+              if (!relatedEventsRes.error) {
+                relatedEvents = mapEventRows((relatedEventsRes.data ?? []) as unknown[]);
+              } else {
+                markSupportingDataIssue();
+              }
+            }
+
+            if (cancelled) return;
+
+            const eventsById: Record<string, EventRecord> = {};
+            [...hostedEvents, ...relatedEvents].forEach((event) => {
+              eventsById[event.id] = event;
+            });
+
+            const timeline: EventTimelineItem[] = [];
+            hostedEvents.forEach((event) => {
+              timeline.push({ event, relation: "hosted", label: "Hosted" });
+            });
+
+            memberRows.forEach((row) => {
+              if (row.status !== "going" && row.status !== "waitlist") return;
+              const event = eventsById[row.eventId];
+              if (!event) return;
+              timeline.push({
+                event,
+                relation: row.status,
+                label: row.status === "going" ? "Going" : "Waitlist",
+              });
+            });
+
+            timeline.sort((a, b) => b.event.startsAt.localeCompare(a.event.startsAt));
+            setEventsTimeline(timeline);
+
+            let acceptedRows: ConnectionLite[] = [];
+            if (!acceptedConnectionsDirect.error) {
+              acceptedRows = ((acceptedConnectionsDirect.data ?? []) as unknown[])
+                .map((raw) => {
+                  const row = asRecord(raw);
+                  const id = pickString(row, ["id"]);
+                  const requesterId = pickString(row, ["requester_id"]);
+                  const targetId = pickString(row, ["target_id"]);
+                  if (!id || !requesterId || !targetId) return null;
+                  return {
+                    id,
+                    requesterId,
+                    targetId,
+                  } satisfies ConnectionLite;
+                })
+                .filter((row): row is ConnectionLite => Boolean(row));
+            } else {
+              acceptedRows = visibleConnections
+                .filter((row) => row.is_accepted_visible && (row.requester_id === resolvedProfileId || row.target_id === resolvedProfileId))
+                .map((row) => ({
+                  id: row.id,
+                  requesterId: row.requester_id,
+                  targetId: row.target_id,
+                }));
+              if (!isSchemaMissingMessage(acceptedConnectionsDirect.error.message)) {
+                markSupportingDataIssue();
+              }
+            }
+
+            setAcceptedConnections(acceptedRows);
+
+            const connectionIds = acceptedRows.map((row) => row.id).filter(Boolean);
+            let syncRows: SyncItem[] = [];
+            if (connectionIds.length > 0) {
+              const acceptedConnectionIds = new Set(connectionIds);
+
+              if (!connectionSyncsByMemberRes.error && (connectionSyncsByMemberRes.data?.length ?? 0) > 0) {
+                syncRows = mapConnectionSyncRows(
+                  ((connectionSyncsByMemberRes.data ?? []) as unknown[]).filter((raw) => {
+                    const row = asRecord(raw);
+                    return acceptedConnectionIds.has(pickString(row, ["connection_id"]));
+                  })
+                );
+              } else {
+                if (connectionSyncsByMemberRes.error && !isSchemaMissingMessage(connectionSyncsByMemberRes.error.message)) {
+                  markSupportingDataIssue();
+                }
+                const fallback = await supabase.from("syncs").select("*").in("connection_id", connectionIds).limit(1000);
+                if (!fallback.error) {
+                  const all = mapSyncRows((fallback.data ?? []) as unknown[]);
+                  syncRows = all.filter((row) => acceptedConnectionIds.has(row.connectionId));
+                } else if (!isSchemaMissingMessage(fallback.error.message)) {
+                  markSupportingDataIssue();
+                }
+              }
+            }
+
+            if (cancelled) return;
+
+            setSyncs(syncRows);
+
+            const profileIds = new Set<string>();
+            mappedRefs.forEach((row) => {
+              if (row.authorId && row.authorId !== resolvedProfileId) profileIds.add(row.authorId);
+              if (row.recipientId && row.recipientId !== resolvedProfileId) profileIds.add(row.recipientId);
+            });
+            acceptedRows.forEach((row) => {
+              if (row.requesterId && row.requesterId !== resolvedProfileId) profileIds.add(row.requesterId);
+              if (row.targetId && row.targetId !== resolvedProfileId) profileIds.add(row.targetId);
+            });
+            timeline.forEach((item) => {
+              if (item.event.hostUserId && item.event.hostUserId !== resolvedProfileId) profileIds.add(item.event.hostUserId);
+            });
+
+            if (profileIds.size > 0) {
+              const ids = Array.from(profileIds);
+              const profileNamesRes = await supabase.from("profiles").select("user_id,display_name,avatar_url,avatar_path").in("user_id", ids);
+              if (!profileNamesRes.error) {
+                const nameMap: Record<string, ProfileListItem> = {};
+                ((profileNamesRes.data ?? []) as unknown[]).forEach((raw) => {
+                  const row = asRecord(raw);
+                  const userId = pickString(row, ["user_id"]);
+                  if (!userId) return;
+                  nameMap[userId] = {
+                    displayName: pickString(row, ["display_name"], "Member"),
+                    avatarUrl: resolveAvatarUrl({
+                      avatarUrl: pickNullableString(row, ["avatar_url"]),
+                      avatarPath: pickNullableString(row, ["avatar_path"]),
+                    }),
+                  };
+                });
+                setProfilesById(nameMap);
+
+                const authorMap: Record<string, string> = {};
+                Object.entries(nameMap).forEach(([id, value]) => {
+                  authorMap[id] = value.displayName;
+                });
+                setReferenceAuthors(authorMap);
+              } else {
+                markSupportingDataIssue();
+              }
+            } else {
+              setProfilesById({});
+              setReferenceAuthors({});
+            }
+
+            if (cancelled) return;
+            markPanelsSynced();
+            setSupportingDataError(
+              hasSupportingDataIssue ? "Some profile sections could not be loaded completely. Refresh to try again." : null
+            );
+          } catch (supportingError) {
+            if (cancelled) return;
+            console.warn(
+              "[profile] supporting data query failed",
+              supportingError instanceof Error ? supportingError.message : String(supportingError)
+            );
+            setSupportingDataError("Some profile sections could not be loaded completely. Refresh to try again.");
+          } finally {
+            if (!cancelled) setSupportingPanelsLoading(false);
+          }
+        })();
+      } catch (err: unknown) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Could not load this profile right now.");
+      } finally {
+        if (!cancelled && !initialReady) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeProfileKey, router, supabaseCompat]);
+
+  async function connect() {
+    if (!meId || !profileUserId) return;
 
     setBusy(true);
     setError(null);
+    setInfo(null);
 
+    const incomingPending = await supabase
+      .from("connections")
+      .select("id,status")
+      .eq("requester_id", profileUserId)
+      .eq("target_id", meId)
+      .maybeSingle();
+
+    if (!incomingPending.error && incomingPending.data?.id && incomingPending.data.status === "pending") {
+      try {
+        await callConnectionAction({ connId: incomingPending.data.id, action: "accept" });
+        await refreshPairConnectionState(meId);
+        setInfoFeedback("Connection accepted.");
+      } catch (err) {
+        setErrorFeedback(err instanceof Error ? err.message : "Failed to accept request.");
+      }
+      setBusy(false);
+      return;
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token ?? "";
+    if (!accessToken) {
+      setBusy(false);
+      setErrorFeedback("Missing auth session. Please sign in again.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          requesterId: meId,
+          targetId: profileUserId,
+          payload: { connect_context: "member" },
+        }),
+      });
+
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) {
+        setErrorFeedback(result?.error ?? "Failed to send request.");
+        setBusy(false);
+        return;
+      }
+
+      await refreshPairConnectionState(meId);
+      setInfoFeedback("Connection request sent.");
+    } catch (err) {
+      setErrorFeedback(err instanceof Error ? err.message : "Failed to send request.");
+    }
+
+    setBusy(false);
+  }
+
+  async function acceptRequest() {
+    if (!meId || state.status !== "pending" || state.role !== "target") return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
     try {
       await callConnectionAction({ connId: state.id, action: "accept" });
+      await refreshPairConnectionState(meId);
+      setInfoFeedback("Connection accepted.");
     } catch (err) {
-      setBusy(false);
-      return setError(err instanceof Error ? err.message : "Failed to accept request.");
+      setErrorFeedback(err instanceof Error ? err.message : "Failed to accept request.");
     }
     setBusy(false);
-
-    await refreshConnectionState(meId);
   }
 
-  async function decline() {
-    if (!meId) return;
-    if (state.status !== "pending" || state.role !== "target") return;
-
+  async function declineRequest() {
+    if (!meId || state.status !== "pending" || state.role !== "target") return;
     setBusy(true);
     setError(null);
-
+    setInfo(null);
     try {
       await callConnectionAction({ connId: state.id, action: "decline" });
+      await refreshPairConnectionState(meId);
+      setInfoFeedback("Request declined.");
     } catch (err) {
-      setBusy(false);
-      return setError(err instanceof Error ? err.message : "Failed to decline request.");
+      setErrorFeedback(err instanceof Error ? err.message : "Failed to decline request.");
     }
     setBusy(false);
-
-    setState({ status: "none" });
   }
 
-  async function block() {
-    if (!meId) return;
-
+  async function cancelRequest() {
+    if (!meId || state.status !== "pending" || state.role !== "requester") return;
     setBusy(true);
     setError(null);
-
+    setInfo(null);
     try {
-      if ("id" in state && state.id) {
-        await callConnectionAction({ connId: state.id, action: "block" });
-      } else {
-        await callConnectionAction({ action: "block", targetUserId: profileId });
-      }
+      await callConnectionAction({ connId: state.id, action: "cancel" });
+      await refreshPairConnectionState(meId);
+      setInfoFeedback("Request cancelled.");
     } catch (err) {
-      setBusy(false);
-      return setError(err instanceof Error ? err.message : "Failed to block user.");
+      setErrorFeedback(err instanceof Error ? err.message : "Failed to cancel request.");
     }
     setBusy(false);
-    await refreshConnectionState(meId);
-    router.replace("/connections");
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading…</div>;
-  if (!profile) return <div className="min-h-screen flex items-center justify-center">Profile not found.</div>;
+  async function blockMember() {
+    if (!meId || !profileUserId) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      if ("id" in state && state.id && state.id !== "self") {
+        await callConnectionAction({ connId: state.id, action: "block" });
+      } else {
+        await callConnectionAction({ action: "block", targetUserId: profileUserId });
+      }
+      setInfoFeedback("Member blocked.");
+      router.replace("/connections");
+    } catch (err) {
+      setErrorFeedback(err instanceof Error ? err.message : "Failed to block member.");
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+  }
+
+  async function reportMember() {
+    if (!meId || !profileUserId || isSelf) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      await callConnectionAction({
+        connId: "id" in state && state.id && state.id !== "self" ? state.id : undefined,
+        targetUserId: profileUserId,
+        action: "report",
+        reason: "profile_concern",
+        context: "profile",
+        contextId: profileUserId,
+      });
+      setInfoFeedback("Report submitted. Our moderation team will review it.");
+    } catch (err) {
+      setErrorFeedback(err instanceof Error ? err.message : "Failed to submit report.");
+    }
+    setBusy(false);
+  }
+
+  if (loading) {
+    return <ProfilePageSkeleton />;
+  }
+
+  if (!profileUserId || !profile) {
+    return (
+      <div className="min-h-screen bg-[#05070c] text-slate-100">
+        <Nav />
+        <main className="mx-auto flex min-h-[60vh] max-w-[1200px] items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
+          <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
+            {error ?? "Profile not found."}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6">
-      <div className="mx-auto max-w-2xl">
-        <Nav />
+    <div className="min-h-screen bg-[#05070c] text-slate-100">
+      <Nav />
 
-        <div className="rounded-2xl bg-white border border-zinc-200 p-8">
-          <button onClick={() => router.back()} className="text-sm text-red-700 underline">
-            Back
-          </button>
-
-          <div className="mt-4 flex items-center gap-4">
-            {/* FIX: Avatar component - no userId prop */}
-            <Avatar src={profile.avatar_url} alt="Avatar" size={80} className="rounded-2xl" />
-
-            <div className="flex-1 min-w-0">
-              <h1 className="flex items-center gap-2">
-                <span className="text-2xl font-semibold truncate">{profile.display_name}</span>
-                {!!profile.verified && <VerifiedBadge size={18} className="ml-1" />}
-              </h1>
-
-              <p className="text-zinc-600">
-                {profile.city}
-                {profile.country ? `, ${profile.country}` : ""}
-              </p>
-            </div>
-          </div>
-
-          {error && (
-            <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{error}</p>
-          )}
-
-          {/* Dance skills */}
-          <div className="mt-5">
-            <div className="text-sm font-medium text-zinc-700">Dance skills</div>
-
-            {skillsList.length ? (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {skillsList.map((x) => (
-                  <span
-                    key={x.style}
-                    className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm"
-                  >
-                    <span className="font-medium">{titleCase(x.style)}</span>
-                    <span className="text-zinc-500">•</span>
-                    <span className="text-zinc-700">{x.level || "—"}</span>
-                    {x.verified ? <VerifiedBadge size={16} className="ml-1" /> : null}
+      <main className={cx("mx-auto w-full max-w-[1280px] px-4 pt-6 sm:px-6 lg:px-8", !isSelf ? "pb-20" : "pb-16")}>
+        {toasts.length ? (
+          <div className="pointer-events-none fixed left-1/2 top-[74px] z-[95] flex w-[min(94vw,560px)] -translate-x-1/2 flex-col gap-2">
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                className={cx(
+                  "toast-in rounded-xl border px-4 py-2.5 text-sm shadow-[0_14px_34px_rgba(0,0,0,0.45)] backdrop-blur",
+                  toast.kind === "success"
+                    ? "border-emerald-300/35 bg-emerald-400/15 text-emerald-50"
+                    : toast.kind === "error"
+                      ? "border-rose-300/35 bg-rose-400/15 text-rose-50"
+                      : "border-cyan-300/35 bg-cyan-300/15 text-cyan-50"
+                )}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[15px]">
+                    {toast.kind === "success" ? "check_circle" : toast.kind === "error" ? "error" : "info"}
                   </span>
-                ))}
+                  {toast.message}
+                </span>
               </div>
-            ) : (
-              <div className="mt-2 text-sm text-zinc-600">No dance skills listed.</div>
-            )}
+            ))}
+          </div>
+        ) : null}
+
+        <section className="relative overflow-visible rounded-[28px] border border-cyan-200/10 bg-[#0b141a]/70 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="hero-ambient hero-ambient--left" />
+            <div className="hero-ambient hero-ambient--right" />
+            <div className="hero-noise" />
+          </div>
+          <div className="relative h-28 w-full sm:h-36">
+            <div className="absolute inset-0 bg-[linear-gradient(130deg,rgba(14,116,144,0.45),rgba(192,38,211,0.32))]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.24),transparent_52%)]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_18%,rgba(232,121,249,0.2),transparent_58%)]" />
+            {isTeacherProfile ? (
+              <div className="pointer-events-none absolute inset-y-0 right-4 hidden items-start justify-end pt-3 sm:flex sm:right-6 sm:pt-4 lg:right-8">
+                <TeacherBadge className="w-[190px] sm:w-[280px] lg:w-[360px]" />
+              </div>
+            ) : null}
           </div>
 
-          {/* Roles / Languages */}
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="font-medium flex items-center gap-2 text-sm">🎭 Roles</div>
-              <div className="mt-2 text-sm text-zinc-700">
-                {(profile.roles ?? []).length ? profile.roles.join(", ") : "—"}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="font-medium flex items-center gap-2 text-sm">🗣️ Languages</div>
-              <div className="mt-2 text-sm text-zinc-700">
-                {(profile.languages ?? []).length ? profile.languages.join(", ") : "—"}
-              </div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          {profile.user_id !== meId && (
-            <div className="mt-6 flex flex-wrap gap-2">
-              {state.status === "none" && (
-                <button
-                  onClick={connect}
-                  disabled={busy}
-                  className="rounded-xl bg-red-700 px-4 py-2 text-sm text-white hover:bg-red-800 disabled:opacity-60"
-                >
-                  {busy ? "Sending…" : "Connect"}
-                </button>
-              )}
-
-              {state.status === "pending" && state.role === "requester" && (
-                <div className="rounded-xl bg-zinc-50 border border-zinc-200 px-4 py-2 text-sm text-zinc-700">
-                  Request pending…
-                </div>
-              )}
-
-              {state.status === "pending" && state.role === "target" && (
-                <>
+          <div className="relative px-4 pb-6 sm:px-6 lg:px-8">
+            <div className="-mt-16 flex flex-col gap-5 sm:-mt-20 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex min-w-0 flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:text-left">
+                <div className="relative shrink-0">
+                  {isTeacherProfile ? (
+                    <span className="absolute -top-5 left-1/2 z-10 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100 sm:hidden">
+                      Teacher
+                    </span>
+                  ) : null}
                   <button
-                    onClick={decline}
-                    disabled={busy}
-                    className="rounded-xl border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:opacity-60"
+                    type="button"
+                    onClick={() => {
+                      setAvatarPreviewFailed(false);
+                      setAvatarLightboxOpen(true);
+                    }}
+                    className="group mx-auto flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-[#071116] bg-[#11242c] shadow-[0_12px_36px_rgba(0,0,0,0.5)] transition hover:border-cyan-300/40 sm:mx-0 sm:h-40 sm:w-40"
+                    aria-label="Enlarge profile photo"
                   >
-                    Decline
+                    {profile.avatarUrl ? (
+                      <img
+                        src={profile.avatarUrl}
+                        alt={profile.displayName}
+                        className="h-full w-full rounded-full bg-[#11242c] object-cover object-center transition group-hover:scale-[1.03]"
+                      />
+                    ) : (
+                      <Avatar src={profile.avatarUrl} alt={profile.displayName} size={112} className="h-full w-full rounded-full sm:[width:160px] sm:[height:160px]" />
+                    )}
                   </button>
-                  <button
-                    onClick={accept}
-                    disabled={busy}
-                    className="rounded-xl bg-red-700 px-4 py-2 text-sm text-white hover:bg-red-800 disabled:opacity-60"
-                  >
-                    Accept
-                  </button>
-                </>
-              )}
-
-              {state.status === "accepted" && (
-                <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-2 text-sm text-green-800">
-                  Connected ✅
-                </div>
-              )}
-
-              {state.status !== "blocked" && (
-                <button
-                  onClick={block}
-                  disabled={busy}
-                  className="rounded-xl border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:opacity-60"
-                >
-                  Block
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Contacts: locked unless accepted */}
-          <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-5">
-            <div className="font-medium flex items-center gap-2 text-sm">📇 Contacts</div>
-
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-xl bg-white border border-zinc-200 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <InstagramIcon className="h-5 w-5 text-red-700" />
-                  <span className="sr-only">Instagram</span>
                 </div>
 
-                {!canReveal ? (
-                  <div className="mt-3 text-sm text-zinc-500">Locked</div>
-                ) : igLink ? (
-                  <a className="mt-3 block text-sm font-medium text-zinc-900 hover:underline" href={igLink} target="_blank" rel="noreferrer">
-                    {igText}
-                  </a>
-                ) : (
-                  <div className="mt-3 text-sm font-medium text-zinc-900">{igText}</div>
-                )}
-              </div>
+                <div className="min-w-0 pb-1">
+                  <div className="flex items-center justify-center gap-2 sm:justify-start">
+                    <h1 className="truncate text-2xl font-bold text-white sm:text-3xl">{profile.displayName}</h1>
+                    {profile.verified ? (
+                      <VerifiedBadge size={20} title={VERIFIED_VIA_PAYMENT_LABEL} />
+                    ) : null}
+                  </div>
 
-              <div className="rounded-xl bg-white border border-zinc-200 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <WhatsAppIcon className="h-5 w-5 text-red-700" />
-                  <span className="sr-only">WhatsApp</span>
-                </div>
+                  {profile.username ? (
+                    <p className="mt-1 text-sm font-medium text-cyan-200/90">@{profile.username}</p>
+                  ) : null}
 
-                {!canReveal ? (
-                  <div className="mt-3 text-sm text-zinc-500">Locked</div>
-                ) : waLink ? (
-                  <a className="mt-3 block text-sm font-medium text-zinc-900 hover:underline" href={waLink} target="_blank" rel="noreferrer">
-                    {waText}
-                  </a>
-                ) : (
-                  <div className="mt-3 text-sm font-medium text-zinc-900">{waText}</div>
-                )}
-              </div>
+                  <p className="mt-1 text-sm text-slate-300">
+                    {[profile.city, profile.country].filter(Boolean).join(", ") || "Location not set"}
+                  </p>
 
-              <div className="rounded-xl bg-white border border-zinc-200 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <YouTubeIcon className="h-5 w-5 text-red-700" />
-                  <span className="sr-only">YouTube</span>
-                </div>
+                  {!isSelf && (acceptedConnections.length > 0 || mutualProfiles.length > 0) ? (
+                    <div className="mt-3">
+                      <p className="text-sm font-medium text-slate-200">
+                        {acceptedConnections.length > 0 ? `${acceptedConnections.length} connections` : ""}
+                        {acceptedConnections.length > 0 && mutualProfiles.length > 0 ? " • " : ""}
+                        {mutualProfiles.length > 0 ? `${mutualProfiles.length} mutual` : ""}
+                      </p>
 
-                {!canReveal ? (
-                  <div className="mt-3 text-sm text-zinc-500">Locked</div>
-                ) : ytLink ? (
-                  <a className="mt-3 block text-sm font-medium text-zinc-900 hover:underline truncate" href={ytLink} target="_blank" rel="noreferrer">
-                    {ytText}
-                  </a>
-                ) : (
-                  <div className="mt-3 text-sm font-medium text-zinc-900 truncate">{ytText}</div>
-                )}
-              </div>
-            </div>
-
-            {!canReveal && (
-              <div className="mt-3 text-xs text-zinc-500">
-                Contacts unlock after mutual connection.
-              </div>
-            )}
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-zinc-900">References</div>
-                <div className="mt-1 text-xs text-zinc-500">
-                  Positive {referenceCounts.positive} • Neutral {referenceCounts.neutral} • Negative {referenceCounts.negative}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {([
-                  { key: "all", label: "All" },
-                  { key: "sync", label: "Sync" },
-                  { key: "trip", label: "Trip" },
-                  { key: "event", label: "Event" },
-                ] as const).map((filterItem) => {
-                  const selected = referenceFilter === filterItem.key;
-                  return (
-                    <button
-                      key={filterItem.key}
-                      type="button"
-                      onClick={() => setReferenceFilter(filterItem.key)}
-                      className={cx(
-                        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                        selected
-                          ? "border-red-200 bg-red-50 text-red-700"
-                          : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900"
-                      )}
-                    >
-                      {filterItem.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {referencesLoading ? (
-                <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">Loading references...</div>
-              ) : filteredReferences.length === 0 ? (
-                <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">No references for this filter.</div>
-              ) : (
-                filteredReferences.map((reference) => {
-                  const author = referenceAuthors[reference.author_id] ?? "Member";
-                  const contextLabel = (reference.entity_type ?? reference.context ?? "connection").toUpperCase();
-
-                  return (
-                    <article key={reference.id} className="rounded-xl border border-zinc-200 bg-white p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-zinc-900">{author}</div>
-                        <div className="flex items-center gap-2">
-                          <span className={cx("rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide", sentimentBadgeClasses(reference.sentiment))}>
-                            {reference.sentiment}
-                          </span>
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
-                            {contextLabel}
-                          </span>
-                          <span className="text-xs text-zinc-500">{formatDate(reference.created_at)}</span>
-                        </div>
-                      </div>
-
-                      <p className="mt-2 text-sm leading-relaxed text-zinc-800">{reference.body}</p>
-
-                      {reference.reply_text ? (
-                        <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
-                          <span className="font-semibold text-zinc-900">Reply:</span> {reference.reply_text}
+                      {mutualProfiles.length > 0 ? (
+                        <div className="mt-3 flex items-center justify-center sm:justify-start">
+                          {mutualProfiles.slice(0, 8).map((item, index) => (
+                            <div
+                              key={item.userId}
+                              className={cx(
+                                "relative h-10 w-10 overflow-hidden rounded-full border-2 border-[#0b141a] bg-[#13202a] shadow-[0_8px_18px_rgba(0,0,0,0.28)]",
+                                index > 0 ? "-ml-2.5" : ""
+                              )}
+                              title={item.displayName}
+                            >
+                              <Avatar src={item.avatarUrl} alt={item.displayName} size={40} className="h-full w-full rounded-full" />
+                            </div>
+                          ))}
+                          {mutualProfiles.length > 8 ? (
+                            <div className="-ml-2.5 inline-flex h-10 min-w-10 items-center justify-center rounded-full border-2 border-[#0b141a] bg-white/[0.08] px-2 text-[11px] font-semibold text-white/85">
+                              +{mutualProfiles.length - 8}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
-                    </article>
-                  );
-                })
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {!isSelf ? (
+                <div className="flex flex-col items-start gap-2 sm:items-end">
+                  <div className="flex flex-wrap items-center gap-2">
+                  {state.status === "none" ? (
+                    <button
+                      type="button"
+                      onClick={() => void connect()}
+                      disabled={busy}
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {busy ? "Sending..." : "Connect"}
+                    </button>
+                  ) : null}
+
+                  {state.status === "pending" && state.role === "requester" ? (
+                    <button
+                      type="button"
+                      onClick={() => void cancelRequest()}
+                      disabled={busy}
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 px-4 py-2.5 text-sm font-semibold text-white/90 hover:bg-black/45 disabled:opacity-60"
+                    >
+                      {busy ? "Cancelling..." : "Cancel request"}
+                    </button>
+                  ) : null}
+
+                  {state.status === "pending" && state.role === "target" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void declineRequest()}
+                        disabled={busy}
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 px-4 py-2.5 text-sm font-semibold text-white/90 hover:bg-black/45 disabled:opacity-60"
+                      >
+                        Decline
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void acceptRequest()}
+                        disabled={busy}
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:opacity-60"
+                      >
+                        Accept
+                      </button>
+                    </>
+                  ) : null}
+
+                  {state.status === "accepted" ? (
+                    <>
+                      {!isTeacherProfile ? (
+                        <span className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100">
+                          Connected
+                        </span>
+                      ) : null}
+                      {state.id !== "self" ? (
+                        <Link
+                          href={`/messages?thread=${encodeURIComponent(`conn:${state.id}`)}`}
+                          className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">chat_bubble</span>
+                          Message
+                        </Link>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={(event) => openActionMenu(event, "desktop", "below")}
+                    aria-haspopup="menu"
+                    aria-expanded={actionMenu?.source === "desktop"}
+                    className="flex items-center justify-center rounded-xl border border-white/20 bg-black/30 px-3 py-2 text-slate-100 hover:bg-black/45"
+                  >
+                      <span className="material-symbols-outlined text-[20px]">more_horiz</span>
+                  </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void shareProfile()}
+                    className="hidden rounded-xl border border-white/20 bg-black/30 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-black/45 sm:inline-flex"
+                  >
+                    Share profile
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void shareProfile()}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45 sm:hidden"
+                    aria-label="Share profile"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">share</span>
+                  </button>
+                  <Link
+                    href="/notifications"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45 sm:hidden"
+                    aria-label="Open notifications"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">notifications</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setMobileSettingsOpen(true)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45 sm:hidden"
+                    aria-label="Open settings menu"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">settings</span>
+                  </button>
+                  <Link
+                    href="/me/edit"
+                    className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                  >
+                    Edit profile
+                  </Link>
+                </div>
               )}
             </div>
           </div>
+        </section>
+
+        <section className={cx("no-scrollbar mt-5 flex gap-3 overflow-x-auto sm:grid sm:grid-cols-2 lg:grid-cols-3", isSelf ? "xl:grid-cols-5" : "xl:grid-cols-4")}>
+          {metricCards.map((card, index) => (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => handleTabChange(card.key as TabKey)}
+              aria-pressed={tab === card.key}
+              style={{ animationDelay: `${index * 70}ms` }}
+              className={cx(
+                "metric-card flex min-h-[108px] min-w-[148px] shrink-0 flex-col items-center justify-center rounded-2xl border px-4 py-4 text-center shadow-[0_10px_30px_rgba(0,0,0,0.22)] transition sm:min-w-0",
+                tab === card.key
+                  ? "border-cyan-300/35 bg-[linear-gradient(170deg,rgba(34,211,238,0.18),rgba(232,121,249,0.08))]"
+                  : "border-white/10 bg-[linear-gradient(170deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01))]",
+                animateMetrics ? "metric-card--show" : ""
+              )}
+            >
+              <p className={cx("mb-1 text-xs uppercase tracking-wide", tab === card.key ? "text-cyan-100" : "text-slate-400")}>{card.title}</p>
+              <p className="text-2xl font-bold text-white">{card.value}</p>
+              <p className={cx("mt-1 text-[11px]", tab === card.key ? "text-cyan-100/80" : "text-slate-400")}>{card.sub}</p>
+            </button>
+          ))}
+        </section>
+
+        <div className="mt-6 pb-1">
+          <div className="no-scrollbar flex overflow-x-auto gap-1 sm:hidden">
+            {visibleTabs.map(([key, label]) => {
+              const selected = tab === key;
+              return (
+                <button
+                  key={`mobile-${key}`}
+                  type="button"
+                  onClick={() => handleTabChange(key)}
+                  className={cx(
+                    "shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition",
+                    selected
+                      ? "bg-gradient-to-r from-cyan-300/30 to-fuchsia-400/30 text-cyan-100 border border-cyan-300/35"
+                      : "border border-white/10 bg-black/20 text-slate-300 hover:text-white"
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            className="hidden gap-1 rounded-2xl border border-white/10 bg-black/20 p-1 sm:grid"
+            style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
+          >
+            {visibleTabs.map(([key, label]) => {
+                const selected = tab === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleTabChange(key)}
+                    className={cx(
+                      "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                      selected
+                        ? "border-cyan-300/35 bg-gradient-to-r from-cyan-300/20 to-fuchsia-400/20 text-cyan-100"
+                        : "border-transparent text-slate-400 hover:border-white/10 hover:text-white"
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+          </div>
         </div>
-      </div>
+
+        <div
+          className={cx(
+            "mt-6 grid grid-cols-1 gap-6",
+            tab === "overview" ? "xl:grid-cols-[minmax(0,2fr)_minmax(280px,360px)]" : "xl:grid-cols-1"
+          )}
+        >
+          <section className="space-y-6">
+            {supportingDataError ? (
+              <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+                {supportingDataError}
+              </div>
+            ) : null}
+            {panelLoading ? (
+              <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                <div className="profile-shimmer mb-4 h-5 w-44 rounded-md" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="profile-shimmer h-20 rounded-2xl" />
+                  <div className="profile-shimmer h-20 rounded-2xl" />
+                  <div className="profile-shimmer h-20 rounded-2xl" />
+                  <div className="profile-shimmer h-20 rounded-2xl" />
+                </div>
+                <div className="mt-4 space-y-3">
+                  <div className="profile-shimmer h-4 w-full rounded-md" />
+                  <div className="profile-shimmer h-4 w-11/12 rounded-md" />
+                  <div className="profile-shimmer h-4 w-9/12 rounded-md" />
+                </div>
+              </article>
+            ) : (
+              <div key={tab} className="profile-panel-enter space-y-6">
+            {tab === "overview" ? (
+              <>
+                <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                  <h2 className="mb-4 text-lg font-bold text-white">Profile overview</h2>
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div>
+                      <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        <span className="material-symbols-outlined text-[16px] text-cyan-300">person</span>
+                        Roles
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {profile.roles.length ? (
+                          profile.roles.map((role) => (
+                            <span key={role} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-slate-200">
+                              {role}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-sm text-slate-400">No roles selected.</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        <span className="material-symbols-outlined text-[16px] text-cyan-300">language</span>
+                        Languages
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {profile.languages.length ? (
+                          profile.languages.map((language) => (
+                            <span key={language} className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs text-slate-300">
+                              {language}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-sm text-slate-400">No languages listed.</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <span className="material-symbols-outlined text-[16px] text-cyan-300">queue_music</span>
+                      Dance styles
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {skillList.length ? (
+                        skillList.map((item) => (
+                          <span
+                            key={item.style}
+                            className={cx(
+                              "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs",
+                              item.verified
+                                ? "border-cyan-300/35 bg-cyan-300/10 text-cyan-100"
+                                : "border-white/10 bg-white/[0.05] text-slate-200"
+                            )}
+                          >
+                            {titleCase(item.style)}
+                            {item.level ? <span className="text-slate-300">({formatDanceLevelLabel(item.level)})</span> : null}
+                            {item.verified ? (
+                              <span className="material-symbols-outlined fill-1 text-[12px] text-[#00F5FF]" title="Verified">
+                                verified
+                              </span>
+                            ) : null}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-slate-400">No dance styles listed.</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {profileMedia.length ? (
+                    <div className="mt-5">
+                      <ProfileMediaShowcase
+                        media={profileMedia}
+                        isOwner={isSelf}
+                        onManage={
+                          isSelf
+                            ? () => {
+                                router.push("/me/edit/media");
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <span className="material-symbols-outlined text-[14px] text-cyan-300">favorite</span>
+                        Interest
+                      </p>
+                      <p className="text-sm text-slate-200">{primaryInterest ?? "Not shared"}</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <span className="material-symbols-outlined text-[14px] text-cyan-300">schedule</span>
+                        Availability
+                      </p>
+                      <p className="text-sm text-slate-200">{availabilityLabel ?? "Not shared"}</p>
+                    </div>
+                  </div>
+                </article>
+
+              </>
+            ) : null}
+
+            {tab === "references" ? (
+              <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <div className="flex items-center rounded-full border border-white/10 bg-black/25 p-1">
+                    {([
+                      { key: "all", label: "All" },
+                      { key: "received", label: "Received" },
+                      { key: "given", label: "Given" },
+                    ] as const).map((option) => {
+                      const selected = referenceDirectionFilter === option.key;
+                      return (
+                        <button
+                          key={`reference-direction-${option.key}`}
+                          type="button"
+                          onClick={() => setReferenceDirectionFilter(option.key)}
+                          className={cx(
+                            "rounded-full px-3 py-1 text-xs font-semibold",
+                            selected ? "bg-cyan-300/15 text-cyan-100" : "text-slate-300 hover:text-white"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <section className="mb-5 rounded-xl bg-[linear-gradient(135deg,rgba(255,255,255,0.015),rgba(255,255,255,0.01))]">
+                  <div className="flex flex-col md:flex-row">
+                    <div className="flex w-full items-center gap-4 px-6 py-5 md:w-[24%]">
+                      <div className="w-full text-center">
+                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">References</p>
+                        <div className="mt-1 flex items-baseline justify-center gap-2">
+                          <h3 className="text-4xl font-black tracking-tight text-white">{referenceStats.total}</h3>
+                          {pendingSyncReferenceCount > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300">
+                              <span className="material-symbols-outlined text-[14px]">schedule</span>
+                              {pendingSyncReferenceCount} pending
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex-1 px-6 py-5">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">Trust Distribution</p>
+                        <div className="flex flex-wrap items-center gap-4 text-[11px] font-bold">
+                          <span className="inline-flex items-center gap-1.5 text-emerald-300">
+                            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                            {referenceStats.positive} Positive
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-white/55">
+                            <span className="h-2 w-2 rounded-full bg-white/35" />
+                            {referenceStats.neutral} Neutral
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-rose-300">
+                            <span className="h-2 w-2 rounded-full bg-rose-400" />
+                            {referenceStats.negative} Negative
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex h-2 overflow-hidden rounded-full bg-white/6">
+                        <div className="bg-emerald-400" style={{ width: `${referenceStats.total ? (referenceStats.positive / referenceStats.total) * 100 : 0}%` }} />
+                        <div className="bg-white/35" style={{ width: `${referenceStats.total ? (referenceStats.neutral / referenceStats.total) * 100 : 0}%` }} />
+                        <div className="bg-rose-400" style={{ width: `${referenceStats.total ? (referenceStats.negative / referenceStats.total) * 100 : 0}%` }} />
+                      </div>
+                    </div>
+                    <div className="flex w-full items-center justify-end bg-transparent px-6 py-5 md:w-[22%]">
+                      <div className="w-full text-center">
+                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">Positive</p>
+                        <h3 className="mt-1 text-5xl font-black tracking-tighter text-cyan-300">{referenceStats.trustScore}%</h3>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:flex lg:flex-1 lg:items-center">
+                    <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Context
+                      <select
+                        value={referenceContextFilter}
+                        onChange={(event) => setReferenceContextFilter(event.target.value as ReferenceContextFilter)}
+                        className="min-w-[220px] rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
+                      >
+                        <option value="all">All reference types</option>
+                        {REFERENCE_CONTEXT_TAGS.map((tag) => (
+                          <option key={tag} value={tag}>
+                            {referenceContextLabel(tag)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Sort
+                      <select
+                        value={referenceSortFilter}
+                        onChange={(event) => setReferenceSortFilter(event.target.value as ReferenceSortFilter)}
+                        className="min-w-[180px] rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
+                      >
+                        <option value="latest">Latest</option>
+                        <option value="oldest">Oldest</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {hasReferenceFilters ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReferenceDirectionFilter("all");
+                        setReferenceContextFilter("all");
+                        setReferenceSortFilter("latest");
+                      }}
+                      className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100"
+                    >
+                      Reset filters
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3">
+                  {filteredReferences.length === 0 ? (
+                    <EmptyPanel
+                      icon="forum"
+                      title="No references for this filter"
+                      detail="Try another direction or context filter to explore this member's feedback."
+                      ctaLabel={hasReferenceFilters ? "Reset filters" : undefined}
+                      onCta={
+                        hasReferenceFilters
+                          ? () => {
+                              setReferenceDirectionFilter("all");
+                              setReferenceContextFilter("all");
+                              setReferenceSortFilter("latest");
+                            }
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    filteredReferences.map((item) => {
+                      const counterpartId = item.direction === "given" ? item.recipientId : item.authorId;
+                      const counterpartProfile =
+                        counterpartId === profileUserId
+                          ? { displayName: profile?.displayName ?? "Member", avatarUrl: profile?.avatarUrl ?? null }
+                          : profilesById[counterpartId] ?? null;
+                      const counterpartName = counterpartProfile?.displayName ?? referenceAuthors[counterpartId] ?? "Member";
+                      return (
+                        <article key={item.id} className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(22,22,24,0.96),rgba(13,14,18,0.96))] p-5 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex gap-4">
+                              <Avatar
+                                src={counterpartProfile?.avatarUrl ?? null}
+                                alt={counterpartName}
+                                size={48}
+                                className="h-12 w-12 rounded-full border-2 border-white/10"
+                              />
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h4 className="text-xl font-bold text-white">{counterpartName}</h4>
+                                  <span
+                                    className={cx(
+                                      "rounded-md border px-2 py-0.5 text-[10px] font-black uppercase tracking-tight",
+                                      item.direction === "given"
+                                        ? "border-fuchsia-400/25 bg-fuchsia-400/10 text-fuchsia-100"
+                                        : "border-cyan-300/25 bg-cyan-300/10 text-cyan-100"
+                                    )}
+                                  >
+                                    {item.direction === "given" ? "Given" : "Received"}
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                                  <span
+                                    className={cx(
+                                      "rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase",
+                                      contextBadge(item.context)
+                                    )}
+                                  >
+                                    {referenceContextLabel(item.context)}
+                                  </span>
+                                  <span>{formatDate(item.createdAt)}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <span className={cx("rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase", sentimentBadge(item.sentiment))}>
+                              {item.sentiment}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 pl-16">
+                            <p className="text-base italic leading-relaxed text-slate-200">
+                              &ldquo;{item.body}&rdquo;
+                            </p>
+
+                            {item.replyText ? (
+                              <div className="mt-5 rounded-2xl border border-cyan-300/18 bg-[#0f1621] p-4">
+                                <div className="flex gap-3">
+                                  <Avatar
+                                    src={profile?.avatarUrl ?? null}
+                                    alt={profile?.displayName ?? "Member"}
+                                    size={32}
+                                    className="h-8 w-8 rounded-full border border-white/10"
+                                  />
+                                  <p className="text-sm italic leading-relaxed text-slate-300">
+                                    &ldquo;{item.replyText}&rdquo;
+                                  </p>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              </article>
+            ) : null}
+
+            {tab === "dance-tools" && isSelf ? (
+              <DashboardEmbedModeProvider value="growth">
+                <DashboardPage />
+              </DashboardEmbedModeProvider>
+            ) : null}
+
+            {tab === "trips" ? (
+              <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                <h2 className="mb-4 text-lg font-bold text-white">Trips</h2>
+
+                <div className="space-y-4">
+                  <section>
+                    <h3 className="mb-2 text-sm font-semibold text-slate-200">Active trips</h3>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      {activeTrips.length === 0 ? (
+                        <EmptyPanel
+                          icon="travel_explore"
+                          title="No active trips"
+                          detail="When a new trip is published, it will show up here."
+                          ctaLabel={pastTrips.length ? "View travel history below" : "Back to overview"}
+                          onCta={() => handleTabChange(pastTrips.length ? "trips" : "overview")}
+                        />
+                      ) : (
+                        activeTrips.map((trip) => {
+                          const heroUrl = getTripHeroStorageUrl(trip.destinationCountry);
+                          const heroStorageFallback = getTripHeroStorageFolderUrl(trip.destinationCountry);
+                          const heroFallback = getTripHeroFallbackUrl(trip.destinationCity, trip.destinationCountry);
+
+                          return (
+                            <div key={trip.id} className="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                              <div className="relative h-28 w-full bg-slate-800">
+                                {(heroUrl || heroStorageFallback || heroFallback) ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={heroUrl || heroStorageFallback || heroFallback}
+                                    alt={`${trip.destinationCity}, ${trip.destinationCountry}`}
+                                    className="h-full w-full object-cover"
+                                    loading="lazy"
+                                    referrerPolicy="no-referrer"
+                                    crossOrigin="anonymous"
+                                    data-fallback-storage={heroStorageFallback || ""}
+                                    data-fallback={heroFallback || ""}
+                                    onError={(event) => {
+                                      const target = event.currentTarget;
+                                      const fallbackStorage = target.dataset.fallbackStorage;
+                                      const fallback = target.dataset.fallback;
+                                      if (fallbackStorage && target.src !== fallbackStorage) {
+                                        target.src = fallbackStorage;
+                                        return;
+                                      }
+                                      if (fallback && target.src !== fallback) {
+                                        target.src = fallback;
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="h-full w-full" style={{ background: FALLBACK_GRADIENT }} />
+                                )}
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#060b0d] via-transparent to-transparent" />
+                              </div>
+
+                              <div className="p-4">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-base font-semibold text-white">
+                                      {[trip.destinationCity, trip.destinationCountry].filter(Boolean).join(", ") || "Destination not set"}
+                                    </p>
+                                    <p className="text-xs text-slate-400">{formatDateRange(trip.startDate, trip.endDate)}</p>
+                                  </div>
+                                  <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-100">
+                                    {trip.purpose}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="mb-2 text-sm font-semibold text-slate-200">Past trips</h3>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {pastTrips.length === 0 ? (
+                        <EmptyPanel
+                          icon="history"
+                          title="No past trips"
+                          detail="Completed travel history will be visible here."
+                          ctaLabel="Back to overview"
+                          onCta={() => handleTabChange("overview")}
+                        />
+                      ) : (
+                        pastTrips.map((trip) => (
+                          <div key={trip.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <div className="flex h-full flex-col justify-between gap-4">
+                              <div>
+                                <p className="text-base font-semibold text-white">
+                                  {[trip.destinationCity, trip.destinationCountry].filter(Boolean).join(", ") || "Destination not set"}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">{formatDateRange(trip.startDate, trip.endDate)}</p>
+                              </div>
+                              <span className="w-fit rounded-full border border-white/15 bg-white/[0.05] px-3 py-1 text-xs text-slate-300">
+                                {trip.purpose}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+                </div>
+              </article>
+            ) : null}
+
+            {tab === "events" ? (
+              <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                <h2 className="mb-4 text-lg font-bold text-white">Events</h2>
+
+                <div className="space-y-4">
+                  {eventsTimeline.length === 0 ? (
+                    <EmptyPanel
+                      icon="event_busy"
+                      title="No event activity yet"
+                      detail="Hosted and attended events will appear here when this member starts joining events."
+                      ctaLabel="Back to overview"
+                      onCta={() => handleTabChange("overview")}
+                    />
+                  ) : (
+                    <>
+                      <section>
+                        <h3 className="mb-3 text-sm font-semibold text-slate-200">Current and upcoming</h3>
+                        {upcomingEvents.length === 0 ? (
+                          <EmptyPanel
+                            icon="event_available"
+                            title="No upcoming events"
+                            detail="Future attended or hosted events will appear here."
+                          />
+                        ) : (
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {upcomingEvents.map((item) => (
+                              <div key={`${item.relation}-${item.event.id}`} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                                <div className="flex h-full flex-col justify-between gap-4">
+                                  <div>
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <p className="text-base font-semibold text-white">{item.event.title}</p>
+                                      <span
+                                        className={cx(
+                                          "rounded-full border px-3 py-1 text-xs font-semibold",
+                                          item.relation === "hosted"
+                                            ? "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100"
+                                            : item.relation === "going"
+                                              ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+                                              : "border-amber-300/30 bg-amber-300/10 text-amber-100"
+                                        )}
+                                      >
+                                        {item.label}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-slate-400">
+                                      {[item.event.city, item.event.country].filter(Boolean).join(", ")} • {formatDate(item.event.startsAt)}
+                                    </p>
+                                  </div>
+
+                                  <div>
+                                    <Link
+                                      href={`/events/${item.event.id}`}
+                                      className="inline-flex rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]"
+                                    >
+                                      View event
+                                    </Link>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+
+                      <section>
+                        <h3 className="mb-3 text-sm font-semibold text-slate-200">Past events</h3>
+                        {pastEvents.length === 0 ? (
+                          <EmptyPanel
+                            icon="history"
+                            title="No past events"
+                            detail="Completed attended or hosted events will appear here."
+                          />
+                        ) : (
+                          <div className="space-y-2">
+                            {pastEvents.map((item) => (
+                              <div key={`${item.relation}-${item.event.id}`} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="text-sm font-semibold text-white">{item.event.title}</p>
+                                      <span
+                                        className={cx(
+                                          "rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                          item.relation === "hosted"
+                                            ? "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100"
+                                            : item.relation === "going"
+                                              ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+                                              : "border-amber-300/30 bg-amber-300/10 text-amber-100"
+                                        )}
+                                      >
+                                        {item.label}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-slate-400">
+                                      {[item.event.city, item.event.country].filter(Boolean).join(", ")} • {formatDate(item.event.startsAt)}
+                                    </p>
+                                  </div>
+                                  <Link
+                                    href={`/events/${item.event.id}`}
+                                    className="inline-flex rounded-full border border-white/15 bg-white/[0.05] px-3 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/[0.1]"
+                                  >
+                                    Open
+                                  </Link>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    </>
+                  )}
+                </div>
+              </article>
+            ) : null}
+
+              </div>
+            )}
+          </section>
+
+          {tab === "overview" ? (
+          <aside className="space-y-6">
+            <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-300">Member Trust</h3>
+              <div className="space-y-3">
+                <section className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                  <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    <span className="material-symbols-outlined fill-1 text-[15px] text-cyan-300">verified_user</span>
+                    Verification
+                  </p>
+                  <div className="space-y-2 text-xs text-slate-300">
+                    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                      <span className="text-slate-400">Status</span>
+                      {profile.verified ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/35 bg-emerald-300/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-100">
+                          <VerifiedBadge size={14} />
+                          Verified
+                        </span>
+                      ) : isSelf ? (
+                        <GetVerifiedButton
+                          className="inline-flex min-h-8 items-center justify-center rounded-lg bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-1.5 text-[11px] font-semibold text-[#06121a] hover:brightness-110"
+                          returnTo={`/profile/${profile.userId}`}
+                          onError={(message) => pushToast("error", message)}
+                        >
+                          Get verified
+                        </GetVerifiedButton>
+                      ) : (
+                        <span className="font-medium text-slate-400">Not verified</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                      <span className="text-slate-400">Member since</span>
+                      <span className="font-semibold text-slate-100">{formatMonthYear(profile.createdAt)}</span>
+                    </div>
+                  </div>
+                </section>
+
+                {showHostingDetails ? (
+                  <section className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                    <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <span className="material-symbols-outlined text-[15px] text-fuchsia-200">home</span>
+                      Hosting details
+                    </p>
+                    <div className="space-y-2 text-xs text-slate-300">
+                      <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                        <span className="text-slate-400">Status</span>
+                        <span className={cx("font-semibold", hostingAvailable ? "text-emerald-100" : "text-slate-100")}>
+                          {hostingAvailable ? "Accepting guests" : "Not accepting guests"}
+                        </span>
+                      </div>
+                      {hostingAvailable ? (
+                        <>
+                          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                            <span className="text-slate-400">Max guests</span>
+                            <span className="font-semibold text-slate-100">{profile.maxGuests ?? "Not set"}</span>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                            <span className="text-slate-400">Last-minute requests</span>
+                            <span className="font-semibold text-slate-100">{profile.hostingLastMinuteOk ? "Yes" : "No"}</span>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                            <span className="text-slate-400">Preferred guest gender</span>
+                            <span className="font-semibold text-slate-100">{formatGuestGenderPreference(profile.hostingPreferredGuestGender)}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { label: "Kid friendly", value: profile.hostingKidFriendly },
+                              { label: "Pet friendly", value: profile.hostingPetFriendly },
+                              { label: "Smoking allowed", value: profile.hostingSmokingAllowed },
+                            ].map((item) => (
+                              <div key={item.label} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                                <p className="text-slate-400">{item.label}</p>
+                                <p className="mt-1 font-semibold text-slate-100">{item.value ? "Yes" : "No"}</p>
+                              </div>
+                            ))}
+                            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                              <p className="text-slate-400">Sleeping arrangement</p>
+                              <p className="mt-1 font-semibold text-slate-100">{formatSleepingArrangement(profile.hostingSleepingArrangement)}</p>
+                            </div>
+                          </div>
+                          {profile.hostingGuestShare ? (
+                            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                              <p className="text-slate-400">What I can share with guests</p>
+                              <p className="mt-1 leading-5 text-slate-100">{profile.hostingGuestShare}</p>
+                            </div>
+                          ) : null}
+                          {profile.hostingTransitAccess ? (
+                            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                              <p className="text-slate-400">Public transportation access</p>
+                              <p className="mt-1 leading-5 text-slate-100">{profile.hostingTransitAccess}</p>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
+              </div>
+            </article>
+
+          </aside>
+          ) : null}
+        </div>
+
+        {profileUserId && profile ? (
+          <RequestInfoModal
+            open={requestInfoOpen}
+            recipientUserId={profileUserId}
+            recipientName={profile.displayName}
+            onClose={() => setRequestInfoOpen(false)}
+            onSubmitted={(message) => setInfoFeedback(message)}
+          />
+        ) : null}
+
+        <VerificationRequiredDialog
+          open={verificationModalOpen}
+          resumePayload={profileUserId ? { kind: "profile_hosting_request", profileId: profileUserId } : null}
+          onClose={() => setVerificationModalOpen(false)}
+          onError={(message) => setErrorFeedback(message)}
+          onAlreadyVerified={() => {
+            setViewerVerified(true);
+            setVerificationModalOpen(false);
+            if (profile?.userId) {
+              router.push(`/connections?mode=hosts&request_host=${encodeURIComponent(profile.userId)}`);
+            }
+          }}
+        />
+
+        {shareDialogOpen && typeof document !== "undefined"
+          ? createPortal(
+              <div
+                className="fixed inset-0 z-[141] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+                onClick={() => setShareDialogOpen(false)}
+              >
+                <div
+                  className="w-full max-w-sm rounded-2xl border border-white/12 bg-[#0f1419] p-4 shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1 truncate rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/80">
+                      {shareDisplayUrl}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void copyShareLink()}
+                      className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">content_copy</span>
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShareDialogOpen(false)}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 text-white/50 hover:text-white"
+                      aria-label="Close"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">close</span>
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )
+          : null}
+
+        {actionMenu && typeof document !== "undefined"
+          ? createPortal(
+              <>
+                <div className="fixed inset-0 z-[139]" onClick={closeActionMenu} aria-hidden="true" />
+                <div
+                  role="menu"
+                  className="fixed z-[140] w-[264px] overflow-hidden rounded-xl border border-white/15 bg-[#091117] p-2 shadow-[0_24px_60px_rgba(0,0,0,0.72)]"
+                  style={{
+                    top: actionMenu.anchorY,
+                    left: actionMenu.left,
+                    transform: actionMenu.placement === "above" ? "translateY(-100%)" : undefined,
+                    backgroundColor: "#091117",
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {canRequestInfo ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeActionMenu();
+                        setRequestInfoOpen(true);
+                      }}
+                      className="mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-cyan-100 hover:bg-cyan-300/15"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">school</span>
+                      Request Teaching Info
+                    </button>
+                  ) : null}
+                  {hostingAvailable ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeActionMenu();
+                        if (viewerVerified) {
+                          router.push(`/connections?mode=hosts&request_host=${encodeURIComponent(profile.userId)}`);
+                          return;
+                        }
+                        setVerificationModalOpen(true);
+                      }}
+                      className="mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-fuchsia-100 hover:bg-fuchsia-300/15"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">home</span>
+                      Request Hosting
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeActionMenu();
+                      void shareProfile();
+                    }}
+                    className="mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/90 hover:bg-white/10"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">share</span>
+                    Share profile
+                  </button>
+                  {state.status === "accepted" && state.id !== "self" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeActionMenu();
+                        void toggleFollowingMember();
+                      }}
+                      disabled={followingBusy}
+                      className={cx(
+                        "mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10 disabled:opacity-60",
+                        contactFollowing ? "text-emerald-100" : "text-white/90"
+                      )}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {contactFollowing ? "check" : "person_add"}
+                      </span>
+                      {followingBusy ? "Updating..." : contactFollowing ? "Following" : "Add to Following"}
+                    </button>
+                  ) : null}
+                  {state.status === "pending" && state.role === "target" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeActionMenu();
+                        void declineRequest();
+                      }}
+                      disabled={busy}
+                      className="mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/90 hover:bg-white/10 disabled:opacity-60"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                      Decline request
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeActionMenu();
+                      void reportMember();
+                    }}
+                    disabled={busy}
+                    className="mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-100 hover:bg-amber-300/15 disabled:opacity-60"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">flag</span>
+                    Report member
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeActionMenu();
+                      void blockMember();
+                    }}
+                    disabled={busy || state.status === "blocked"}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-100 hover:bg-rose-300/15 disabled:opacity-60"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">block</span>
+                    {state.status === "blocked" ? "Blocked" : "Block member"}
+                  </button>
+                </div>
+              </>,
+              document.body
+            )
+          : null}
+
+        {avatarLightboxOpen ? (
+          <div
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm"
+            onClick={() => setAvatarLightboxOpen(false)}
+          >
+            <div
+              className="relative w-full max-w-[960px] overflow-hidden rounded-3xl border border-white/15 bg-[#0b141a] p-3 shadow-[0_30px_90px_rgba(0,0,0,0.65)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setAvatarLightboxOpen(false)}
+                className="absolute right-4 top-4 z-10 rounded-full border border-white/20 bg-black/45 p-1.5 text-white/90 hover:bg-black/70"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+              <div className="flex max-h-[84vh] min-h-[320px] w-full items-center justify-center overflow-hidden rounded-2xl bg-black">
+                {profile.avatarUrl && !avatarPreviewFailed ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={profile.avatarUrl}
+                    alt={profile.displayName}
+                    className="h-full w-full object-contain"
+                    loading="eager"
+                    onError={() => setAvatarPreviewFailed(true)}
+                  />
+                ) : (
+                  <Avatar src={profile.avatarUrl} alt={profile.displayName} size={420} className="rounded-2xl border-none" />
+                )}
+              </div>
+              <p className="mt-2 text-center text-[11px] text-slate-500">Tap outside to close</p>
+            </div>
+          </div>
+        ) : null}
+
+        {mobileSettingsOpen ? (
+          <div
+            className="fixed inset-0 z-[130] flex items-end bg-black/75 px-0 backdrop-blur-sm sm:hidden"
+            onClick={() => setMobileSettingsOpen(false)}
+          >
+            <div
+              className="w-full rounded-t-[28px] border border-white/10 bg-[#0b141a] px-4 pb-5 pt-4 shadow-[0_-24px_60px_rgba(0,0,0,0.5)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200/80">Settings</p>
+                  <p className="mt-1 text-sm text-slate-300">Quick access to the same profile and account actions available in the web app settings menu.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileSettingsOpen(false)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/25 text-slate-200"
+                  aria-label="Close settings menu"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {mobileSettingsLinks.map((item) => (
+                  <button
+                    key={item.href}
+                    type="button"
+                    onClick={() => {
+                      setMobileSettingsOpen(false);
+                      router.push(item.href);
+                    }}
+                    className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm text-white/85"
+                  >
+                    <span className="inline-flex items-center gap-3">
+                      <span className="material-symbols-outlined text-[18px] text-cyan-200/90">{item.icon}</span>
+                      {item.label}
+                    </span>
+                    <span className="material-symbols-outlined text-[18px] text-slate-500">chevron_right</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileSettingsOpen(false);
+                    void signOutFromProfile();
+                  }}
+                  className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm text-white/85"
+                >
+                  <span className="inline-flex items-center gap-3">
+                    <span className="material-symbols-outlined text-[18px] text-slate-200">logout</span>
+                    Logout
+                  </span>
+                  <span className="material-symbols-outlined text-[18px] text-slate-500">chevron_right</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <style jsx>{`
+          .profile-panel-enter {
+            animation: profilePanelIn 220ms ease-out;
+          }
+
+          .profile-shimmer {
+            position: relative;
+            overflow: hidden;
+            background: rgba(148, 163, 184, 0.14);
+          }
+
+          .profile-shimmer::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            transform: translateX(-120%);
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+            animation: profileShimmer 1.2s linear infinite;
+          }
+
+          .toast-in {
+            animation: toastIn 180ms ease-out;
+          }
+
+          .hero-ambient {
+            position: absolute;
+            border-radius: 9999px;
+            filter: blur(60px);
+            opacity: 0.45;
+            animation: heroDrift 14s ease-in-out infinite;
+          }
+
+          .hero-ambient--left {
+            left: -10%;
+            top: -42%;
+            height: 210px;
+            width: 210px;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.3), transparent 70%);
+          }
+
+          .hero-ambient--right {
+            right: -12%;
+            top: -40%;
+            height: 240px;
+            width: 240px;
+            background: radial-gradient(circle, rgba(232, 121, 249, 0.28), transparent 72%);
+            animation-delay: -5s;
+          }
+
+          .hero-noise {
+            position: absolute;
+            inset: 0;
+            opacity: 0.07;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.7) 0.8px, transparent 0.8px);
+            background-size: 3px 3px;
+            mix-blend-mode: soft-light;
+          }
+
+          .metric-card {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+
+          .metric-card--show {
+            animation: metricCardIn 360ms ease-out forwards;
+          }
+
+          .material-symbols-outlined {
+            text-transform: none;
+            font-feature-settings: "liga" 1;
+            letter-spacing: normal;
+            word-spacing: normal;
+            white-space: nowrap;
+            direction: ltr;
+          }
+
+          @keyframes profilePanelIn {
+            from {
+              opacity: 0;
+              transform: translateY(6px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @keyframes profileShimmer {
+            100% {
+              transform: translateX(120%);
+            }
+          }
+
+          @keyframes toastIn {
+            from {
+              opacity: 0;
+              transform: translateY(-6px) scale(0.98);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          @keyframes metricCardIn {
+            from {
+              opacity: 0;
+              transform: translateY(8px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @keyframes heroDrift {
+            0%,
+            100% {
+              transform: translate3d(0, 0, 0);
+            }
+            50% {
+              transform: translate3d(0, 10px, 0);
+            }
+          }
+        `}</style>
+      </main>
     </div>
   );
+}
+
+export default function MemberProfilePageRoute() {
+  return <MemberProfilePage />;
 }

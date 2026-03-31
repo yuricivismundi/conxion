@@ -1,18 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { City, Country } from "country-state-city";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  getCachedCitiesOfCountry,
+  getCachedCountriesAll,
+  getCitiesOfCountry,
+  getCountriesAll,
+  type CountryEntry,
+} from "@/lib/country-city-client";
 import { supabase } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
+import PaginationControls from "@/components/PaginationControls";
+import { useAppLanguage } from "@/components/AppLanguageProvider";
 import {
   FALLBACK_GRADIENT,
   getTripHeroFallbackUrl,
   getTripHeroStorageFolderUrl,
   getTripHeroStorageUrl,
 } from "@/lib/city-hero-images";
+import VerifiedBadge from "@/components/VerifiedBadge";
+import VerificationRequiredDialog from "@/components/verification/VerificationRequiredDialog";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { clearVerificationResume, loadVerificationResume, type VerificationResumePayload } from "@/lib/verification-client";
+import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
 
 type Tab = "members" | "travellers";
+type DiscoverMode = "dancers" | "travelers" | "hosts";
 
 type Level = "Beginner" | "Improver" | "Intermediate" | "Advanced" | "Teacher/Competitor";
 type Role = "Social Dancer / Student" | "Organizer" | "Studio Owner" | "Promoter" | "DJ" | "Artist" | "Teacher";
@@ -45,6 +60,124 @@ const EMPTY_CONNECT_MODAL: ConnectModalState = {
   tripId: null,
 };
 
+type HostingRequestType = "request_hosting" | "offer_to_host";
+
+type HostingModalState = {
+  open: boolean;
+  targetUserId: string | null;
+  targetName: string;
+  targetPhotoUrl?: string;
+  targetMaxGuests: number | null;
+  tripId: string | null;
+  requestType: HostingRequestType;
+  arrivalDate: string;
+  departureDate: string;
+  arrivalFlexible: boolean;
+  departureFlexible: boolean;
+  travellersCount: number;
+  maxTravellersAllowed: string;
+  message: string;
+};
+
+const EMPTY_HOSTING_MODAL: HostingModalState = {
+  open: false,
+  targetUserId: null,
+  targetName: "Member",
+  targetPhotoUrl: undefined,
+  targetMaxGuests: null,
+  tripId: null,
+  requestType: "request_hosting",
+  arrivalDate: "",
+  departureDate: "",
+  arrivalFlexible: false,
+  departureFlexible: false,
+  travellersCount: 1,
+  maxTravellersAllowed: "",
+  message: "",
+};
+
+type TripJoinModalState = {
+  open: boolean;
+  targetUserId: string | null;
+  targetName: string;
+  targetPhotoUrl?: string;
+  tripId: string | null;
+  destinationCity: string;
+  destinationCountry: string;
+  startDate: string | null;
+  endDate: string | null;
+  note: string;
+};
+
+const EMPTY_TRIP_JOIN_MODAL: TripJoinModalState = {
+  open: false,
+  targetUserId: null,
+  targetName: "Traveller",
+  targetPhotoUrl: undefined,
+  tripId: null,
+  destinationCity: "",
+  destinationCountry: "",
+  startDate: null,
+  endDate: null,
+  note: "",
+};
+
+const SECURE_TEXT_PATTERNS = {
+  links: /(https?:\/\/|www\.)/i,
+  emails: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+  handles: /[@#][A-Za-z0-9_]+/,
+  phones: /(\+?\d[\d\s().-]{7,}\d)/,
+};
+
+function validateSecureFreeText(value: string) {
+  const message = value.trim();
+  if (!message) return null;
+  if (message.length > 500) return "Message can be at most 500 characters.";
+  if (SECURE_TEXT_PATTERNS.links.test(message)) return "Links are not allowed in hosting requests.";
+  if (SECURE_TEXT_PATTERNS.emails.test(message)) return "Emails are not allowed in hosting requests.";
+  if (SECURE_TEXT_PATTERNS.handles.test(message)) return "Social handles are not allowed in hosting requests.";
+  if (SECURE_TEXT_PATTERNS.phones.test(message)) return "Phone numbers are not allowed in hosting requests.";
+  return null;
+}
+
+function validateTripRequestText(value: string) {
+  const message = value.trim();
+  if (!message) return null;
+  if (message.length > 500) return "Message can be at most 500 characters.";
+  if (SECURE_TEXT_PATTERNS.links.test(message)) return "Links are not allowed in trip requests.";
+  if (SECURE_TEXT_PATTERNS.emails.test(message)) return "Emails are not allowed in trip requests.";
+  if (SECURE_TEXT_PATTERNS.handles.test(message)) return "Social handles are not allowed in trip requests.";
+  if (SECURE_TEXT_PATTERNS.phones.test(message)) return "Phone numbers are not allowed in trip requests.";
+  return null;
+}
+
+function getTripReferenceTotal(trip: Pick<TripCard, "refMemberAll" | "refTripAll" | "refEventAll">) {
+  return Number(trip.refMemberAll ?? 0) + Number(trip.refTripAll ?? 0) + Number(trip.refEventAll ?? 0);
+}
+
+const HOST_OFFER_TEMPLATES = [
+  {
+    label: "Friendly host",
+    text: "Hi! I can host you during these dates if you still need a place. Happy to coordinate details in chat.",
+  },
+  {
+    label: "Space available",
+    text: "I have space available for your trip dates. If it helps, I can host and we can confirm logistics here.",
+  },
+  {
+    label: "Need details",
+    text: "I can offer hosting for this trip window. Let me know your arrival plan and how many people are coming.",
+  },
+  {
+    label: "Flexible stay",
+    text: "If you still need accommodation, I can host during your stay. We can align on timing and expectations in chat.",
+  },
+  {
+    label: "Quick intro",
+    text: "I’m available to host for these dates. Send me your travel timing and we can see if it fits well.",
+  },
+] as const;
+
 const LEVELS: Level[] = ["Beginner", "Improver", "Intermediate", "Advanced", "Teacher/Competitor"];
 const LANGUAGE_CODES = [
   "af", "am", "ar", "az", "be", "bg", "bn", "bo", "bs", "ca", "cs", "cy", "da", "de", "el", "en",
@@ -63,6 +196,7 @@ const COMMON_LANGUAGES = [
   "Italian",
   "German",
 ] as const;
+const DISCOVER_PAGE_SIZE = 25;
 const LEVEL_SHORT_LABEL: Record<Level, string> = {
   Beginner: "Beg",
   Improver: "Imp",
@@ -114,21 +248,21 @@ const PURPOSE_META: Record<string, { icon: string; text: string; bg: string; bor
   },
   "Dance Festival": {
     icon: "festival",
-    text: "text-[#FF00FF]",
-    bg: "bg-[#FF00FF]/12",
-    border: "border-[#FF00FF]/35",
+    text: "text-[#00F5FF]",
+    bg: "bg-[#00F5FF]/12",
+    border: "border-[#00F5FF]/35",
   },
   "Social Dancing": {
     icon: "groups",
-    text: "text-[#67E8F9]",
-    bg: "bg-[#67E8F9]/12",
-    border: "border-[#67E8F9]/35",
+    text: "text-[#00F5FF]",
+    bg: "bg-[#00F5FF]/12",
+    border: "border-[#00F5FF]/35",
   },
   "Training / Workshops": {
     icon: "school",
-    text: "text-[#C084FC]",
-    bg: "bg-[#C084FC]/12",
-    border: "border-[#C084FC]/35",
+    text: "text-[#00F5FF]",
+    bg: "bg-[#00F5FF]/12",
+    border: "border-[#00F5FF]/35",
   },
 };
 
@@ -176,6 +310,7 @@ type MemberCard = {
   name: string;
   city: string;
   country: string;
+  memberSince?: string | null;
   verified?: boolean;
   roles: string[];
   danceSkills: Partial<Record<Style, Level>>;
@@ -183,6 +318,9 @@ type MemberCard = {
   langs?: string[]; // stored as codes in cards (EN/ES/...)
   interest?: string;
   availability?: string;
+  canHost?: boolean;
+  hostingStatus?: string;
+  maxGuests?: number | null;
   photoUrl?: string;
 
   connectionsCount?: number;
@@ -225,17 +363,24 @@ type ProfileFeedRow = {
   id?: string;
   user_id?: string;
   display_name?: string | null;
+  created_at?: string | null;
   city?: string | null;
   country?: string | null;
   roles?: unknown;
   languages?: unknown;
   avatar_url?: string | null;
+  is_verified?: boolean | null;
+  verification_type?: string | null;
   verified?: boolean | null;
+  verified_label?: string | null;
   dance_skills?: unknown;
   has_other_style?: boolean | null;
   connections_count?: number | null;
   interests?: unknown;
   availability?: unknown;
+  can_host?: boolean | null;
+  hosting_status?: string | null;
+  max_guests?: number | null;
   ref_total_all?: number | null;
   ref_member_all?: number | null;
   ref_trip_all?: number | null;
@@ -271,6 +416,14 @@ type ProfileFeedLiteRow = {
 };
 
 const isString = (value: unknown): value is string => typeof value === "string";
+
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
 
 function errorMessage(e: unknown, fallback: string): string {
   if (e && typeof e === "object" && "message" in e) {
@@ -386,6 +539,13 @@ function formatShortDate(iso: string) {
   return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric" }).format(d);
 }
 
+function formatMemberSince(value: string | null | undefined) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(d);
+}
+
 const MONTHS = [
   "January",
   "February",
@@ -411,6 +571,7 @@ type FiltersState = {
   country?: string;
   cities: string[]; // max 3
   roles: Role[];
+  references?: "has" | "none";
   styleLevels: Partial<Record<Style, Level[]>>;
   otherStyle: boolean;
   langs: string[]; // labels
@@ -426,6 +587,7 @@ const EMPTY_FILTERS: FiltersState = {
   country: undefined,
   cities: [],
   roles: [],
+  references: undefined,
   styleLevels: {},
   otherStyle: false,
   langs: [],
@@ -437,34 +599,89 @@ const EMPTY_FILTERS: FiltersState = {
   tripDateTo: undefined,
 };
 
-export default function ConnectionsPage() {
+function ConnectionsPageContent() {
+  const { t } = useAppLanguage();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>("members");
+  const [discoverMode, setDiscoverMode] = useState<DiscoverMode>("dancers");
   const [myCityOnly, setMyCityOnly] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [myCity, setMyCity] = useState<string | null>(null);
   const [myCountry, setMyCountry] = useState<string | null>(null);
+  const [viewerVerified, setViewerVerified] = useState(false);
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [myLangCodes, setMyLangCodes] = useState<string[]>([]);
   const [myStyleLevels, setMyStyleLevels] = useState<Partial<Record<Style, Level>>>({});
+  const [hiddenMemberIds, setHiddenMemberIds] = useState<string[]>([]);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<FiltersState>(EMPTY_FILTERS);
+  const [memberSearch, setMemberSearch] = useState("");
   const [cityQuery, setCityQuery] = useState("");
   const [languageQuery, setLanguageQuery] = useState("");
-  const [moreFiltersOpen, setMoreFiltersOpen] = useState(true);
 
   const [uiError, setUiError] = useState<string | null>(null);
+  const [uiInfo, setUiInfo] = useState<string | null>(null);
+  const [verificationModalOpen, setVerificationModalOpen] = useState(false);
+  const [verificationResumePayload, setVerificationResumePayload] = useState<VerificationResumePayload | null>(null);
 
-  const [connectModal, setConnectModal] =
-  useState<ConnectModalState>(EMPTY_CONNECT_MODAL);
+  const [connectModal, setConnectModal] = useState<ConnectModalState>(EMPTY_CONNECT_MODAL);
+  const [connectReasons, setConnectReasons] = useState<ConnectReason[]>([]);
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [connectReasonQuery, setConnectReasonQuery] = useState("");
+  const [sendingRequest, setSendingRequest] = useState(false);
 
-const [connectReasons, setConnectReasons] = useState<ConnectReason[]>([]);
-const [selectedRole, setSelectedRole] = useState<string | null>(null);
-const [selectedReason, setSelectedReason] = useState<string | null>(null);
-const [sendingRequest, setSendingRequest] = useState(false);
-const openConnect = useCallback(
-  (params: {
+  const [hostingModal, setHostingModal] = useState<HostingModalState>(EMPTY_HOSTING_MODAL);
+  const [hostingSending, setHostingSending] = useState(false);
+  const [tripJoinModal, setTripJoinModal] = useState<TripJoinModalState>(EMPTY_TRIP_JOIN_MODAL);
+  const [tripRequestSending, setTripRequestSending] = useState(false);
+  const [membersPage, setMembersPage] = useState(1);
+  const [travellersPage, setTravellersPage] = useState(1);
+  useBodyScrollLock(Boolean(filtersOpen || connectModal.open || hostingModal.open || tripJoinModal.open || verificationModalOpen));
+
+  const closeConnectModal = useCallback(() => {
+    setConnectModal(EMPTY_CONNECT_MODAL);
+    setSelectedReason(null);
+    setSelectedRole(null);
+    setConnectReasonQuery("");
+    setConnectReasons([]);
+  }, []);
+
+  const closeHostingModal = useCallback(() => {
+    setHostingModal(EMPTY_HOSTING_MODAL);
+  }, []);
+
+  const closeTripJoinModal = useCallback(() => {
+    setTripJoinModal(EMPTY_TRIP_JOIN_MODAL);
+  }, []);
+
+  const openTripJoinModal = useCallback((params: {
+    targetUserId: string;
+    targetName?: string;
+    targetPhotoUrl?: string | null;
+    tripId?: string | null;
+    destinationCity?: string | null;
+    destinationCountry?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  }) => {
+    setTripJoinModal({
+      open: true,
+      targetUserId: params.targetUserId,
+      targetName: params.targetName ?? "Traveller",
+      targetPhotoUrl: params.targetPhotoUrl ?? undefined,
+      tripId: params.tripId ?? null,
+      destinationCity: params.destinationCity ?? "",
+      destinationCountry: params.destinationCountry ?? "",
+      startDate: params.startDate ?? null,
+      endDate: params.endDate ?? null,
+      note: "",
+    });
+  }, []);
+
+  const openConnect = useCallback((params: {
     targetUserId: string;
     targetName?: string;
     targetPhotoUrl?: string | null;
@@ -475,6 +692,7 @@ const openConnect = useCallback(
     const safeRoles = (params.targetRoles ?? []).filter(isNonEmptyString);
     setSelectedReason(null);
     setSelectedRole(null);
+    setConnectReasonQuery("");
     setConnectReasons([]);
     setConnectModal({
       open: true,
@@ -485,28 +703,137 @@ const openConnect = useCallback(
       connectContext: params.connectContext ?? "member",
       tripId: params.tripId ?? null,
     });
-  },
-  []
-);
+  }, []);
 
-  const reasonsByRole = useMemo(() => {
-    const map = new Map<string, ConnectReason[]>();
-    for (const r of connectReasons) {
-      const role = String(r.role ?? "");
-      if (!role) continue;
-      const prev = map.get(role) ?? [];
-      prev.push(r);
-      map.set(role, prev);
+  const openHostingRequest = useCallback((params: {
+    targetUserId: string;
+    targetName?: string;
+    targetPhotoUrl?: string | null;
+    targetMaxGuests?: number | null;
+    requestType: HostingRequestType;
+    tripId?: string | null;
+    prefillArrivalDate?: string | null;
+    prefillDepartureDate?: string | null;
+  }) => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const arrivalPrefill =
+      typeof params.prefillArrivalDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.prefillArrivalDate)
+        ? params.prefillArrivalDate
+        : addDaysIso(todayIso, 14);
+    const departurePrefill =
+      typeof params.prefillDepartureDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.prefillDepartureDate)
+        ? params.prefillDepartureDate
+        : addDaysIso(arrivalPrefill, 2);
+
+    setHostingModal({
+      open: true,
+      targetUserId: params.targetUserId,
+      targetName: params.targetName ?? "Member",
+      targetPhotoUrl: params.targetPhotoUrl ?? undefined,
+      targetMaxGuests: typeof params.targetMaxGuests === "number" ? params.targetMaxGuests : null,
+      tripId: params.tripId ?? null,
+      requestType: params.requestType,
+      arrivalDate: arrivalPrefill,
+      departureDate: departurePrefill,
+      arrivalFlexible: false,
+      departureFlexible: false,
+      travellersCount: 1,
+      maxTravellersAllowed: params.requestType === "offer_to_host"
+        ? String(typeof params.targetMaxGuests === "number" && params.targetMaxGuests > 0 ? params.targetMaxGuests : 1)
+        : "",
+      message: "",
+    });
+  }, []);
+
+  const requestHostingAccess = useCallback((params: {
+    targetUserId: string;
+    targetName?: string;
+    targetPhotoUrl?: string | null;
+    targetMaxGuests?: number | null;
+    tripId?: string | null;
+    prefillArrivalDate?: string | null;
+    prefillDepartureDate?: string | null;
+  }) => {
+    if (viewerVerified) {
+      openHostingRequest({
+        ...params,
+        requestType: "request_hosting",
+      });
+      return;
     }
-    return map;
-  }, [connectReasons]);
+
+    setVerificationResumePayload({
+      kind: "request_hosting",
+      targetUserId: params.targetUserId,
+      targetName: params.targetName,
+      targetPhotoUrl: params.targetPhotoUrl,
+      targetMaxGuests: params.targetMaxGuests ?? null,
+      tripId: params.tripId ?? null,
+      prefillArrivalDate: params.prefillArrivalDate ?? null,
+      prefillDepartureDate: params.prefillDepartureDate ?? null,
+    });
+    setVerificationModalOpen(true);
+  }, [openHostingRequest, viewerVerified]);
+
+  useEffect(() => {
+    const verificationState = searchParams.get("verification");
+    if (verificationState === "success") {
+      setUiInfo(VERIFICATION_SUCCESS_MESSAGE);
+      return;
+    }
+    if (verificationState === "cancelled") {
+      clearVerificationResume();
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!viewerVerified || searchParams.get("verification") !== "success") return;
+
+    const resume = loadVerificationResume();
+    if (!resume || resume.kind !== "request_hosting") return;
+
+    clearVerificationResume();
+    openHostingRequest({
+      targetUserId: resume.targetUserId,
+      targetName: resume.targetName,
+      targetPhotoUrl: resume.targetPhotoUrl,
+      targetMaxGuests: resume.targetMaxGuests ?? null,
+      requestType: "request_hosting",
+      tripId: resume.tripId ?? null,
+      prefillArrivalDate: resume.prefillArrivalDate ?? null,
+      prefillDepartureDate: resume.prefillDepartureDate ?? null,
+    });
+  }, [openHostingRequest, searchParams, viewerVerified]);
 
   const selectedReasonObj = useMemo(() => {
     if (!selectedReason) return null;
     return connectReasons.find((r) => r.id === selectedReason) ?? null;
   }, [selectedReason, connectReasons]);
 
+  const connectRoleOptions = useMemo(() => {
+    return Array.from(new Set(connectReasons.map((reason) => reason.role).filter(isNonEmptyString))).sort((a, b) => a.localeCompare(b));
+  }, [connectReasons]);
+
+  const visibleConnectReasons = useMemo(() => {
+    const queryText = connectReasonQuery.trim().toLowerCase();
+    return connectReasons
+      .filter((reason) => {
+        if (selectedRole && reason.role !== selectedRole) return false;
+        if (!queryText) return true;
+        const haystack = `${reason.label} ${reason.role}`.toLowerCase();
+        return haystack.includes(queryText);
+      })
+      .slice()
+      .sort((a, b) => {
+        const left = a.sort_order ?? 100;
+        const right = b.sort_order ?? 100;
+        if (left !== right) return left - right;
+        return a.label.localeCompare(b.label);
+      });
+  }, [connectReasonQuery, connectReasons, selectedRole]);
+
   const [dbMembers, setDbMembers] = useState<MemberCard[]>([]);
+  const [hostColumnsAvailable, setHostColumnsAvailable] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [tripCards, setTripCards] = useState<TripCard[]>([]);
@@ -514,6 +841,12 @@ const openConnect = useCallback(
   const [tripsError, setTripsError] = useState<string | null>(null);
 
   const [iconsReady, setIconsReady] = useState(false);
+  const autoRequestedHostRef = useRef<string | null>(null);
+
+  const filtersTitle =
+    tab === "travellers" ? "Filter Travellers" : discoverMode === "hosts" ? "Filter Hosts" : "Filter Dancers";
+  const filtersApplyLabel =
+    tab === "travellers" ? "Show Travellers" : discoverMode === "hosts" ? "Show Hosts" : "Show Dancers";
 
   useEffect(() => {
     let cancelled = false;
@@ -548,6 +881,25 @@ const openConnect = useCallback(
       setTab(stored);
     }
   }, []);
+
+  useEffect(() => {
+    const modeParam = (searchParams.get("mode") ?? "").toLowerCase();
+    if (modeParam === "travelers") {
+      setDiscoverMode("travelers");
+      setTab("travellers");
+      return;
+    }
+    if (modeParam === "hosts") {
+      setDiscoverMode("hosts");
+      setTab("members");
+      return;
+    }
+    if (modeParam === "dancers") {
+      setDiscoverMode("dancers");
+      setTab("members");
+      return;
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -925,10 +1277,11 @@ const openConnect = useCallback(
   }, []);
 
   useEffect(() => {
-    if (!connectModal.open || !connectModal.targetRoles.length) return;
+    if (!connectModal.open) return;
 
     setSelectedReason(null);
-    setSelectedRole(connectModal.targetRoles?.[0] ?? null);
+    setSelectedRole(null);
+    setConnectReasonQuery("");
 
     (async () => {
       try {
@@ -941,7 +1294,6 @@ const openConnect = useCallback(
           .select("id,label,role,sort_order")
           .eq("active", true)
           .in("context", [...contexts])
-          .in("role", connectModal.targetRoles)
           .order("sort_order");
 
         if (!error) setConnectReasons(data ?? []);
@@ -949,7 +1301,7 @@ const openConnect = useCallback(
         setConnectReasons([]);
       }
     })();
-  }, [connectModal.open, connectModal.targetRoles, connectModal.connectContext]);
+  }, [connectModal.open, connectModal.connectContext]);
 
   useEffect(() => {
     (async () => {
@@ -967,11 +1319,16 @@ const openConnect = useCallback(
       try {
         const { data: authData } = await supabase.auth.getUser();
         const user = authData?.user;
+        if (!user) {
+          router.replace("/auth?next=%2Fdiscover%2Fdancers");
+          setLoadingMembers(false);
+          return;
+        }
         if (user) {
           meId = user.id;
           const { data: myProfile } = await supabase
             .from("profiles")
-            .select("city,country,roles,languages,dance_skills")
+            .select("city,country,roles,languages,dance_skills,verified,verified_label")
             .eq("user_id", user.id)
             .maybeSingle();
           const city = isNonEmptyString((myProfile as { city?: string | null } | null)?.city)
@@ -1002,9 +1359,34 @@ const openConnect = useCallback(
           }
           setMyCity(city);
           setMyCountry(country);
+          setViewerVerified(isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null));
           setMyRoles(myRoleList);
           setMyLangCodes(myLangList);
           setMyStyleLevels(myStyles);
+
+          const { data: connectionRows, error: connectionError } = await supabase
+            .from("connections")
+            .select("requester_id,target_id,status")
+            .or(`requester_id.eq.${user.id},target_id.eq.${user.id}`)
+            .in("status", ["pending", "accepted", "blocked"]);
+
+          if (!connectionError) {
+            const nextHiddenMemberIds = Array.from(
+              new Set(
+                (connectionRows ?? [])
+                  .map((raw) => {
+                    const row = raw as { requester_id?: string | null; target_id?: string | null };
+                    if (row.requester_id === user.id) return row.target_id ?? "";
+                    if (row.target_id === user.id) return row.requester_id ?? "";
+                    return "";
+                  })
+                  .filter(isNonEmptyString)
+              )
+            );
+            setHiddenMemberIds(nextHiddenMemberIds);
+          } else {
+            setHiddenMemberIds([]);
+          }
         }
       } catch {}
 
@@ -1012,6 +1394,8 @@ const openConnect = useCallback(
       try {
         setLoadingMembers(true);
         setMembersError(null);
+
+        const hostFieldsSelect = ["can_host", "hosting_status", "max_guests"];
 
         const feedSelect = [
           "id",
@@ -1022,6 +1406,7 @@ const openConnect = useCallback(
           "languages",
           "avatar_url",
           "verified",
+          "verified_label",
           "dance_skills",
           "has_other_style",
           "connections_count",
@@ -1035,11 +1420,13 @@ const openConnect = useCallback(
           "ref_total_neutral",
           "ref_total_negative",
           "is_test",
+          ...hostFieldsSelect,
         ].join(",");
 
         let rawRows: ProfileFeedRow[] = [];
         let loadedRows = false;
         let lastLoadError: unknown = null;
+        let hostFieldsOnSource = false;
 
         let membersQuery = supabase.from("profiles_feed").select(feedSelect).limit(200);
         if (meId) membersQuery = membersQuery.neq("id", meId);
@@ -1047,6 +1434,7 @@ const openConnect = useCallback(
         if (!feedError) {
           rawRows = (feedData ?? []) as ProfileFeedRow[];
           loadedRows = true;
+          hostFieldsOnSource = true;
         } else {
           lastLoadError = feedError;
         }
@@ -1058,17 +1446,20 @@ const openConnect = useCallback(
               [
                 "user_id",
                 "display_name",
+                "created_at",
                 "city",
                 "country",
                 "roles",
                 "languages",
                 "avatar_url",
                 "verified",
+                "verified_label",
                 "dance_skills",
                 "has_other_style",
                 "connections_count",
                 "interests",
                 "availability",
+                ...hostFieldsSelect,
               ].join(",")
             )
             .limit(200);
@@ -1083,6 +1474,7 @@ const openConnect = useCallback(
               };
             });
             loadedRows = true;
+            hostFieldsOnSource = true;
           } else {
             lastLoadError = fallbackError;
           }
@@ -1095,12 +1487,14 @@ const openConnect = useCallback(
               [
                 "user_id",
                 "display_name",
+                "created_at",
                 "city",
                 "country",
                 "roles",
                 "languages",
                 "avatar_url",
                 "verified",
+                "verified_label",
                 "dance_skills",
                 "has_other_style",
               ].join(",")
@@ -1117,6 +1511,7 @@ const openConnect = useCallback(
               };
             });
             loadedRows = true;
+            hostFieldsOnSource = false;
           } else {
             lastLoadError = fallbackErrorLite;
           }
@@ -1125,7 +1520,7 @@ const openConnect = useCallback(
         if (!loadedRows) {
           let fallbackQueryMinimal = supabase
             .from("profiles")
-            .select("user_id,display_name,city,country,avatar_url,verified")
+            .select("user_id,display_name,created_at,city,country,avatar_url,verified,verified_label")
             .limit(200);
           if (meId) fallbackQueryMinimal = fallbackQueryMinimal.neq("user_id", meId);
           const { data: fallbackDataMinimal, error: fallbackErrorMinimal } = await fallbackQueryMinimal;
@@ -1138,57 +1533,63 @@ const openConnect = useCallback(
               };
             });
             loadedRows = true;
+            hostFieldsOnSource = false;
           } else {
             lastLoadError = fallbackErrorMinimal;
           }
         }
 
         if (!loadedRows) throw (lastLoadError ?? new Error("members_source_unavailable"));
+        setHostColumnsAvailable(hostFieldsOnSource);
 
         const mapped: MemberCard[] = rawRows
           .filter((row) => row.is_test !== true)
           .filter((row) => String(row.id ?? row.user_id ?? "") !== (meId ?? ""))
-          .map((row) => {
-          const raw = row as ProfileFeedRow;
-          const rawId = String(raw.id ?? raw.user_id ?? "");
-          const name = isNonEmptyString(raw.display_name) ? raw.display_name : "";
-          const city = isNonEmptyString(raw.city) ? raw.city : "";
-          const country = isNonEmptyString(raw.country) ? raw.country : "";
+          .reduce<MemberCard[]>((acc, row) => {
+            const raw = row as ProfileFeedRow;
+            const rawId = String(raw.id ?? raw.user_id ?? "");
+            if (!rawId) return acc;
 
-          const roles = Array.isArray(raw.roles) ? raw.roles.filter(isNonEmptyString) : [];
-          const rawLangs = Array.isArray(raw.languages) ? raw.languages.filter(isNonEmptyString) : [];
-          const langsCodes = rawLangs.map(langLabelToCode);
+            const name = isNonEmptyString(raw.display_name) ? raw.display_name : "";
+            const city = isNonEmptyString(raw.city) ? raw.city : "";
+            const country = isNonEmptyString(raw.country) ? raw.country : "";
 
-          const verified = Boolean(raw.verified);
-          const photoUrl = isNonEmptyString(raw.avatar_url) ? raw.avatar_url : undefined;
+            const roles = Array.isArray(raw.roles) ? raw.roles.filter(isNonEmptyString) : [];
+            const rawLangs = Array.isArray(raw.languages) ? raw.languages.filter(isNonEmptyString) : [];
+            const langsCodes = rawLangs.map(langLabelToCode);
 
-          // dance_skills from DB is JSON or JSON string; keys lowercased (e.g. "salsa")
-          const danceSkills: Partial<Record<Style, Level>> = {};
-          const ds = safeParseJson<Record<string, unknown>>(raw.dance_skills);
-          if (ds && typeof ds === "object") {
-            for (const [styleKey, payload] of Object.entries(ds)) {
-              const uiStyle = normalizeStyleKeyToUi(styleKey);
-              if (!uiStyle) continue;
-              const payloadObj = payload as { level?: unknown };
-              const lvlRaw = typeof payload === "string" ? payload : payloadObj?.level;
-              const uiLvl = normalizeLevelToUi(lvlRaw);
-              if (uiLvl) danceSkills[uiStyle] = uiLvl;
+            const verified = raw.verified === true;
+            const photoUrl = isNonEmptyString(raw.avatar_url) ? raw.avatar_url : undefined;
+
+            // dance_skills from DB is JSON or JSON string; keys lowercased (e.g. "salsa")
+            const danceSkills: Partial<Record<Style, Level>> = {};
+            const ds = safeParseJson<Record<string, unknown>>(raw.dance_skills);
+            if (ds && typeof ds === "object") {
+              for (const [styleKey, payload] of Object.entries(ds)) {
+                const uiStyle = normalizeStyleKeyToUi(styleKey);
+                if (!uiStyle) continue;
+                const payloadObj = payload as { level?: unknown };
+                const lvlRaw = typeof payload === "string" ? payload : payloadObj?.level;
+                const uiLvl = normalizeLevelToUi(lvlRaw);
+                if (uiLvl) danceSkills[uiStyle] = uiLvl;
+              }
             }
-          }
 
-          const otherStyle = Boolean(raw.has_other_style);
-
-          const interestList = Array.isArray(raw.interests) ? raw.interests.filter(isNonEmptyString) : [];
-          const interest = interestList[0];
-
+            const otherStyle = Boolean(raw.has_other_style);
+            const interestList = Array.isArray(raw.interests) ? raw.interests.filter(isNonEmptyString) : [];
+            const interest = interestList[0];
             const availability =
               Array.isArray(raw.availability) && isNonEmptyString(raw.availability?.[0]) ? raw.availability[0] : undefined;
+            const canHost = typeof raw.can_host === "boolean" ? raw.can_host : undefined;
+            const hostingStatus = isNonEmptyString(raw.hosting_status) ? raw.hosting_status : undefined;
+            const maxGuests = typeof raw.max_guests === "number" ? raw.max_guests : null;
 
-            return {
+            acc.push({
               id: rawId,
               name,
               city,
               country,
+              memberSince: isNonEmptyString(raw.created_at) ? raw.created_at : null,
               verified,
               roles,
               danceSkills,
@@ -1196,6 +1597,9 @@ const openConnect = useCallback(
               langs: langsCodes,
               interest,
               availability,
+              canHost,
+              hostingStatus,
+              maxGuests,
               photoUrl,
 
               connectionsCount: typeof raw.connections_count === "number" ? raw.connections_count : undefined,
@@ -1208,13 +1612,34 @@ const openConnect = useCallback(
               refTotalPositive: typeof raw.ref_total_positive === "number" ? raw.ref_total_positive : 0,
               refTotalNeutral: typeof raw.ref_total_neutral === "number" ? raw.ref_total_neutral : 0,
               refTotalNegative: typeof raw.ref_total_negative === "number" ? raw.ref_total_negative : 0,
-            };
-          });
+            });
+
+            return acc;
+          }, []);
+
+        const needsMemberSince = mapped.filter((row) => !row.memberSince).map((row) => row.id);
+        if (needsMemberSince.length > 0) {
+          const { data: createdRows, error: createdErr } = await supabase
+            .from("profiles")
+            .select("user_id,created_at")
+            .in("user_id", needsMemberSince);
+          if (!createdErr) {
+            const createdAtByUserId: Record<string, string | null> = {};
+            (createdRows ?? []).forEach((raw) => {
+              const row = raw as { user_id?: string | null; created_at?: string | null };
+              if (isNonEmptyString(row.user_id)) createdAtByUserId[row.user_id] = row.created_at ?? null;
+            });
+            mapped.forEach((row) => {
+              if (!row.memberSince) row.memberSince = createdAtByUserId[row.id] ?? null;
+            });
+          }
+        }
 
         setDbMembers(mapped);
       } catch (e: unknown) {
         setMembersError(errorMessage(e, "Failed to load members from database."));
         setDbMembers([]);
+        setHostColumnsAvailable(false);
       } finally {
         setLoadingMembers(false);
       }
@@ -1233,14 +1658,16 @@ const openConnect = useCallback(
         const tripsQuery = supabase
           .from("trips")
           .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
-          .neq("user_id", meId ?? "")
           .eq("status", "active")
           .gte("end_date", todayIso)
           .limit(200);
         const { data: tripRows, error: tripErr } = await tripsQuery;
         if (!tripErr) {
-          trips = (tripRows ?? []) as TripRow[];
-          loadedTrips = true;
+          const strictRows = (tripRows ?? []) as TripRow[];
+          if (strictRows.length > 0) {
+            trips = strictRows;
+            loadedTrips = true;
+          }
         } else {
           lastTripsError = tripErr;
         }
@@ -1249,12 +1676,14 @@ const openConnect = useCallback(
           const tripsQueryFallback = supabase
             .from("trips")
             .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .neq("user_id", meId ?? "")
             .limit(200);
           const { data: fallbackRows, error: fallbackErr } = await tripsQueryFallback;
           if (!fallbackErr) {
-            trips = (fallbackRows ?? []) as TripRow[];
-            loadedTrips = true;
+            const broadRows = (fallbackRows ?? []) as TripRow[];
+            if (broadRows.length > 0) {
+              trips = broadRows;
+              loadedTrips = true;
+            }
           } else {
             lastTripsError = fallbackErr;
           }
@@ -1264,12 +1693,14 @@ const openConnect = useCallback(
           const tripsQueryLite = supabase
             .from("trips")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .neq("user_id", meId ?? "")
             .limit(200);
           const { data: fallbackRowsLite, error: fallbackErrLite } = await tripsQueryLite;
           if (!fallbackErrLite) {
-            trips = (fallbackRowsLite ?? []) as TripRow[];
-            loadedTrips = true;
+            const liteRows = (fallbackRowsLite ?? []) as TripRow[];
+            if (liteRows.length > 0) {
+              trips = liteRows;
+              loadedTrips = true;
+            }
           } else {
             lastTripsError = fallbackErrLite;
           }
@@ -1279,12 +1710,14 @@ const openConnect = useCallback(
           const travelPlansQuery = supabase
             .from("travel_plans")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .neq("user_id", meId ?? "")
             .limit(200);
           const { data: planRows, error: planErr } = await travelPlansQuery;
           if (!planErr) {
-            trips = (planRows ?? []) as TripRow[];
-            loadedTrips = true;
+            const planRowsSafe = (planRows ?? []) as TripRow[];
+            if (planRowsSafe.length > 0) {
+              trips = planRowsSafe;
+              loadedTrips = true;
+            }
           } else {
             lastTripsError = planErr;
           }
@@ -1292,9 +1725,10 @@ const openConnect = useCallback(
 
         if (!loadedTrips) throw (lastTripsError ?? new Error("trips_source_unavailable"));
 
+        const activeLikeStatuses = new Set(["active", "published", "open", "upcoming"]);
         trips = trips.filter((trip) => {
           const status = String(trip.status ?? "active").toLowerCase();
-          if (trip.status && status !== "active") return false;
+          if (trip.status && !activeLikeStatuses.has(status)) return false;
           if (!trip.end_date) return true;
           return trip.end_date >= todayIso;
         });
@@ -1404,27 +1838,13 @@ const openConnect = useCallback(
         setLoadingTrips(false);
       }
     })();
-  }, []);
+  }, [router]);
 
   // Country + City library (same as onboarding)
-  const countriesAll = useMemo(() => Country.getAllCountries(), []);
+  const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
   const countryNames = useMemo(() => countriesAll.map((c) => c.name), [countriesAll]);
-  const countryIsoByName = useMemo(() => {
-    const map = new Map<string, string>();
-    countriesAll.forEach((c) => {
-      if (c.name && c.isoCode) map.set(c.name, c.isoCode);
-    });
-    return map;
-  }, [countriesAll]);
-  const availableCities = useMemo(() => {
-    if (!filters.country) return [];
-    const iso = countryIsoByName.get(filters.country);
-    if (!iso) return [];
-    const cities = (City.getCitiesOfCountry(iso) ?? [])
-      .map((c) => c.name?.trim())
-      .filter((name): name is string => !!name);
-    return Array.from(new Set(cities)).sort((a, b) => a.localeCompare(b));
-  }, [filters.country, countryIsoByName]);
+  const countryIso = useMemo(() => countriesAll.find((c) => c.name === filters.country)?.isoCode ?? "", [countriesAll, filters.country]);
   const citySuggestions = useMemo(() => {
     const q = cityQuery.trim().toLowerCase();
     return availableCities
@@ -1444,6 +1864,63 @@ const openConnect = useCallback(
       .map((item) => item.label);
     return Array.from(new Set(labels));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (countriesAll.length > 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCountriesAll()
+      .then((countries) => {
+        if (cancelled) return;
+        setCountriesAll(countries);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCountriesAll([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countriesAll.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!countryIso) {
+      setAvailableCities([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cachedCities = getCachedCitiesOfCountry(countryIso);
+    if (cachedCities.length > 0) {
+      setAvailableCities(cachedCities);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCitiesOfCountry(countryIso)
+      .then((cities) => {
+        if (cancelled) return;
+        setAvailableCities(cities);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAvailableCities([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countryIso]);
 
   const languageSuggestions = useMemo(() => {
     const q = languageQuery.trim().toLowerCase();
@@ -1520,6 +1997,7 @@ const openConnect = useCallback(
 
   const members = useMemo(() => {
     let list = dbMembers.slice();
+    const memberSearchQuery = normalizeSearchText(memberSearch);
 
     if (myCityOnly) {
       if (!myCity) return [];
@@ -1535,9 +2013,16 @@ const openConnect = useCallback(
 
     if (filters.country) list = list.filter((m) => m.country === filters.country);
     if (filters.cities.length) list = list.filter((m) => filters.cities.includes(m.city));
+    if (hiddenMemberIds.length) list = list.filter((m) => !hiddenMemberIds.includes(m.id));
 
     if (filters.roles.length) {
       list = list.filter((m) => m.roles.some((r) => filters.roles.includes(r as Role)));
+    }
+
+    if (filters.references === "has") {
+      list = list.filter((m) => Number(m.refTotalAll ?? 0) > 0);
+    } else if (filters.references === "none") {
+      list = list.filter((m) => Number(m.refTotalAll ?? 0) === 0);
     }
 
     const entries = Object.entries(filters.styleLevels) as Array<[Style, Level[]]>;
@@ -1563,6 +2048,38 @@ const openConnect = useCallback(
     if (filters.availability) list = list.filter((m) => (m.availability ?? "") === filters.availability);
     if (filters.verifiedOnly) list = list.filter((m) => !!m.verified);
 
+    if (discoverMode === "hosts") {
+      if (hostColumnsAvailable) {
+        list = list.filter((m) => {
+          if (!m.canHost) return false;
+          if (m.maxGuests !== null && typeof m.maxGuests === "number" && m.maxGuests <= 0) return false;
+          const status = (m.hostingStatus ?? "").trim().toLowerCase();
+          if (!status) return true;
+          return ["active", "available", "open", "enabled", "on"].includes(status);
+        });
+      } else {
+        list = list.filter((m) => {
+          const hasHostRole = m.roles.some((role) => ["Organizer", "Studio Owner", "Promoter"].includes(role));
+          const availability = (m.availability ?? "").toLowerCase();
+          const interest = (m.interest ?? "").toLowerCase();
+          const hostSignal =
+            availability.includes("travel") ||
+            interest.includes("accommodation") ||
+            interest.includes("organize") ||
+            interest.includes("host");
+          return hasHostRole || hostSignal;
+        });
+      }
+    }
+
+    if (memberSearchQuery) {
+      const terms = memberSearchQuery.split(/\s+/).filter(Boolean);
+      list = list.filter((m) => {
+        const haystack = normalizeSearchText(m.name ?? "");
+        return terms.every((term) => haystack.includes(term));
+      });
+    }
+
     const byNewest = (a: MemberCard, b: MemberCard) => {
       const ar = Number(a.refTotalAll ?? 0);
       const br = Number(b.refTotalAll ?? 0);
@@ -1587,16 +2104,64 @@ const openConnect = useCallback(
     else if (sortMode === "city_az") list = list.slice().sort(byCity);
 
     return list;
-  }, [myCityOnly, myCity, myCountry, filters, dbMembers, sortMode, getMemberRecommendationMeta]);
+  }, [
+    myCityOnly,
+    myCity,
+    myCountry,
+    filters,
+    dbMembers,
+    hiddenMemberIds,
+    sortMode,
+    getMemberRecommendationMeta,
+    discoverMode,
+    hostColumnsAvailable,
+    memberSearch,
+  ]);
+
+  useEffect(() => {
+    const requestedHostId = (searchParams.get("request_host") ?? "").trim();
+    if (!requestedHostId || loadingMembers) return;
+    if (autoRequestedHostRef.current === requestedHostId) return;
+
+    const host = dbMembers.find((member) => member.id === requestedHostId);
+    if (!host) return;
+
+    autoRequestedHostRef.current = requestedHostId;
+    requestHostingAccess({
+      targetUserId: host.id,
+      targetName: host.name,
+      targetPhotoUrl: host.photoUrl ?? null,
+      targetMaxGuests: host.maxGuests ?? null,
+      tripId: null,
+    });
+  }, [dbMembers, loadingMembers, requestHostingAccess, searchParams]);
 
   const filteredTrips = useMemo(() => {
     let list = tripCards.slice();
+
+    if (myCityOnly) {
+      if (!myCity) return [];
+      const cityLower = myCity.toLowerCase();
+      const countryLower = (myCountry ?? "").toLowerCase();
+      list = list.filter((t) => {
+        const sameCity = (t.destination_city ?? "").toLowerCase() === cityLower;
+        if (!sameCity) return false;
+        if (!countryLower) return true;
+        return (t.destination_country ?? "").toLowerCase() === countryLower;
+      });
+    }
 
     if (filters.country) list = list.filter((t) => t.destination_country === filters.country);
     if (filters.cities.length) list = list.filter((t) => filters.cities.includes(t.destination_city));
 
     if (filters.roles.length) {
       list = list.filter((t) => (t.roles ?? []).some((r) => filters.roles.includes(r as Role)));
+    }
+
+    if (filters.references === "has") {
+      list = list.filter((t) => getTripReferenceTotal(t) > 0);
+    } else if (filters.references === "none") {
+      list = list.filter((t) => getTripReferenceTotal(t) === 0);
     }
 
     if (filters.langs.length) {
@@ -1612,7 +2177,7 @@ const openConnect = useCallback(
 
     const from = (filters.tripDateFrom ?? "").trim();
     const to = (filters.tripDateTo ?? "").trim();
-    if (from && to) {
+    if (from || to) {
       const fromT = from ? Date.parse(from) : Number.NEGATIVE_INFINITY;
       const toT = to ? Date.parse(to) : Number.POSITIVE_INFINITY;
 
@@ -1637,13 +2202,27 @@ const openConnect = useCallback(
     else if (sortMode === "city_az") list = list.slice().sort(byCity);
 
     return list;
-  }, [filters, tripCards, sortMode, getTripRecommendationMeta]);
+  }, [filters, tripCards, sortMode, getTripRecommendationMeta, myCityOnly, myCity, myCountry]);
+
+  const totalMembersPages = Math.max(1, Math.ceil(members.length / DISCOVER_PAGE_SIZE));
+  const totalTravellersPages = Math.max(1, Math.ceil(filteredTrips.length / DISCOVER_PAGE_SIZE));
+
+  const paginatedMembers = useMemo(
+    () => members.slice((membersPage - 1) * DISCOVER_PAGE_SIZE, membersPage * DISCOVER_PAGE_SIZE),
+    [members, membersPage]
+  );
+
+  const paginatedTrips = useMemo(
+    () => filteredTrips.slice((travellersPage - 1) * DISCOVER_PAGE_SIZE, travellersPage * DISCOVER_PAGE_SIZE),
+    [filteredTrips, travellersPage]
+  );
 
   const activeFiltersCount = useMemo(() => {
     let n = 0;
     if (filters.country) n += 1;
     if (filters.cities.length) n += 1;
     if (filters.roles.length) n += 1;
+    if (filters.references) n += 1;
     if (tab === "members") {
       if (Object.keys(filters.styleLevels).length) n += 1;
       if (filters.otherStyle) n += 1;
@@ -1658,64 +2237,331 @@ const openConnect = useCallback(
     return n;
   }, [filters, tab]);
 
+  useEffect(() => {
+    setMembersPage(1);
+  }, [
+    tab,
+    discoverMode,
+    sortMode,
+    myCityOnly,
+    myCity,
+    myCountry,
+    filters.country,
+    filters.cities,
+    filters.roles,
+    filters.references,
+    filters.otherStyle,
+    filters.interest,
+    filters.availability,
+    filters.verifiedOnly,
+    filters.langs,
+    filters.styleLevels,
+    memberSearch,
+    dbMembers.length,
+  ]);
+
+  useEffect(() => {
+    setTravellersPage(1);
+  }, [
+    tab,
+    sortMode,
+    myCityOnly,
+    myCity,
+    myCountry,
+    filters.country,
+    filters.cities,
+    filters.roles,
+    filters.references,
+    filters.tripPurpose,
+    filters.tripDateFrom,
+    filters.tripDateTo,
+    filters.langs,
+    tripCards.length,
+  ]);
+
+  useEffect(() => {
+    if (membersPage > totalMembersPages) setMembersPage(totalMembersPages);
+  }, [membersPage, totalMembersPages]);
+
+  useEffect(() => {
+    if (travellersPage > totalTravellersPages) setTravellersPage(totalTravellersPages);
+  }, [travellersPage, totalTravellersPages]);
+
+  const hostingMessageValidation = useMemo(
+    () => validateSecureFreeText(hostingModal.message),
+    [hostingModal.message]
+  );
+  const tripRequestMessageValidation = useMemo(
+    () => validateTripRequestText(tripJoinModal.note),
+    [tripJoinModal.note]
+  );
+
+  async function sendTripJoinRequest() {
+    if (!tripJoinModal.tripId || !tripJoinModal.targetUserId) {
+      setUiError("Missing trip details.");
+      return;
+    }
+
+    if (tripRequestMessageValidation) {
+      setUiError(tripRequestMessageValidation);
+      return;
+    }
+
+    try {
+      setTripRequestSending(true);
+      setUiError(null);
+      setUiInfo(null);
+
+      const note = tripJoinModal.note.trim();
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token ?? "";
+      if (!token) throw new Error("Missing auth session.");
+
+      const response = await fetch("/api/trips/requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          tripId: tripJoinModal.tripId,
+          note: note || null,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to create trip request.");
+      }
+
+      closeTripJoinModal();
+      setUiInfo("Trip request sent. Continue the request inside Messages.");
+      router.replace("/messages?tab=requests");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to send trip request.";
+      setUiError(
+        message.includes("Failed to fetch")
+          ? "Network issue while sending request. Check your connection and retry."
+          : message
+      );
+    } finally {
+      setTripRequestSending(false);
+    }
+  }
+
+  async function sendHostingRequest() {
+    if (!hostingModal.targetUserId) {
+      setUiError("Missing target host/traveler.");
+      return;
+    }
+    if (!hostingModal.arrivalDate || !hostingModal.departureDate) {
+      setUiError("Arrival and departure dates are required.");
+      return;
+    }
+    if (hostingModal.departureDate < hostingModal.arrivalDate) {
+      setUiError("Departure must be after arrival.");
+      return;
+    }
+    if (hostingModal.arrivalDate < new Date().toISOString().slice(0, 10)) {
+      setUiError("Arrival date must be today or later.");
+      return;
+    }
+    if (hostingModal.travellersCount < 1 || hostingModal.travellersCount > 20) {
+      setUiError("Number of travellers must be between 1 and 20.");
+      return;
+    }
+
+    const maxAllowedRaw = hostingModal.maxTravellersAllowed.trim();
+    const hasMaxAllowed = maxAllowedRaw.length > 0;
+    const parsedMaxAllowed = hasMaxAllowed ? Number(maxAllowedRaw) : Number.NaN;
+    if (hostingModal.requestType === "offer_to_host" && !hasMaxAllowed) {
+      setUiError("Select how many travellers you can host.");
+      return;
+    }
+    if (hasMaxAllowed && (!Number.isFinite(parsedMaxAllowed) || parsedMaxAllowed < 1 || parsedMaxAllowed > 20)) {
+      setUiError("Host capacity must be between 1 and 20 when provided.");
+      return;
+    }
+    if (hostingModal.requestType !== "offer_to_host" && hasMaxAllowed && parsedMaxAllowed < hostingModal.travellersCount) {
+      setUiError("Host capacity must be equal or greater than traveller count.");
+      return;
+    }
+
+    const messageValidationError = validateSecureFreeText(hostingModal.message);
+    if (messageValidationError) {
+      setUiError(messageValidationError);
+      return;
+    }
+
+    try {
+      setHostingSending(true);
+      setUiError(null);
+      setUiInfo(null);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token ?? "";
+      if (!accessToken) throw new Error("Missing auth session token.");
+
+      const response = await fetch("/api/hosting/requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          recipientUserId: hostingModal.targetUserId,
+          requestType: hostingModal.requestType,
+          tripId: hostingModal.tripId,
+          arrivalDate: hostingModal.arrivalDate,
+          departureDate: hostingModal.departureDate,
+          arrivalFlexible: hostingModal.arrivalFlexible,
+          departureFlexible: hostingModal.departureFlexible,
+          travellersCount: hostingModal.travellersCount,
+          maxTravellersAllowed: hasMaxAllowed ? parsedMaxAllowed : null,
+          message: hostingModal.message.trim() || null,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "Failed to send hosting request.");
+      }
+
+      closeHostingModal();
+      setUiInfo(
+        hostingModal.requestType === "offer_to_host"
+          ? "Host offer sent. Continue the request inside Messages."
+          : "Hosting request sent. Continue the request inside Messages."
+      );
+      router.replace("/messages?tab=requests");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to send hosting request.";
+      setUiError(
+        message.includes("Failed to fetch")
+          ? "Network issue while sending request. Check your connection and retry."
+          : message
+      );
+    } finally {
+      setHostingSending(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white">
       <Nav />
 
-      <main className="mx-auto max-w-[1200px] px-6 py-8">
+      <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8">
+        {uiInfo ? (
+          <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-[#00F5FF]/35 bg-[#00F5FF]/10 p-3 text-sm text-[#B8FBFF]">
+            <span>{uiInfo}</span>
+            <button
+              type="button"
+              onClick={() => setUiInfo(null)}
+              className="text-[#B8FBFF]/70 hover:text-[#B8FBFF]"
+              aria-label="Dismiss"
+            >
+              <MSIcon name="close" className="text-[18px]" />
+            </button>
+          </div>
+        ) : null}
+
         {uiError ? (
-          <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
+          <div className="mb-6 rounded-xl border border-[#FF00FF]/30 bg-[#FF00FF]/10 p-3 text-sm text-[#FFC6FA]">
             {uiError}
           </div>
         ) : null}
 
         {membersError ? (
-          <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
+          <div className="mb-6 rounded-xl border border-[#FF00FF]/30 bg-[#FF00FF]/10 p-3 text-sm text-[#FFC6FA]">
             {membersError}
           </div>
         ) : null}
 
 
-        <div className="flex justify-center">
-          <div className="flex h-12 w-full max-w-md items-center justify-center rounded-full bg-white/5 p-1 border border-white/10">
+        <section className="border-b border-white/6 pb-3 sm:pb-4">
+          <div
+            className="mx-auto grid w-full max-w-none grid-cols-3 gap-2 px-0 pb-1 sm:flex sm:max-w-[560px] sm:items-center sm:justify-center sm:gap-8 sm:overflow-visible sm:px-0 sm:pb-0"
+            style={{ scrollbarWidth: "none" }}
+          >
             <button
-              onClick={() => setTab("members")}
-              className={[
-                "h-full flex-1 rounded-full px-4 text-sm font-bold transition",
-                tab === "members" ? "bg-white/10 text-[#00F5FF]" : "text-white/50 hover:text-white",
+              onClick={() => {
+                setTab("members");
+                setDiscoverMode("dancers");
+                router.replace("/connections?mode=dancers", { scroll: false });
+              }}
+            className={[
+                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                tab === "members" && discoverMode === "dancers"
+                  ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
+                  : "text-white/70 hover:text-white/95",
               ].join(" ")}
             >
-              Members
+              <MSIcon
+                name="person"
+                className={[
+                  "text-[18px] transition-opacity",
+                  tab === "members" && discoverMode === "dancers" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
+                ].join(" ")}
+              />
+              {t("discover.dancers")}
             </button>
             <button
-              onClick={() => setTab("travellers")}
+              onClick={() => {
+                setTab("travellers");
+                setDiscoverMode("travelers");
+                router.replace("/connections?mode=travelers", { scroll: false });
+              }}
               className={[
-                "h-full flex-1 rounded-full px-4 text-sm font-bold transition",
-                tab === "travellers" ? "bg-white/10 text-[#00F5FF]" : "text-white/50 hover:text-white",
+                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                tab === "travellers"
+                  ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
+                  : "text-white/70 hover:text-white/95",
               ].join(" ")}
             >
-              Travellers
+              <MSIcon
+                name="flight"
+                className={[
+                  "text-[18px] transition-opacity",
+                  tab === "travellers" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
+                ].join(" ")}
+              />
+              {t("discover.travelers")}
+            </button>
+            <button
+              onClick={() => {
+                setTab("members");
+                setDiscoverMode("hosts");
+                router.replace("/connections?mode=hosts", { scroll: false });
+              }}
+              className={[
+                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                tab === "members" && discoverMode === "hosts"
+                  ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
+                  : "text-white/70 hover:text-white/95",
+              ].join(" ")}
+            >
+              <MSIcon
+                name="home"
+                className={[
+                  "text-[18px] transition-opacity",
+                  tab === "members" && discoverMode === "hosts" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
+                ].join(" ")}
+              />
+              {t("discover.hosts")}
             </button>
           </div>
-        </div>
+        </section>
 
-        <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-6">
+        <div className="mt-6 flex flex-col gap-4 md:mt-8 md:flex-row md:items-center md:justify-between">
+          <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center md:gap-6">
             <p className="text-white/50 text-sm">
-              Showing <span className="text-white font-semibold">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
-              {tab === "members" ? "members" : "trips"}
+              {t("discover.showing")} <span className="text-white font-semibold">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
+              {tab === "members" ? (discoverMode === "hosts" ? "hosts" : "dancers") : "travelers"}
             </p>
 
-            <div className="flex items-center gap-4 border-l border-white/10 pl-6">
-              <button className="flex items-center gap-2 text-sm text-white/70 hover:text-white transition">
-                <span className="text-xl">≡</span>
-                <span>Sort</span>
-              </button>
+            <div className="hidden md:flex md:flex-row md:items-center md:gap-3 md:border-l md:border-white/10 md:pl-6">
               <div className="relative">
                 <select
                   value={sortMode}
                   onChange={(e) => setSortMode(e.target.value as SortMode)}
-                  className="appearance-none rounded-full border border-white/10 bg-white/5 px-4 py-2 pr-9 text-sm text-white/80 outline-none transition hover:border-white/25 focus:border-[#00F5FF]/50"
+                  className="appearance-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 pr-8 text-sm text-white/85 outline-none transition hover:border-white/25 focus:border-[#00F5FF]/50"
                 >
                   <option value="recommended">Recommended</option>
                   <option value="newest">Newest</option>
@@ -1724,10 +2570,10 @@ const openConnect = useCallback(
                   {tab === "members" ? <option value="connections_desc">Most Connections</option> : null}
                   {tab === "members" ? <option value="references_desc">Most References</option> : null}
                 </select>
-                <MSIcon name="expand_more" className="pointer-events-none absolute right-3 top-2.5 text-[16px] text-white/45" />
+                <MSIcon name="expand_more" className="pointer-events-none absolute right-2.5 top-2.5 text-[16px] text-white/45" />
               </div>
 
-              {tab === "members" ? (
+              {tab === "members" || tab === "travellers" ? (
                 <label className={`flex items-center gap-3 text-sm ${myCity ? "text-white/70" : "text-white/35"}`}>
                   <input
                     type="checkbox"
@@ -1742,33 +2588,50 @@ const openConnect = useCallback(
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center md:w-auto md:justify-end">
+            {tab === "members" ? (
+              <label className="relative w-full sm:flex-1 md:w-[240px] md:flex-none">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
+                  <MSIcon name="search" className="text-[18px]" />
+                </span>
+                <input
+                  type="search"
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  placeholder={discoverMode === "hosts" ? "Search hosts by name" : "Search dancers by name"}
+                  className="h-11 w-full rounded-full border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/35 hover:border-white/20 focus:border-[#00F5FF]/45"
+                />
+              </label>
+            ) : null}
             {tab === "travellers" ? (
-              <RangeDatePicker
-                start={filters.tripDateFrom}
-                end={filters.tripDateTo}
-                onChangeStart={(v) => setFilters((p) => ({ ...p, tripDateFrom: v }))}
-                onChangeEnd={(v) => setFilters((p) => ({ ...p, tripDateTo: v }))}
-              />
+              <div className="hidden md:block">
+                <RangeDatePicker
+                  start={filters.tripDateFrom}
+                  end={filters.tripDateTo}
+                  onChangeStart={(v) => setFilters((p) => ({ ...p, tripDateFrom: v }))}
+                  onChangeEnd={(v) => setFilters((p) => ({ ...p, tripDateTo: v }))}
+                />
+              </div>
             ) : null}
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}
-              className="rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] hover:opacity-90 transition"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90 sm:w-auto"
             >
-              Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+              <span className="material-symbols-outlined text-[18px]">tune</span>
+              {t("discover.filters")}{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
             </button>
           </div>
         </div>
 
         {tab === "members" ? (
           <div className="relative mt-8">
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
               {loadingMembers ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <div
                     key={`sk-${i}`}
-                    className="connections-card border border-white/10 rounded-[1.25rem] bg-[#121212] overflow-hidden flex flex-col md:flex-row h-[420px] md:h-64 animate-pulse"
+                    className="connections-card flex min-h-[360px] flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] animate-pulse md:h-64 md:min-h-0 md:flex-row"
                   >
                     <div className="w-full md:w-1/2 h-44 md:h-full bg-white/5" />
                     <div className="w-full md:w-1/2 p-4 flex flex-col h-full justify-between">
@@ -1805,128 +2668,130 @@ const openConnect = useCallback(
                   </div>
                 ))
               ) : (
-                members.map((m) => {
+                paginatedMembers.map((m) => {
                 const refMember = Number(m.refMemberAll ?? 0);
                 const refTrip = Number(m.refTripAll ?? 0);
                 const refEvent = Number(m.refEventAll ?? 0);
                 const refTotal = Number(m.refTotalAll ?? 0) || refMember + refTrip + refEvent;
                 const connectionsCount = Number(m.connectionsCount ?? 0);
-
                 return (
                   <div
                     key={m.id}
-                    className="connections-card border border-white/10 rounded-[1.25rem] bg-[#121212] overflow-hidden flex flex-col md:flex-row h-[420px] md:h-64 transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
+                    className="connections-card overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
                   >
-                    <div
-                      className="w-full md:w-1/2 h-44 md:h-full bg-cover bg-center"
-                      style={
-                        m.photoUrl
-                          ? { backgroundImage: `url(${m.photoUrl})` }
-                          : { backgroundImage: "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))" }
-                      }
-                    />
+                    <div className="flex min-h-[196px] md:hidden">
+                      <div className="relative w-[42%] shrink-0 border-r border-white/10">
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/profile/${encodeURIComponent(m.id)}`)}
+                          className="h-full w-full overflow-hidden bg-white/5"
+                          title="View profile"
+                        >
+                          <div
+                            className="h-full w-full bg-cover bg-center"
+                            style={
+                              m.photoUrl
+                                ? { backgroundImage: `url(${m.photoUrl})` }
+                                : { backgroundImage: "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))" }
+                            }
+                          />
+                        </button>
+                      </div>
 
-                    <div className="w-full md:w-1/2 p-4 flex flex-col h-full justify-between">
-                      <div className="min-h-0">
-                        <div className="relative">
-                          {connectionsCount > 0 ? (
-                            <div className="absolute top-0 right-0 flex items-center gap-1 text-[12px] text-white/40 font-semibold">
-                              <MSIcon name="group" className="icon-sm text-[#00F5FF]" />
-                              <span>{connectionsCount}</span>
+                      <div className="flex min-w-0 flex-1 flex-col justify-between p-3">
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="truncate text-[18px] font-semibold tracking-tight text-white">{m.name}</h3>
+                                {m.verified ? <VerifiedBadge size={16} /> : null}
+                              </div>
+                              <div className="mt-1 text-[13px] font-medium text-[#00F5FF]">
+                                {m.city}
+                                <span className="text-white/60">, {m.country}</span>
+                              </div>
                             </div>
-                          ) : null}
 
-                          <div className="flex items-center gap-1.5 mb-2">
-                            <h3 className="text-[20px] font-normal tracking-tight">{m.name}</h3>
-                            {m.verified ? (
-                              <MSIcon name="verified" className="fill-1 verified-icon" title="Verified" />
+                            {connectionsCount > 0 ? (
+                              <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-semibold text-white/70">
+                                <MSIcon name="group" className="text-[13px] text-[#00F5FF]" />
+                                <span>{connectionsCount}</span>
+                              </div>
                             ) : null}
                           </div>
 
-                          <div className="mb-3 flex items-baseline gap-2">
-                            <span className="text-[15px] font-medium leading-none text-[#00F5FF]">{m.city}</span>
-                            <span className="text-[15px] font-medium leading-none text-white/65">, {m.country}</span>
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] font-medium text-white/55">
+                            <span className="inline-flex items-center gap-1">
+                              <MSIcon name="workspace_premium" className="text-[13px] text-[#00F5FF]" />
+                              <span className="text-white/80">{refTotal}</span>
+                              refs
+                            </span>
+                            {refMember > 0 ? (
+                              <span className="inline-flex items-center gap-1">
+                                <MSIcon name="person" className="text-[13px] text-[#00F5FF]" />
+                                <span className="text-white/80">{refMember}</span>
+                              </span>
+                            ) : null}
+                            {refTrip > 0 ? (
+                              <span className="inline-flex items-center gap-1">
+                                <MSIcon name="flight" className="text-[13px] text-[#00F5FF]" />
+                                <span className="text-white/80">{refTrip}</span>
+                              </span>
+                            ) : null}
                           </div>
 
-                          {(refMember + refTrip + refEvent) > 0 ? (
-                            <div className="mb-3 flex items-center gap-3 text-[11px] text-white/45 font-medium">
-                              <span className="whitespace-nowrap">{refTotal} References:</span>
-
-                              {refMember > 0 ? (
-                                <div className="flex items-center gap-1.5">
-                                  <MSIcon name="person" className="icon-xs text-[#00F5FF]" />
-                                  <span className="text-white/70 font-medium">{refMember}</span>
-                                </div>
-                              ) : null}
-
-                              {refTrip > 0 ? (
-                                <div className="flex items-center gap-1.5">
-                                  <MSIcon name="flight" className="icon-xs text-[#00F5FF]" />
-                                  <span className="text-white/70 font-medium">{refTrip}</span>
-                                </div>
-                              ) : null}
-
-                              {refEvent > 0 ? (
-                                <div className="flex items-center gap-1.5">
-                                  <MSIcon name="event_available" className="icon-xs text-[#00F5FF]" />
-                                  <span className="text-white/70 font-medium">{refEvent}</span>
-                                </div>
-                              ) : null}
+                          {m.roles.length ? (
+                            <div className="mt-0.5">
+                              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
+                                <MSIcon name="badge" className="text-[13px] text-[#00F5FF]" />
+                                <span>Roles</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {m.roles.slice(0, 2).map((r) => (
+                                  <span
+                                    key={r}
+                                    className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium text-white/75"
+                                  >
+                                    {r}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
                           ) : null}
 
-                          <div className="flex items-center gap-2 mb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                            <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                            <div className="flex gap-1.5">
-                              {m.roles.map((r) => (
-                                <span
-                                  key={r}
-                                  className="bg-white/5 text-white/70 text-[9px] font-medium px-2 py-[3px] rounded-md border border-white/10 whitespace-nowrap"
-                                >
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 mb-3">
-                            <MSIcon name="person_play" className="icon-sm text-[#00F5FF]" />
-                            <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                              {Object.entries(m.danceSkills ?? {}).map(([style, lvl]) => {
-                                return (
+                          {Object.entries(m.danceSkills ?? {}).length || m.otherStyle ? (
+                            <div className="mt-1">
+                              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
+                                <MSIcon name="person_play" className="text-[13px] text-[#00F5FF]" />
+                                <span>Dance styles</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(m.danceSkills ?? {}).slice(0, 3).map(([style, lvl]) => (
                                   <span
                                     key={style}
                                     title={`Level: ${lvl}`}
-                                    className="text-[9px] px-2 py-[3px] rounded-md border border-white/10 bg-white/5 text-white/55 font-medium uppercase tracking-wider whitespace-nowrap"
+                                    className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/60"
                                   >
                                     {style}
                                   </span>
-                                );
-                              })}
-
-                              {m.otherStyle ? (
-                                <span
-                                  className="text-[9px] px-2 py-[3px] rounded-md border border-white/10 bg-white/5 text-white/55 font-medium uppercase tracking-wider whitespace-nowrap"
-                                  title="Other style"
-                                >
-                                  Other
-                                </span>
-                              ) : null}
+                                ))}
+                                {m.otherStyle ? (
+                                  <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/60">
+                                    Other
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      </div>
+                          ) : null}
 
-                      <div className="pt-3 flex flex-col gap-0">
-                        {m.langs?.length ? (
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <MSIcon name="public" className="icon-sm text-[#00F5FF]" />
+                          {m.langs?.length ? (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              <MSIcon name="public" className="text-[14px] text-[#00F5FF]" />
                               <div className="flex flex-wrap gap-1.5">
                                 {m.langs.slice(0, 3).map((l) => (
                                   <div
                                     key={l}
-                                    className="size-5 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[7px] font-bold text-white/70"
+                                    className="flex size-5 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
                                     title={l}
                                   >
                                     {l}
@@ -1934,36 +2799,221 @@ const openConnect = useCallback(
                                 ))}
                               </div>
                             </div>
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </div>
 
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => router.push(`/profile/${m.id}`)}
-                            className="flex-1 text-[10px] font-semibold py-2 px-4 rounded-full border border-white/10 hover:bg-white/5 transition-colors uppercase tracking-widest"
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <Link
+                            href={`/profile/${encodeURIComponent(m.id)}`}
+                            className="inline-flex min-h-[40px] items-center justify-center rounded-full border border-white/10 px-4 py-2 text-center text-[10px] font-semibold uppercase tracking-widest transition-colors hover:bg-white/5"
+                            title="View profile"
                           >
                             View
-                          </button>
-                          <button
-  className="flex-[1.5] text-[10px] font-semibold py-2 px-4 rounded-full
-             text-[#0A0A0A] flex items-center justify-center gap-2
-             uppercase tracking-widest"
-  style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
-  onClick={() => {
-    openConnect({
-      targetUserId: m.id,
-      targetName: m.name,
-      targetPhotoUrl: m.photoUrl ?? null,
-      targetRoles: m.roles,
-      connectContext: "member",
-      tripId: null,
-    });
-  }}
->
-  <span className="text-[12px] font-black leading-none">+</span>
-  Connect
-</button>
+                          </Link>
+                          {discoverMode === "hosts" ? (
+                            <button
+                              className="flex min-h-[40px] items-center justify-center whitespace-nowrap rounded-full px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#0A0A0A]"
+                              style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
+                              onClick={() => {
+                                requestHostingAccess({
+                                  targetUserId: m.id,
+                                  targetName: m.name,
+                                  targetPhotoUrl: m.photoUrl ?? null,
+                                  targetMaxGuests: m.maxGuests ?? null,
+                                  tripId: null,
+                                });
+                              }}
+                            >
+                              Request Hosting
+                            </button>
+                          ) : (
+                            <button
+                              className="flex min-h-[40px] items-center justify-center gap-2 rounded-full px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
+                              style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
+                              onClick={() => {
+                                openConnect({
+                                  targetUserId: m.id,
+                                  targetName: m.name,
+                                  targetPhotoUrl: m.photoUrl ?? null,
+                                  targetRoles: m.roles,
+                                  connectContext: "member",
+                                  tripId: null,
+                                });
+                              }}
+                            >
+                              <span className="text-[12px] font-black leading-none">+</span>
+                              Connect
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="hidden md:flex md:h-64 md:min-h-0 md:flex-row">
+                      <div className="relative h-full w-1/2">
+                        <div
+                          className="h-full w-full bg-cover bg-center"
+                          style={
+                            m.photoUrl
+                              ? { backgroundImage: `url(${m.photoUrl})` }
+                              : { backgroundImage: "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))" }
+                          }
+                        />
+                      </div>
+
+                      <div className="flex h-full w-1/2 flex-col justify-between p-4">
+                        <div className="min-h-0">
+                          <div className="relative">
+                            {connectionsCount > 0 ? (
+                              <div className="absolute right-0 top-0 flex items-center gap-1 text-[12px] font-semibold text-white/40">
+                                <MSIcon name="group" className="icon-sm text-[#00F5FF]" />
+                                <span>{connectionsCount}</span>
+                              </div>
+                            ) : null}
+
+                            <div className="mb-2 flex items-center gap-1.5">
+                              <h3 className="text-[20px] font-normal tracking-tight">{m.name}</h3>
+                              {m.verified ? <VerifiedBadge size={16} /> : null}
+                            </div>
+
+                            <div className="mb-3 flex items-baseline gap-2">
+                              <span className="text-[15px] font-medium leading-none text-[#00F5FF]">{m.city}</span>
+                              <span className="text-[15px] font-medium leading-none text-white/65">, {m.country}</span>
+                            </div>
+
+                            <div className="mb-3 flex items-center gap-3 text-[11px] font-medium text-white/45">
+                              <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                <MSIcon name="workspace_premium" className="icon-xs text-[#00F5FF]" />
+                                <span className="font-medium text-white/70">{refTotal}</span>
+                                <span>References</span>
+                              </div>
+
+                              {refMember > 0 ? (
+                                <div className="flex items-center gap-1.5">
+                                  <MSIcon name="person" className="icon-xs text-[#00F5FF]" />
+                                  <span className="font-medium text-white/70">{refMember}</span>
+                                </div>
+                              ) : null}
+
+                              {refTrip > 0 ? (
+                                <div className="flex items-center gap-1.5">
+                                  <MSIcon name="flight" className="icon-xs text-[#00F5FF]" />
+                                  <span className="font-medium text-white/70">{refTrip}</span>
+                                </div>
+                              ) : null}
+
+                              {refEvent > 0 ? (
+                                <div className="flex items-center gap-1.5">
+                                  <MSIcon name="event_available" className="icon-xs text-[#00F5FF]" />
+                                  <span className="font-medium text-white/70">{refEvent}</span>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="mb-2.5 space-y-1">
+                              <div className="flex items-center gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                                <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
+                                <div className="flex gap-1.5">
+                                  {m.roles.map((r) => (
+                                    <span
+                                      key={r}
+                                      className="whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium text-white/70"
+                                    >
+                                      {r}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <MSIcon name="person_play" className="icon-sm text-[#00F5FF]" />
+                                <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                                  {Object.entries(m.danceSkills ?? {}).map(([style, lvl]) => (
+                                    <span
+                                      key={style}
+                                      title={`Level: ${lvl}`}
+                                      className="whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/55"
+                                    >
+                                      {style}
+                                    </span>
+                                  ))}
+
+                                  {m.otherStyle ? (
+                                    <span
+                                      className="whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/55"
+                                      title="Other style"
+                                    >
+                                      Other
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {m.langs?.length ? (
+                                <div className="flex items-center gap-1.5">
+                                  <MSIcon name="public" className="icon-sm text-[#00F5FF]" />
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {m.langs.slice(0, 3).map((l) => (
+                                      <div
+                                        key={l}
+                                        className="flex size-5 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
+                                        title={l}
+                                      >
+                                        {l}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3">
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/profile/${encodeURIComponent(m.id)}`}
+                              className="inline-flex min-h-[42px] flex-1 items-center justify-center whitespace-nowrap rounded-full border border-white/10 px-4 py-2.5 text-center text-[10px] font-semibold uppercase tracking-widest transition-colors hover:bg-white/5"
+                              title="View profile"
+                            >
+                              View
+                            </Link>
+                            {discoverMode === "hosts" ? (
+                              <button
+                                className="flex min-h-[42px] flex-1 items-center justify-center whitespace-nowrap rounded-full px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#0A0A0A]"
+                                style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
+                                onClick={() => {
+                                  requestHostingAccess({
+                                    targetUserId: m.id,
+                                    targetName: m.name,
+                                    targetPhotoUrl: m.photoUrl ?? null,
+                                    targetMaxGuests: m.maxGuests ?? null,
+                                    tripId: null,
+                                  });
+                                }}
+                              >
+                                Request Hosting
+                              </button>
+                            ) : (
+                              <button
+                                className="flex min-h-[42px] flex-[1.5] items-center justify-center gap-2 rounded-full px-4 py-2.5 text-[11px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
+                                style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
+                                onClick={() => {
+                                  openConnect({
+                                    targetUserId: m.id,
+                                    targetName: m.name,
+                                    targetPhotoUrl: m.photoUrl ?? null,
+                                    targetRoles: m.roles,
+                                    connectContext: "member",
+                                    tripId: null,
+                                  });
+                                }}
+                              >
+                                <span className="text-[12px] font-black leading-none">+</span>
+                                Connect
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1973,11 +3023,22 @@ const openConnect = useCallback(
               )}
 
               {!members.length ? (
-                <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-6 text-white/60">
-                  No matches with these filters.
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white/60 lg:col-span-2">
+                  {memberSearch.trim()
+                    ? `No ${discoverMode === "hosts" ? "hosts" : "dancers"} match "${memberSearch.trim()}".`
+                    : "No matches with these filters."}
                 </div>
               ) : null}
             </div>
+
+            <PaginationControls
+              page={membersPage}
+              totalPages={totalMembersPages}
+              totalItems={members.length}
+              pageSize={DISCOVER_PAGE_SIZE}
+              itemLabel={discoverMode === "hosts" ? "hosts" : "dancers"}
+              onPageChange={setMembersPage}
+            />
 
             {/* Vanish / fade effect at bottom while scrolling */}
           </div>
@@ -1990,15 +3051,52 @@ const openConnect = useCallback(
             ) : null}
 
             {loadingTrips ? (
-              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div
                     key={`trip-sk-${i}`}
-                    className="border border-white/10 rounded-[1.25rem] bg-[#121212] p-4 animate-pulse"
+                    className="connections-card relative overflow-hidden border border-white/10 rounded-3xl bg-[#121212] flex flex-col md:flex-row h-auto md:h-[236px] animate-pulse"
                   >
-                    <div className="h-6 w-40 rounded bg-white/10" />
-                    <div className="mt-3 h-4 w-56 rounded bg-white/10" />
-                    <div className="mt-5 h-10 w-full rounded-full bg-white/10" />
+                    <div className="relative w-full md:w-1/2 h-36 md:h-full bg-white/5" />
+                    <div className="flex w-full md:w-1/2 flex-col bg-[#121212] px-3 pt-3 pb-4 md:px-4 md:pt-3 md:pb-4">
+                      <div className="mb-3 flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-lg bg-white/10" />
+                        <div className="space-y-2">
+                          <div className="h-3 w-24 rounded bg-white/10" />
+                          <div className="h-5 w-36 rounded bg-white/10" />
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3 rounded-2xl p-1.5">
+                        <div className="h-[72px] w-[72px] shrink-0 rounded-[14px] bg-white/10" />
+                        <div className="min-w-0 flex-1 space-y-2 pt-1">
+                          <div className="h-5 w-32 rounded bg-white/10" />
+                          <div className="h-4 w-24 rounded bg-white/10" />
+                          <div className="flex gap-1">
+                            <div className="h-5 w-5 rounded-full bg-white/10" />
+                            <div className="h-5 w-5 rounded-full bg-white/10" />
+                            <div className="h-5 w-5 rounded-full bg-white/10" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-1 space-y-2">
+                        <div className="h-4 w-40 rounded bg-white/10" />
+                        <div className="flex gap-2">
+                          <div className="h-6 w-24 rounded-md bg-white/10" />
+                          <div className="h-6 w-20 rounded-md bg-white/10" />
+                          <div className="h-6 w-16 rounded-md bg-white/10" />
+                        </div>
+                        <div className="flex gap-2">
+                          <div className="h-5 w-8 rounded-full bg-white/10" />
+                          <div className="h-5 w-8 rounded-full bg-white/10" />
+                        </div>
+                      </div>
+                      <div className="mt-auto pt-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="h-[38px] rounded-full bg-white/10" />
+                          <div className="h-[38px] rounded-full bg-white/10" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2007,8 +3105,8 @@ const openConnect = useCallback(
                 No trips match these filters.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-                {filteredTrips.map((t) => {
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+                {paginatedTrips.map((t) => {
                   const heroUrl = getTripHeroStorageUrl(t.destination_country);
                   const heroStorageFallback = getTripHeroStorageFolderUrl(t.destination_country);
                   const heroFallback = getTripHeroFallbackUrl(t.destination_city, t.destination_country);
@@ -2017,7 +3115,7 @@ const openConnect = useCallback(
                   return (
                     <div
                       key={t.id}
-                      className="connections-card relative border border-white/10 rounded-3xl bg-[#121212] overflow-hidden flex flex-col md:flex-row h-auto md:h-[228px] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
+                      className="connections-card relative border border-white/10 rounded-3xl bg-[#121212] overflow-hidden flex flex-col md:flex-row h-auto md:h-[236px] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
                     >
                       <div className="relative w-full md:w-1/2 h-36 md:h-full overflow-hidden flex items-center justify-center text-center">
                         <div className="absolute inset-0" style={{ backgroundImage: FALLBACK_GRADIENT }} />
@@ -2051,9 +3149,9 @@ const openConnect = useCallback(
                         <div className="absolute inset-0 bg-black/40 md:bg-black/30" />
                         <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A]/60 via-transparent to-transparent" />
                         <div className="relative z-10 flex flex-col items-center gap-3 px-4">
-                          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 shadow-lg">
-                            <MSIcon name="calendar_month" className="text-[#0dccf2] text-[14px]" />
-                            <span className="text-white text-[11px] font-bold tracking-wide uppercase">
+                          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/10 shadow-lg">
+                            <MSIcon name="calendar_month" className="text-[#0dccf2] text-[18px]" />
+                            <span className="text-white text-[12px] md:text-[13px] font-bold tracking-wide uppercase">
                               {formatDateCompact(t.start_date)} – {formatDateCompact(t.end_date)}
                             </span>
                           </div>
@@ -2068,116 +3166,228 @@ const openConnect = useCallback(
                         </div>
                       </div>
 
-                      <div className="flex flex-col w-full md:w-1/2 px-3 pt-3 pb-1 md:px-4 md:pt-3 md:pb-1 bg-[#121212] relative z-10 gap-1.5">
-                        <div className="flex items-center gap-3 mb-0">
-                          <div className={`p-2 rounded-lg border ${purposeMeta.bg} ${purposeMeta.border}`}>
-                            <MSIcon name={purposeMeta.icon} className={`${purposeMeta.text} text-[18px]`} />
-                          </div>
-                          <div className="flex flex-col">
-                            <span className="text-xs text-white/40 font-bold uppercase tracking-wider">
-                              Trip Purpose
-                            </span>
-                            <span className={`text-base font-semibold ${purposeMeta.text}`}>
-                              {t.purpose ?? "Trip"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
-                            }
-                          }}
-                          className="w-full p-0.5 transition-all hover:opacity-90 text-left"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="relative shrink-0">
-                              <div className="absolute -inset-2 bg-[#d946ef]/20 rounded-[14px] blur-md" />
-                              <div
-                                className="relative h-20 w-20 rounded-[14px] bg-cover bg-center ring-1 ring-white/10"
-                                style={{
-                                  backgroundImage: t.avatar_url
-                                    ? `url(${t.avatar_url})`
-                                    : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                                }}
-                              />
-                            </div>
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-white text-base font-bold tracking-tight truncate">
-                                {t.display_name}
-                              </span>
-                              <span className="text-[#0dccf2] text-[11px] font-bold flex items-center gap-1">
-                                View profile
-                                <MSIcon name="arrow_forward" className="text-[12px]" />
-                              </span>
-                              {t.languages?.length ? (
-                                <div className="mt-1 flex items-center gap-0.5 min-w-0">
-                                  <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
-                                  <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
-                                    {t.languages.map((l) => {
-                                      const code = langLabelToCode(l);
-                                      return (
-                                        <span
-                                          key={l}
-                                          className="flex items-center justify-center size-5 shrink-0 rounded-full bg-white/5 border border-white/10 text-white/70 text-[7px] font-bold"
-                                          title={l}
-                                        >
-                                          {code}
-                                        </span>
-                                      );
-                                    })}
-                                  </ScrollRow>
+                      <div className="relative z-10 flex w-full flex-col gap-0.5 bg-[#121212] px-3 pb-4 pt-3 md:w-1/2 md:px-4 md:pb-4 md:pt-3">
+                        <div className="md:hidden">
+                          <div className="flex items-start justify-between gap-3">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
+                                }
+                              }}
+                              className="group min-w-0 flex-1 rounded-2xl text-left"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="relative shrink-0">
+                                  <div className="absolute -inset-2 rounded-[14px] bg-[#d946ef]/20 blur-md" />
+                                  <div
+                                    className="relative h-[68px] w-[68px] rounded-[14px] bg-cover bg-center ring-1 ring-white/10"
+                                    style={{
+                                      backgroundImage: t.avatar_url
+                                        ? `url(${t.avatar_url})`
+                                        : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                                    }}
+                                  />
                                 </div>
-                              ) : null}
+                                <div className="min-w-0">
+                                  <span className="truncate text-base font-bold tracking-tight text-white">{t.display_name}</span>
+                                  <span className="flex items-center gap-1 text-[12px] font-bold text-[#0dccf2] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#67F7FF]">
+                                    View profile
+                                    <MSIcon name="arrow_forward" className="text-[12px] transition-transform duration-200 group-hover:translate-x-0.5" />
+                                  </span>
+                                  {t.languages?.length ? (
+                                    <div className="mt-1 flex min-w-0 items-center gap-1">
+                                      <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
+                                      <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
+                                        {t.languages.map((l) => {
+                                          const code = langLabelToCode(l);
+                                          return (
+                                            <span
+                                              key={l}
+                                              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
+                                              title={l}
+                                            >
+                                              {code}
+                                            </span>
+                                          );
+                                        })}
+                                      </ScrollRow>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className={`shrink-0 rounded-2xl border px-3 py-2 ${purposeMeta.bg} ${purposeMeta.border}`}>
+                              <div className="flex items-center gap-2">
+                                <MSIcon name={purposeMeta.icon} className={`${purposeMeta.text} text-[16px]`} />
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/45">Purpose</span>
+                                  <span className={`text-[13px] font-semibold ${purposeMeta.text}`}>{t.purpose ?? "Trip"}</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
 
-                          <div className="mt-2 space-y-0">
-                            <div className="flex items-center gap-0.5 min-w-0">
-                              <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                              <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
-                                {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
-                                  <span
-                                    key={role}
-                                    className="shrink-0 px-2 py-[3px] text-[9px] font-medium text-white/70 uppercase tracking-widest whitespace-nowrap"
-                                  >
-                                    {role}
-                                  </span>
-                                ))}
-                              </ScrollRow>
+                          <div className="mt-2 flex min-w-0 items-center gap-0.5">
+                            <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
+                            <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
+                              {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
+                                <span
+                                  key={role}
+                                  className="shrink-0 whitespace-nowrap px-2 py-[2px] text-[8px] font-medium uppercase tracking-[0.14em] text-white/70"
+                                >
+                                  {role}
+                                </span>
+                              ))}
+                            </ScrollRow>
+                          </div>
+                        </div>
+
+                        <div className="hidden md:block">
+                          <div className="mb-0 flex items-center gap-3">
+                            <div className={`rounded-lg border p-2 ${purposeMeta.bg} ${purposeMeta.border}`}>
+                              <MSIcon name={purposeMeta.icon} className={`${purposeMeta.text} text-[18px]`} />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                                Trip Purpose
+                              </span>
+                              <span className={`text-base font-semibold ${purposeMeta.text}`}>
+                                {t.purpose ?? "Trip"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
+                              }
+                            }}
+                            className="group w-full rounded-2xl p-1.5 text-left"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="relative shrink-0">
+                                <div className="absolute -inset-2 rounded-[14px] bg-[#d946ef]/20 blur-md" />
+                                <div
+                                  className="relative h-[72px] w-[72px] rounded-[14px] bg-cover bg-center ring-1 ring-white/10"
+                                  style={{
+                                    backgroundImage: t.avatar_url
+                                      ? `url(${t.avatar_url})`
+                                      : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                                  }}
+                                />
+                              </div>
+                              <div className="flex min-w-0 flex-col">
+                                <span className="truncate text-base font-bold tracking-tight text-white">
+                                  {t.display_name}
+                                </span>
+                                <span className="flex items-center gap-1 text-[12px] font-bold text-[#0dccf2] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#67F7FF]">
+                                  View profile
+                                  <MSIcon name="arrow_forward" className="text-[12px] transition-transform duration-200 group-hover:translate-x-0.5" />
+                                </span>
+                                {t.languages?.length ? (
+                                  <div className="mt-0.5 flex min-w-0 items-center gap-0.5">
+                                    <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
+                                    <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
+                                      {t.languages.map((l) => {
+                                        const code = langLabelToCode(l);
+                                        return (
+                                          <span
+                                            key={l}
+                                            className="flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
+                                            title={l}
+                                          >
+                                            {code}
+                                          </span>
+                                        );
+                                      })}
+                                    </ScrollRow>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="mt-2 space-y-0">
+                              <div className="flex min-w-0 items-center gap-0.5">
+                                <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
+                                <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
+                                  {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
+                                    <span
+                                      key={role}
+                                      className="shrink-0 whitespace-nowrap px-2 py-[2px] text-[8px] font-medium uppercase tracking-[0.14em] text-white/70"
+                                    >
+                                      {role}
+                                    </span>
+                                  ))}
+                                </ScrollRow>
+                              </div>
                             </div>
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openConnect({
-                              targetUserId: t.user_id,
-                              targetName: t.display_name,
-                              targetPhotoUrl: t.avatar_url ?? null,
-                              targetRoles: t.roles,
-                              connectContext: "traveller",
-                              tripId: t.id,
-                            })
-                          }
-                          className="mt-0 flex items-center justify-center gap-2 w-full text-[10px] font-semibold py-2 px-4 rounded-full text-[#0A0A0A] uppercase tracking-widest"
-                          style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
-                        >
-                          <span className="text-[12px] font-black leading-none">+</span>
-                          Connect for this trip
-                        </button>
+                        <div className="mt-auto grid grid-cols-2 gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openTripJoinModal({
+                                targetUserId: t.user_id,
+                                targetName: t.display_name,
+                                targetPhotoUrl: t.avatar_url ?? null,
+                                tripId: t.id,
+                                destinationCity: t.destination_city,
+                                destinationCountry: t.destination_country,
+                                startDate: t.start_date,
+                                endDate: t.end_date,
+                              })
+                            }
+                            className="flex min-h-[38px] w-full items-center justify-center gap-2 rounded-full border border-[#00F5FF]/35 bg-[#00F5FF]/12 px-4 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#B8FBFF] transition hover:border-[#00F5FF]/55 hover:bg-[#00F5FF]/18 hover:text-white"
+                          >
+                            <MSIcon name="group_add" className="text-[13px] text-[#00F5FF]" />
+                            Join Trip
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openHostingRequest({
+                                targetUserId: t.user_id,
+                                targetName: t.display_name,
+                                targetPhotoUrl: t.avatar_url ?? null,
+                                requestType: "offer_to_host",
+                                tripId: t.id,
+                                prefillArrivalDate: t.start_date,
+                                prefillDepartureDate: t.end_date,
+                              })
+                            }
+                            className="w-full min-h-[38px] whitespace-nowrap rounded-full border border-[#FF00FF]/30 bg-[#FF00FF]/10 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#FFC6FA] transition hover:border-[#FF00FF]/50 hover:bg-[#FF00FF]/16 hover:text-white"
+                          >
+                            Offer to Host
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
+            <PaginationControls
+              page={travellersPage}
+              totalPages={totalTravellersPages}
+              totalItems={filteredTrips.length}
+              pageSize={DISCOVER_PAGE_SIZE}
+              itemLabel="travelers"
+              onPageChange={setTravellersPage}
+            />
           </div>
         )}
       </main>
@@ -2189,7 +3399,7 @@ const openConnect = useCallback(
           <aside className="absolute right-0 top-0 h-full w-full max-w-md border-l border-white/10 bg-[#0A0A0A] shadow-2xl flex flex-col">
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
               <h2 className="text-2xl font-bold tracking-tight text-white">
-                {tab === "travellers" ? "Filter Travellers" : "Filter Connections"}
+                {filtersTitle}
               </h2>
               <button
                 type="button"
@@ -2202,6 +3412,72 @@ const openConnect = useCallback(
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6 pb-36 space-y-7">
+              <section className="space-y-4 md:hidden">
+                <div className="flex items-center gap-2 text-[#00F5FF]">
+                  <MSIcon name="tune" className="text-[20px]" />
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">View</h3>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-semibold text-white/90">Sort by</label>
+                    <div className="relative mt-2">
+                      <select
+                        value={sortMode}
+                        onChange={(e) => setSortMode(e.target.value as SortMode)}
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      >
+                        <option value="recommended">Recommended</option>
+                        <option value="newest">Newest</option>
+                        <option value="name_az">Name A-Z</option>
+                        <option value="city_az">City A-Z</option>
+                        {tab === "members" ? <option value="connections_desc">Most Connections</option> : null}
+                        {tab === "members" ? <option value="references_desc">Most References</option> : null}
+                      </select>
+                      <MSIcon name="expand_more" className="pointer-events-none absolute right-3 top-3 text-[20px] text-white/40" />
+                    </div>
+                  </div>
+                  {tab === "members" || tab === "travellers" ? (
+                    <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                      <span>
+                        <span className="block text-xs font-bold uppercase tracking-wider text-white/75">My City</span>
+                        <span className="mt-0.5 block text-[11px] text-white/45">
+                          {myCity ? `Only show ${myCity}` : "Set your city in profile first"}
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={myCityOnly}
+                        onChange={(e) => setMyCityOnly(e.target.checked)}
+                        disabled={!myCity}
+                        className="h-5 w-5 rounded border-white/20 bg-transparent accent-[#00F5FF]"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+                {tab === "travellers" ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-semibold text-white/90">Trip from</label>
+                      <input
+                        type="date"
+                        value={filters.tripDateFrom ?? ""}
+                        onChange={(e) => setFilters((p) => ({ ...p, tripDateFrom: e.target.value || undefined }))}
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-white/90">Trip to</label>
+                      <input
+                        type="date"
+                        value={filters.tripDateTo ?? ""}
+                        onChange={(e) => setFilters((p) => ({ ...p, tripDateTo: e.target.value || undefined }))}
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
               <section className="space-y-4">
                 <div className="flex items-center gap-2 text-[#00F5FF]">
                   <MSIcon name="location_on" className="text-[20px]" />
@@ -2329,6 +3605,45 @@ const openConnect = useCallback(
                       );
                     })()
                   ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <div className="flex items-center gap-2 text-[#00F5FF]">
+                  <MSIcon name="verified" className="text-[20px]" />
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">References</h3>
+                </div>
+                <p className="text-[11px] text-white/45">Filter by whether a member or traveller already has reference history.</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { key: "all", label: "All" },
+                    { key: "has", label: "Has references" },
+                    { key: "none", label: "No references" },
+                  ].map((option) => {
+                    const selected =
+                      option.key === "all"
+                        ? !filters.references
+                        : filters.references === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() =>
+                          setFilters((p) => ({
+                            ...p,
+                            references: option.key === "all" ? undefined : (option.key as "has" | "none"),
+                          }))
+                        }
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                          selected
+                            ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                            : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
 
@@ -2490,92 +3805,69 @@ const openConnect = useCallback(
               ) : null}
 
               {tab === "members" ? (
-              <section className="border-t border-white/10 pt-6">
-                <button
-                  type="button"
-                  onClick={() => setMoreFiltersOpen((v) => !v)}
-                  className="flex w-full items-center justify-between text-left"
-                >
-                  <span className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.12em] text-white/80">
-                    <MSIcon name="add_circle" className="text-[18px] text-[#00F5FF]" />
-                    More Filters
-                  </span>
-                  <MSIcon
-                    name="expand_more"
-                    className={`text-[18px] text-white/50 transition-transform ${moreFiltersOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-
-                {moreFiltersOpen ? (
-                  <div className="mt-4 space-y-4">
-                    {tab === "members" ? (
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-white/50">Languages</div>
-                        <div className="mt-3 flex items-center justify-between">
-                          <label className="text-sm font-semibold text-white/90">Search languages</label>
-                          <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
-                            {filters.langs.length}
-                          </span>
-                        </div>
-                        <input
-                          value={languageQuery}
-                          onChange={(e) => setLanguageQuery(e.target.value)}
-                          placeholder="Search languages..."
-                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/85 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                        />
-                        {filters.langs.length ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {filters.langs.map((lang) => (
-                              <button
-                                key={`selected-lang-${lang}`}
-                                type="button"
-                                onClick={() =>
-                                  setFilters((p) => ({ ...p, langs: p.langs.filter((l) => l !== lang) }))
-                                }
-                                className="flex items-center gap-1 rounded-full border border-[#00F5FF]/40 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#00F5FF]"
-                              >
-                                {lang}
-                                <MSIcon name="cancel" className="text-[14px]" />
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
-                        {languageSuggestions.length ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {languageSuggestions.map((lang, idx) => (
-                              <button
-                                key={`suggestion-lang-${lang}-${idx}`}
-                                type="button"
-                                onClick={() =>
-                                  setFilters((p) => ({ ...p, langs: [...p.langs, lang] }))
-                                }
-                                className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold text-white/70 transition hover:border-[#00F5FF]/50 hover:text-[#00F5FF]"
-                              >
-                                {lang}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
+                <section className="border-t border-white/10 pt-6 space-y-4">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-white/50">Languages</div>
+                    <div className="mt-3 flex items-center justify-between">
+                      <label className="text-sm font-semibold text-white/90">Search languages</label>
+                      <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
+                        {filters.langs.length}
+                      </span>
+                    </div>
+                    <input
+                      value={languageQuery}
+                      onChange={(e) => setLanguageQuery(e.target.value)}
+                      placeholder="Search languages..."
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/85 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    />
+                    {filters.langs.length ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {filters.langs.map((lang) => (
+                          <button
+                            key={`selected-lang-${lang}`}
+                            type="button"
+                            onClick={() =>
+                              setFilters((p) => ({ ...p, langs: p.langs.filter((l) => l !== lang) }))
+                            }
+                            className="flex items-center gap-1 rounded-full border border-[#00F5FF]/40 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#00F5FF]"
+                          >
+                            {lang}
+                            <MSIcon name="cancel" className="text-[14px]" />
+                          </button>
+                        ))}
                       </div>
                     ) : null}
-
-                    {tab === "members" ? (
-                      <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                        <span>
-                          <span className="block text-xs font-bold uppercase tracking-wider text-white/75">Verified only</span>
-                          <span className="mt-0.5 block text-[11px] text-white/45">Only show verified members</span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={filters.verifiedOnly}
-                          onChange={(e) => setFilters((p) => ({ ...p, verifiedOnly: e.target.checked }))}
-                          className="h-5 w-5 rounded border-white/20 bg-transparent accent-[#00F5FF]"
-                        />
-                      </label>
+                    {languageSuggestions.length ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {languageSuggestions.map((lang, idx) => (
+                          <button
+                            key={`suggestion-lang-${lang}-${idx}`}
+                            type="button"
+                            onClick={() =>
+                              setFilters((p) => ({ ...p, langs: [...p.langs, lang] }))
+                            }
+                            className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold text-white/70 transition hover:border-[#00F5FF]/50 hover:text-[#00F5FF]"
+                          >
+                            {lang}
+                          </button>
+                        ))}
+                      </div>
                     ) : null}
                   </div>
-                ) : null}
-              </section>
+
+                  <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-white/75">Verified only</span>
+                      <span className="mt-0.5 block text-[11px] text-white/45">Only show verified members</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={filters.verifiedOnly}
+                      onChange={(e) => setFilters((p) => ({ ...p, verifiedOnly: e.target.checked }))}
+                      className="h-5 w-5 rounded border-white/20 bg-transparent accent-[#00F5FF]"
+                    />
+                  </label>
+                </section>
               ) : null}
             </div>
 
@@ -2598,7 +3890,7 @@ const openConnect = useCallback(
                 style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
               >
                 <MSIcon name="search" className="text-[18px]" />
-                {tab === "travellers" ? "Show Travellers" : "Show Connections"}
+                {filtersApplyLabel}
               </button>
             </div>
           </aside>
@@ -2608,18 +3900,13 @@ const openConnect = useCallback(
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 h-28 bg-gradient-to-b from-transparent to-[#0A0A0A]" />
       ) : null}
 
-      {connectModal.open && (
-  <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-md px-4">
-    <div className="relative w-full max-w-[540px] rounded-[28px] bg-[#102323] border border-white/10 shadow-2xl p-6 sm:p-8">
+{connectModal.open && (
+  <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 px-4 py-4 backdrop-blur-md sm:items-center">
+    <div className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[540px] overflow-y-auto overscroll-contain rounded-[28px] border border-white/10 bg-[#102323] p-6 shadow-2xl sm:max-h-[min(92dvh,860px)] sm:p-8">
       {/* Close */}
       <button
         type="button"
-        onClick={() => {
-          setConnectModal(EMPTY_CONNECT_MODAL);
-          setSelectedReason(null);
-          setSelectedRole(null);
-          setConnectReasons([]);
-        }}
+        onClick={closeConnectModal}
         className="absolute top-5 right-5 text-white/50 hover:text-white transition"
         aria-label="Close"
       >
@@ -2648,115 +3935,74 @@ const openConnect = useCallback(
           <h3 className="text-[22px] sm:text-2xl font-extrabold tracking-tight text-white">
             Connect with {connectModal.targetName}
           </h3>
-          <p className="mt-1 text-sm text-white/50">Select a role, then choose one reason.</p>
+          <p className="mt-1 text-sm text-white/50">Search or filter the reason that best explains why you want to connect.</p>
         </div>
       </div>
 
-      {/* Roles row (scrollable) */}
       <div className="mt-6">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60 mb-3">
-          Connect as
-        </div>
-
-        <div className="-mx-2 px-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          <div className="flex gap-3 min-w-max pb-1">
-            {connectModal.targetRoles.map((role) => {
-              const active = selectedRole === role;
-
-              return (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={() => {
-                    setSelectedRole(role);
-                    setSelectedReason(null);
-                  }}
-                  className={[
-                    "relative flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 min-w-[170px] transition",
-                    active
-                      ? "border-[#00F5FF] bg-[#00F5FF]/10"
-                      : "border-white/10 bg-white/[0.04] hover:border-white/20",
-                  ].join(" ")}
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={[
-                        "h-10 w-10 rounded-xl flex items-center justify-center border",
-                        active ? "border-[#00F5FF]/40 bg-[#00F5FF]/10" : "border-white/10 bg-white/5",
-                      ].join(" ")}
-                    >
-                      <MSIcon
-                        name={
-                          role === "Teacher"
-                            ? "record_voice_over"
-                            : role === "DJ"
-                            ? "graphic_eq"
-                            : role === "Organizer"
-                            ? "event_available"
-                            : role === "Studio Owner"
-                            ? "store"
-                            : role === "Promoter"
-                            ? "campaign"
-                            : role === "Artist"
-                            ? "movie"
-                            : role === "Social Dancer / Student"
-                            ? "school"
-                            : "badge"
-                        }
-                        className={active ? "text-[#00F5FF]" : "text-white/50"}
-                      />
-                    </div>
-
-                    <div className="text-left">
-                      <div className={active ? "text-white font-bold" : "text-white/70 font-semibold"}>
-                        {role}
-                      </div>
-                      <div className="text-[11px] text-white/40">Pick a reason below</div>
-                    </div>
-                  </div>
-
-                  <div
-                    className={[
-                      "h-5 w-5 rounded-full border flex items-center justify-center",
-                      active ? "border-[#00F5FF]" : "border-white/20",
-                    ].join(" ")}
-                  >
-                    {active ? <div className="h-2.5 w-2.5 rounded-full bg-[#00F5FF]" /> : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Dropdown appears cleanly below role row */}
-        <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">
-              Select a reason
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="flex-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">Search reason</div>
+              <div className="relative mt-2">
+                <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
+                  search
+                </span>
+                <input
+                  value={connectReasonQuery}
+                  onChange={(e) => setConnectReasonQuery(e.target.value)}
+                  placeholder="Search reasons to connect..."
+                  className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] pl-11 pr-4 py-3 text-sm text-white/85 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                />
+              </div>
             </div>
-            <div className="text-[11px] text-white/40">{selectedRole ?? ""}</div>
+
+            <div className="min-w-0 md:min-w-[220px]">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">Role filter</div>
+              <div className="relative mt-2">
+                <select
+                  value={selectedRole ?? ""}
+                  onChange={(e) => setSelectedRole(e.target.value || null)}
+                  className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] px-4 py-3 text-sm text-white/80 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                >
+                  <option value="">All roles</option>
+                  {connectRoleOptions.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
+                  expand_more
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">Select a reason</div>
+            <div className="text-[11px] text-white/40">
+              {visibleConnectReasons.length} match{visibleConnectReasons.length === 1 ? "" : "es"}
+            </div>
           </div>
 
           <select
             value={selectedReason ?? ""}
-            disabled={!selectedRole}
             onChange={(e) => {
               const v = e.target.value;
               if (!v) return;
               setSelectedReason(v);
+              const selected = connectReasons.find((reason) => reason.id === v);
+              setSelectedRole(selected?.role ?? null);
             }}
-            className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] px-4 py-3 text-sm text-white/80 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-60"
+            className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] px-4 py-3 text-sm text-white/80 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
           >
             <option value="">Select a reason…</option>
-            {(selectedRole ? reasonsByRole.get(selectedRole) ?? [] : [])
-              .slice()
-              .sort((a, b) => (a.sort_order ?? 100) - (b.sort_order ?? 100))
-              .map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
+            {visibleConnectReasons.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label} ({r.role})
+              </option>
+            ))}
           </select>
 
           {/* Strong selected confirmation */}
@@ -2782,13 +4028,10 @@ const openConnect = useCallback(
 	          onClick={async () => {
 	            const targetId = connectModal.targetUserId;
 	            const reasonId = selectedReason;
-	            const role = selectedRole;
+	            const role = selectedReasonObj?.role ?? selectedRole;
 	            const connectContext = connectModal.connectContext ?? "member";
 	            const tripId = connectModal.tripId ?? null;
-	            const requestsRedirect =
-	              connectContext === "traveller"
-	                ? "/connections/requests?tab=outgoing&kind=trips"
-	                : "/connections/requests?tab=outgoing&kind=connections";
+	            const requestsRedirect = "/messages?tab=requests";
 
             if (!targetId || !reasonId || !role) return;
 
@@ -2818,18 +4061,13 @@ const openConnect = useCallback(
 
               if (existingErr) throw existingErr;
 
-	              if (existing?.status === "accepted" || existing?.status === "pending") {
-	                // Already connected/requested: route to the next valid screen.
-	                setConnectModal(EMPTY_CONNECT_MODAL);
-	                setSelectedReason(null);
-	                setSelectedRole(null);
-	                setConnectReasons([]);
-	                if (existing.status === "accepted" && existing.id) {
-	                  router.push(`/messages/${existing.id}`);
-	                } else {
-	                  router.push(requestsRedirect);
-	                }
-	                return;
+		              if (existing?.status === "accepted" || existing?.status === "pending") {
+		                if (existing.status === "accepted" && existing.id) {
+		                  closeConnectModal();
+		                  router.push(`/messages/${existing.id}`);
+		                  return;
+		                }
+		                throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
 	              }
 
               // 2) Create pending request through server endpoint (single validation path)
@@ -2855,11 +4093,8 @@ const openConnect = useCallback(
                 throw new Error(result?.error || "Failed to create connection request");
               }
 
-              // 3) Close + route
-	              setConnectModal(EMPTY_CONNECT_MODAL);
-	              setSelectedReason(null);
-	              setSelectedRole(null);
-	              setConnectReasons([]);
+	              // 3) Close + route
+	              closeConnectModal();
 	              router.push(requestsRedirect);
 	            } catch (e) {
               const message = e instanceof Error ? e.message : "Failed to send request.";
@@ -2880,12 +4115,7 @@ const openConnect = useCallback(
 
         <button
           type="button"
-          onClick={() => {
-            setConnectModal(EMPTY_CONNECT_MODAL);
-            setSelectedReason(null);
-            setSelectedRole(null);
-            setConnectReasons([]);
-          }}
+          onClick={closeConnectModal}
           className="w-full h-10 rounded-full text-white/60 text-sm font-semibold hover:text-white transition"
         >
           Cancel
@@ -2894,6 +4124,445 @@ const openConnect = useCallback(
     </div>
   </div>
 )}
+
+      {tripJoinModal.open ? (
+        <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/70 px-4 py-4 backdrop-blur-md sm:items-center">
+          <div className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[620px] overflow-y-auto overscroll-contain rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] p-6 shadow-2xl sm:max-h-[min(92dvh,860px)] sm:p-8">
+            <button
+              type="button"
+              onClick={closeTripJoinModal}
+              className="absolute right-5 top-5 text-white/50 transition hover:text-white"
+              aria-label="Close trip request modal"
+            >
+              <MSIcon name="close" className="text-[22px]" />
+            </button>
+
+            <div className="mb-6 flex items-center gap-4">
+              <div
+                className="h-14 w-14 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
+                style={{
+                  backgroundImage: tripJoinModal.targetPhotoUrl
+                    ? `url(${tripJoinModal.targetPhotoUrl})`
+                    : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                }}
+              />
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Join Trip</p>
+                <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
+                  {tripJoinModal.targetName}
+                </h3>
+                <p className="text-xs text-white/55">
+                  Send a trip join request. Once sent, the request continues inside Messages.
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-white">{tripJoinModal.destinationCity || "Trip"}</span>
+                {tripJoinModal.destinationCountry ? <span className="text-white/45">• {tripJoinModal.destinationCountry}</span> : null}
+                {tripJoinModal.startDate && tripJoinModal.endDate ? (
+                  <span className="text-white/45">
+                    • {formatDateCompact(tripJoinModal.startDate)} - {formatDateCompact(tripJoinModal.endDate)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-2 text-sm font-semibold text-white">Optional note</div>
+              <p className="mb-3 text-xs text-white/50">Keep it short. Explain why you want to join or any relevant coordination detail.</p>
+              <textarea
+                value={tripJoinModal.note}
+                onChange={(event) => setTripJoinModal((prev) => ({ ...prev, note: event.target.value }))}
+                maxLength={500}
+                rows={4}
+                placeholder="Add context for your trip request."
+                className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+              />
+              <div className="mt-2 flex items-center justify-between text-[11px]">
+                <span className={tripRequestMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
+                  No links, emails, social handles, or phone numbers.
+                </span>
+                <span className={tripJoinModal.note.length > 480 ? "text-amber-200" : "text-white/45"}>
+                  {tripJoinModal.note.length}/500
+                </span>
+              </div>
+              {tripRequestMessageValidation ? (
+                <p className="mt-1 text-xs text-[#FFC6FA]">{tripRequestMessageValidation}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={closeTripJoinModal}
+                className="h-11 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={tripRequestSending || Boolean(tripRequestMessageValidation)}
+                onClick={sendTripJoinRequest}
+                className="h-11 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
+                style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+              >
+                {tripRequestSending ? "Sending…" : "Send trip request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {hostingModal.open ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-4 py-4 backdrop-blur-md sm:items-center">
+          <div className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[640px] overflow-y-auto overscroll-contain rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] p-6 shadow-2xl sm:max-h-[min(92dvh,900px)] sm:p-8">
+            <button
+              type="button"
+              onClick={closeHostingModal}
+              className="absolute right-5 top-5 text-white/50 transition hover:text-white"
+              aria-label="Close hosting request modal"
+            >
+              <MSIcon name="close" className="text-[22px]" />
+            </button>
+
+            <div className="mb-6 flex items-center gap-4">
+              <div
+                className="h-14 w-14 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
+                style={{
+                  backgroundImage: hostingModal.targetPhotoUrl
+                    ? `url(${hostingModal.targetPhotoUrl})`
+                    : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                }}
+              />
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">
+                  {hostingModal.requestType === "offer_to_host" ? "Offer to Host" : "Request Hosting"}
+                </p>
+                <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
+                  {hostingModal.targetName}
+                </h3>
+                <p className="text-xs text-white/55">
+                  Trusted request flow with secure text filtering and anti-spam protections.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              {hostingModal.requestType === "offer_to_host" ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-[#FF00FF]/20 bg-[#FF00FF]/8 p-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/55">Trip dates</div>
+                    <div className="mt-2 text-sm font-semibold text-white">
+                      {formatDateCompact(hostingModal.arrivalDate)} - {formatDateCompact(hostingModal.departureDate)}
+                    </div>
+                    <p className="mt-1 text-xs text-white/55">
+                      These dates come from the traveller trip. Set how many people you can host.
+                    </p>
+                  </div>
+
+                  <label className="space-y-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                      Max travellers you can host
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={hostingModal.maxTravellersAllowed}
+                      onChange={(event) => setHostingModal((prev) => ({ ...prev, maxTravellersAllowed: event.target.value }))}
+                      className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      placeholder="e.g. 2"
+                    />
+                  </label>
+
+                  <div className="pt-3 space-y-2 border-t border-white/8">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                        Invite note
+                      </span>
+                      <span className={hostingModal.message.length > 480 ? "text-[11px] text-amber-200" : "text-[11px] text-white/45"}>
+                        {hostingModal.message.length}/500
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/50">
+                      Optional short message to make the hosting offer clearer.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {HOST_OFFER_TEMPLATES.map((template, index) => (
+                        <button
+                          key={`host-offer-template-${index}`}
+                          type="button"
+                          onClick={() => setHostingModal((prev) => ({ ...prev, message: template.text }))}
+                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/70 transition hover:border-[#00F5FF]/40 hover:text-[#00F5FF]"
+                        >
+                          {template.label}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={hostingModal.message}
+                      onChange={(event) => setHostingModal((prev) => ({ ...prev, message: event.target.value }))}
+                      maxLength={500}
+                      rows={4}
+                      placeholder="Add a short hosting invite."
+                      className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    />
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className={hostingMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
+                        No links, emails, social handles, or phone numbers.
+                      </span>
+                    </div>
+                    {hostingMessageValidation ? (
+                      <p className="text-xs text-[#FFC6FA]">{hostingMessageValidation}</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Arrival date</span>
+                      <input
+                        type="date"
+                        value={hostingModal.arrivalDate}
+                        onChange={(event) => setHostingModal((prev) => ({ ...prev, arrivalDate: event.target.value }))}
+                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                      <label className="mt-1 flex items-center gap-2 text-xs text-white/70">
+                        <input
+                          type="checkbox"
+                          checked={hostingModal.arrivalFlexible}
+                          onChange={(event) =>
+                            setHostingModal((prev) => ({ ...prev, arrivalFlexible: event.target.checked }))
+                          }
+                          className="h-4 w-4 rounded border-white/25 bg-transparent accent-[#00F5FF]"
+                        />
+                        Flexible arrival
+                      </label>
+                    </label>
+
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Departure date</span>
+                      <input
+                        type="date"
+                        value={hostingModal.departureDate}
+                        onChange={(event) => setHostingModal((prev) => ({ ...prev, departureDate: event.target.value }))}
+                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                      <label className="mt-1 flex items-center gap-2 text-xs text-white/70">
+                        <input
+                          type="checkbox"
+                          checked={hostingModal.departureFlexible}
+                          onChange={(event) =>
+                            setHostingModal((prev) => ({ ...prev, departureFlexible: event.target.checked }))
+                          }
+                          className="h-4 w-4 rounded border-white/25 bg-transparent accent-[#00F5FF]"
+                        />
+                        Flexible departure
+                      </label>
+                    </label>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                        Number of travellers
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={hostingModal.travellersCount}
+                        onChange={(event) =>
+                          setHostingModal((prev) => ({
+                            ...prev,
+                            travellersCount: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
+                          }))
+                        }
+                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                    </label>
+
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                        Max travellers allowed (optional)
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={hostingModal.maxTravellersAllowed}
+                        onChange={(event) => setHostingModal((prev) => ({ ...prev, maxTravellersAllowed: event.target.value }))}
+                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        placeholder="Optional"
+                      />
+                      {hostingModal.targetMaxGuests && hostingModal.requestType === "request_hosting" ? (
+                        <p className="text-[11px] text-[#9EEBFF]">
+                          Host profile capacity: {hostingModal.targetMaxGuests} guests
+                        </p>
+                      ) : null}
+                    </label>
+                  </div>
+
+                  <label className="mt-4 block space-y-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                      Optional message
+                    </span>
+                    <textarea
+                      value={hostingModal.message}
+                      onChange={(event) => setHostingModal((prev) => ({ ...prev, message: event.target.value }))}
+                      maxLength={500}
+                      rows={4}
+                      placeholder="Add context for your request. Keep it short and respectful."
+                      className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    />
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className={hostingMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
+                        No links, emails, social handles, or phone numbers.
+                      </span>
+                      <span className={hostingModal.message.length > 480 ? "text-amber-200" : "text-white/45"}>
+                        {hostingModal.message.length}/500
+                      </span>
+                    </div>
+                    {hostingMessageValidation ? (
+                      <p className="text-xs text-[#FFC6FA]">{hostingMessageValidation}</p>
+                    ) : null}
+                  </label>
+                </>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={closeHostingModal}
+                className="h-11 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={hostingSending || Boolean(hostingMessageValidation)}
+                onClick={sendHostingRequest}
+                className="h-11 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
+                style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+              >
+                {hostingSending
+                  ? "Sending…"
+                  : hostingModal.requestType === "offer_to_host"
+                  ? "Send host offer"
+                  : "Request Hosting"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <VerificationRequiredDialog
+        open={verificationModalOpen}
+        resumePayload={verificationResumePayload}
+        onClose={() => setVerificationModalOpen(false)}
+        onError={(message) => setUiError(message)}
+        onAlreadyVerified={() => {
+          const resume = verificationResumePayload;
+          setVerificationModalOpen(false);
+          setVerificationResumePayload(null);
+          setViewerVerified(true);
+          if (resume?.kind === "request_hosting") {
+            openHostingRequest({
+              targetUserId: resume.targetUserId,
+              targetName: resume.targetName,
+              targetPhotoUrl: resume.targetPhotoUrl,
+              targetMaxGuests: resume.targetMaxGuests ?? null,
+              requestType: "request_hosting",
+              tripId: resume.tripId ?? null,
+              prefillArrivalDate: resume.prefillArrivalDate ?? null,
+              prefillDepartureDate: resume.prefillDepartureDate ?? null,
+            });
+          }
+        }}
+      />
+
     </div>
+  );
+}
+
+export default function ConnectionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0A0A0A] text-white">
+          <Nav />
+          <main className="mx-auto w-full max-w-[1320px] px-4 pb-10 pt-6 sm:px-6 sm:pt-8 lg:px-8">
+            <section className="border-b border-white/6 pb-3 sm:pb-4">
+              <div
+                className="mx-auto flex w-full max-w-none items-center gap-3 overflow-x-auto px-1 pb-1 sm:max-w-[560px] sm:justify-center sm:gap-8 sm:overflow-visible sm:px-0 sm:pb-0"
+                style={{ scrollbarWidth: "none" }}
+              >
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div
+                    key={`discover-tab-sk-${index}`}
+                    className="h-11 w-28 shrink-0 animate-pulse rounded-full border border-white/10 bg-white/5"
+                  />
+                ))}
+              </div>
+            </section>
+
+            <div className="mt-6 flex flex-col gap-4 md:mt-8 md:flex-row md:items-center md:justify-between">
+              <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center md:gap-6">
+                <div className="h-5 w-32 animate-pulse rounded bg-white/10" />
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-3 md:border-l md:border-white/10 md:pl-6">
+                  <div className="h-10 w-36 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+                  <div className="h-6 w-36 animate-pulse rounded bg-white/10" />
+                </div>
+              </div>
+
+              <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center md:w-auto md:justify-end">
+                <div className="h-11 w-full animate-pulse rounded-full border border-white/10 bg-white/5 sm:w-[320px]" />
+                <div className="h-11 w-full animate-pulse rounded-full bg-[#00F5FF]/80 sm:w-[144px]" />
+              </div>
+            </div>
+
+            <div className="relative mt-8">
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+                {Array.from({ length: 8 }).map((_, index) => (
+                  <div
+                    key={`discover-card-sk-${index}`}
+                    className="connections-card flex min-h-[360px] animate-pulse flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] md:h-64 md:min-h-0 md:flex-row"
+                  >
+                    <div className="h-44 w-full bg-white/5 md:h-full md:w-1/2" />
+                    <div className="flex h-full w-full flex-col justify-between p-4 md:w-1/2">
+                      <div className="min-h-0">
+                        <div className="h-6 w-40 rounded bg-white/10" />
+                        <div className="mt-3 h-4 w-36 rounded bg-white/10" />
+                        <div className="mt-4 h-3 w-40 rounded bg-white/10" />
+                        <div className="mt-4 flex gap-2">
+                          <div className="h-5 w-16 rounded bg-white/10" />
+                          <div className="h-5 w-20 rounded bg-white/10" />
+                          <div className="h-5 w-14 rounded bg-white/10" />
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          <div className="h-5 w-10 rounded bg-white/10" />
+                          <div className="h-5 w-10 rounded bg-white/10" />
+                          <div className="h-5 w-10 rounded bg-white/10" />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 pt-3">
+                        <div className="h-10 flex-1 rounded-full bg-white/10" />
+                        <div className="h-10 flex-[1.3] rounded-full bg-white/10" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </main>
+        </div>
+      }
+    >
+      <ConnectionsPageContent />
+    </Suspense>
   );
 }
