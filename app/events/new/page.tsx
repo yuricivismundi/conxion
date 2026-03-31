@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import EventCoverCropDialog from "@/components/events/EventCoverCropDialog";
@@ -100,6 +100,14 @@ function exactStreetAddress(result: OsmGeocodeResult) {
 }
 
 export default function CreateEventPage() {
+  return (
+    <Suspense>
+      <CreateEventForm />
+    </Suspense>
+  );
+}
+
+function CreateEventForm() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
