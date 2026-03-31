@@ -113,7 +113,7 @@ export default function PricingPage() {
             ) : null}
           </section>
 
-          <section id="plan-grid" className="mx-auto mt-4 grid gap-5 lg:grid-cols-[1fr_1fr_auto]">
+          <section id="plan-grid" className="mx-auto mt-4 grid gap-5 lg:grid-cols-3">
             {plans.filter((p) => p.id === "starter" || p.id === "pro").map((plan) => (
               <PlanCard
                 key={plan.id}
@@ -123,28 +123,29 @@ export default function PricingPage() {
               />
             ))}
 
-            {/* Verified — separate one-time section */}
+            {/* Verified — same size, distinct background */}
             {(() => {
               const verifiedPlan = plans.find((p) => p.id === "verified");
               if (!verifiedPlan) return null;
               const isVerified = billingState.currentPlanId === "verified" || billingState.isVerified;
               return (
-                <aside className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,17,22,0.94),rgba(8,12,18,0.9))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6 lg:max-w-[280px]">
+                <article className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
+                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(52,211,153,0.14),transparent_68%)]" />
                   <div className="relative">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-300/70">One-time</p>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-400/70">One-time payment</p>
                     <h2 className="mt-1 text-2xl font-black tracking-tight text-white">{verifiedPlan.name}</h2>
-                    <p className="mt-2 text-2xl font-black text-white">{verifiedPlan.priceLabel}</p>
-                    <p className="mt-3 text-sm leading-6 text-slate-300">{verifiedPlan.shortDescription}</p>
+                    <p className="mt-2 text-3xl font-black text-white">{verifiedPlan.priceLabel}</p>
+                    <p className="mt-3 max-w-[34ch] text-sm leading-6 text-slate-300">{verifiedPlan.shortDescription}</p>
                   </div>
 
-                  <div className="mt-5 space-y-4">
+                  <div className="relative mt-6 space-y-4">
                     {verifiedPlan.featureGroups.map((group) => (
                       <section key={group.title} className="rounded-2xl border border-white/8 bg-black/20 p-4">
                         <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-white/55">{group.title}</h3>
                         <ul className="mt-3 space-y-2">
                           {group.items.map((item) => (
                             <li key={item} className="flex items-start gap-2 text-sm leading-6 text-slate-200">
-                              <span className="material-symbols-outlined mt-0.5 text-[16px] text-cyan-300">check_circle</span>
+                              <span className="material-symbols-outlined mt-0.5 text-[16px] text-emerald-400">check_circle</span>
                               <span>{item}</span>
                             </li>
                           ))}
@@ -159,13 +160,13 @@ export default function PricingPage() {
                     disabled={isVerified}
                     className={
                       isVerified
-                        ? "mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-300"
-                        : "mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        ? "relative mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-300"
+                        : "relative mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 px-4 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
                     }
                   >
                     {isVerified ? "Verified" : verifiedPlan.ctaLabel}
                   </button>
-                </aside>
+                </article>
               );
             })()}
           </section>
