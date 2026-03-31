@@ -3936,142 +3936,123 @@ function ConnectionsPageContent() {
       ) : null}
 
 {connectModal.open && (
-  <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 px-4 py-4 backdrop-blur-md sm:items-center">
-    <div className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[540px] overflow-y-auto overscroll-contain rounded-[28px] border border-white/10 bg-[#102323] p-6 shadow-2xl sm:max-h-[min(92dvh,860px)] sm:p-8">
+  <div className=”fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center”>
+    <div className=”relative w-full max-w-[480px] overflow-hidden rounded-[28px] border border-white/8 bg-[#080e14] shadow-[0_32px_80px_rgba(0,0,0,0.5)] sm:rounded-[32px]”
+      style={{ background: “radial-gradient(circle at top left, rgba(13,204,242,0.07), transparent 40%), radial-gradient(circle at bottom right, rgba(217,59,255,0.07), transparent 40%), #080e14” }}
+    >
       {/* Close */}
       <button
-        type="button"
+        type=”button”
         onClick={closeConnectModal}
-        className="absolute top-5 right-5 text-white/50 hover:text-white transition"
-        aria-label="Close"
+        className=”absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 hover:text-white transition”
+        aria-label=”Close”
       >
-        <MSIcon name="close" className="text-[22px]" />
+        <MSIcon name=”close” className=”text-[18px]” />
       </button>
 
       {/* Header */}
-      <div className="flex flex-col items-center text-center gap-3">
-        <div className="relative">
-          <div className="h-20 w-20 rounded-full border-2 border-[#00F5FF] p-1">
-            <div
-              className="h-full w-full rounded-full bg-center bg-cover"
-              style={{
-                backgroundImage: connectModal.targetPhotoUrl
-                  ? `url(${connectModal.targetPhotoUrl})`
-                  : "linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04))",
-              }}
-            />
-          </div>
-          <div className="absolute bottom-0 right-0 rounded-full bg-[#00F5FF] p-[2px] border-2 border-[#102323]">
-            <MSIcon name="check_circle" className="text-[#0A0A0A] text-[18px]" />
+      <div className=”flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/8”>
+        <div className=”relative shrink-0”>
+          <div className=”h-14 w-14 rounded-2xl overflow-hidden border border-white/10”
+            style={{
+              backgroundImage: connectModal.targetPhotoUrl
+                ? `url(${connectModal.targetPhotoUrl})`
+                : “linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))”,
+              backgroundSize: “cover”,
+              backgroundPosition: “center”,
+            }}
+          />
+          <div className=”absolute -bottom-1 -right-1 rounded-full border-2 border-[#080e14] bg-[#0df2f2] p-[2px]”>
+            <MSIcon name=”check_circle” className=”text-[#080e14] text-[13px]” />
           </div>
         </div>
-
-        <div>
-          <h3 className="text-[22px] sm:text-2xl font-extrabold tracking-tight text-white">
-            Connect with {connectModal.targetName}
-          </h3>
-          <p className="mt-1 text-sm text-white/50">Search or filter the reason that best explains why you want to connect.</p>
+        <div className=”min-w-0”>
+          <p className=”text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40”>Connect with</p>
+          <h3 className=”truncate text-lg font-extrabold tracking-tight text-white”>{connectModal.targetName}</h3>
         </div>
       </div>
 
-      {connectRequestsLimit !== null && connectRequestsUsed !== null && (
-        <div className="mt-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
-          <span className="text-white/50">Connection requests this month</span>
-          <span className={
-            connectRequestsUsed >= connectRequestsLimit
-              ? "font-bold text-rose-400"
-              : connectRequestsUsed >= connectRequestsLimit * 0.8
-                ? "font-bold text-amber-400"
-                : "font-semibold text-white"
-          }>
-            {connectRequestsUsed} / {connectRequestsLimit}
-          </span>
-        </div>
-      )}
+      <div className=”px-6 py-5 space-y-4”>
+        {/* Usage counter */}
+        {connectRequestsLimit !== null && connectRequestsUsed !== null && (
+          <div className=”flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2.5 text-xs”>
+            <span className=”text-white/40”>Requests this month</span>
+            <span className={
+              connectRequestsUsed >= connectRequestsLimit
+                ? “font-bold text-rose-400”
+                : connectRequestsUsed >= connectRequestsLimit * 0.8
+                  ? “font-bold text-amber-400”
+                  : “font-semibold text-[#0df2f2]”
+            }>
+              {connectRequestsUsed} / {connectRequestsLimit}
+            </span>
+          </div>
+        )}
 
-      <div className="mt-6">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div className="flex-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">Search reason</div>
-              <div className="relative mt-2">
-                <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
-                  search
-                </span>
-                <input
-                  value={connectReasonQuery}
-                  onChange={(e) => setConnectReasonQuery(e.target.value)}
-                  placeholder="Search reasons to connect..."
-                  className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] pl-11 pr-4 py-3 text-sm text-white/85 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                />
-              </div>
+        {/* Reason — searchable select */}
+        <div>
+          <label className=”text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40”>Reason to connect</label>
+          <div className=”relative mt-2”>
+            <span className=”material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[17px] text-white/25”>search</span>
+            <input
+              value={connectReasonQuery}
+              onChange={(e) => {
+                setConnectReasonQuery(e.target.value);
+                setSelectedReason(null);
+              }}
+              placeholder=”Type to search reasons…”
+              className=”w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition”
+            />
+          </div>
+          {connectReasonQuery.trim() && (
+            <div className=”mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]”>
+              {visibleConnectReasons.length === 0 ? (
+                <p className=”px-4 py-3 text-sm text-white/40”>No matches</p>
+              ) : (
+                visibleConnectReasons.map((r) => (
+                  <button
+                    key={r.id}
+                    type=”button”
+                    onClick={() => {
+                      setSelectedReason(r.id);
+                      setConnectReasonQuery(r.label);
+                    }}
+                    className=”w-full px-4 py-2.5 text-left text-sm text-white/80 hover:bg-white/[0.06] hover:text-white transition flex items-center justify-between gap-3”
+                  >
+                    <span>{r.label}</span>
+                    <span className=”shrink-0 text-[11px] text-white/30”>{r.role}</span>
+                  </button>
+                ))
+              )}
             </div>
-
-            <div className="min-w-0 md:min-w-[220px]">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">Role filter</div>
-              <div className="relative mt-2">
-                <select
-                  value={selectedRole ?? ""}
-                  onChange={(e) => setSelectedRole(e.target.value || null)}
-                  className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] px-4 py-3 text-sm text-white/80 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+          )}
+          {!connectReasonQuery.trim() && (
+            <div className=”mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]”>
+              {connectReasons.filter((r) => r.context === (connectModal.connectContext === “trip” ? “trip” : “member”)).map((r) => (
+                <button
+                  key={r.id}
+                  type=”button”
+                  onClick={() => {
+                    setSelectedReason(r.id);
+                    setConnectReasonQuery(r.label);
+                  }}
+                  className={`w-full px-4 py-2.5 text-left text-sm transition flex items-center justify-between gap-3 ${
+                    selectedReason === r.id
+                      ? “bg-[#0df2f2]/10 text-[#0df2f2]”
+                      : “text-white/80 hover:bg-white/[0.06] hover:text-white”
+                  }`}
                 >
-                  <option value="">All roles</option>
-                  {connectRoleOptions.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
-                <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
-                  expand_more
-                </span>
-              </div>
+                  <span>{r.label}</span>
+                  <span className=”shrink-0 text-[11px] text-white/30”>{r.role}</span>
+                </button>
+              ))}
             </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/60">Select a reason</div>
-            <div className="text-[11px] text-white/40">
-              {visibleConnectReasons.length} match{visibleConnectReasons.length === 1 ? "" : "es"}
-            </div>
-          </div>
-
-          <select
-            value={selectedReason ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (!v) return;
-              setSelectedReason(v);
-              const selected = connectReasons.find((reason) => reason.id === v);
-              setSelectedRole(selected?.role ?? null);
-            }}
-            className="w-full rounded-xl border border-white/10 bg-[#0F1F1F] px-4 py-3 text-sm text-white/80 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-          >
-            <option value="">Select a reason…</option>
-            {visibleConnectReasons.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.label} ({r.role})
-              </option>
-            ))}
-          </select>
-
-          {/* Strong selected confirmation */}
-          <div className="mt-4 rounded-xl border border-[#00F5FF]/25 bg-[#00F5FF]/10 px-4 py-3">
-            <div className="text-[11px] uppercase tracking-wider text-white/70">Selected reason</div>
-            {selectedReasonObj ? (
-              <div className="mt-1 text-sm font-semibold text-white">
-                {selectedReasonObj.label}
-                <span className="ml-2 text-[11px] font-medium text-white/60">({selectedReasonObj.role})</span>
-              </div>
-            ) : (
-              <div className="mt-1 text-sm text-white/60">Choose one reason to enable “Send Request”.</div>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
       {/* Actions */}
-      <div className="mt-6 flex flex-col gap-3">
+      <div className="flex flex-col gap-2 border-t border-white/8 px-6 py-5">
         <button
           type="button"
           disabled={!selectedReason || sendingRequest}
@@ -4157,16 +4138,16 @@ function ConnectionsPageContent() {
               setSendingRequest(false);
             }
           }}
-          className="w-full h-14 rounded-full font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-40"
-          style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+          className="w-full h-13 rounded-2xl font-bold text-sm text-[#040a0f] disabled:opacity-40 transition hover:brightness-110"
+          style={{ backgroundImage: "linear-gradient(90deg,#0df2f2 0%, #ff00ff 100%)" }}
         >
-          {sendingRequest ? "Sending…" : "Send request"}
+          {sendingRequest ? "Sending…" : "Send Request"}
         </button>
 
         <button
           type="button"
           onClick={closeConnectModal}
-          className="w-full h-10 rounded-full text-white/60 text-sm font-semibold hover:text-white transition"
+          className="w-full h-10 rounded-2xl border border-white/8 text-white/40 text-sm font-medium hover:text-white/70 hover:border-white/15 transition"
         >
           Cancel
         </button>
