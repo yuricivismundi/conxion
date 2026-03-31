@@ -38,6 +38,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         items: [
           "Find travellers and join their trips",
           "Create 1 trip per month",
+          "10 hosting requests per month",
           "Send 5 hosting offers per month around dance holidays, festivals, and competitions",
         ],
       },
@@ -97,6 +98,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Travelling",
         items: [
           "Find travellers and create 5 trips per month",
+          "30 hosting requests per month",
           "Send 10 hosting offers per month",
           "Keep your dance travel plans visible across the community",
         ],

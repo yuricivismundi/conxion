@@ -25,6 +25,7 @@ import VerificationRequiredDialog from "@/components/verification/VerificationRe
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { clearVerificationResume, loadVerificationResume, type VerificationResumePayload } from "@/lib/verification-client";
 import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
+import { getPlanLimits } from "@/lib/billing/limits";
 
 type Tab = "members" | "travellers";
 type DiscoverMode = "dancers" | "travelers" | "hosts";
@@ -614,6 +615,10 @@ function ConnectionsPageContent() {
   const [myLangCodes, setMyLangCodes] = useState<string[]>([]);
   const [myStyleLevels, setMyStyleLevels] = useState<Partial<Record<Style, Level>>>({});
   const [hiddenMemberIds, setHiddenMemberIds] = useState<string[]>([]);
+  const [connectRequestsUsed, setConnectRequestsUsed] = useState<number | null>(null);
+  const [connectRequestsLimit, setConnectRequestsLimit] = useState<number | null>(null);
+  const [hostingOffersUsed, setHostingOffersUsed] = useState<number | null>(null);
+  const [hostingOffersLimit, setHostingOffersLimit] = useState<number | null>(null);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<FiltersState>(EMPTY_FILTERS);
@@ -1363,6 +1368,36 @@ function ConnectionsPageContent() {
           setMyRoles(myRoleList);
           setMyLangCodes(myLangList);
           setMyStyleLevels(myStyles);
+
+          // Load plan limits + monthly connection request count
+          try {
+            const { data: authUser } = await supabase.auth.getUser();
+            const meta = authUser?.user?.user_metadata ?? {};
+            const isPro = meta.billing_plan === "pro" || meta.subscription_status === "active";
+            const planId = isPro ? "pro" : "starter";
+            const limits = getPlanLimits(planId);
+            setConnectRequestsLimit(limits.connectionRequestsPerMonth);
+
+            const monthStart = new Date();
+            monthStart.setDate(1);
+            monthStart.setHours(0, 0, 0, 0);
+            const { count } = await supabase
+              .from("connections")
+              .select("id", { count: "exact", head: true })
+              .eq("requester_id", user.id)
+              .gte("created_at", monthStart.toISOString());
+            setConnectRequestsUsed(count ?? 0);
+
+            setHostingOffersLimit(limits.hostingOffersPerMonth);
+            const { count: hostingCount } = await supabase
+              .from("hosting_requests")
+              .select("id", { count: "exact", head: true })
+              .eq("sender_user_id", user.id)
+              .eq("request_type", "offer_to_host")
+              .gte("created_at", monthStart.toISOString());
+            setHostingOffersUsed(hostingCount ?? 0);
+          } catch {}
+
 
           const { data: connectionRows, error: connectionError } = await supabase
             .from("connections")
@@ -3939,6 +3974,21 @@ function ConnectionsPageContent() {
         </div>
       </div>
 
+      {connectRequestsLimit !== null && connectRequestsUsed !== null && (
+        <div className="mt-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
+          <span className="text-white/50">Connection requests this month</span>
+          <span className={
+            connectRequestsUsed >= connectRequestsLimit
+              ? "font-bold text-rose-400"
+              : connectRequestsUsed >= connectRequestsLimit * 0.8
+                ? "font-bold text-amber-400"
+                : "font-semibold text-white"
+          }>
+            {connectRequestsUsed} / {connectRequestsLimit}
+          </span>
+        </div>
+      )}
+
       <div className="mt-6">
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -4248,6 +4298,21 @@ function ConnectionsPageContent() {
                 </p>
               </div>
             </div>
+
+            {hostingModal.requestType === "offer_to_host" && hostingOffersLimit !== null && hostingOffersUsed !== null && (
+              <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
+                <span className="text-white/50">Hosting offers this month</span>
+                <span className={
+                  hostingOffersUsed >= hostingOffersLimit
+                    ? "font-bold text-rose-400"
+                    : hostingOffersUsed >= hostingOffersLimit * 0.8
+                      ? "font-bold text-amber-400"
+                      : "font-semibold text-white"
+                }>
+                  {hostingOffersUsed} / {hostingOffersLimit}
+                </span>
+              </div>
+            )}
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               {hostingModal.requestType === "offer_to_host" ? (

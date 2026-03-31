@@ -23,7 +23,8 @@ export type AppEmailKind =
   | "travel_plan_upcoming"
   | "inbox_digest"
   | "support_case_received"
-  | "support_case_updated";
+  | "support_case_updated"
+  | "pro_upgrade";
 
 export type AppEmailParams = {
   kind: AppEmailKind;

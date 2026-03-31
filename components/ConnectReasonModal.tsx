@@ -23,6 +23,9 @@ type Props = {
 
   loading?: boolean;
   onConfirm: (reasonKey: string) => void;
+
+  requestsUsed?: number | null;
+  requestsLimit?: number | null;
 };
 
 export default function ConnectReasonModal({
@@ -36,6 +39,8 @@ export default function ConnectReasonModal({
   error = null,
   loading = false,
   onConfirm,
+  requestsUsed = null,
+  requestsLimit = null,
 }: Props) {
   const [selectedKey, setSelectedKey] = useState<string>("");
   useBodyScrollLock(open);
@@ -116,6 +121,27 @@ export default function ConnectReasonModal({
             ✕
           </button>
         </div>
+
+        {requestsLimit !== null && requestsUsed !== null && (
+          <div className={cx(
+            "flex items-center justify-between px-5 py-2 text-xs",
+            isTrip ? "border-b border-[#224949] bg-[#0b0f0f]" : "border-b border-zinc-100 bg-zinc-50"
+          )}>
+            <span className={isTrip ? "text-[#90cbcb]" : "text-zinc-500"}>
+              Connection requests this month
+            </span>
+            <span className={cx(
+              "font-semibold tabular-nums",
+              requestsUsed >= requestsLimit
+                ? "text-rose-400"
+                : requestsUsed >= requestsLimit * 0.8
+                  ? "text-amber-400"
+                  : isTrip ? "text-white" : "text-zinc-800"
+            )}>
+              {requestsUsed} / {requestsLimit}
+            </span>
+          </div>
+        )}
 
         <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
           {context === "trip" ? (

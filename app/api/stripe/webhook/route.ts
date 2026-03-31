@@ -8,6 +8,7 @@ import {
   syncProSubscriptionToAuthMetadata,
 } from "@/lib/billing/stripe";
 import { markProfileVerifiedViaPayment } from "@/lib/verification-server";
+import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 
 export const runtime = "nodejs";
 
@@ -34,6 +35,10 @@ export async function POST(req: Request) {
 
       if (isProCheckout(session)) {
         await syncProSubscriptionFromCheckoutSession({ stripe, session });
+        const proUserId = session.metadata?.user_id?.trim();
+        if (proUserId) {
+          void sendAppEmailBestEffort({ kind: "pro_upgrade", recipientUserId: proUserId });
+        }
       }
     }
 

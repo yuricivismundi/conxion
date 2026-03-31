@@ -160,6 +160,7 @@ export function buildCtaPath(params: AppEmailParams) {
     case "event_starting_soon":
       return params.eventId ? `/events/${params.eventId}` : "/events";
     case "welcome_member":
+    case "pro_upgrade":
       return "/discover";
     case "inbox_digest":
       return "/messages";
@@ -488,15 +489,35 @@ export function buildEmailCopy(params: {
         ctaLabel: "Open support",
         footerNote: "We review safety and trust cases directly in the admin console so moderation history stays consistent.",
       };
-    case "support_case_updated":
+    case “support_case_updated”:
       return {
-        eyebrow: "Support Update",
-        subject: ticketCode ? `[${ticketCode}] Status updated` : "Support request updated",
-        title: ticketCode ? `${ticketCode} updated` : "Support request updated",
+        eyebrow: “Support Update”,
+        subject: ticketCode ? `[${ticketCode}] Status updated` : “Support request updated”,
+        title: ticketCode ? `${ticketCode} updated` : “Support request updated”,
         intro: `Your report for “${supportSubject}” is now ${supportStatus.toLowerCase()}.`,
         details: [`Current status: ${supportStatus}`],
-        ctaLabel: "Open support",
-        footerNote: "Check the case details in ConXion for the latest moderation status and notes.",
+        ctaLabel: “Open support”,
+        footerNote: “Check the case details in ConXion for the latest moderation status and notes.”,
+      };
+    case “pro_upgrade”:
+      return {
+        eyebrow: “Plus Active”,
+        subject: “Welcome to ConXion Plus”,
+        title: “You're now on Plus”,
+        intro: “Thank you for upgrading. Your new limits are active and ready to use.”,
+        details: [
+          “30 connection requests per month”,
+          “30 active chat threads”,
+          “10 hosting offers per month”,
+          “5 trips per month”,
+          “5 events per month”,
+          “3 profile photos”,
+          “Better visibility in discovery”,
+        ],
+        detailStyle: “list”,
+        ctaLabel: “Explore the community”,
+        footerNote: “Your Plus subscription renews monthly. Manage it any time from your account settings.”,
+        showFallbackLink: false,
       };
   }
 }
