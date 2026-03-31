@@ -5,8 +5,8 @@ import { normalizeStripeEnvValue } from "@/lib/billing/stripe-env";
 import { VERIFICATION_PRICE_CENTS, VERIFIED_VIA_PAYMENT_LABEL, VERIFICATION_PURPOSE } from "@/lib/verification";
 
 export const PRO_SUBSCRIPTION_PURPOSE = "pro_subscription";
-export const PRO_PLAN_PRICE_CENTS = 500;
-export const PRO_PLAN_PRICE_LABEL = "€5/month";
+export const PRO_PLAN_PRICE_CENTS = 699;
+export const PRO_PLAN_PRICE_LABEL = "€6.99/month";
 
 export function getStripeClient() {
   const secretKey = normalizeStripeEnvValue(process.env.STRIPE_SECRET_KEY);

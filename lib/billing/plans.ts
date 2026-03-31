@@ -91,7 +91,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
     id: "pro",
     name: "Plus",
     billingType: "subscription",
-    priceLabel: "€5/month",
+    priceLabel: "€6.99/month",
     shortDescription: "Get more visibility, more trips and events, and more room to grow your profile.",
     ctaLabel: "Upgrade to Plus",
     isRecommended: true,
