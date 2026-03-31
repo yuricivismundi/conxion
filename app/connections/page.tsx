@@ -637,6 +637,7 @@ function ConnectionsPageContent() {
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [connectReasonQuery, setConnectReasonQuery] = useState("");
   const [sendingRequest, setSendingRequest] = useState(false);
+  const [pendingWarning, setPendingWarning] = useState<string | null>(null);
 
   const [hostingModal, setHostingModal] = useState<HostingModalState>(EMPTY_HOSTING_MODAL);
   const [hostingSending, setHostingSending] = useState(false);
@@ -652,6 +653,7 @@ function ConnectionsPageContent() {
     setSelectedRole(null);
     setConnectReasonQuery("");
     setConnectReasons([]);
+    setPendingWarning(null);
   }, []);
 
   const closeHostingModal = useCallback(() => {
@@ -1287,6 +1289,7 @@ function ConnectionsPageContent() {
     setSelectedReason(null);
     setSelectedRole(null);
     setConnectReasonQuery("");
+    setPendingWarning(null);
 
     (async () => {
       try {
@@ -1306,7 +1309,33 @@ function ConnectionsPageContent() {
         setConnectReasons([]);
       }
     })();
-  }, [connectModal.open, connectModal.connectContext]);
+
+    // Check for existing pending/accepted request
+    (async () => {
+      try {
+        const { data: authUser } = await supabase.auth.getUser();
+        const userId = authUser?.user?.id;
+        const targetId = connectModal.targetUserId;
+        if (!userId || !targetId) return;
+
+        const { data: existing } = await supabase
+          .from("connections")
+          .select("id,status,requester_id")
+          .or(
+            `and(requester_id.eq.${userId},target_id.eq.${targetId}),and(requester_id.eq.${targetId},target_id.eq.${userId})`
+          )
+          .limit(1)
+          .maybeSingle();
+
+        if (existing?.status === "pending") {
+          const direction = existing.requester_id === userId ? "You already sent" : "You received";
+          setPendingWarning(`${direction} a pending connection request with this member.`);
+        } else if (existing?.status === "accepted") {
+          setPendingWarning("You are already connected with this member.");
+        }
+      } catch {}
+    })();
+  }, [connectModal.open, connectModal.connectContext, connectModal.targetUserId]);
 
   useEffect(() => {
     (async () => {
@@ -3952,7 +3981,7 @@ function ConnectionsPageContent() {
 
       {/* Header */}
       <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/8">
-        <div className="relative shrink-0">
+        <div className="shrink-0">
           <div className="h-14 w-14 rounded-2xl overflow-hidden border border-white/10"
             style={{
               backgroundImage: connectModal.targetPhotoUrl
@@ -3962,9 +3991,6 @@ function ConnectionsPageContent() {
               backgroundPosition: "center",
             }}
           />
-          <div className="absolute -bottom-1 -right-1 rounded-full border-2 border-[#080e14] bg-[#0df2f2] p-[2px]">
-            <MSIcon name="check_circle" className="text-[#080e14] text-[13px]" />
-          </div>
         </div>
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Connect with</p>
@@ -3973,6 +3999,14 @@ function ConnectionsPageContent() {
       </div>
 
       <div className="px-6 py-5 space-y-4">
+        {/* Pending request warning */}
+        {pendingWarning && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+            <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
+            <span>{pendingWarning}</span>
+          </div>
+        )}
+
         {/* Usage counter */}
         {connectRequestsLimit !== null && connectRequestsUsed !== null && (
           <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2.5 text-xs">
@@ -3989,7 +4023,7 @@ function ConnectionsPageContent() {
           </div>
         )}
 
-        {/* Reason — searchable select */}
+        {/* Reason — menu with optional search */}
         <div>
           <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Reason to connect</label>
           <div className="relative mt-2">
@@ -4000,41 +4034,21 @@ function ConnectionsPageContent() {
                 setConnectReasonQuery(e.target.value);
                 setSelectedReason(null);
               }}
-              placeholder="Type to search reasons…"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition"
+              placeholder="Filter reasons..."
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-2.5 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition"
             />
           </div>
-          {connectReasonQuery.trim() && (
-            <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]">
-              {visibleConnectReasons.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-white/40">No matches</p>
-              ) : (
-                visibleConnectReasons.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedReason(r.id);
-                      setConnectReasonQuery(r.label);
-                    }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-white/80 hover:bg-white/[0.06] hover:text-white transition flex items-center justify-between gap-3"
-                  >
-                    <span>{r.label}</span>
-                    <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-          {!connectReasonQuery.trim() && (
-            <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]">
-              {connectReasons.filter((r) => r.context === (connectModal.connectContext === "trip" ? "trip" : "member")).map((r) => (
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-xl bg-[#0b1219]">
+            {visibleConnectReasons.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-white/40">No matches</p>
+            ) : (
+              visibleConnectReasons.map((r) => (
                 <button
                   key={r.id}
                   type="button"
                   onClick={() => {
                     setSelectedReason(r.id);
-                    setConnectReasonQuery(r.label);
+                    setConnectReasonQuery("");
                   }}
                   className={`w-full px-4 py-2.5 text-left text-sm transition flex items-center justify-between gap-3 ${
                     selectedReason === r.id
@@ -4045,9 +4059,9 @@ function ConnectionsPageContent() {
                   <span>{r.label}</span>
                   <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
                 </button>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
       </div>
 

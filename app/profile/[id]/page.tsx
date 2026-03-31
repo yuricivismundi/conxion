@@ -54,6 +54,7 @@ import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
 import { clearVerificationResume, loadVerificationResume } from "@/lib/verification-client";
 import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
 import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-username";
+import DarkConnectModal from "@/components/DarkConnectModal";
 
 type DanceSkill = { level?: string; verified?: boolean };
 type DanceSkills = Record<string, DanceSkill>;
@@ -691,6 +692,7 @@ function MemberProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [profileMedia, setProfileMedia] = useState<ProfileMediaItem[]>([]);
   const [state, setState] = useState<ConnectionState>({ status: "none" });
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [verificationModalOpen, setVerificationModalOpen] = useState(false);
 
   const [references, setReferences] = useState<ReferenceItem[]>([]);
@@ -2265,11 +2267,10 @@ function MemberProfilePage() {
                   {state.status === "none" ? (
                     <button
                       type="button"
-                      onClick={() => void connect()}
-                      disabled={busy}
-                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={() => setConnectModalOpen(true)}
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
                     >
-                      {busy ? "Sending..." : "Connect"}
+                      Connect
                     </button>
                   ) : null}
 
@@ -3547,6 +3548,19 @@ function MemberProfilePage() {
           }
         `}</style>
       </main>
+
+      {profile && profileUserId && (
+        <DarkConnectModal
+          open={connectModalOpen}
+          onClose={() => {
+            setConnectModalOpen(false);
+            if (meId) void refreshPairConnectionState(meId);
+          }}
+          targetUserId={profileUserId}
+          targetName={profile.displayName}
+          targetPhotoUrl={profile.avatarUrl}
+        />
+      )}
     </div>
   );
 }
