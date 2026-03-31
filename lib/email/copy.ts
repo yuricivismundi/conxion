@@ -481,7 +481,7 @@ export function buildEmailCopy(params: {
         eyebrow: "Support Ticket",
         subject: ticketCode ? `[${ticketCode}] Request received` : "Support request received",
         title: ticketCode ? `${ticketCode} received` : "Support request received",
-        intro: `We received your report for “${supportSubject}” and added it to the moderation queue.`,
+        intro: `We received your report for "${supportSubject}" and added it to the moderation queue.`,
         details: [
           `Status: ${supportStatus}`,
           "Replies by email are not enabled yet. Add new context from your Support page inside ConXion.",
@@ -489,34 +489,34 @@ export function buildEmailCopy(params: {
         ctaLabel: "Open support",
         footerNote: "We review safety and trust cases directly in the admin console so moderation history stays consistent.",
       };
-    case “support_case_updated”:
+    case "support_case_updated":
       return {
-        eyebrow: “Support Update”,
-        subject: ticketCode ? `[${ticketCode}] Status updated` : “Support request updated”,
-        title: ticketCode ? `${ticketCode} updated` : “Support request updated”,
-        intro: `Your report for “${supportSubject}” is now ${(supportStatus ?? “updated”).toLowerCase()}.`,
+        eyebrow: "Support Update",
+        subject: ticketCode ? `[${ticketCode}] Status updated` : "Support request updated",
+        title: ticketCode ? `${ticketCode} updated` : "Support request updated",
+        intro: `Your report for "${supportSubject}" is now ${(supportStatus ?? "updated").toLowerCase()}.`,
         details: [`Current status: ${supportStatus}`],
-        ctaLabel: “Open support”,
-        footerNote: “Check the case details in ConXion for the latest moderation status and notes.”,
+        ctaLabel: "Open support",
+        footerNote: "Check the case details in ConXion for the latest moderation status and notes.",
       };
-    case “pro_upgrade”:
+    case "pro_upgrade":
       return {
-        eyebrow: “Plus Active”,
-        subject: “Welcome to ConXion Plus”,
-        title: “You're now on Plus”,
-        intro: “Thank you for upgrading. Your new limits are active and ready to use.”,
+        eyebrow: "Plus Active",
+        subject: "Welcome to ConXion Plus",
+        title: "You're now on Plus",
+        intro: "Thank you for upgrading. Your new limits are active and ready to use.",
         details: [
-          “30 connection requests per month”,
-          “30 active chat threads”,
-          “10 hosting offers per month”,
-          “5 trips per month”,
-          “5 events per month”,
-          “3 profile photos”,
-          “Better visibility in discovery”,
+          "30 connection requests per month",
+          "30 active chat threads",
+          "10 hosting offers per month",
+          "5 trips per month",
+          "5 events per month",
+          "3 profile photos",
+          "Better visibility in discovery",
         ],
-        detailStyle: “list”,
-        ctaLabel: “Explore the community”,
-        footerNote: “Your Plus subscription renews monthly. Manage it any time from your account settings.”,
+        detailStyle: "list",
+        ctaLabel: "Explore the community",
+        footerNote: "Your Plus subscription renews monthly. Manage it any time from your account settings.",
         showFallbackLink: false,
       };
   }
