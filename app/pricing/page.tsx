@@ -113,8 +113,8 @@ export default function PricingPage() {
             ) : null}
           </section>
 
-          <section id="plan-grid" className="mt-4 grid gap-5 lg:grid-cols-3">
-            {plans.map((plan) => (
+          <section id="plan-grid" className="mx-auto mt-4 grid max-w-[820px] gap-5 lg:grid-cols-2">
+            {plans.filter((p) => p.id === "starter" || p.id === "pro").map((plan) => (
               <PlanCard
                 key={plan.id}
                 plan={plan}

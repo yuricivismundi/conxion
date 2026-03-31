@@ -29,25 +29,31 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         items: [
           "Discover social dancers, teachers, organizers, DJs, and artists",
           "10 connection requests per month",
-          "30 connection requests in your first month after joining",
-          "10 active chat threads",
+          "10 active chat threads per month",
         ],
       },
       {
         title: "Travelling",
         items: [
           "Find travellers and join their trips",
-          "Create 1 trip per month",
-          "Send 5 hosting offers per month around dance holidays, festivals, and competitions",
+          "Join up to 1 trip per month",
+          "Send up to 5 hosting offers to travellers",
         ],
       },
       {
         title: "Events",
-        items: ["Create 2 public or private events per month", "Join trips and events across the community"],
+        items: [
+          "Create up to 2 public or private events per month",
+          "Join events across the community",
+        ],
       },
       {
         title: "Profile",
-        items: ["Create your profile", "2 showcase videos", "1 photo"],
+        items: [
+          "Create your profile and personalise it",
+          "2 showcase videos",
+          "Dance Tools to manage your Growth Path, have a record of your competitions and your goals",
+        ],
       },
     ],
   },
@@ -92,28 +98,47 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
     featureGroups: [
       {
         title: "Discovery",
-        items: ["30 connection requests per month", "30 active chat threads", "Better visibility in discovery", "Appear before free users"],
+        items: [
+          "Discover social dancers, teachers, organizers, DJs, and artists",
+          "60 connection requests per month",
+          "30 active chat threads per month",
+          "Better visibility in discovery",
+          "Appear before free users",
+        ],
       },
       {
         title: "Travelling",
         items: [
-          "Find travellers and create 5 trips per month",
+          "Find travellers and join their trips",
+          "Create 5 trips per month",
           "10 hosting requests per month",
-          "Send 10 hosting offers per month",
-          "Keep your dance travel plans visible across the community",
+          "Send up to 10 hosting offers to travellers",
+          "Your trips appear before free users",
         ],
       },
       {
         title: "Events",
-        items: ["Create 5 public or private events per month"],
+        items: [
+          "Create up to 5 public or private events per month",
+          "Your events appear before free users (Ideal for Organisers)",
+        ],
       },
       {
         title: "Profile",
-        items: ["2 showcase videos", "3 photos"],
+        items: [
+          "2 showcase videos",
+          "3 additional photos on your profile",
+          "Dance Tools to manage your Growth Path, have a record of your competitions and your goals",
+        ],
       },
       {
         title: "Extras",
-        items: ["Priority support for important requests", "Early access to featured profile / event boosts"],
+        items: [
+          "Priority support for important requests",
+          "Early access to featured profile / event boosts",
+          "Call with Co-founder to discuss new features and dance topics",
+          "Opportunity to become promoter of the brand in your city",
+        ],
       },
     ],
   },

@@ -41,7 +41,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   pro: {
     activeChatThreadsPerMonth: 30,
     initiatedChatsPerMonth: 30,
-    connectionRequestsPerMonth: 30,
+    connectionRequestsPerMonth: 60,
     firstMonthConnectionRequestsPerMonth: 30,
     hostingOffersPerMonth: 10,
     hostingRequestsPerMonth: 10,
