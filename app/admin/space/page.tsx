@@ -40,6 +40,26 @@ type ReportItem = {
   createdAt: string;
 };
 
+type ReferenceReportClaim = {
+  id: string;
+  reportId: string | null;
+  ticketCode: string | null;
+  referenceId: string;
+  reporterId: string;
+  targetUserId: string;
+  referenceAuthorId: string;
+  referenceRecipientId: string;
+  contextTag: string | null;
+  referenceExcerpt: string | null;
+  reason: string;
+  subject: string;
+  description: string;
+  reporterEmail: string | null;
+  profileLink: string | null;
+  evidenceLinks: string[];
+  createdAt: string;
+};
+
 type ModerationLogItem = {
   id: string;
   reportId: string | null;
@@ -62,6 +82,22 @@ type AdminStats = {
   verifiedMembers: number | null;
   openReports: number | null;
   moderationActions: number | null;
+};
+
+type EventsMaintenanceHealth = {
+  upcoming_total: number;
+  upcoming_public_visible: number;
+  past_total: number;
+  archived_total: number;
+  generated_at: string;
+};
+
+type EventsMaintenanceRun = {
+  archivedCount: number;
+  deletedCount: number;
+  prunedArchiveCount: number;
+  seededCount: number;
+  ranAt: string;
 };
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -157,6 +193,47 @@ function mapModerationLogRows(rows: unknown[]) {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function mapReferenceReportClaimRows(rows: unknown[]) {
+  return rows
+    .map((raw) => {
+      const row = (raw ?? {}) as Record<string, unknown>;
+      const id = pickString(row, ["id"]);
+      const referenceId = pickString(row, ["reference_id"]);
+      const reporterId = pickString(row, ["reporter_id"]);
+      const targetUserId = pickString(row, ["target_user_id"]);
+      const referenceAuthorId = pickString(row, ["reference_author_id"]);
+      const referenceRecipientId = pickString(row, ["reference_recipient_id"]);
+      const createdAt = pickString(row, ["created_at"]);
+      if (!id || !referenceId || !reporterId || !targetUserId || !referenceAuthorId || !referenceRecipientId || !createdAt) {
+        return null;
+      }
+
+      return {
+        id,
+        reportId: pickNullableString(row, ["report_id"]),
+        ticketCode: pickNullableString(row, ["ticket_code"]),
+        referenceId,
+        reporterId,
+        targetUserId,
+        referenceAuthorId,
+        referenceRecipientId,
+        contextTag: pickNullableString(row, ["context_tag"]),
+        referenceExcerpt: pickNullableString(row, ["reference_excerpt"]),
+        reason: pickString(row, ["reason"]) || "No reason",
+        subject: pickString(row, ["subject"]) || "Reference report",
+        description: pickString(row, ["description"]) || "No description provided.",
+        reporterEmail: pickNullableString(row, ["reporter_email"]),
+        profileLink: pickNullableString(row, ["profile_link"]),
+        evidenceLinks: Array.isArray(row.evidence_links)
+          ? row.evidence_links.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          : [],
+        createdAt,
+      } satisfies ReferenceReportClaim;
+    })
+    .filter((item): item is ReferenceReportClaim => Boolean(item))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 async function countProfiles(whereVerified: boolean | null) {
   let query = supabase.from("profiles").select("user_id", { count: "exact", head: true });
   if (whereVerified !== null) {
@@ -203,6 +280,7 @@ export default function AdminSpacePage() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [logs, setLogs] = useState<ModerationLogItem[]>([]);
   const [events, setEvents] = useState<EventRecord[]>([]);
+  const [referenceClaims, setReferenceClaims] = useState<ReferenceReportClaim[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, LiteProfile>>({});
   const [adminTeam, setAdminTeam] = useState<string[]>([]);
 
@@ -211,9 +289,13 @@ export default function AdminSpacePage() {
   const [eventFilter, setEventFilter] = useState<EventFilter>("pending_cover");
 
   const [actionBusyReportId, setActionBusyReportId] = useState<string | null>(null);
+  const [moderationNoteByReportId, setModerationNoteByReportId] = useState<Record<string, string>>({});
   const [eventActionBusyId, setEventActionBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
+  const [eventsOpsBusy, setEventsOpsBusy] = useState(false);
+  const [eventsOpsHealth, setEventsOpsHealth] = useState<EventsMaintenanceHealth | null>(null);
+  const [eventsOpsLastRun, setEventsOpsLastRun] = useState<EventsMaintenanceRun | null>(null);
   const [eventModerationDialog, setEventModerationDialog] = useState<EventModerationDialogState>({
     open: false,
     eventId: "",
@@ -271,7 +353,7 @@ export default function AdminSpacePage() {
           }
         : null;
 
-      const [totalMembers, verifiedMembers, openReports, moderationActions, reportsRes, logsRes, adminsRes, eventsRes] =
+      const [totalMembers, verifiedMembers, openReports, moderationActions, reportsRes, logsRes, adminsRes, eventsRes, referenceClaimsRes] =
         await Promise.all([
           countProfiles(null),
           countProfiles(true),
@@ -281,11 +363,15 @@ export default function AdminSpacePage() {
           supabase.from("moderation_logs").select("*").order("created_at", { ascending: false }).limit(200),
           supabase.from("admins").select("user_id").limit(100),
           supabase.from("events").select("*").order("created_at", { ascending: false }).limit(300),
+          supabase.from("reference_report_claims").select("*").order("created_at", { ascending: false }).limit(200),
         ]);
 
       const reportRows = reportsRes.error ? [] : mapReportRows((reportsRes.data ?? []) as unknown[]);
       const logRows = logsRes.error ? [] : mapModerationLogRows((logsRes.data ?? []) as unknown[]);
       const eventRows = eventsRes.error ? [] : mapEventRows((eventsRes.data ?? []) as unknown[]);
+      const referenceClaimRows = referenceClaimsRes.error
+        ? []
+        : mapReferenceReportClaimRows((referenceClaimsRes.data ?? []) as unknown[]);
 
       const ids = new Set<string>();
       reportRows.forEach((row) => {
@@ -298,6 +384,10 @@ export default function AdminSpacePage() {
       });
       eventRows.forEach((row) => {
         ids.add(row.hostUserId);
+      });
+      referenceClaimRows.forEach((row) => {
+        ids.add(row.referenceAuthorId);
+        ids.add(row.referenceRecipientId);
       });
 
       const profileMap: Record<string, LiteProfile> = {};
@@ -334,6 +424,7 @@ export default function AdminSpacePage() {
       setReports(reportRows);
       setLogs(logRows);
       setEvents(eventRows);
+      setReferenceClaims(referenceClaimRows);
       setProfilesById(profileMap);
       setAdminTeam(team);
       setLoading(false);
@@ -350,6 +441,14 @@ export default function AdminSpacePage() {
     if (reportFilter === "all") return reports;
     return reports.filter((row) => row.status === reportFilter);
   }, [reportFilter, reports]);
+
+  const referenceClaimsByReportId = useMemo(() => {
+    const map = new Map<string, ReferenceReportClaim>();
+    referenceClaims.forEach((claim) => {
+      if (claim.reportId) map.set(claim.reportId, claim);
+    });
+    return map;
+  }, [referenceClaims]);
 
   const flaggedMembers = useMemo(() => {
     const counts = new Map<string, number>();
@@ -436,6 +535,105 @@ export default function AdminSpacePage() {
     }
     return eventModerationFeed.filter((item) => item.openReports > 0);
   }, [eventFilter, eventModerationFeed]);
+
+  async function refreshEventsMaintenanceHealth() {
+    if (!accessToken) return;
+    setActionError(null);
+
+    const response = await fetch("/api/admin/events/maintenance", {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const json = (await response.json().catch(() => null)) as
+      | { ok?: boolean; error?: string; health?: EventsMaintenanceHealth }
+      | null;
+
+    if (!response.ok || !json?.ok || !json.health) {
+      setActionError(json?.error ?? "Failed to load events maintenance health.");
+      return;
+    }
+
+    setEventsOpsHealth(json.health);
+  }
+
+  async function runEventsMaintenance(seedIfEmpty: boolean) {
+    if (!accessToken) {
+      setActionError("Missing auth session. Please sign in again.");
+      return;
+    }
+
+    setEventsOpsBusy(true);
+    setActionError(null);
+    setActionInfo(null);
+
+    try {
+      const response = await fetch("/api/admin/events/maintenance", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          seedIfEmpty,
+          archiveAfterDays: 0,
+          deleteAfterDays: 30,
+          keepArchiveDays: 30,
+          batch: 1000,
+        }),
+      });
+
+      const json = (await response.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            error?: string;
+            hint?: string;
+            run?: EventsMaintenanceRun;
+            health?: EventsMaintenanceHealth;
+          }
+        | null;
+
+      if (!response.ok || !json?.ok) {
+        const hint = json?.hint ? ` ${json.hint}` : "";
+        setActionError(`${json?.error ?? "Failed to run events maintenance."}${hint}`);
+        return;
+      }
+
+      if (json.health) setEventsOpsHealth(json.health);
+      if (json.run) setEventsOpsLastRun(json.run);
+
+      const [eventsRes, logsRes, reportsRes] = await Promise.all([
+        supabase.from("events").select("*").order("created_at", { ascending: false }).limit(300),
+        supabase.from("moderation_logs").select("*").order("created_at", { ascending: false }).limit(200),
+        supabase.from("reports").select("*").order("created_at", { ascending: false }).limit(200),
+      ]);
+
+      setEvents(eventsRes.error ? [] : mapEventRows((eventsRes.data ?? []) as unknown[]));
+      setLogs(logsRes.error ? [] : mapModerationLogRows((logsRes.data ?? []) as unknown[]));
+      setReports(reportsRes.error ? [] : mapReportRows((reportsRes.data ?? []) as unknown[]));
+
+      const run = json.run;
+      if (run) {
+        setActionInfo(
+          `Events maintenance completed. Archived ${run.archivedCount}, deleted ${run.deletedCount}, pruned archive ${run.prunedArchiveCount}, seeded ${run.seededCount}.`
+        );
+      } else {
+        setActionInfo("Events maintenance completed.");
+      }
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to run events maintenance.");
+    } finally {
+      setEventsOpsBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isAdmin || !accessToken) return;
+    void refreshEventsMaintenanceHealth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, accessToken]);
 
   async function moderateEvent(eventId: string, action: EventModerateAction, payload?: { note?: string; hiddenReason?: string }) {
     if (!accessToken) {
@@ -557,7 +755,7 @@ export default function AdminSpacePage() {
         "content-type": "application/json",
         authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ reportId, action }),
+      body: JSON.stringify({ reportId, action, note: moderationNoteByReportId[reportId] ?? null }),
     });
 
     const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
@@ -567,21 +765,77 @@ export default function AdminSpacePage() {
       return;
     }
 
-    const [reportsRes, logsRes, openReportsCount] = await Promise.all([
+    const [reportsRes, logsRes, openReportsCount, referenceClaimsRes] = await Promise.all([
       supabase.from("reports").select("*").order("created_at", { ascending: false }).limit(200),
       supabase.from("moderation_logs").select("*").order("created_at", { ascending: false }).limit(200),
       countReports("open"),
+      supabase.from("reference_report_claims").select("*").order("created_at", { ascending: false }).limit(200),
     ]);
 
     setReports(reportsRes.error ? [] : mapReportRows((reportsRes.data ?? []) as unknown[]));
     setLogs(logsRes.error ? [] : mapModerationLogRows((logsRes.data ?? []) as unknown[]));
+    setReferenceClaims(
+      referenceClaimsRes.error ? [] : mapReferenceReportClaimRows((referenceClaimsRes.data ?? []) as unknown[])
+    );
     setStats((prev) => ({ ...prev, openReports: openReportsCount }));
+    setModerationNoteByReportId((prev) => ({ ...prev, [reportId]: "" }));
     setActionBusyReportId(null);
     setActionInfo(`Report updated: ${action}`);
   }
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center bg-[#071316] text-white">Loading...</div>;
+    return (
+      <div className="min-h-screen bg-[#071316] text-white">
+        <Nav />
+        <main className="mx-auto w-full max-w-[1280px] px-4 pb-14 pt-6 sm:px-6 lg:px-8">
+          <div className="overflow-hidden rounded-[28px] border border-cyan-200/10 bg-[#0b1a1d]/70 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur">
+            <div className="h-40 animate-pulse bg-[linear-gradient(125deg,rgba(17,113,127,0.24),rgba(164,41,187,0.18))] sm:h-48" />
+            <div className="px-4 pb-6 sm:px-6 lg:px-8">
+              <div className="-mt-12 flex flex-col gap-4 sm:-mt-16">
+                <div className="h-24 w-24 animate-pulse rounded-full border-4 border-[#071316] bg-white/10 sm:h-28 sm:w-28" />
+                <div className="space-y-3">
+                  <div className="h-8 w-56 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-40 animate-pulse rounded-full bg-white/10" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <section className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4">
+                <div className="h-3 w-24 animate-pulse rounded-full bg-white/10" />
+                <div className="mt-3 h-8 w-16 animate-pulse rounded-full bg-white/10" />
+              </div>
+            ))}
+          </section>
+
+          <section className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+            <div className="mb-4 flex gap-3 overflow-x-auto">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className="h-10 w-24 shrink-0 animate-pulse rounded-full bg-white/10" />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+              {Array.from({ length: 2 }).map((_, index) => (
+                <div key={index} className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                  <div className="h-5 w-40 animate-pulse rounded-full bg-white/10" />
+                  <div className="mt-4 space-y-3">
+                    {Array.from({ length: 4 }).map((__, rowIndex) => (
+                      <div key={rowIndex} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <div className="h-4 w-32 animate-pulse rounded-full bg-white/10" />
+                        <div className="mt-3 h-3 w-full animate-pulse rounded-full bg-white/10" />
+                        <div className="mt-2 h-3 w-2/3 animate-pulse rounded-full bg-white/10" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </main>
+      </div>
+    );
   }
 
   if (!isAdmin) {
@@ -634,16 +888,16 @@ export default function AdminSpacePage() {
                 Profile Manager
               </Link>
               <Link
-                href="/my-space"
+                href="/dashboard"
                 className="rounded-xl border border-white/20 bg-black/30 px-4 py-2 text-sm font-medium text-white/85 hover:bg-black/45"
               >
-                My Space
+                Dashboard
               </Link>
             </div>
           </div>
 
           <div className="relative px-4 pb-6 sm:px-6 lg:px-8">
-            <div className="-mt-16 flex flex-col gap-4 sm:-mt-20 sm:flex-row sm:items-end sm:justify-between">
+            <div className="-mt-16 flex flex-col gap-4 sm:-mt-20 lg:flex-row lg:items-end lg:justify-between">
               <div className="flex min-w-0 items-end gap-4">
                 <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-[#071316] bg-[#11272b] shadow-[0_12px_36px_rgba(0,0,0,0.55)] sm:h-32 sm:w-32">
                   {myProfile?.avatarUrl ? (
@@ -670,7 +924,7 @@ export default function AdminSpacePage() {
           </div>
         </section>
 
-        <section className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <section className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Members</p>
             <p className="mt-1 text-2xl font-bold text-white">{stats.totalMembers ?? "-"}</p>
@@ -818,11 +1072,22 @@ export default function AdminSpacePage() {
                   filteredReports.map((report) => {
                     const reporter = profilesById[report.reporterId];
                     const target = profilesById[report.targetUserId];
+                    const claim = referenceClaimsByReportId.get(report.id) ?? null;
+                    const referenceAuthor = claim ? profilesById[claim.referenceAuthorId] : null;
+                    const referenceRecipient = claim ? profilesById[claim.referenceRecipientId] : null;
                     const busy = actionBusyReportId === report.id;
                     return (
                       <div key={report.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
                         <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <span className="font-semibold text-slate-100">{report.reason}</span>
+                          <span className="font-semibold text-slate-100">{claim?.subject || report.reason}</span>
+                          {claim?.ticketCode ? (
+                            <>
+                              <span>•</span>
+                              <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-semibold tracking-[0.14em] text-cyan-100">
+                                {claim.ticketCode}
+                              </span>
+                            </>
+                          ) : null}
                           <span>•</span>
                           <span className="uppercase">{report.context}</span>
                           <span>•</span>
@@ -835,7 +1100,88 @@ export default function AdminSpacePage() {
                         <p className="text-sm text-slate-300">
                           Reporter: {reporter?.displayName || report.reporterId} • Target: {target?.displayName || report.targetUserId}
                         </p>
-                        {report.note ? <p className="mt-2 text-sm text-slate-200">{report.note}</p> : null}
+                        {claim ? (
+                          <div className="mt-3 space-y-3">
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                <span>Reference claim</span>
+                                {claim.contextTag ? (
+                                  <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] tracking-[0.14em] text-cyan-100">
+                                    {claim.contextTag.replace(/_/g, " ")}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="mt-3 text-sm font-semibold text-white">{claim.reason}</p>
+                              <p className="mt-2 text-sm leading-6 text-slate-200">{claim.description}</p>
+                              {claim.referenceExcerpt ? (
+                                <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3">
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Reported reference</p>
+                                  <p className="mt-2 text-sm italic leading-6 text-slate-300">
+                                    &ldquo;{claim.referenceExcerpt}&rdquo;
+                                  </p>
+                                  <p className="mt-3 text-xs text-slate-500">
+                                    Author: {referenceAuthor?.displayName || claim.referenceAuthorId} • Recipient:{" "}
+                                    {referenceRecipient?.displayName || claim.referenceRecipientId}
+                                  </p>
+                                </div>
+                              ) : null}
+                              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                                <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Reporter email</p>
+                                  <p className="mt-1 text-sm text-slate-200">{claim.reporterEmail || "Not provided"}</p>
+                                </div>
+                                <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Profile link</p>
+                                  {claim.profileLink ? (
+                                    <a
+                                      href={claim.profileLink}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="mt-1 block break-all text-sm text-cyan-100 hover:text-cyan-50"
+                                    >
+                                      {claim.profileLink}
+                                    </a>
+                                  ) : (
+                                    <p className="mt-1 text-sm text-slate-200">Not provided</p>
+                                  )}
+                                </div>
+                              </div>
+                              {claim.evidenceLinks.length > 0 ? (
+                                <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3">
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Evidence links</p>
+                                  <div className="mt-2 space-y-1.5">
+                                    {claim.evidenceLinks.map((link) => (
+                                      <a
+                                        key={link}
+                                        href={link}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="block break-all text-sm text-cyan-100 hover:text-cyan-50"
+                                      >
+                                        {link}
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : report.note ? (
+                          <p className="mt-2 text-sm text-slate-200">{report.note}</p>
+                        ) : null}
+
+                        <label className="mt-3 block">
+                          <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">Moderator note</span>
+                          <textarea
+                            value={moderationNoteByReportId[report.id] ?? ""}
+                            onChange={(event) =>
+                              setModerationNoteByReportId((prev) => ({ ...prev, [report.id]: event.target.value }))
+                            }
+                            rows={3}
+                            className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300/35"
+                            placeholder="Add follow-up context for this moderation action..."
+                          />
+                        </label>
 
                         <div className="mt-3 flex flex-wrap gap-2">
                           {report.status === "open" ? (
@@ -908,7 +1254,75 @@ export default function AdminSpacePage() {
                 </div>
               </div>
 
-              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="mb-4 rounded-2xl border border-cyan-300/25 bg-[linear-gradient(130deg,rgba(34,211,238,0.10),rgba(15,23,42,0.35))] p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-100">Feed Health & Retention</h3>
+                    <p className="mt-1 text-sm text-slate-200">
+                      Keep only upcoming events in discover and auto-reseed examples when feed is empty.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Health snapshot: {eventsOpsHealth ? formatDate(eventsOpsHealth.generated_at) : "Not loaded"}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void refreshEventsMaintenanceHealth()}
+                      disabled={eventsOpsBusy}
+                      className="rounded-full border border-white/15 bg-black/25 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-black/35 disabled:opacity-60"
+                    >
+                      Refresh health
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runEventsMaintenance(false)}
+                      disabled={eventsOpsBusy}
+                      className="rounded-full border border-cyan-300/35 bg-cyan-300/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/25 disabled:opacity-60"
+                    >
+                      {eventsOpsBusy ? "Running..." : "Run cleanup now"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runEventsMaintenance(true)}
+                      disabled={eventsOpsBusy}
+                      className="rounded-full border border-emerald-300/35 bg-emerald-300/15 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-300/25 disabled:opacity-60"
+                    >
+                      {eventsOpsBusy ? "Running..." : "Cleanup + seed if empty"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-2.5">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Upcoming</p>
+                    <p className="mt-1 text-xl font-bold text-white">{eventsOpsHealth?.upcoming_total ?? "-"}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-2.5">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Public Visible</p>
+                    <p className="mt-1 text-xl font-bold text-white">{eventsOpsHealth?.upcoming_public_visible ?? "-"}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-2.5">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Past in Events</p>
+                    <p className="mt-1 text-xl font-bold text-white">{eventsOpsHealth?.past_total ?? "-"}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-2.5">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Archive Rows</p>
+                    <p className="mt-1 text-xl font-bold text-white">{eventsOpsHealth?.archived_total ?? "-"}</p>
+                  </div>
+                </div>
+
+                {eventsOpsLastRun ? (
+                  <p className="mt-3 text-xs text-slate-300">
+                    Last run {formatRelative(eventsOpsLastRun.ranAt)} • archived {eventsOpsLastRun.archivedCount} • deleted{" "}
+                    {eventsOpsLastRun.deletedCount} • pruned archive {eventsOpsLastRun.prunedArchiveCount} • seeded{" "}
+                    {eventsOpsLastRun.seededCount}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
                   <p className="text-xs uppercase tracking-wide text-slate-400">Pending Covers</p>
                   <p className="mt-1 text-2xl font-bold text-white">{eventModerationStats.pendingCovers}</p>

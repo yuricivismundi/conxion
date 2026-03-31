@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type Session } from "@supabase/supabase-js";
 import type { Page } from "@playwright/test";
 
 type BootstrapResult =
@@ -32,11 +32,27 @@ type SeedContext =
       reason: string;
     };
 
+type MessagesSeedRuntime = {
+  ready: true;
+  adminClient: ReturnType<typeof createClient>;
+  requesterClient: ReturnType<typeof createClient>;
+  targetClient: ReturnType<typeof createClient>;
+  requesterSession: Session;
+  targetSession: Session;
+  primaryId: string;
+  secondaryId: string;
+  supabaseUrl: string;
+  anonKey: string;
+  primaryEmail: string;
+  password: string;
+};
+
 const LOCAL_MANUAL_UNREAD_STORAGE_KEY = "cx_messages_manual_unread_v1";
 const LOCAL_REACTIONS_STORAGE_KEY = "cx_messages_reactions_local_v1";
 const LOCAL_THREAD_DRAFTS_STORAGE_KEY = "cx_messages_thread_drafts_v1";
 
 let cachedDotenv: Record<string, string> | null = null;
+let cachedMessagesSeedRuntimePromise: Promise<MessagesSeedRuntime | { ready: false; reason: string }> | null = null;
 
 function loadDotEnvLocal(): Record<string, string> {
   if (cachedDotenv) return cachedDotenv;
@@ -88,7 +104,8 @@ function withNamespacedEmail(baseEmail: string) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const namespace = sanitizeNamespace(explicit || implicit);
+  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
   const at = baseEmail.indexOf("@");
@@ -100,7 +117,12 @@ function withNamespacedEmail(baseEmail: string) {
 
 function isLikelyAlreadyExistsError(message: string) {
   const text = message.toLowerCase();
-  return text.includes("already registered") || text.includes("already exists") || text.includes("duplicate");
+  return (
+    text.includes("already registered") ||
+    text.includes("already been registered") ||
+    text.includes("already exists") ||
+    text.includes("duplicate")
+  );
 }
 
 function isMissingSchemaError(message: string) {
@@ -111,6 +133,18 @@ function isMissingSchemaError(message: string) {
     text.includes("does not exist") ||
     text.includes("could not find the table") ||
     text.includes("column")
+  );
+}
+
+function shouldFallbackAcceptedConnectionRpc(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("threads_type_chk") ||
+    text.includes("cx_ensure_pair_thread") ||
+    text.includes("direct_user_low") ||
+    text.includes("direct_user_high") ||
+    (text.includes("thread") && text.includes("constraint")) ||
+    (text.includes("thread_type") && text.includes("check"))
   );
 }
 
@@ -139,23 +173,9 @@ function buildSeedContext(): SeedContext {
   };
 }
 
-async function findUserIdByEmail(
-  adminClient: ReturnType<typeof createClient>,
-  email: string
-): Promise<string | null> {
-  const normalized = email.trim().toLowerCase();
-  for (let page = 1; page <= 5; page += 1) {
-    const listed = await adminClient.auth.admin.listUsers({ page, perPage: 200 });
-    if (listed.error) throw listed.error;
-    const match = listed.data.users.find((item) => (item.email ?? "").toLowerCase() === normalized);
-    if (match?.id) return match.id;
-    if (listed.data.users.length < 200) break;
-  }
-  return null;
-}
-
 async function ensureUser(
   adminClient: ReturnType<typeof createClient>,
+  signInClient: ReturnType<typeof createClient>,
   params: {
     email: string;
     password: string;
@@ -166,9 +186,9 @@ async function ensureUser(
     primaryStyle: "bachata" | "salsa" | "kizomba" | "zouk";
   }
 ) {
-  let userId = await findUserIdByEmail(adminClient, params.email);
+  let userId: string | null = null;
 
-  if (!userId) {
+  try {
     const created = await adminClient.auth.admin.createUser({
       email: params.email,
       password: params.password,
@@ -176,13 +196,26 @@ async function ensureUser(
       user_metadata: { display_name: params.displayName },
     });
     if (created.error && !isLikelyAlreadyExistsError(created.error.message)) throw created.error;
-    if (!created.error) userId = created.data.user.id;
+    if (!created.error) {
+      userId = created.data.user.id;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isLikelyAlreadyExistsError(message)) {
+      throw error;
+    }
   }
 
   if (!userId) {
-    userId = await findUserIdByEmail(adminClient, params.email);
+    const signedIn = await signInClient.auth.signInWithPassword({
+      email: params.email,
+      password: params.password,
+    });
+    if (signedIn.error || !signedIn.data.user?.id) {
+      throw signedIn.error ?? new Error(`Unable to resolve user id for ${params.email}`);
+    }
+    userId = signedIn.data.user.id;
   }
-  if (!userId) throw new Error(`Unable to resolve user id for ${params.email}`);
 
   const updated = await adminClient.auth.admin.updateUserById(userId, {
     email_confirm: true,
@@ -250,6 +283,11 @@ async function ensureAcceptedConnection(
   if (createReq.error) {
     const msg = createReq.error.message.toLowerCase();
     if (!msg.includes("already_pending_or_connected")) {
+      if (shouldFallbackAcceptedConnectionRpc(msg)) {
+        throw new Error(
+          "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+        );
+      }
       throw createReq.error;
     }
   }
@@ -266,7 +304,22 @@ async function ensureAcceptedConnection(
   if (firstPending?.id) {
     const accepter = firstPending.target_id === targetId ? targetClient : requesterClient;
     const accept = await accepter.rpc("accept_connection_request", { p_connection_id: firstPending.id });
-    if (accept.error) throw accept.error;
+    if (accept.error) {
+      if (!shouldFallbackAcceptedConnectionRpc(accept.error.message)) throw accept.error;
+      const fallbackAccept = await adminClient
+        .from("connections")
+        .update({ status: "accepted" })
+        .eq("id", firstPending.id)
+        .eq("status", "pending");
+      if (fallbackAccept.error) {
+        if (shouldFallbackAcceptedConnectionRpc(fallbackAccept.error.message)) {
+          throw new Error(
+            "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+          );
+        }
+        throw fallbackAccept.error;
+      }
+    }
   }
 
   const after = await adminClient
@@ -369,6 +422,20 @@ async function resetMessageSeedState(
   }
 
   if (threadId) {
+    const clearActivityContexts = await adminClient
+      .from("thread_contexts")
+      .delete()
+      .eq("thread_id", threadId)
+      .eq("source_table", "activities");
+    if (clearActivityContexts.error && !isMissingSchemaError(clearActivityContexts.error.message)) {
+      throw clearActivityContexts.error;
+    }
+
+    const clearActivities = await adminClient.from("activities").delete().eq("thread_id", threadId);
+    if (clearActivities.error && !isMissingSchemaError(clearActivities.error.message)) {
+      throw clearActivities.error;
+    }
+
     const clearThreadMessages = await adminClient.from("thread_messages").delete().eq("thread_id", threadId);
     if (clearThreadMessages.error && !isMissingSchemaError(clearThreadMessages.error.message)) {
       throw clearThreadMessages.error;
@@ -389,90 +456,145 @@ async function seedUnreadMessage(targetClient: ReturnType<typeof createClient>, 
   if (rpc.error) throw rpc.error;
 }
 
-async function loginPageWithPasswordSession(
-  page: Page,
-  anonClient: ReturnType<typeof createClient>,
-  email: string,
-  password: string
-) {
-  const signIn = await anonClient.auth.signInWithPassword({ email, password });
-  if (signIn.error || !signIn.data.session) {
-    throw signIn.error ?? new Error("Missing session after sign in");
+async function gotoWithRetry(page: Page, url: string, attempts = 4) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil: "commit", timeout: 45_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) break;
+      await page.waitForTimeout(400 * attempt);
+    }
+  }
+  throw lastError ?? new Error(`Failed to navigate to ${url}`);
+}
+
+async function loginPageWithSession(page: Page, supabaseUrl: string, session: Session) {
+  const projectRef = new URL(supabaseUrl).hostname.split(".")[0];
+  const storageKeys = [`sb-${projectRef}-auth-token`, "supabase.auth.token"];
+  const sessionPayload = session;
+
+  await page.addInitScript(
+    ({ keys, payload }) => {
+      const serialized = JSON.stringify(payload);
+      keys.forEach((key) => {
+        window.localStorage.setItem(key, serialized);
+        window.sessionStorage.setItem(key, serialized);
+      });
+    },
+    {
+      keys: storageKeys,
+      payload: sessionPayload,
+    }
+  );
+}
+
+async function getMessagesSeedRuntime(): Promise<MessagesSeedRuntime | { ready: false; reason: string }> {
+  if (cachedMessagesSeedRuntimePromise) {
+    return cachedMessagesSeedRuntimePromise;
   }
 
-  const hashParams = new URLSearchParams({
-    access_token: signIn.data.session.access_token,
-    refresh_token: signIn.data.session.refresh_token,
-    token_type: "bearer",
-  });
+  cachedMessagesSeedRuntimePromise = (async () => {
+    const context = buildSeedContext();
+    if (!context.ready) return context;
 
-  await page.goto(`/auth/callback#${hashParams.toString()}`);
-  await page.waitForURL((url) => !url.pathname.startsWith("/auth/callback"), { timeout: 20_000 });
+    try {
+      const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const requesterClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const targetClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const primaryId = await ensureUser(adminClient, requesterClient, {
+        email: context.primaryEmail,
+        password: context.password,
+        displayName: "Playwright Primary",
+        city: "Tallinn",
+        country: "Estonia",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.primaryEmail)}`,
+        primaryStyle: "bachata",
+      });
+      const secondaryId = await ensureUser(adminClient, targetClient, {
+        email: context.secondaryEmail,
+        password: context.password,
+        displayName: "Playwright Peer",
+        city: "Lisbon",
+        country: "Portugal",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.secondaryEmail)}`,
+        primaryStyle: "salsa",
+      });
+
+      const requesterSignIn = await requesterClient.auth.signInWithPassword({
+        email: context.primaryEmail,
+        password: context.password,
+      });
+      if (requesterSignIn.error || !requesterSignIn.data.session) {
+        throw requesterSignIn.error ?? new Error("Failed to sign in requester for e2e seed.");
+      }
+
+      const targetSignIn = await targetClient.auth.signInWithPassword({
+        email: context.secondaryEmail,
+        password: context.password,
+      });
+      if (targetSignIn.error || !targetSignIn.data.session) {
+        throw targetSignIn.error ?? new Error("Failed to sign in target for e2e seed.");
+      }
+
+      return {
+        ready: true,
+        adminClient,
+        requesterClient,
+        targetClient,
+        requesterSession: requesterSignIn.data.session,
+        targetSession: targetSignIn.data.session,
+        primaryId,
+        secondaryId,
+        supabaseUrl: context.supabaseUrl,
+        anonKey: context.anonKey,
+        primaryEmail: context.primaryEmail,
+        password: context.password,
+      };
+    } catch (error) {
+      cachedMessagesSeedRuntimePromise = null;
+      throw error;
+    }
+  })();
+
+  return cachedMessagesSeedRuntimePromise;
 }
 
 async function ensureMessagesSeed() {
-  const context = buildSeedContext();
-  if (!context.ready) return context;
+  const runtime = await getMessagesSeedRuntime();
+  if (!runtime.ready) return runtime;
 
-  const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const requesterClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const targetClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const primaryId = await ensureUser(adminClient, {
-    email: context.primaryEmail,
-    password: context.password,
-    displayName: "Playwright Primary",
-    city: "Tallinn",
-    country: "Estonia",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.primaryEmail)}`,
-    primaryStyle: "bachata",
-  });
-  const secondaryId = await ensureUser(adminClient, {
-    email: context.secondaryEmail,
-    password: context.password,
-    displayName: "Playwright Peer",
-    city: "Lisbon",
-    country: "Portugal",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.secondaryEmail)}`,
-    primaryStyle: "salsa",
-  });
-
-  const requesterSignIn = await requesterClient.auth.signInWithPassword({
-    email: context.primaryEmail,
-    password: context.password,
-  });
-  if (requesterSignIn.error || !requesterSignIn.data.session) {
-    throw requesterSignIn.error ?? new Error("Failed to sign in requester for e2e seed.");
-  }
-
-  const targetSignIn = await targetClient.auth.signInWithPassword({
-    email: context.secondaryEmail,
-    password: context.password,
-  });
-  if (targetSignIn.error || !targetSignIn.data.session) {
-    throw targetSignIn.error ?? new Error("Failed to sign in target for e2e seed.");
-  }
-
-  const connectionId = await ensureAcceptedConnection(adminClient, requesterClient, targetClient, primaryId, secondaryId);
-  await resetMessageSeedState(adminClient, {
+  const connectionId = await ensureAcceptedConnection(
+    runtime.adminClient,
+    runtime.requesterClient,
+    runtime.targetClient,
+    runtime.primaryId,
+    runtime.secondaryId
+  );
+  await resetMessageSeedState(runtime.adminClient, {
     connectionId,
-    primaryId,
-    secondaryId,
+    primaryId: runtime.primaryId,
+    secondaryId: runtime.secondaryId,
   });
-  await seedUnreadMessage(targetClient, connectionId);
+  await seedUnreadMessage(runtime.targetClient, connectionId);
 
   return {
     ready: true as const,
-    supabaseUrl: context.supabaseUrl,
-    anonKey: context.anonKey,
-    primaryEmail: context.primaryEmail,
-    password: context.password,
+    supabaseUrl: runtime.supabaseUrl,
+    anonKey: runtime.anonKey,
+    primaryEmail: runtime.primaryEmail,
+    password: runtime.password,
+    requesterSession: runtime.requesterSession,
+    targetSession: runtime.targetSession,
   };
 }
 
@@ -484,22 +606,69 @@ export async function resetMessagesE2ESeed(): Promise<BootstrapResult> {
   return { ready: true };
 }
 
-export async function bootstrapMessagesE2E(page: Page): Promise<BootstrapResult> {
+export async function bootstrapMessagesPeerE2E(
+  page: Page,
+  options?: {
+    initialPath?: string;
+  }
+): Promise<BootstrapResult> {
   const seedResult = await ensureMessagesSeed();
   if (!seedResult.ready) {
     return seedResult;
   }
 
-  const browserAnonClient = createClient(seedResult.supabaseUrl, seedResult.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  await loginPageWithPasswordSession(page, browserAnonClient, seedResult.primaryEmail, seedResult.password);
+  await loginPageWithSession(page, seedResult.supabaseUrl, seedResult.targetSession);
 
-  await page.goto("/messages");
+  await gotoWithRetry(page, options?.initialPath ?? "/messages");
   await page.waitForLoadState("domcontentloaded");
-  await page.evaluate((keys) => {
-    keys.forEach((key) => window.localStorage.removeItem(key));
-  }, [LOCAL_MANUAL_UNREAD_STORAGE_KEY, LOCAL_REACTIONS_STORAGE_KEY, LOCAL_THREAD_DRAFTS_STORAGE_KEY]);
+
+  if (!options?.initialPath || options.initialPath.startsWith("/messages")) {
+    await page.evaluate((keys) => {
+      keys.forEach((key) => window.localStorage.removeItem(key));
+    }, [LOCAL_MANUAL_UNREAD_STORAGE_KEY, LOCAL_REACTIONS_STORAGE_KEY, LOCAL_THREAD_DRAFTS_STORAGE_KEY]);
+  }
+
+  return { ready: true };
+}
+
+export async function bootstrapMessagesAuthE2E(
+  page: Page,
+  options?: {
+    initialPath?: string;
+  }
+): Promise<BootstrapResult> {
+  const runtime = await getMessagesSeedRuntime();
+  if (!runtime.ready) {
+    return runtime;
+  }
+
+  await loginPageWithSession(page, runtime.supabaseUrl, runtime.requesterSession);
+  await gotoWithRetry(page, options?.initialPath ?? "/");
+  await page.waitForLoadState("domcontentloaded");
+
+  return { ready: true };
+}
+
+export async function bootstrapMessagesE2E(
+  page: Page,
+  options?: {
+    initialPath?: string;
+  }
+): Promise<BootstrapResult> {
+  const seedResult = await ensureMessagesSeed();
+  if (!seedResult.ready) {
+    return seedResult;
+  }
+
+  await loginPageWithSession(page, seedResult.supabaseUrl, seedResult.requesterSession);
+
+  await gotoWithRetry(page, options?.initialPath ?? "/messages");
+  await page.waitForLoadState("domcontentloaded");
+  if (!options?.initialPath || options.initialPath.startsWith("/messages")) {
+    await page.evaluate((keys) => {
+      keys.forEach((key) => window.localStorage.removeItem(key));
+    }, [LOCAL_MANUAL_UNREAD_STORAGE_KEY, LOCAL_REACTIONS_STORAGE_KEY, LOCAL_THREAD_DRAFTS_STORAGE_KEY]);
+  }
 
   return { ready: true };
 }

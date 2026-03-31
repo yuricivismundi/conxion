@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sendAppEmailBestEffort } from "@/lib/email/app-events";
+import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
 function getSupabaseUserClient(token: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -63,6 +66,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid connect_context." }, { status: 400 });
     }
 
+    const pendingConflict = await findPendingPairRequestConflict(getSupabaseServiceClient(), {
+      actorUserId: requesterId,
+      otherUserId: targetId,
+    });
+    if (pendingConflict) {
+      return NextResponse.json({ ok: false, error: pendingConflict.message }, { status: 409 });
+    }
+
     const { data, error } = await supabase.rpc("create_connection_request", {
       p_target_id: targetId,
       p_context: normalizedContext,
@@ -80,6 +91,13 @@ export async function POST(req: Request) {
         message.includes("blocked") ? 403 : 400;
       return NextResponse.json({ ok: false, error: message }, { status });
     }
+
+    await sendAppEmailBestEffort({
+      kind: "connection_request_received",
+      recipientUserId: targetId,
+      actorUserId: requesterId,
+      connectionId: typeof data === "string" ? data : null,
+    });
 
     return NextResponse.json({ ok: true, id: data ?? null });
   } catch (e: unknown) {

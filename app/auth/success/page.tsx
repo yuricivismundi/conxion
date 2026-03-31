@@ -24,8 +24,6 @@ function AuthSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [progress, setProgress] = useState(25);
-  const [logoSrc, setLogoSrc] = useState("/branding/conxion-logo.svg");
-  const [logoFailed, setLogoFailed] = useState(false);
 
   const nextPath = useMemo(() => safeNextPath(searchParams.get("next")), [searchParams]);
   const context = useMemo(() => searchParams.get("context"), [searchParams]);
@@ -56,35 +54,7 @@ function AuthSuccessContent() {
       />
 
       <div className="relative z-10 w-full max-w-[460px] text-center">
-        {!logoFailed ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={logoSrc}
-            alt="ConXion"
-            className="mx-auto h-24 w-auto select-none"
-            onError={() => {
-              if (logoSrc.endsWith(".svg")) {
-                setLogoSrc("/branding/conxion-short-logo.png");
-                return;
-              }
-              setLogoFailed(true);
-            }}
-          />
-        ) : (
-          <div
-            className="mx-auto text-4xl font-black italic tracking-tight"
-            style={{
-              backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            CONXION
-          </div>
-        )}
-
-        <div className="mt-7 rounded-3xl border p-8" style={{ backgroundColor: BRAND.surface, borderColor: BRAND.border }}>
+        <div className="rounded-3xl border p-8" style={{ backgroundColor: BRAND.surface, borderColor: BRAND.border }}>
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-white/15 bg-black/25">
             <span className="material-symbols-outlined text-4xl" style={{ color: BRAND.cyan }}>
               check

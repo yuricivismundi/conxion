@@ -47,11 +47,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 
 # Server-only (DO NOT expose to client)
 SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+RESEND_API_KEY=re_xxxxxxxxx
+RESEND_FROM_EMAIL=ConXion <notifications@YOUR_DOMAIN>
 ```
 
 #### Important rules
 - `NEXT_PUBLIC_*` variables are exposed to the browser.
 - `SUPABASE_SERVICE_ROLE_KEY` must **never** be used in client components.
+- `RESEND_API_KEY` and `RESEND_FROM_EMAIL` are only used by server routes for transactional emails.
 - Service role key is reserved for:
   - Admin scripts
   - Seed data
@@ -92,8 +96,10 @@ Add the following in **Vercel → Project → Settings → Environment Variables
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_APP_URL`
 
 Only add `SUPABASE_SERVICE_ROLE_KEY` when you explicitly need server-only features.
+Add `RESEND_API_KEY` and `RESEND_FROM_EMAIL` when you want transactional emails enabled.
 
 ---
 

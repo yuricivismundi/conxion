@@ -54,6 +54,10 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   font-synthesis: none;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  white-space: nowrap;
+  direction: ltr;
 }
 /* Connections card icon scaling */
 /* Connections cards: override Material Symbols size */
@@ -124,4 +128,29 @@ body {
 .scrollbar-subtle {
   scrollbar-width: thin;
   scrollbar-color: rgba(120, 120, 120, 0.55) transparent;
+}
+
+.dark-calendar-input {
+  color-scheme: dark;
+}
+
+.dark-calendar-input::-webkit-calendar-picker-indicator,
+.dark-calendar-input::-webkit-time-picker-indicator,
+.dark-calendar-input::-webkit-clear-button,
+.dark-calendar-input::-webkit-inner-spin-button {
+  filter: brightness(0) invert(1) saturate(0) contrast(1.05);
+  opacity: 1;
+  cursor: pointer;
+}
+
+.dark-calendar-input::-webkit-datetime-edit,
+.dark-calendar-input::-webkit-datetime-edit-fields-wrapper,
+.dark-calendar-input::-webkit-datetime-edit-text,
+.dark-calendar-input::-webkit-datetime-edit-month-field,
+.dark-calendar-input::-webkit-datetime-edit-day-field,
+.dark-calendar-input::-webkit-datetime-edit-year-field,
+.dark-calendar-input::-webkit-datetime-edit-hour-field,
+.dark-calendar-input::-webkit-datetime-edit-minute-field,
+.dark-calendar-input::-webkit-datetime-edit-ampm-field {
+  color: #fff;
 }

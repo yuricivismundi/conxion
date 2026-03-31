@@ -22,7 +22,7 @@ export default function Avatar({
         className={`relative overflow-hidden bg-zinc-100 border border-zinc-200 ${className}`}
         style={{ width: size, height: size }}
       >
-        <Image src={src} alt={alt} fill className="object-cover" sizes={`${size}px`} />
+        <Image src={src} alt={alt} fill className="object-cover object-center" sizes={`${size}px`} />
       </div>
     );
   }

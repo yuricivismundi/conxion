@@ -47,7 +47,8 @@ function withNamespacedEmail(baseEmail) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const namespace = sanitizeNamespace(explicit || implicit);
+  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
   const at = baseEmail.indexOf("@");
@@ -65,6 +66,18 @@ function missingSchemaError(message) {
     text.includes("does not exist") ||
     text.includes("could not find the table") ||
     text.includes("column")
+  );
+}
+
+function shouldFallbackAcceptedConnectionRpc(message) {
+  const text = String(message || "").toLowerCase();
+  return (
+    text.includes("threads_type_chk") ||
+    text.includes("cx_ensure_pair_thread") ||
+    text.includes("direct_user_low") ||
+    text.includes("direct_user_high") ||
+    (text.includes("thread") && text.includes("constraint")) ||
+    (text.includes("thread_type") && text.includes("check"))
   );
 }
 
@@ -153,8 +166,16 @@ async function ensureAcceptedConnection(adminClient, requesterClient, targetClie
     p_trip_id: null,
     p_note: "Deterministic thread setup",
   });
-  if (createReq.error && !String(createReq.error.message || "").toLowerCase().includes("already_pending_or_connected")) {
-    throw createReq.error;
+  if (createReq.error) {
+    const msg = String(createReq.error.message || "").toLowerCase();
+    if (!msg.includes("already_pending_or_connected")) {
+      if (shouldFallbackAcceptedConnectionRpc(msg)) {
+        throw new Error(
+          "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+        );
+      }
+      throw createReq.error;
+    }
   }
 
   const pending = await adminClient
@@ -169,7 +190,22 @@ async function ensureAcceptedConnection(adminClient, requesterClient, targetClie
   if (firstPending?.id) {
     const accepter = firstPending.target_id === targetId ? targetClient : requesterClient;
     const accept = await accepter.rpc("accept_connection_request", { p_connection_id: firstPending.id });
-    if (accept.error) throw accept.error;
+    if (accept.error) {
+      if (!shouldFallbackAcceptedConnectionRpc(accept.error.message)) throw accept.error;
+      const fallbackAccept = await adminClient
+        .from("connections")
+        .update({ status: "accepted" })
+        .eq("id", firstPending.id)
+        .eq("status", "pending");
+      if (fallbackAccept.error) {
+        if (shouldFallbackAcceptedConnectionRpc(fallbackAccept.error.message)) {
+          throw new Error(
+            "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+          );
+        }
+        throw fallbackAccept.error;
+      }
+    }
   }
 
   const after = await adminClient

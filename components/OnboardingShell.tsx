@@ -30,7 +30,7 @@ export default function OnboardingShell({
           {/* Logo (left-most, no extra padding) */}
           <Link href="/" className="select-none flex items-center">
             <Image
-              src="/branding/conxion-logo.svg"
+              src="/branding/CONXION-3-tight.png"
               alt="ConXion"
               width={160}
               height={40}

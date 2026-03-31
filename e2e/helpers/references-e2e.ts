@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type Session } from "@supabase/supabase-js";
 import type { Page } from "@playwright/test";
 
 type BootstrapResult =
@@ -26,6 +26,24 @@ type SeedContext =
       ready: false;
       reason: string;
     };
+
+type ReferencesSeedRuntime = {
+  ready: true;
+  adminClient: ReturnType<typeof createClient>;
+  authorClient: ReturnType<typeof createClient>;
+  recipientClient: ReturnType<typeof createClient>;
+  authorSession: Session;
+  recipientSession: Session;
+  authorId: string;
+  recipientId: string;
+  supabaseUrl: string;
+  anonKey: string;
+  authorEmail: string;
+  recipientEmail: string;
+  authorName: string;
+  recipientName: string;
+  password: string;
+};
 
 type ConnectionRow = {
   id?: string;
@@ -61,6 +79,7 @@ export type ReferencesScenario = {
 };
 
 let cachedDotenv: Record<string, string> | null = null;
+let cachedReferencesSeedRuntimePromise: Promise<ReferencesSeedRuntime | { ready: false; reason: string }> | null = null;
 
 function loadDotEnvLocal(): Record<string, string> {
   if (cachedDotenv) return cachedDotenv;
@@ -112,7 +131,8 @@ function withNamespacedEmail(baseEmail: string) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const namespace = sanitizeNamespace(explicit || implicit);
+  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
   const at = baseEmail.indexOf("@");
@@ -135,6 +155,18 @@ function isMissingSchemaError(message: string) {
     text.includes("does not exist") ||
     text.includes("could not find the table") ||
     text.includes("column")
+  );
+}
+
+function shouldFallbackAcceptedConnectionRpc(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("threads_type_chk") ||
+    text.includes("cx_ensure_pair_thread") ||
+    text.includes("direct_user_low") ||
+    text.includes("direct_user_high") ||
+    (text.includes("thread") && text.includes("constraint")) ||
+    (text.includes("thread_type") && text.includes("check"))
   );
 }
 
@@ -476,6 +508,11 @@ async function ensureAcceptedConnection(
   if (createReq.error) {
     const msg = createReq.error.message.toLowerCase();
     if (!msg.includes("already_pending_or_connected")) {
+      if (shouldFallbackAcceptedConnectionRpc(msg)) {
+        throw new Error(
+          "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+        );
+      }
       throw createReq.error;
     }
   }
@@ -492,7 +529,22 @@ async function ensureAcceptedConnection(
   if (firstPending?.id) {
     const accepter = firstPending.target_id === recipientId ? recipientClient : authorClient;
     const accept = await accepter.rpc("accept_connection_request", { p_connection_id: firstPending.id });
-    if (accept.error) throw accept.error;
+    if (accept.error) {
+      if (!shouldFallbackAcceptedConnectionRpc(accept.error.message)) throw accept.error;
+      const fallbackAccept = await adminClient
+        .from("connections")
+        .update({ status: "accepted" })
+        .eq("id", firstPending.id)
+        .eq("status", "pending");
+      if (fallbackAccept.error) {
+        if (shouldFallbackAcceptedConnectionRpc(fallbackAccept.error.message)) {
+          throw new Error(
+            "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+          );
+        }
+        throw fallbackAccept.error;
+      }
+    }
   }
 
   const after = await adminClient
@@ -741,21 +793,10 @@ async function gotoWithRetry(page: Page, url: string, attempts = 4) {
   throw lastError ?? new Error(`Failed to navigate to ${url}`);
 }
 
-async function loginPageWithPasswordSession(
-  page: Page,
-  anonClient: ReturnType<typeof createClient>,
-  supabaseUrl: string,
-  email: string,
-  password: string
-) {
-  const signIn = await withNetworkRetries(() => anonClient.auth.signInWithPassword({ email, password }));
-  if (signIn.error || !signIn.data.session) {
-    throw signIn.error ?? new Error("Missing session after sign in");
-  }
-
+async function loginPageWithSession(page: Page, supabaseUrl: string, session: Session) {
   const projectRef = new URL(supabaseUrl).hostname.split(".")[0];
   const storageKeys = [`sb-${projectRef}-auth-token`, "supabase.auth.token"];
-  const sessionPayload = signIn.data.session;
+  const sessionPayload = session;
 
   await page.addInitScript(
     ({ keys, payload }) => {
@@ -770,109 +811,131 @@ async function loginPageWithPasswordSession(
       payload: sessionPayload,
     }
   );
+}
 
-  await gotoWithRetry(page, "/auth");
-  await page.evaluate(
-    ({ keys, payload }) => {
-      const serialized = JSON.stringify(payload);
-      keys.forEach((key) => {
-        window.localStorage.setItem(key, serialized);
-        window.sessionStorage.setItem(key, serialized);
-      });
-    },
-    {
-      keys: storageKeys,
-      payload: sessionPayload,
-    }
-  );
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 25_000 });
-      break;
-    } catch (error) {
-      if (attempt >= 3) throw error;
-      await page.waitForTimeout(350 * attempt);
-    }
+async function getReferencesSeedRuntime(): Promise<ReferencesSeedRuntime | { ready: false; reason: string }> {
+  if (cachedReferencesSeedRuntimePromise) {
+    return cachedReferencesSeedRuntimePromise;
   }
+
+  cachedReferencesSeedRuntimePromise = (async () => {
+    const context = buildSeedContext();
+    if (!context.ready) return context;
+
+    try {
+      const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const authorClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const recipientClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const authorId = await ensureUser(adminClient, {
+        email: context.authorEmail,
+        password: context.password,
+        displayName: context.authorName,
+        city: "Tallinn",
+        country: "Estonia",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.authorEmail)}`,
+        primaryStyle: "bachata",
+      });
+
+      const recipientId = await ensureUser(adminClient, {
+        email: context.recipientEmail,
+        password: context.password,
+        displayName: context.recipientName,
+        city: "Lisbon",
+        country: "Portugal",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.recipientEmail)}`,
+        primaryStyle: "salsa",
+      });
+
+      const authorSignIn = await withNetworkRetries(() =>
+        authorClient.auth.signInWithPassword({ email: context.authorEmail, password: context.password })
+      );
+      if (authorSignIn.error || !authorSignIn.data.session) {
+        throw authorSignIn.error ?? new Error("Failed to sign in author for references e2e seed.");
+      }
+
+      const recipientSignIn = await withNetworkRetries(() =>
+        recipientClient.auth.signInWithPassword({
+          email: context.recipientEmail,
+          password: context.password,
+        })
+      );
+      if (recipientSignIn.error || !recipientSignIn.data.session) {
+        throw recipientSignIn.error ?? new Error("Failed to sign in recipient for references e2e seed.");
+      }
+
+      return {
+        ready: true,
+        adminClient,
+        authorClient,
+        recipientClient,
+        authorSession: authorSignIn.data.session,
+        recipientSession: recipientSignIn.data.session,
+        authorId,
+        recipientId,
+        supabaseUrl: context.supabaseUrl,
+        anonKey: context.anonKey,
+        authorEmail: context.authorEmail,
+        recipientEmail: context.recipientEmail,
+        authorName: context.authorName,
+        recipientName: context.recipientName,
+        password: context.password,
+      };
+    } catch (error) {
+      cachedReferencesSeedRuntimePromise = null;
+      throw error;
+    }
+  })();
+
+  return cachedReferencesSeedRuntimePromise;
 }
 
 async function ensureReferencesScenario(): Promise<BootstrapResult> {
-  const context = buildSeedContext();
-  if (!context.ready) return context;
+  const runtime = await getReferencesSeedRuntime();
+  if (!runtime.ready) return runtime;
 
-  const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const authorClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const recipientClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const authorId = await ensureUser(adminClient, {
-    email: context.authorEmail,
-    password: context.password,
-    displayName: context.authorName,
-    city: "Tallinn",
-    country: "Estonia",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.authorEmail)}`,
-    primaryStyle: "bachata",
-  });
-
-  const recipientId = await ensureUser(adminClient, {
-    email: context.recipientEmail,
-    password: context.password,
-    displayName: context.recipientName,
-    city: "Lisbon",
-    country: "Portugal",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.recipientEmail)}`,
-    primaryStyle: "salsa",
-  });
-
-  const authorSignIn = await withNetworkRetries(() =>
-    authorClient.auth.signInWithPassword({ email: context.authorEmail, password: context.password })
+  const connectionId = await ensureAcceptedConnection(
+    runtime.adminClient,
+    runtime.authorClient,
+    runtime.recipientClient,
+    runtime.authorId,
+    runtime.recipientId
   );
-  if (authorSignIn.error || !authorSignIn.data.session) {
-    throw authorSignIn.error ?? new Error("Failed to sign in author for references e2e seed.");
-  }
-
-  const recipientSignIn = await withNetworkRetries(() =>
-    recipientClient.auth.signInWithPassword({
-      email: context.recipientEmail,
-      password: context.password,
-    })
-  );
-  if (recipientSignIn.error || !recipientSignIn.data.session) {
-    throw recipientSignIn.error ?? new Error("Failed to sign in recipient for references e2e seed.");
-  }
-
-  const connectionId = await ensureAcceptedConnection(adminClient, authorClient, recipientClient, authorId, recipientId);
-  await resetReferencesState(adminClient, { connectionId, authorId, recipientId });
-
-  const { recentSyncId, oldSyncId } = await seedCompletedSyncs(adminClient, {
+  await resetReferencesState(runtime.adminClient, {
     connectionId,
-    authorId,
-    recipientId,
+    authorId: runtime.authorId,
+    recipientId: runtime.recipientId,
+  });
+
+  const { recentSyncId, oldSyncId } = await seedCompletedSyncs(runtime.adminClient, {
+    connectionId,
+    authorId: runtime.authorId,
+    recipientId: runtime.recipientId,
   });
 
   const zeroUuid = "00000000-0000-0000-0000-000000000000";
-  const supportsV2 = await detectRpcSupport(authorClient, "create_reference_v2", {
+  const supportsV2 = await detectRpcSupport(runtime.authorClient, "create_reference_v2", {
     p_connection_id: zeroUuid,
     p_entity_type: "sync",
     p_entity_id: zeroUuid,
-    p_recipient_id: recipientId,
+    p_recipient_id: runtime.recipientId,
     p_sentiment: "positive",
     p_body: "E2E support probe body",
   });
 
-  const supportsEdit = await detectRpcSupport(authorClient, "update_reference_author", {
+  const supportsEdit = await detectRpcSupport(runtime.authorClient, "update_reference_author", {
     p_reference_id: zeroUuid,
     p_sentiment: "neutral",
     p_body: "E2E support probe edit",
   });
 
-  const supportsReply = await detectRpcSupport(recipientClient, "reply_reference_receiver", {
+  const supportsReply = await detectRpcSupport(runtime.recipientClient, "reply_reference_receiver", {
     p_reference_id: zeroUuid,
     p_reply_text: "ok",
   });
@@ -881,13 +944,13 @@ async function ensureReferencesScenario(): Promise<BootstrapResult> {
     ready: true,
     scenario: {
       connectionId,
-      authorId,
-      recipientId,
-      authorEmail: context.authorEmail,
-      recipientEmail: context.recipientEmail,
-      authorName: context.authorName,
-      recipientName: context.recipientName,
-      password: context.password,
+      authorId: runtime.authorId,
+      recipientId: runtime.recipientId,
+      authorEmail: runtime.authorEmail,
+      recipientEmail: runtime.recipientEmail,
+      authorName: runtime.authorName,
+      recipientName: runtime.recipientName,
+      password: runtime.password,
       recentSyncId,
       oldSyncId,
       supportsV2,
@@ -904,15 +967,11 @@ export async function bootstrapReferencesE2E(
   const seeded = await ensureReferencesScenario();
   if (!seeded.ready) return seeded;
 
-  const context = buildSeedContext();
-  if (!context.ready) return context;
+  const runtime = await getReferencesSeedRuntime();
+  if (!runtime.ready) return runtime;
 
-  const browserAnonClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const loginEmail = actor === "author" ? seeded.scenario.authorEmail : seeded.scenario.recipientEmail;
-  await loginPageWithPasswordSession(page, browserAnonClient, context.supabaseUrl, loginEmail, seeded.scenario.password);
+  const session = actor === "author" ? runtime.authorSession : runtime.recipientSession;
+  await loginPageWithSession(page, runtime.supabaseUrl, session);
   await gotoWithRetry(page, `/references?connectionId=${seeded.scenario.connectionId}`);
   await page.waitForLoadState("domcontentloaded");
 
@@ -923,27 +982,17 @@ export async function fetchReferencesUserAccessToken(params: {
   scenario: ReferencesScenario;
   actor: "author" | "recipient";
 }): Promise<string> {
-  const context = buildSeedContext();
-  if (!context.ready) {
-    throw new Error(context.reason);
+  const runtime = await getReferencesSeedRuntime();
+  if (!runtime.ready) {
+    throw new Error(runtime.reason);
   }
 
-  const anonClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const email = params.actor === "author" ? params.scenario.authorEmail : params.scenario.recipientEmail;
-  const signIn = await withNetworkRetries(() =>
-    anonClient.auth.signInWithPassword({
-      email,
-      password: params.scenario.password,
-    })
-  );
-  if (signIn.error || !signIn.data.session?.access_token) {
-    throw signIn.error ?? new Error(`Failed to sign in ${params.actor} for references token.`);
+  const session = params.actor === "author" ? runtime.authorSession : runtime.recipientSession;
+  if (!session.access_token) {
+    throw new Error(`Missing cached ${params.actor} access token for references token.`);
   }
 
-  return signIn.data.session.access_token;
+  return session.access_token;
 }
 
 export async function fetchReferenceByEntity(params: {

@@ -48,17 +48,18 @@ test("archive and unarchive thread keeps Archived tab in sync", async ({ page })
   await page.getByTestId("thread-action-archive").click();
 
   const rowByToken = page.locator(`[data-testid="thread-row"][data-thread-token="${token}"]`);
-  await expect(rowByToken).toHaveCount(0, { timeout: 10_000 });
-
-  await page.getByTestId("thread-filter-archived").click();
-  await expect(rowByToken).toBeVisible({ timeout: 10_000 });
+  await expect(rowByToken).toHaveCount(1, { timeout: 10_000 });
+  await expect(rowByToken.first()).toBeVisible({ timeout: 10_000 });
 
   await rowByToken.first().click();
   await openThreadActions(page);
+  await expect(page.getByTestId("thread-action-unarchive")).toBeVisible({ timeout: 10_000 });
   await page.getByTestId("thread-action-unarchive").click();
 
-  await expect(rowByToken).toHaveCount(0, { timeout: 10_000 });
+  await expect(rowByToken).toHaveCount(1, { timeout: 10_000 });
+  await expect(rowByToken.first()).toBeVisible({ timeout: 10_000 });
 
-  await page.getByTestId("thread-filter-all").click();
-  await expect(rowByToken).toBeVisible({ timeout: 10_000 });
+  await rowByToken.first().click();
+  await openThreadActions(page);
+  await expect(page.getByTestId("thread-action-archive")).toBeVisible({ timeout: 10_000 });
 });

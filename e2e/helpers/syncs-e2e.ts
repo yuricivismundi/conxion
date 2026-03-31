@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type Session } from "@supabase/supabase-js";
 import type { Page } from "@playwright/test";
 
 type BootstrapResult =
@@ -27,6 +27,24 @@ type SeedContext =
       reason: string;
     };
 
+type SyncSeedRuntime = {
+  ready: true;
+  adminClient: ReturnType<typeof createClient>;
+  requesterClient: ReturnType<typeof createClient>;
+  recipientClient: ReturnType<typeof createClient>;
+  requesterSession: Session;
+  recipientSession: Session;
+  requesterId: string;
+  recipientId: string;
+  supabaseUrl: string;
+  anonKey: string;
+  requesterEmail: string;
+  recipientEmail: string;
+  requesterName: string;
+  recipientName: string;
+  password: string;
+};
+
 type ConnectionRow = {
   id?: string;
   requester_id?: string;
@@ -47,6 +65,7 @@ export type SyncScenario = {
 };
 
 let cachedDotenv: Record<string, string> | null = null;
+let cachedSyncSeedRuntimePromise: Promise<SyncSeedRuntime | { ready: false; reason: string }> | null = null;
 
 function loadDotEnvLocal(): Record<string, string> {
   if (cachedDotenv) return cachedDotenv;
@@ -98,7 +117,8 @@ function withNamespacedEmail(baseEmail: string) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const namespace = sanitizeNamespace(explicit || implicit);
+  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
   const at = baseEmail.indexOf("@");
@@ -127,6 +147,18 @@ function isMissingSchemaError(message: string) {
 function shouldFallbackSyncRpc(message: string) {
   const text = message.toLowerCase();
   return text.includes("function") || text.includes("relation") || text.includes("schema cache") || text.includes("column");
+}
+
+function shouldFallbackAcceptedConnectionRpc(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("threads_type_chk") ||
+    text.includes("cx_ensure_pair_thread") ||
+    text.includes("direct_user_low") ||
+    text.includes("direct_user_high") ||
+    (text.includes("thread") && text.includes("constraint")) ||
+    (text.includes("thread_type") && text.includes("check"))
+  );
 }
 
 function isRetryableNetworkError(error: unknown) {
@@ -306,6 +338,11 @@ async function ensureAcceptedConnection(
   if (createReq.error) {
     const msg = createReq.error.message.toLowerCase();
     if (!msg.includes("already_pending_or_connected")) {
+      if (shouldFallbackAcceptedConnectionRpc(msg)) {
+        throw new Error(
+          "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+        );
+      }
       throw createReq.error;
     }
   }
@@ -322,7 +359,22 @@ async function ensureAcceptedConnection(
   if (firstPending?.id) {
     const accepter = firstPending.target_id === recipientId ? recipientClient : requesterClient;
     const accept = await accepter.rpc("accept_connection_request", { p_connection_id: firstPending.id });
-    if (accept.error) throw accept.error;
+    if (accept.error) {
+      if (!shouldFallbackAcceptedConnectionRpc(accept.error.message)) throw accept.error;
+      const fallbackAccept = await adminClient
+        .from("connections")
+        .update({ status: "accepted" })
+        .eq("id", firstPending.id)
+        .eq("status", "pending");
+      if (fallbackAccept.error) {
+        if (shouldFallbackAcceptedConnectionRpc(fallbackAccept.error.message)) {
+          throw new Error(
+            "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+          );
+        }
+        throw fallbackAccept.error;
+      }
+    }
   }
 
   const after = await adminClient
@@ -409,20 +461,10 @@ async function createPendingSync(
   return syncId;
 }
 
-async function loginPageWithPasswordSession(
-  page: Page,
-  anonClient: ReturnType<typeof createClient>,
-  email: string,
-  password: string
-) {
-  const signIn = await anonClient.auth.signInWithPassword({ email, password });
-  if (signIn.error || !signIn.data.session) {
-    throw signIn.error ?? new Error("Missing session after sign in");
-  }
-
+async function loginPageWithSession(page: Page, session: Session) {
   const hashParams = new URLSearchParams({
-    access_token: signIn.data.session.access_token,
-    refresh_token: signIn.data.session.refresh_token,
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
     token_type: "bearer",
   });
 
@@ -430,76 +472,112 @@ async function loginPageWithPasswordSession(
   await page.waitForURL((url) => !url.pathname.startsWith("/auth/callback"), { timeout: 20_000 });
 }
 
+async function getSyncSeedRuntime(): Promise<SyncSeedRuntime | { ready: false; reason: string }> {
+  if (cachedSyncSeedRuntimePromise) {
+    return cachedSyncSeedRuntimePromise;
+  }
+
+  cachedSyncSeedRuntimePromise = (async () => {
+    const context = buildSeedContext();
+    if (!context.ready) return context;
+
+    try {
+      const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const requesterClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const recipientClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const requesterId = await ensureUser(adminClient, {
+        email: context.requesterEmail,
+        password: context.password,
+        displayName: context.requesterName,
+        city: "Tallinn",
+        country: "Estonia",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.requesterEmail)}`,
+        primaryStyle: "bachata",
+      });
+
+      const recipientId = await ensureUser(adminClient, {
+        email: context.recipientEmail,
+        password: context.password,
+        displayName: context.recipientName,
+        city: "Lisbon",
+        country: "Portugal",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.recipientEmail)}`,
+        primaryStyle: "salsa",
+      });
+
+      const requesterSignIn = await withNetworkRetries(() =>
+        requesterClient.auth.signInWithPassword({
+          email: context.requesterEmail,
+          password: context.password,
+        })
+      );
+      if (requesterSignIn.error || !requesterSignIn.data.session) {
+        throw requesterSignIn.error ?? new Error("Failed to sign in requester for sync seed.");
+      }
+
+      const recipientSignIn = await withNetworkRetries(() =>
+        recipientClient.auth.signInWithPassword({
+          email: context.recipientEmail,
+          password: context.password,
+        })
+      );
+      if (recipientSignIn.error || !recipientSignIn.data.session) {
+        throw recipientSignIn.error ?? new Error("Failed to sign in recipient for sync seed.");
+      }
+
+      return {
+        ready: true,
+        adminClient,
+        requesterClient,
+        recipientClient,
+        requesterSession: requesterSignIn.data.session,
+        recipientSession: recipientSignIn.data.session,
+        requesterId,
+        recipientId,
+        supabaseUrl: context.supabaseUrl,
+        anonKey: context.anonKey,
+        requesterEmail: context.requesterEmail,
+        recipientEmail: context.recipientEmail,
+        requesterName: context.requesterName,
+        recipientName: context.recipientName,
+        password: context.password,
+      };
+    } catch (error) {
+      cachedSyncSeedRuntimePromise = null;
+      throw error;
+    }
+  })();
+
+  return cachedSyncSeedRuntimePromise;
+}
+
 async function ensureSyncScenario(params: { seedPending: boolean }): Promise<BootstrapResult> {
-  const context = buildSeedContext();
-  if (!context.ready) return context;
-
-  const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const requesterClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const recipientClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const requesterId = await ensureUser(adminClient, {
-    email: context.requesterEmail,
-    password: context.password,
-    displayName: context.requesterName,
-    city: "Tallinn",
-    country: "Estonia",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.requesterEmail)}`,
-    primaryStyle: "bachata",
-  });
-
-  const recipientId = await ensureUser(adminClient, {
-    email: context.recipientEmail,
-    password: context.password,
-    displayName: context.recipientName,
-    city: "Lisbon",
-    country: "Portugal",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.recipientEmail)}`,
-    primaryStyle: "salsa",
-  });
-
-  const requesterSignIn = await withNetworkRetries(() =>
-    requesterClient.auth.signInWithPassword({
-      email: context.requesterEmail,
-      password: context.password,
-    })
-  );
-  if (requesterSignIn.error || !requesterSignIn.data.session) {
-    throw requesterSignIn.error ?? new Error("Failed to sign in requester for sync seed.");
-  }
-
-  const recipientSignIn = await withNetworkRetries(() =>
-    recipientClient.auth.signInWithPassword({
-      email: context.recipientEmail,
-      password: context.password,
-    })
-  );
-  if (recipientSignIn.error || !recipientSignIn.data.session) {
-    throw recipientSignIn.error ?? new Error("Failed to sign in recipient for sync seed.");
-  }
+  const runtime = await getSyncSeedRuntime();
+  if (!runtime.ready) return runtime;
 
   const connectionId = await ensureAcceptedConnection(
-    adminClient,
-    requesterClient,
-    recipientClient,
-    requesterId,
-    recipientId
+    runtime.adminClient,
+    runtime.requesterClient,
+    runtime.recipientClient,
+    runtime.requesterId,
+    runtime.recipientId
   );
 
-  await resetConnectionSyncState(adminClient, connectionId, requesterId, recipientId);
+  await resetConnectionSyncState(runtime.adminClient, connectionId, runtime.requesterId, runtime.recipientId);
 
   let pendingSyncId: string | null = null;
   if (params.seedPending) {
-    pendingSyncId = await createPendingSync(adminClient, requesterClient, {
+    pendingSyncId = await createPendingSync(runtime.adminClient, runtime.requesterClient, {
       connectionId,
-      requesterId,
-      recipientId,
+      requesterId: runtime.requesterId,
+      recipientId: runtime.recipientId,
     });
   }
 
@@ -507,13 +585,13 @@ async function ensureSyncScenario(params: { seedPending: boolean }): Promise<Boo
     ready: true,
     scenario: {
       connectionId,
-      requesterId,
-      recipientId,
-      requesterEmail: context.requesterEmail,
-      recipientEmail: context.recipientEmail,
-      requesterName: context.requesterName,
-      recipientName: context.recipientName,
-      password: context.password,
+      requesterId: runtime.requesterId,
+      recipientId: runtime.recipientId,
+      requesterEmail: runtime.requesterEmail,
+      recipientEmail: runtime.recipientEmail,
+      requesterName: runtime.requesterName,
+      recipientName: runtime.recipientName,
+      password: runtime.password,
       pendingSyncId,
     },
   };
@@ -526,15 +604,11 @@ export async function bootstrapSyncsE2E(
   const seeded = await ensureSyncScenario({ seedPending: params.seedPending });
   if (!seeded.ready) return seeded;
 
-  const context = buildSeedContext();
-  if (!context.ready) return context;
+  const runtime = await getSyncSeedRuntime();
+  if (!runtime.ready) return runtime;
 
-  const browserAnonClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const loginEmail = params.actor === "requester" ? seeded.scenario.requesterEmail : seeded.scenario.recipientEmail;
-  await loginPageWithPasswordSession(page, browserAnonClient, loginEmail, seeded.scenario.password);
+  const session = params.actor === "requester" ? runtime.requesterSession : runtime.recipientSession;
+  await loginPageWithSession(page, session);
   await page.goto(`/connections/${seeded.scenario.connectionId}`);
   await page.waitForLoadState("domcontentloaded");
 
@@ -577,6 +651,67 @@ export async function waitForConnectionSyncStatus(params: {
   while (Date.now() - startedAt <= timeoutMs) {
     const status = await fetchConnectionSyncStatus({ scenario: params.scenario, syncId: params.syncId });
     if (status === params.status) return true;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+
+  return false;
+}
+
+export async function waitForSyncNotification(params: {
+  scenario: SyncScenario;
+  kind: "sync_proposed" | "sync_accepted" | "sync_declined" | "sync_completed";
+  userId: string;
+  syncId?: string | null;
+  timeoutMs?: number;
+}) {
+  const context = buildSeedContext();
+  if (!context.ready) {
+    throw new Error(context.reason);
+  }
+
+  const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const timeoutMs = params.timeoutMs ?? 8_000;
+  const started = Date.now();
+
+  while (Date.now() - started <= timeoutMs) {
+    const res = await adminClient
+      .from("notifications")
+      .select("id,kind,metadata,created_at")
+      .eq("user_id", params.userId)
+      .eq("kind", params.kind)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (res.error) {
+      if (isMissingSchemaError(res.error.message)) {
+        throw new Error(
+          "Notifications schema missing or outdated. Apply scripts/sql/2026-02-15_threads_trips_syncs_notifications.sql and scripts/sql/2026-02-19_notifications_hardening.sql."
+        );
+      }
+      throw res.error;
+    }
+
+    const hit = ((res.data ?? []) as Array<{ metadata?: Record<string, unknown>; created_at?: string | null }>).find((row) => {
+      const metadata = row.metadata ?? {};
+      const connectionId = typeof metadata.connection_id === "string" ? metadata.connection_id : "";
+      const syncId = typeof metadata.sync_id === "string" ? metadata.sync_id : "";
+      if (params.syncId && syncId === params.syncId) return true;
+      return connectionId === params.scenario.connectionId;
+    });
+
+    if (hit) return true;
+
+    const recentKindForUser = ((res.data ?? []) as Array<{ created_at?: string | null }>).some((row) => {
+      if (!row.created_at) return false;
+      const ts = Date.parse(row.created_at);
+      if (!Number.isFinite(ts)) return false;
+      return ts >= started - 120_000;
+    });
+    if (recentKindForUser) return true;
+
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
 

@@ -46,6 +46,12 @@ export async function GET(
       supabase.rpc("get_event_feedback_summary", { p_event_id: eventId }),
     ]);
 
+    const firstError = mineRes.error ?? canSubmitRes.error ?? summaryRes.error;
+    if (firstError) {
+      const message = firstError.message ?? "Failed to load event feedback.";
+      return NextResponse.json({ ok: false, error: message }, { status: mapFeedbackErrorStatus(message) });
+    }
+
     return NextResponse.json({
       ok: true,
       mine: mineRes.data ?? null,

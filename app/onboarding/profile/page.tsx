@@ -1,9 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Country, City } from "country-state-city";
 import { useRouter } from "next/navigation";
 import OnboardingShell from "@/components/OnboardingShell";
+import {
+  getCachedCitiesOfCountry,
+  getCachedCountriesAll,
+  getCitiesOfCountry,
+  getCountriesAll,
+  type CountryEntry,
+} from "@/lib/country-city-client";
+import { getAvatarStorageUrl } from "@/lib/avatar-storage";
 import { readOnboardingDraft, writeOnboardingDraft } from "@/lib/onboardingDraft";
 import { supabase } from "@/lib/supabase/client";
 
@@ -16,13 +23,15 @@ const ROLES = [
   "Artist",
   "Teacher",
 ] as const;
+const MAX_DISPLAY_NAME_LENGTH = 48;
 
 type Role = (typeof ROLES)[number];
 
 export default function OnboardingProfilePage() {
   const router = useRouter();
 
-  const countriesAll = useMemo(() => Country.getAllCountries(), []);
+  const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
+  const [cityNames, setCityNames] = useState<string[]>([]);
   const countryNames = useMemo(() => countriesAll.map((c) => c.name), [countriesAll]);
 
   const [meId, setMeId] = useState<string | null>(null);
@@ -79,15 +88,26 @@ export default function OnboardingProfilePage() {
         router.replace("/auth");
         return;
       }
+      const draftAgeConfirmed = readOnboardingDraft().ageConfirmed === true;
+      const metadataAgeConfirmed = Boolean(user.user_metadata?.age_confirmed_at || user.user_metadata?.age_confirmed === true);
+      if (!draftAgeConfirmed && !metadataAgeConfirmed) {
+        router.replace("/onboarding/age");
+        return;
+      }
       setMeId(user.id);
 
       const d = readOnboardingDraft();
-      if (typeof d.displayName === "string") setDisplayName(d.displayName);
+      if (typeof d.displayName === "string") setDisplayName(d.displayName.slice(0, MAX_DISPLAY_NAME_LENGTH));
       if (typeof d.country === "string") setCountry(d.country);
       if (typeof d.city === "string") setCity(d.city);
       if (Array.isArray(d.roles)) setRoles(d.roles.filter(Boolean) as Role[]);
-      if (typeof d.avatarDataUrl === "string" && d.avatarDataUrl) setAvatarPreviewUrl(d.avatarDataUrl);
-      if (typeof d.avatarPath === "string") setAvatarPath(d.avatarPath);
+      const draftAvatarPath = typeof d.avatarPath === "string" && d.avatarPath.trim() ? d.avatarPath.trim() : undefined;
+      const draftAvatarUrl =
+        typeof d.avatarDataUrl === "string" && d.avatarDataUrl
+          ? d.avatarDataUrl
+          : getAvatarStorageUrl(draftAvatarPath) ?? undefined;
+      if (draftAvatarUrl) setAvatarPreviewUrl(draftAvatarUrl);
+      if (draftAvatarPath) setAvatarPath(draftAvatarPath);
       if (typeof d.avatarStatus === "string") setAvatarStatus(d.avatarStatus);
 
       setHydrated(true);
@@ -96,6 +116,30 @@ export default function OnboardingProfilePage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (countriesAll.length > 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCountriesAll()
+      .then((countries) => {
+        if (cancelled) return;
+        setCountriesAll(countries);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCountriesAll([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countriesAll.length]);
 
   // Persist draft as user types/selects
   useEffect(() => {
@@ -145,8 +189,6 @@ export default function OnboardingProfilePage() {
       if (!file.type.startsWith("image/")) throw new Error("Please upload an image.");
       if (file.size > 5 * 1024 * 1024) throw new Error("Max size is 5MB.");
 
-      // IMPORTANT: Use a PRIVATE bucket in Supabase (set the bucket visibility to private).
-      // Keep the bucket name as "avatars" if you already have it, just make it private.
       const bucket = "avatars";
 
       const ext = file.name.split(".").pop() || "jpg";
@@ -155,21 +197,17 @@ export default function OnboardingProfilePage() {
       const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
       if (upErr) throw upErr;
 
-      // Create a short-lived signed URL for preview (works with private buckets)
-      const { data: signed, error: signErr } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
-      if (signErr) throw signErr;
-
-      const signedUrl = signed?.signedUrl;
-      if (!signedUrl) throw new Error("Could not generate preview URL.");
+      const publicUrl = getAvatarStorageUrl(path);
+      if (!publicUrl) throw new Error("Could not generate preview URL.");
 
       setAvatarPath(path);
       setAvatarStatus("pending");
-      setAvatarPreviewUrl(signedUrl);
+      setAvatarPreviewUrl(publicUrl);
 
       writeOnboardingDraft({
         avatarPath: path,
         avatarStatus: "pending",
-        avatarDataUrl: signedUrl,
+        avatarDataUrl: publicUrl,
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -178,10 +216,39 @@ export default function OnboardingProfilePage() {
     }
   }
 
-  const iso = countriesAll.find((c) => c.name === country)?.isoCode ?? "";
-  const cityNames = useMemo(() => {
-    if (!iso) return [];
-    return (City.getCitiesOfCountry(iso) ?? []).map((c) => c.name);
+  const iso = useMemo(() => countriesAll.find((c) => c.name === country)?.isoCode ?? "", [countriesAll, country]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!iso) {
+      setCityNames([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cachedCities = getCachedCitiesOfCountry(iso);
+    if (cachedCities.length > 0) {
+      setCityNames(cachedCities);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCitiesOfCountry(iso)
+      .then((cities) => {
+        if (cancelled) return;
+        setCityNames(cities);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCityNames([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [iso]);
 
   const canContinue =
@@ -196,7 +263,7 @@ export default function OnboardingProfilePage() {
           </p>
         ) : null}
         {/* Photo + Display name (same row) */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-12 sm:items-start">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-start">
           <div className="sm:col-span-4">
             <input
               ref={fileInputRef}
@@ -209,7 +276,7 @@ export default function OnboardingProfilePage() {
             <button
               type="button"
               onClick={onPickPhotoClick}
-              className="group flex h-44 w-44 sm:h-48 sm:w-48 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/15 hover:border-[#00F5FF]/60 transition overflow-hidden"
+              className="group mx-auto flex h-40 w-40 flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-white/15 transition hover:border-[#00F5FF]/60 sm:h-44 sm:w-44 lg:mx-0 lg:h-48 lg:w-48"
               title="Add photo"
             >
               {avatarPreviewUrl ? (
@@ -238,17 +305,21 @@ export default function OnboardingProfilePage() {
             </button>
           </div>
 
-          <div className="sm:col-span-8">
+          <div className="lg:col-span-8">
             <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">Display Name</label>
             <input
               value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              onChange={(e) => setDisplayName(e.target.value.slice(0, MAX_DISPLAY_NAME_LENGTH))}
+              maxLength={MAX_DISPLAY_NAME_LENGTH}
               placeholder="e.g. Maria Dance"
               className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
             />
+            <div className="mt-1 text-right text-xs text-white/45">
+              {displayName.length}/{MAX_DISPLAY_NAME_LENGTH}
+            </div>
 
             {/* Country + City */}
-            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div>
                 <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">Country</label>
                 <select
@@ -272,21 +343,30 @@ export default function OnboardingProfilePage() {
 
               <div>
                 <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">City</label>
-                <select
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  disabled={!country || cityNames.length === 0}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
-                >
-                  <option value="" disabled>
-                    {!country ? "Select country first" : cityNames.length === 0 ? "No cities found" : "Select city…"}
-                  </option>
-                  {cityNames.map((n, idx) => (
-                    <option key={`${n}-${idx}`} value={n}>
-                      {n}
+                {country && cityNames.length === 0 ? (
+                  <input
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Type your city…"
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                  />
+                ) : (
+                  <select
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    disabled={!country}
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
+                  >
+                    <option value="" disabled>
+                      {!country ? "Select country first" : "Select city…"}
                     </option>
-                  ))}
-                </select>
+                    {cityNames.map((n, idx) => (
+                      <option key={`${n}-${idx}`} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
           </div>
@@ -303,7 +383,7 @@ export default function OnboardingProfilePage() {
             className="relative mt-3"
           >
             <div
-              className="flex gap-3 overflow-x-auto pb-2 pl-0 pr-10 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex gap-3 overflow-x-auto pb-2 pl-0 pr-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:pr-10"
               ref={rolesScrollRef}
               onScroll={updateScrollButtons}
             >
@@ -315,7 +395,7 @@ export default function OnboardingProfilePage() {
                     type="button"
                     onClick={() => toggleRole(r)}
                     className={[
-                      "shrink-0 w-[70%] sm:w-[45%] md:w-[30%] rounded-2xl px-4 py-4 text-left transition border",
+                      "shrink-0 w-[82%] sm:w-[55%] md:w-[42%] lg:w-[30%] rounded-2xl border px-4 py-4 text-left transition",
                       active
                         ? "border-[#00F5FF] bg-black/30 shadow-[0_0_18px_rgba(0,245,255,0.18)]"
                         : "border-white/10 bg-black/20 hover:border-white/20",
@@ -336,7 +416,7 @@ export default function OnboardingProfilePage() {
                 type="button"
                 aria-label="Scroll roles left"
                 onClick={() => scrollRolesBy(-320)}
-                className="absolute left-[-18px] top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition"
+                className="absolute left-[-18px] top-1/2 hidden -translate-y-1/2 text-white/60 transition hover:text-white lg:block"
               >
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/30 border border-white/10">&lt;</span>
               </button>
@@ -346,7 +426,7 @@ export default function OnboardingProfilePage() {
                 type="button"
                 aria-label="Scroll roles right"
                 onClick={() => scrollRolesBy(320)}
-                className="absolute right-0 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition"
+                className="absolute right-0 top-1/2 hidden -translate-y-1/2 text-white/60 transition hover:text-white lg:block"
               >
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/30 border border-white/10">&gt;</span>
               </button>

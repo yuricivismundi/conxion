@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
 type ConfirmationDialogProps = {
   open: boolean;
@@ -29,13 +30,18 @@ export default function ConfirmationDialog({
   onConfirm,
   error,
 }: ConfirmationDialogProps) {
+  useBodyScrollLock(open);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-6" data-testid="confirmation-dialog">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#121414] shadow-[0_30px_60px_rgba(0,0,0,0.45)]">
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-4 py-4 backdrop-blur-sm sm:items-center sm:px-6"
+      data-testid="confirmation-dialog"
+    >
+      <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#121414] shadow-[0_30px_60px_rgba(0,0,0,0.45)] sm:max-h-[min(88dvh,640px)] sm:rounded-2xl">
         <div className="h-px w-full bg-gradient-to-r from-[#0df2f2]/60 via-[#0df2f2]/10 to-[#f20db1]/60" />
-        <div className="p-5">
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-lg font-bold text-white">{title}</p>

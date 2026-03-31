@@ -9,6 +9,7 @@ import {
   readOnboardingDraft,
   writeOnboardingDraft,
 } from "@/lib/onboardingDraft";
+import { getAvatarStorageUrl } from "@/lib/avatar-storage";
 import { supabase } from "@/lib/supabase/client";
 
 const AVAIL = [
@@ -104,26 +105,60 @@ export default function OnboardingFinalizePage() {
 
   /* eslint-disable react-hooks/set-state-in-effect -- hydration from persisted draft. */
   useEffect(() => {
-    const d = readOnboardingDraft();
+    let cancelled = false;
+    (async () => {
+      const authRes = await supabase.auth.getUser();
+      const user = authRes.data.user;
+      if (!user) {
+        router.replace("/auth");
+        return;
+      }
 
-    if (Array.isArray(d.langs) && d.langs.length) {
-      // Keep only known languages (menu-only)
-      const next = d.langs.filter((x): x is Language => (LANGUAGES as readonly string[]).includes(x));
-      if (next.length) setLangs(next);
-    }
+      const d = readOnboardingDraft();
+      const draftAgeConfirmed = d.ageConfirmed === true;
+      const metadataAgeConfirmed = Boolean(user.user_metadata?.age_confirmed_at || user.user_metadata?.age_confirmed === true);
+      if (!draftAgeConfirmed && !metadataAgeConfirmed) {
+        router.replace("/onboarding/age");
+        return;
+      }
 
-    if (d.avail && typeof d.avail === "object") {
-      // Keep only known availability keys
-      const next: Record<AvailKey, boolean> = { ...DEFAULT_AVAIL };
-      const incoming = d.avail as Record<string, boolean>;
-      (Object.keys(next) as AvailKey[]).forEach((k) => {
-        next[k] = Boolean(incoming[k]);
-      });
-      setAvail(next);
-    }
+      const draftRoles = toStringArray(d.roles);
+      if (draftRoles.length === 0) {
+        router.replace("/onboarding/profile");
+        return;
+      }
 
-    setHydrated(true);
-  }, []);
+      const draftStyles = toStringArray(d.styles);
+      if (draftStyles.length === 0) {
+        router.replace("/onboarding/interests");
+        return;
+      }
+
+      if (cancelled) return;
+
+      if (Array.isArray(d.langs) && d.langs.length) {
+        // Keep only known languages (menu-only)
+        const next = d.langs.filter((x): x is Language => (LANGUAGES as readonly string[]).includes(x));
+        if (next.length) setLangs(next);
+      }
+
+      if (d.avail && typeof d.avail === "object") {
+        // Keep only known availability keys
+        const next: Record<AvailKey, boolean> = { ...DEFAULT_AVAIL };
+        const incoming = d.avail as Record<string, boolean>;
+        (Object.keys(next) as AvailKey[]).forEach((k) => {
+          next[k] = Boolean(incoming[k]);
+        });
+        setAvail(next);
+      }
+
+      setHydrated(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -131,7 +166,7 @@ export default function OnboardingFinalizePage() {
     writeOnboardingDraft({ langs, avail });
   }, [hydrated, langs, avail]);
 
-  const canAddMoreLanguages = langs.length < 3;
+  const canAddMoreLanguages = langs.length < 5;
 
   function addLang() {
     const v = langPick;
@@ -210,6 +245,7 @@ export default function OnboardingFinalizePage() {
         draft.avatarStatus === "approved" || draft.avatarStatus === "rejected" || draft.avatarStatus === "pending"
           ? draft.avatarStatus
           : "pending";
+      const avatarUrl = getAvatarStorageUrl(avatarPath);
 
       const upsertRes = await supabase.from("profiles").upsert(
         {
@@ -227,12 +263,24 @@ export default function OnboardingFinalizePage() {
           has_other_style: hasOtherStyle,
           avatar_path: avatarPath,
           avatar_status: avatarStatus,
+          ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
         },
         { onConflict: "user_id" }
       );
 
       if (upsertRes.error) {
         throw new Error(upsertRes.error.message);
+      }
+
+      const sessionRes = await supabase.auth.getSession();
+      const accessToken = sessionRes.data.session?.access_token ?? "";
+      if (accessToken) {
+        await fetch("/api/onboarding/welcome-email", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }).catch(() => null);
       }
 
       clearOnboardingDraft();
@@ -267,7 +315,7 @@ export default function OnboardingFinalizePage() {
                 disabled={!canAddMoreLanguages}
                 className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
               >
-                <option value="">{canAddMoreLanguages ? "Select a language…" : "Max 3 languages"}</option>
+                <option value="">{canAddMoreLanguages ? "Select a language…" : "Max 5 languages"}</option>
                 {LANGUAGES.filter((l) => !langs.includes(l)).map((l) => (
                   <option key={l} value={l}>
                     {l}
@@ -307,7 +355,7 @@ export default function OnboardingFinalizePage() {
               )}
             </div>
 
-            <div className="mt-2 text-[11px] text-white/35">Select up to 3.</div>
+            <div className="mt-2 text-[11px] text-white/35">Select up to 5.</div>
           </div>
         </section>
 

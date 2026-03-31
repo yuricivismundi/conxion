@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from "react";
 import type { ConnectContext, ReasonItem } from "@/lib/connectReasons";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -37,6 +38,7 @@ export default function ConnectReasonModal({
   onConfirm,
 }: Props) {
   const [selectedKey, setSelectedKey] = useState<string>("");
+  useBodyScrollLock(open);
 
   const resetSelection = () => {
     setSelectedKey("");
@@ -62,7 +64,7 @@ export default function ConnectReasonModal({
   const isTrip = context === "trip";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
       {/* overlay */}
       <button
         type="button"
@@ -78,7 +80,7 @@ export default function ConnectReasonModal({
       {/* modal */}
       <div
         className={cx(
-          "relative w-full max-w-lg rounded-2xl shadow-xl",
+          "relative flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col overflow-hidden rounded-[28px] shadow-xl sm:max-h-[min(88dvh,760px)] sm:rounded-2xl",
           isTrip ? "border border-[#224949] bg-[#0F1212]" : "border border-zinc-200 bg-white"
         )}
       >
@@ -115,7 +117,7 @@ export default function ConnectReasonModal({
           </button>
         </div>
 
-        <div className="px-5 py-4">
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
           {context === "trip" ? (
             <div className="space-y-4">
               {tripSummary ? (
@@ -170,7 +172,7 @@ export default function ConnectReasonModal({
               {error ? <div className={cx("text-xs", isTrip ? "text-red-300" : "text-red-600")}>{error}</div> : null}
             </div>
           ) : (
-            <div className="max-h-[50vh] overflow-auto pr-1 space-y-4">
+            <div className="space-y-4 pr-1">
               {grouped.length === 0 ? (
                 <div className="text-sm text-zinc-600">No reasons available for these roles.</div>
               ) : (

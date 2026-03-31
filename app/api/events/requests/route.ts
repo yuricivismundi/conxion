@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
+import { sendAppEmailBestEffort } from "@/lib/email/app-events";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
 type RequestAction = "accept" | "decline";
 
@@ -31,10 +33,21 @@ export async function POST(req: Request) {
     }
 
     const supabase = getSupabaseUserClient(token);
+    const service = getSupabaseServiceClient();
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
     }
+
+    const requestRes = await service
+      .from("event_requests")
+      .select("id,event_id,requester_id")
+      .eq("id", requestId)
+      .maybeSingle();
+    if (requestRes.error) {
+      return NextResponse.json({ ok: false, error: requestRes.error.message }, { status: 500 });
+    }
+    const requestRow = (requestRes.data ?? null) as { requester_id?: string; event_id?: string | null } | null;
 
     const { data, error } = await supabase.rpc("respond_event_request", {
       p_request_id: requestId,
@@ -43,6 +56,17 @@ export async function POST(req: Request) {
     if (error) {
       const message = error.message ?? "Failed to process request.";
       return NextResponse.json({ ok: false, error: message }, { status: mapRequestErrorStatus(message) });
+    }
+
+    const requesterId = typeof requestRow?.requester_id === "string" ? requestRow.requester_id : "";
+    const eventId = typeof requestRow?.event_id === "string" ? requestRow.event_id : null;
+    if (requesterId) {
+      await sendAppEmailBestEffort({
+        kind: action === "accept" ? "event_request_accepted" : "event_request_declined",
+        recipientUserId: requesterId,
+        actorUserId: authData.user.id,
+        eventId,
+      });
     }
 
     return NextResponse.json({ ok: true, event_id: data ?? null });

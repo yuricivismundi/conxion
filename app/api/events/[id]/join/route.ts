@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
+import { sendAppEmailBestEffort } from "@/lib/email/app-events";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
 type JoinAction = "join" | "request" | "leave" | "cancel_request";
 
@@ -40,7 +42,11 @@ export async function POST(
     const actionRaw = body?.action;
     const note = typeof body?.note === "string" ? body.note : null;
 
-    const action: JoinAction = isJoinAction(actionRaw) ? actionRaw : "join";
+    if (!isJoinAction(actionRaw)) {
+      return NextResponse.json({ ok: false, error: "Invalid action." }, { status: 400 });
+    }
+
+    const action = actionRaw;
 
     const token = getBearerToken(req);
     if (!token) {
@@ -48,16 +54,36 @@ export async function POST(
     }
 
     const supabase = getSupabaseUserClient(token);
+    const service = getSupabaseServiceClient();
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
     }
+
+    const eventRes = await service
+      .from("events")
+      .select("host_user_id")
+      .eq("id", eventId)
+      .maybeSingle();
+    if (eventRes.error) {
+      return NextResponse.json({ ok: false, error: eventRes.error.message }, { status: 500 });
+    }
+    const eventRow = (eventRes.data ?? null) as { host_user_id?: string } | null;
+    const hostUserId = typeof eventRow?.host_user_id === "string" ? eventRow.host_user_id : "";
 
     if (action === "join") {
       const { data, error } = await supabase.rpc("join_event_guarded", { p_event_id: eventId });
       if (error) {
         const message = error.message ?? "Failed to join event.";
         return NextResponse.json({ ok: false, error: message }, { status: mapActionErrorStatus(message) });
+      }
+      if (hostUserId && hostUserId !== authData.user.id) {
+        await sendAppEmailBestEffort({
+          kind: "event_joined",
+          recipientUserId: hostUserId,
+          actorUserId: authData.user.id,
+          eventId,
+        });
       }
       return NextResponse.json({ ok: true, status: data ?? null });
     }
@@ -70,6 +96,14 @@ export async function POST(
       if (error) {
         const message = error.message ?? "Failed to request access.";
         return NextResponse.json({ ok: false, error: message }, { status: mapActionErrorStatus(message) });
+      }
+      if (hostUserId && hostUserId !== authData.user.id) {
+        await sendAppEmailBestEffort({
+          kind: "event_request_received",
+          recipientUserId: hostUserId,
+          actorUserId: authData.user.id,
+          eventId,
+        });
       }
       return NextResponse.json({ ok: true, request_id: data ?? null });
     }

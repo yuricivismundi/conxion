@@ -198,9 +198,12 @@ export async function POST(req: Request, context: RouteContext) {
       .map((row) => row.requester_id ?? "")
       .filter(Boolean);
 
+    const safeExplicitRequesterId =
+      explicitRequesterId && acceptedRequesterIds.includes(explicitRequesterId) ? explicitRequesterId : null;
+
     const participantIds = Array.from(
       new Set(
-        [trip.user_id, meId, explicitRequesterId, ...acceptedRequesterIds].filter(
+        [trip.user_id, meId, safeExplicitRequesterId, ...acceptedRequesterIds].filter(
           (value): value is string => typeof value === "string" && value.length > 0
         )
       )

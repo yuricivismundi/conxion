@@ -2,5 +2,5 @@
 import { redirect } from "next/navigation";
 
 export default function OnboardingPage() {
-  redirect("/connections"); // <- your post-onboarding landing
+  redirect("/onboarding/age");
 }

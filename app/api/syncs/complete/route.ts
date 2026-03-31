@@ -18,6 +18,14 @@ function getSupabaseUserClient(token: string) {
   });
 }
 
+function mapSyncCompleteErrorStatus(message: string) {
+  if (message.includes("not_authenticated")) return 401;
+  if (message.includes("not_authorized")) return 403;
+  if (message.includes("sync_not_found")) return 404;
+  if (message.includes("sync_not_accepted") || message.includes("connection_not_eligible_for_sync")) return 409;
+  return 400;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -71,7 +79,10 @@ export async function POST(req: Request) {
         !completed.error.message.toLowerCase().includes("function") &&
         !completed.error.message.toLowerCase().includes("complete_connection_sync")
       ) {
-        return NextResponse.json({ ok: false, error: completed.error.message }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, error: completed.error.message },
+          { status: mapSyncCompleteErrorStatus(completed.error.message) }
+        );
       }
     }
 
@@ -84,7 +95,10 @@ export async function POST(req: Request) {
       p_note: note,
     });
     if (legacy.error) {
-      return NextResponse.json({ ok: false, error: legacy.error.message }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: legacy.error.message },
+        { status: mapSyncCompleteErrorStatus(legacy.error.message) }
+      );
     }
 
     return NextResponse.json({ ok: true, sync_id: legacy.data ?? null, mode: "legacy" });

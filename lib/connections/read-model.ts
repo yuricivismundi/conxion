@@ -27,6 +27,13 @@ export type VisibleConnectionRow = {
   is_accepted_visible: boolean;
 };
 
+export type ProfileRequestResponseStats = {
+  totalRequests: number;
+  respondedRequests: number;
+  pendingRequests: number;
+  responseRate: number;
+};
+
 function asString(v: unknown) {
   return typeof v === "string" ? v : "";
 }
@@ -37,6 +44,15 @@ function asNullableString(v: unknown) {
 
 function asBool(v: unknown) {
   return v === true;
+}
+
+function asNumber(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const parsed = Number(v);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
 }
 
 function normalizeRpcRow(raw: Record<string, unknown>): VisibleConnectionRow {
@@ -117,4 +133,25 @@ export async function fetchVisibleConnections(client: SupabaseClient, userId: st
   }
 
   return (fallbackRows ?? []).map((row) => normalizeFallbackRow(row as Record<string, unknown>, userId));
+}
+
+export async function fetchProfileRequestResponseStats(
+  client: SupabaseClient,
+  userId: string
+): Promise<ProfileRequestResponseStats> {
+  const { data, error } = await client.rpc("cx_profile_request_response_stats", { p_profile_user_id: userId });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const raw =
+    Array.isArray(data) ? ((data[0] as Record<string, unknown> | undefined) ?? {}) : ((data as Record<string, unknown> | null) ?? {});
+
+  return {
+    totalRequests: asNumber(raw.total_requests ?? raw.totalRequests),
+    respondedRequests: asNumber(raw.responded_requests ?? raw.respondedRequests),
+    pendingRequests: asNumber(raw.pending_requests ?? raw.pendingRequests),
+    responseRate: asNumber(raw.response_rate ?? raw.responseRate),
+  };
 }

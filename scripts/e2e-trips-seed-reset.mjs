@@ -45,7 +45,8 @@ function withNamespacedEmail(baseEmail) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const namespace = sanitizeNamespace(explicit || implicit);
+  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
   const at = baseEmail.indexOf("@");
@@ -62,8 +63,21 @@ function shouldFallbackTripRequestRpc(message) {
     text.includes("column") ||
     text.includes("decided_by") ||
     text.includes("decided_at") ||
+    text.includes("not_authenticated") ||
     text.includes("schema cache") ||
     text.includes("on conflict")
+  );
+}
+
+function shouldFallbackAcceptedConnectionRpc(message) {
+  const text = String(message || "").toLowerCase();
+  return (
+    text.includes("threads_type_chk") ||
+    text.includes("cx_ensure_pair_thread") ||
+    text.includes("direct_user_low") ||
+    text.includes("direct_user_high") ||
+    (text.includes("thread") && text.includes("constraint")) ||
+    (text.includes("thread_type") && text.includes("check"))
   );
 }
 
@@ -179,8 +193,16 @@ async function ensureAcceptedConnection(adminClient, requesterClient, targetClie
     p_trip_id: null,
     p_note: "Deterministic trips setup",
   });
-  if (createReq.error && !String(createReq.error.message || "").toLowerCase().includes("already_pending_or_connected")) {
-    throw createReq.error;
+  if (createReq.error) {
+    const msg = String(createReq.error.message || "").toLowerCase();
+    if (!msg.includes("already_pending_or_connected")) {
+      if (shouldFallbackAcceptedConnectionRpc(msg)) {
+        throw new Error(
+          "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+        );
+      }
+      throw createReq.error;
+    }
   }
 
   const pending = await adminClient
@@ -195,7 +217,22 @@ async function ensureAcceptedConnection(adminClient, requesterClient, targetClie
   if (firstPending?.id) {
     const accepter = firstPending.target_id === targetId ? targetClient : requesterClient;
     const accept = await accepter.rpc("accept_connection_request", { p_connection_id: firstPending.id });
-    if (accept.error) throw accept.error;
+    if (accept.error) {
+      if (!shouldFallbackAcceptedConnectionRpc(accept.error.message)) throw accept.error;
+      const fallbackAccept = await adminClient
+        .from("connections")
+        .update({ status: "accepted" })
+        .eq("id", firstPending.id)
+        .eq("status", "pending");
+      if (fallbackAccept.error) {
+        if (shouldFallbackAcceptedConnectionRpc(fallbackAccept.error.message)) {
+          throw new Error(
+            "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+          );
+        }
+        throw fallbackAccept.error;
+      }
+    }
   }
 
   const after = await adminClient
@@ -336,66 +373,56 @@ async function createPendingRequest(adminClient, requesterClient, requesterId, o
 
     const existingId = (existingRes.data || [])[0]?.id || null;
     if (existingId) {
-      const updatePayloads = [
-        { status: "pending", reason: reasonValue, note: "E2E outgoing request" },
-        { status: "pending", reason: reasonValue },
-        { status: "pending", note: "E2E outgoing request" },
-        { status: "pending" },
-      ];
-      let updateError = null;
-      for (const payload of updatePayloads) {
-        const updateRes = await adminClient.from("trip_requests").update(payload).eq("id", existingId);
-        if (!updateRes.error) {
-          updateError = null;
-          break;
-        }
-        updateError = updateRes.error;
-        if (!isTripRequestCompatPayloadError(updateRes.error.message)) {
-          throw updateRes.error;
-        }
+      const deleteRes = await adminClient.from("trip_requests").delete().eq("id", existingId);
+      if (deleteRes.error) {
+        throw deleteRes.error;
       }
-      if (updateError) throw updateError;
-    } else {
-      const insertPayloads = [
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          reason: reasonValue,
-          note: "E2E outgoing request",
-          status: "pending",
-        },
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          reason: reasonValue,
-          status: "pending",
-        },
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          note: "E2E outgoing request",
-          status: "pending",
-        },
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          status: "pending",
-        },
-      ];
-      let insertError = null;
-      for (const payload of insertPayloads) {
-        const insertRes = await adminClient.from("trip_requests").insert(payload);
-        if (!insertRes.error) {
-          insertError = null;
-          break;
-        }
-        insertError = insertRes.error;
-        if (!isTripRequestCompatPayloadError(insertRes.error.message)) {
-          throw insertRes.error;
-        }
-      }
-      if (insertError) throw insertError;
     }
+
+    const insertPayloads = [
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        reason: reasonValue,
+        note: "E2E outgoing request",
+        status: "pending",
+      },
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        reason: reasonValue,
+        status: "pending",
+      },
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        note: "E2E outgoing request",
+        status: "pending",
+      },
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        status: "pending",
+      },
+    ];
+    let insertError = null;
+    for (const payload of insertPayloads) {
+      const insertRes = await requesterClient.from("trip_requests").insert(payload);
+      if (!insertRes.error) {
+        insertError = null;
+        break;
+      }
+      const message = String(insertRes.error.message || "").toLowerCase();
+      if (insertRes.error.code === "23505" || message.includes("duplicate")) {
+        insertError = null;
+        break;
+      }
+      insertError = insertRes.error;
+      if (!isTripRequestCompatPayloadError(insertRes.error.message)) {
+        throw insertRes.error;
+      }
+    }
+    if (insertError) throw insertError;
   }
 
   const requestRow = await adminClient

@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   bootstrapSyncsE2E,
   waitForConnectionSyncStatus,
+  waitForSyncNotification,
   type SyncScenario,
 } from "./helpers/syncs-e2e";
 
@@ -61,9 +62,11 @@ test("requester proposes a sync", async ({ page }) => {
   const scenario = await bootstrapOrFail(page, { actor: "requester", seedPending: false });
 
   await expect(page.getByTestId("sync-empty")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("sync-empty")).toContainText(/no activities yet/i);
 
   await page.getByTestId("sync-propose-open").click();
   await expect(page.getByTestId("sync-propose-modal")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("heading", { name: /propose activity/i })).toBeVisible({ timeout: 10_000 });
 
   await page.getByTestId("sync-propose-type").selectOption("workshop");
   await page.getByTestId("sync-propose-note").fill("E2E proposal: workshop planning and timing.");
@@ -82,6 +85,17 @@ test("requester proposes a sync", async ({ page }) => {
   });
   if (!persisted) {
     hardFail("Proposed sync was not persisted as pending.");
+  }
+
+  const notificationPersisted = await waitForSyncNotification({
+    scenario,
+    kind: "sync_proposed",
+    userId: scenario.recipientId,
+    syncId,
+    timeoutMs: 10_000,
+  });
+  if (!notificationPersisted) {
+    hardFail("Proposed sync notification was not created for recipient.");
   }
 });
 
@@ -106,6 +120,17 @@ test("recipient accepts pending sync", async ({ page }) => {
   });
   if (!persisted) {
     hardFail("Accepted sync status was not persisted.");
+  }
+
+  const notificationPersisted = await waitForSyncNotification({
+    scenario,
+    kind: "sync_accepted",
+    userId: scenario.requesterId,
+    syncId: scenario.pendingSyncId,
+    timeoutMs: 10_000,
+  });
+  if (!notificationPersisted) {
+    hardFail("Accepted sync notification was not created for requester.");
   }
 
   await page.reload();
@@ -135,6 +160,17 @@ test("recipient declines pending sync", async ({ page }) => {
   });
   if (!persisted) {
     hardFail("Declined sync status was not persisted.");
+  }
+
+  const notificationPersisted = await waitForSyncNotification({
+    scenario,
+    kind: "sync_declined",
+    userId: scenario.requesterId,
+    syncId: scenario.pendingSyncId,
+    timeoutMs: 10_000,
+  });
+  if (!notificationPersisted) {
+    hardFail("Declined sync notification was not created for requester.");
   }
 
   await page.reload();
@@ -218,6 +254,17 @@ test("accepted sync can be completed and keeps reference CTA after reload", asyn
   });
   if (!persisted) {
     hardFail("Completed sync status was not persisted.");
+  }
+
+  const notificationPersisted = await waitForSyncNotification({
+    scenario,
+    kind: "sync_completed",
+    userId: scenario.requesterId,
+    syncId: scenario.pendingSyncId,
+    timeoutMs: 10_000,
+  });
+  if (!notificationPersisted) {
+    hardFail("Completed sync notification was not created for requester.");
   }
 
   await page.reload();

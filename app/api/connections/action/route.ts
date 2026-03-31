@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sendAppEmailBestEffort } from "@/lib/email/app-events";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
 type ActionType = "accept" | "decline" | "undo_decline" | "cancel" | "block" | "unblock" | "report";
 
@@ -42,6 +44,34 @@ function isActionType(value: unknown): value is ActionType {
   );
 }
 
+function mapConnectionActionErrorStatus(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("not_authenticated")) return 401;
+  if (
+    lower.includes("not_authorized") ||
+    lower.includes("not_found_or_not_allowed") ||
+    lower.includes("connection_not_found_or_not_allowed") ||
+    lower.includes("target_not_found_or_not_allowed")
+  ) {
+    return 403;
+  }
+  if (lower.includes("report_reason_required") || lower.includes("missing_target") || lower.includes("invalid_action")) {
+    return 400;
+  }
+  if (lower.includes("not_found")) return 404;
+  if (
+    lower.includes("cannot_") ||
+    lower.includes("pending") ||
+    lower.includes("accepted") ||
+    lower.includes("declined") ||
+    lower.includes("cancelled") ||
+    lower.includes("blocked")
+  ) {
+    return 409;
+  }
+  return 400;
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => null)) as ActionPayload | null;
@@ -56,9 +86,9 @@ export async function POST(req: Request) {
     if (!isActionType(action)) {
       return NextResponse.json({ ok: false, error: "Invalid action." }, { status: 400 });
     }
-    if (!connId && !(action === "block" && targetUserId)) {
+    if (!connId && !((action === "block" || action === "report") && targetUserId)) {
       return NextResponse.json(
-        { ok: false, error: "Missing connId (or targetUserId for block)." },
+        { ok: false, error: "Missing connId (or targetUserId for block/report)." },
         { status: 400 }
       );
     }
@@ -70,6 +100,7 @@ export async function POST(req: Request) {
     }
 
     const supabase = getSupabaseUserClient(token);
+    const service = getSupabaseServiceClient();
 
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData.user) {
@@ -77,26 +108,58 @@ export async function POST(req: Request) {
     }
 
     if (action === "accept") {
+      const connectionRes = connId
+        ? await service.from("connections").select("id,requester_id").eq("id", connId).maybeSingle()
+        : null;
+      if (connectionRes?.error) {
+        return NextResponse.json({ ok: false, error: connectionRes.error.message }, { status: 500 });
+      }
+      const connectionRow = (connectionRes?.data ?? null) as { requester_id?: string } | null;
       const { error } = await supabase.rpc("accept_connection_request", { p_connection_id: connId });
-      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
+      const requesterId = typeof connectionRow?.requester_id === "string" ? connectionRow.requester_id : "";
+      if (requesterId) {
+        await sendAppEmailBestEffort({
+          kind: "connection_request_accepted",
+          recipientUserId: requesterId,
+          actorUserId: authData.user.id,
+          connectionId: connId ?? null,
+        });
+      }
       return NextResponse.json({ ok: true });
     }
 
     if (action === "decline") {
+      const connectionRes = connId
+        ? await service.from("connections").select("id,requester_id").eq("id", connId).maybeSingle()
+        : null;
+      if (connectionRes?.error) {
+        return NextResponse.json({ ok: false, error: connectionRes.error.message }, { status: 500 });
+      }
+      const connectionRow = (connectionRes?.data ?? null) as { requester_id?: string } | null;
       const { error } = await supabase.rpc("decline_connection_request", { p_connection_id: connId });
-      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
+      const requesterId = typeof connectionRow?.requester_id === "string" ? connectionRow.requester_id : "";
+      if (requesterId) {
+        await sendAppEmailBestEffort({
+          kind: "connection_request_declined",
+          recipientUserId: requesterId,
+          actorUserId: authData.user.id,
+          connectionId: connId ?? null,
+        });
+      }
       return NextResponse.json({ ok: true });
     }
 
     if (action === "undo_decline") {
       const { error } = await supabase.rpc("undo_decline_connection_request", { p_connection_id: connId });
-      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       return NextResponse.json({ ok: true });
     }
 
     if (action === "cancel") {
       const { error } = await supabase.rpc("cancel_connection_request", { p_connection_id: connId });
-      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       return NextResponse.json({ ok: true });
     }
 
@@ -105,13 +168,13 @@ export async function POST(req: Request) {
         p_connection_id: connId ?? null,
         p_target_user_id: targetUserId ?? null,
       });
-      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       return NextResponse.json({ ok: true, connection_id: data ?? null });
     }
 
     if (action === "unblock") {
       const { error } = await supabase.rpc("unblock_connection", { p_connection_id: connId });
-      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       return NextResponse.json({ ok: true });
     }
 
@@ -128,7 +191,7 @@ export async function POST(req: Request) {
       p_note: note || null,
     });
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+      return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
     }
     return NextResponse.json({ ok: true, report_id: data ?? null });
   } catch (e: unknown) {

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Country, City } from "country-state-city";
+import {
+  getCachedCitiesOfCountry,
+  getCachedCountriesAll,
+  getCitiesOfCountry,
+  getCountriesAll,
+  type CountryEntry,
+} from "@/lib/country-city-client";
 import { readOnboardingDraft } from "@/lib/onboardingDraft";
 
 const ROLE_PREFS = ["Leader", "Follower", "Switch"] as const;
@@ -203,6 +209,8 @@ export default function ConnectionsFiltersDrawer({
   onClear: () => void;
 }) {
   const [local, setLocal] = useState<ConnectionsFilters>(() => normalizeFilters(value));
+  const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
+  const [cityNames, setCityNames] = useState<string[]>([]);
 
   // Prefill from onboarding draft once (country/city as defaults)
   useEffect(() => {
@@ -225,18 +233,68 @@ export default function ConnectionsFiltersDrawer({
   }, [value]);
 
   const citiesCount = useMemo(() => `${local.cities.length}/3`, [local.cities.length]);
-
-  const countriesAll = useMemo(() => Country.getAllCountries(), []);
   const countryNames = useMemo(() => countriesAll.map((c) => c.name), [countriesAll]);
-
-  const iso = countriesAll.find((c) => c.name === local.country)?.isoCode ?? "";
-  const cityNames = useMemo(() => {
-    if (!iso) return [];
-    return (City.getCitiesOfCountry(iso) ?? []).map((c) => c.name);
-  }, [iso]);
+  const iso = useMemo(() => countriesAll.find((c) => c.name === local.country)?.isoCode ?? "", [countriesAll, local.country]);
 
   const [cityPick, setCityPick] = useState<string>("");
   const [languagePick, setLanguagePick] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!open || countriesAll.length > 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCountriesAll()
+      .then((countries) => {
+        if (cancelled) return;
+        setCountriesAll(countries);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCountriesAll([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countriesAll.length, open]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!open || !iso) {
+      setCityNames([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cachedCities = getCachedCitiesOfCountry(iso);
+    if (cachedCities.length > 0) {
+      setCityNames(cachedCities);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getCitiesOfCountry(iso)
+      .then((cities) => {
+        if (cancelled) return;
+        setCityNames(cities);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCityNames([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [iso, open]);
 
   function commit(next: ConnectionsFilters) {
     setLocal(next);

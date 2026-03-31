@@ -1,0 +1,216 @@
+import { LEGAL_PROFILE } from "@/lib/legal-profile";
+
+export type HelpArticle = {
+  slug: string;
+  title: string;
+  summary: string;
+  category: HelpCategoryKey;
+  updatedAt: string;
+  body: string[];
+  related: string[];
+};
+
+export type HelpCategoryKey =
+  | "using-conxion"
+  | "billing-plans"
+  | "trust-safety"
+  | "references"
+  | "trips-hosting"
+  | "account-access";
+
+export type HelpCategory = {
+  key: HelpCategoryKey;
+  title: string;
+  description: string;
+  icon: string;
+  accent: string;
+};
+
+export const HELP_CATEGORIES: HelpCategory[] = [
+  {
+    key: "using-conxion",
+    title: "Using ConXion",
+    description: "Connections, messages, activities, and how trust flows through the app.",
+    icon: "hub",
+    accent: "cyan",
+  },
+  {
+    key: "billing-plans",
+    title: "Plans & Upgrades",
+    description: "Starter, Verified, Plus, and which access rules apply to travel, hosting, and growth.",
+    icon: "workspace_premium",
+    accent: "fuchsia",
+  },
+  {
+    key: "trust-safety",
+    title: "Trust & Safety",
+    description: "Blocking, reporting, emergencies, and what moderation can act on.",
+    icon: "verified_user",
+    accent: "fuchsia",
+  },
+  {
+    key: "references",
+    title: "References",
+    description: "How references work, when they unlock, and how disputes are handled.",
+    icon: "workspace_premium",
+    accent: "slate",
+  },
+  {
+    key: "trips-hosting",
+    title: "Trips & Hosting",
+    description: "Join trip, offer hosting, and safer coordination in travel flows.",
+    icon: "travel_explore",
+    accent: "cyan",
+  },
+  {
+    key: "account-access",
+    title: "Account & Access",
+    description: "Login, recovery, profile access, and support ticket tracking.",
+    icon: "manage_accounts",
+    accent: "slate",
+  },
+];
+
+export const HELP_ARTICLES: HelpArticle[] = [
+  {
+    slug: "how-starter-verified-and-plus-work",
+    title: "How do Starter, Verified, and Plus work?",
+    summary: "Starter is free, Verified is one-time, and Plus is monthly. They solve different needs and can complement each other.",
+    category: "billing-plans",
+    updatedAt: "2026-03-28",
+    body: [
+      "Starter is the free entry plan. It lets you discover social dancers, teachers, organizers, DJs, and artists, send 10 connection requests per month with up to 30 in your first month, keep 10 active chat threads, send 5 hosting offers per month, create 1 trip per month, create 2 public or private events per month, offer hosting, and use Dance Tools.",
+      "Verified is a one-time trust upgrade. It is not a subscription and it does not replace Plus. Verified is for requesting hosting, getting hosted with more confidence, unlocking teacher or artist access, and opening service inquiries.",
+      "Plus is the monthly visibility and usage plan. It raises your account to 30 connection requests per month, 30 active chat threads, 10 hosting offers per month, 5 trips per month, 5 events per month, and 3 profile photos while keeping 2 showcase videos. Verified and Plus stay separate products because one is trust access and the other is recurring growth access.",
+    ],
+    related: ["when-do-i-need-verification-for-hosting", "how-references-are-unlocked"],
+  },
+  {
+    slug: "how-connections-and-activities-work",
+    title: "How do connections, chat, and activities work together?",
+    summary: "Accepted relationships unlock the thread, and activities are created from that thread over time.",
+    category: "using-conxion",
+    updatedAt: "2026-03-27",
+    body: [
+      "Connection requests are the relationship unlock, not the trust event itself. Once a connection is accepted, the same member thread becomes the place where future interactions continue.",
+      "Activities such as Practice, Social Dance, Travel Together, Hosting, Private Class, or Collaboration are then started from that accepted thread. Each accepted activity is logged inside the thread history so the relationship timeline remains visible when you scroll.",
+      "References do not come from connection acceptance alone. They become eligible after an activity is accepted by both sides, then appear later based on that activity timeline.",
+    ],
+    related: ["how-references-are-unlocked", "how-to-report-a-member-or-reference"],
+  },
+  {
+    slug: "how-to-report-a-member-or-reference",
+    title: "How do I report a member or a reference?",
+    summary: "Use the in-app report actions so moderation gets the correct context, ticket code, and audit trail.",
+    category: "trust-safety",
+    updatedAt: "2026-03-22",
+    body: [
+      "Use Report directly inside the relevant flow whenever possible. For references, use the menu on the reference card. For member-to-member issues, use report actions in the conversation or relationship context where the issue happened.",
+      "Every submitted report creates a support ticket code. That code is shown in your Support page and in the moderation console, so case handling stays consistent.",
+      "If there is immediate danger, contact local emergency services first. In-app reporting is for moderation handling and cannot replace emergency response.",
+    ],
+    related: ["what-happens-after-i-submit-a-support-ticket", "reference-guidelines-and-disputes"],
+  },
+  {
+    slug: "reference-guidelines-and-disputes",
+    title: "What are the reference guidelines and how do disputes work?",
+    summary: "References should be factual, specific, and tied to completed activities or an established relationship context.",
+    category: "references",
+    updatedAt: "2026-03-22",
+    body: [
+      "References are meant to document reliability, communication, respect, and trust in real interactions. They should stay specific, factual, and calm.",
+      "A member can submit one reference per type for another member. That keeps the trust model stable and reduces spam or score inflation from repeated activities of the same kind.",
+      "If a reference violates guidelines, use the report flow. Moderation can review, dismiss, or act on the case, but the content is not meant to be negotiated through public replies.",
+    ],
+    related: ["how-references-are-unlocked", "how-to-report-a-member-or-reference"],
+  },
+  {
+    slug: "how-references-are-unlocked",
+    title: "When can I leave a reference?",
+    summary: "References unlock after accepted activities, not just after chat starts.",
+    category: "references",
+    updatedAt: "2026-03-27",
+    body: [
+      "References become eligible after an activity is accepted by both sides. Examples include Practice, Social Dance, Travel Together, Hosting, Private Class, and Collaboration.",
+      "If an activity has an end date, the reference prompt unlocks 24 hours after that end date. If the activity has no date range, the prompt unlocks 24 hours after acceptance.",
+      "Pending references appear in your References tab and in the relevant thread history. Once you already submitted a reference of that type for that member, that same type will not open again.",
+      "This keeps trust meaningful while still allowing a clean history of completed activities inside the thread.",
+    ],
+    related: ["reference-guidelines-and-disputes", "how-starter-verified-and-plus-work"],
+  },
+  {
+    slug: "when-do-i-need-verification-for-hosting",
+    title: "When do I need verification for hosting?",
+    summary: "You can offer hosting on Starter. Verified is required when you want to request hosting for yourself.",
+    category: "trips-hosting",
+    updatedAt: "2026-03-27",
+    body: [
+      "You can offer hosting on Starter, and that stays available if you simply want to host dancers visiting your city or destination.",
+      "Verified is required when you want to request a hosting stay for yourself. It also helps others feel more confident hosting you for festivals, competitions, dance holidays, and other travel plans.",
+      "Use the in-app hosting request flow so dates, traveler count, and acceptance history stay attached to the thread. That also keeps the future reference flow tied to the right activity context.",
+    ],
+    related: ["travel-and-hosting-safety-basics", "how-starter-verified-and-plus-work"],
+  },
+  {
+    slug: "travel-and-hosting-safety-basics",
+    title: "What are the basics for safer trips and hosting?",
+    summary: "Use references, clear expectations, and in-app request flows before committing to real-world travel or stays.",
+    category: "trips-hosting",
+    updatedAt: "2026-03-27",
+    body: [
+      "Use Join Trip and Offer to Host inside ConXion so the full request context stays attached to the thread. That gives both members a record of dates, capacity, and acceptance history.",
+      "Offering hosting can stay on Starter. If you want to request hosting for yourself, use Verified first so the trust layer is in place before you ask someone to host you.",
+      "Before confirming a stay, review references, trust indicators, and profile details. Clarify arrival timing, number of travelers, and any house expectations.",
+      "If something feels inconsistent, incomplete, or unsafe, decline the request and report the issue if needed.",
+    ],
+    related: ["when-do-i-need-verification-for-hosting", "what-happens-after-i-submit-a-support-ticket"],
+  },
+  {
+    slug: "recover-account-and-access-support",
+    title: "How do I recover my account and where do I track support?",
+    summary: "Use recovery first, then track cases from Support if manual review is needed.",
+    category: "account-access",
+    updatedAt: "2026-03-22",
+    body: [
+      "Start with the account recovery flow whenever you lose access. If the issue still requires manual review, support cases are tracked inside the Support page.",
+      "Support tickets are notification-driven by email, but the source of truth stays in the app. This avoids split histories and keeps moderation notes aligned to the case state.",
+      "For MVP, replying by email is not supported. Any future follow-up should happen from the app UI.",
+    ],
+    related: ["what-happens-after-i-submit-a-support-ticket", "how-to-report-a-member-or-reference"],
+  },
+  {
+    slug: "privacy-rights-data-requests",
+    title: "How do privacy, access, deletion, and portability requests work?",
+    summary: "Use Privacy Requests in your account when signed in, and note that deactivation is different from deletion.",
+    category: "account-access",
+    updatedAt: "2026-03-28",
+    body: [
+      `If you are signed in, use Privacy Requests in Account Settings for access, rectification, deletion, objection, restriction, portability, or other privacy issues. If you cannot sign in, contact ${LEGAL_PROFILE.privacyEmail}.`,
+      `${LEGAL_PROFILE.brandName} may need to verify your identity before releasing, exporting, or deleting data. Some requests can be limited where the law allows, including to protect other people's rights, preserve safety investigations, prevent fraud, keep billing or tax records, or defend legal claims.`,
+      "Deactivation is reversible and is not the same as deletion. If you simply deactivate the account, signing in again can reactivate it. If you want erasure instead, say that clearly in your request.",
+      "Cookie and similar-technology choices are handled separately in Cookie Settings, where you can withdraw non-essential preferences on the current browser and device.",
+    ],
+    related: ["recover-account-and-access-support", "what-happens-after-i-submit-a-support-ticket"],
+  },
+  {
+    slug: "what-happens-after-i-submit-a-support-ticket",
+    title: "What happens after I submit a support ticket?",
+    summary: "You receive a ticket code, moderation reviews the case in admin, and updates are sent by email and shown in Support.",
+    category: "account-access",
+    updatedAt: "2026-03-22",
+    body: [
+      "Every report creates a ticket code like CX-000123. That ticket appears in your Support page and in the moderation console.",
+      "Moderators review the case in the admin console. Status changes such as open, under review, resolved, or dismissed are sent to you by email and shown in the app.",
+      "For MVP, this internal case CRM is enough. Zendesk is not necessary until support volume, SLA management, macros, and multi-agent workflows justify the extra integration cost.",
+    ],
+    related: ["recover-account-and-access-support", "how-to-report-a-member-or-reference"],
+  },
+];
+
+export function getHelpArticle(slug: string) {
+  return HELP_ARTICLES.find((article) => article.slug === slug) ?? null;
+}
+
+export function getHelpCategory(key: HelpCategoryKey) {
+  return HELP_CATEGORIES.find((category) => category.key === key) ?? null;
+}

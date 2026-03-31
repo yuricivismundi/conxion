@@ -74,17 +74,6 @@ function normalizeSyncStatus(value: string): SyncStatus {
   return "pending";
 }
 
-function shouldFallbackSyncRpc(message: string) {
-  const text = message.toLowerCase();
-  return (
-    text.includes("function") ||
-    text.includes("schema cache") ||
-    text.includes("relation") ||
-    text.includes("column") ||
-    text.includes("policy")
-  );
-}
-
 export default function ConnectionDetailPage() {
   const router = useRouter();
   const params = useParams<{ connectionId: string }>();
@@ -281,7 +270,7 @@ export default function ConnectionDetailPage() {
 
     const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
     if (!res.ok || !payload?.ok) {
-      throw new Error(payload?.error || "Sync action fallback failed.");
+      throw new Error(payload?.error || "Activity action fallback failed.");
     }
   }
 
@@ -292,29 +281,20 @@ export default function ConnectionDetailPage() {
 
     const scheduledAt = proposeDateTime ? new Date(proposeDateTime).toISOString() : null;
     try {
-      const rpc = await supabase.rpc("propose_connection_sync", {
-        p_connection_id: connectionId,
-        p_sync_type: proposeType,
-        p_scheduled_at: scheduledAt,
-        p_note: proposeNote.trim() || null,
+      await runSyncActionFallbackApi({
+        action: "propose",
+        syncType: proposeType,
+        scheduledAt,
+        note: proposeNote.trim() || null,
       });
-      if (rpc.error) {
-        if (!shouldFallbackSyncRpc(rpc.error.message)) throw new Error(rpc.error.message);
-        await runSyncActionFallbackApi({
-          action: "propose",
-          syncType: proposeType,
-          scheduledAt,
-          note: proposeNote.trim() || null,
-        });
-      }
-      setInfo("Sync proposed.");
+      setInfo("Activity proposed.");
       setProposeOpen(false);
       setProposeType("training");
       setProposeDateTime("");
       setProposeNote("");
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to propose sync.");
+      setError(e instanceof Error ? e.message : "Failed to propose activity.");
     } finally {
       setProposeBusy(false);
     }
@@ -334,34 +314,7 @@ export default function ConnectionDetailPage() {
     setError(null);
     setInfo(null);
     try {
-      if (action === "accept" || action === "decline") {
-        const rpc = await supabase.rpc("respond_connection_sync", {
-          p_sync_id: syncId,
-          p_action: action,
-          p_note: null,
-        });
-        if (rpc.error) {
-          if (!shouldFallbackSyncRpc(rpc.error.message)) throw new Error(rpc.error.message);
-          await runSyncActionFallbackApi({ action, syncId });
-        }
-      } else if (action === "cancel") {
-        const rpc = await supabase.rpc("cancel_connection_sync", {
-          p_sync_id: syncId,
-        });
-        if (rpc.error) {
-          if (!shouldFallbackSyncRpc(rpc.error.message)) throw new Error(rpc.error.message);
-          await runSyncActionFallbackApi({ action, syncId });
-        }
-      } else {
-        const rpc = await supabase.rpc("complete_connection_sync", {
-          p_sync_id: syncId,
-          p_note: null,
-        });
-        if (rpc.error) {
-          if (!shouldFallbackSyncRpc(rpc.error.message)) throw new Error(rpc.error.message);
-          await runSyncActionFallbackApi({ action, syncId });
-        }
-      }
+      await runSyncActionFallbackApi({ action, syncId });
       const actionLabel =
         action === "accept"
           ? "accepted"
@@ -370,10 +323,10 @@ export default function ConnectionDetailPage() {
             : action === "cancel"
               ? "cancelled"
               : "completed";
-      setInfo(`Sync ${actionLabel}.`);
+      setInfo(`Activity ${actionLabel}.`);
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to update sync.");
+      setError(e instanceof Error ? e.message : "Failed to update activity.");
     } finally {
       setSyncBusyId(null);
     }
@@ -441,7 +394,7 @@ export default function ConnectionDetailPage() {
                 data-testid="sync-propose-open"
                 className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-[#052328] hover:bg-cyan-200"
               >
-                Propose Sync
+                Propose Activity
               </button>
             </div>
           </div>
@@ -489,7 +442,7 @@ export default function ConnectionDetailPage() {
 
           <article className="rounded-3xl border border-white/10 bg-[#0b1a1d]/75 p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Sync Activities</h2>
+              <h2 className="text-lg font-bold">Activities</h2>
               {completedSync ? (
                 <Link
                   href={`/references?connectionId=${encodeURIComponent(connectionId)}`}
@@ -504,7 +457,7 @@ export default function ConnectionDetailPage() {
             <div className="space-y-3" data-testid="sync-list">
               {syncs.length === 0 ? (
                 <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300" data-testid="sync-empty">
-                  No syncs yet. Propose one to start planning.
+                  No activities yet. Propose one to start planning.
                 </div>
               ) : (
                 syncs.map((sync) => {
@@ -595,7 +548,7 @@ export default function ConnectionDetailPage() {
         <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" data-testid="sync-propose-modal">
           <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#0b1a1d] p-5">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-white">Propose Sync</h3>
+              <h3 className="text-lg font-bold text-white">Propose Activity</h3>
               <button type="button" onClick={() => setProposeOpen(false)} className="text-slate-400 hover:text-white">
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -655,7 +608,7 @@ export default function ConnectionDetailPage() {
                 data-testid="sync-propose-submit"
                 className="rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-[#052328] hover:bg-cyan-200 disabled:opacity-60"
               >
-                {proposeBusy ? "Saving..." : "Send Proposal"}
+                {proposeBusy ? "Saving..." : "Send Activity"}
               </button>
             </div>
           </div>
@@ -664,14 +617,14 @@ export default function ConnectionDetailPage() {
 
       <ConfirmationDialog
         open={confirmSyncAction.open}
-        title={confirmSyncAction.action === "cancel" ? "Cancel this sync?" : "Mark sync completed?"}
+        title={confirmSyncAction.action === "cancel" ? "Cancel this activity?" : "Mark activity completed?"}
         description={
           confirmSyncAction.action === "cancel"
-            ? "This will close the pending sync request."
+            ? "This will close the pending activity request."
             : "This unlocks the reference flow for both participants."
         }
         confirmVariant={confirmSyncAction.action === "cancel" ? "danger" : "primary"}
-        confirmLabel={confirmSyncAction.action === "cancel" ? "Cancel Sync" : "Mark Completed"}
+        confirmLabel={confirmSyncAction.action === "cancel" ? "Cancel Activity" : "Mark Completed"}
         onCancel={() => setConfirmSyncAction({ open: false, syncId: "", action: "cancel" })}
         onConfirm={() => {
           const { syncId, action } = confirmSyncAction;

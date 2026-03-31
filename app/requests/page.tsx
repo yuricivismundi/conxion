@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function LegacyRequestsPage() {
-  redirect("/connections/requests");
+  redirect("/messages?tab=requests");
 }

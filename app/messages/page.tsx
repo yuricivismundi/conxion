@@ -1,25 +1,62 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Suspense, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
+import TeacherInquiryCard from "@/components/messages/TeacherInquiryCard";
 import Nav from "@/components/Nav";
+import ShareInquiryInfoModal from "@/components/teacher/ShareInquiryInfoModal";
 import { supabase } from "@/lib/supabase/client";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
+import { fetchTeacherInfoBlocks } from "@/lib/teacher-info/read-model";
+import type { TeacherInfoBlock } from "@/lib/teacher-info/types";
+import {
+  ACTIVITY_TYPES,
+  REFERENCE_CONTEXT_TAGS,
+  activityTypeLabel,
+  normalizeReferenceContextTag,
+  referenceContextLabel,
+  type ActivityType,
+  type ReferenceContextTag,
+} from "@/lib/activities/types";
+import {
+  normalizeHostingPreferredGuestGender,
+  normalizeHostingSleepingArrangement,
+  type HostingPreferredGuestGender,
+  type HostingSleepingArrangement,
+} from "@/lib/hosting/preferences";
+import {
+  SERVICE_INQUIRY_KIND_LABELS,
+  type ServiceInquiryKind,
+  type TeacherInquiryShareSnapshot,
+} from "@/lib/service-inquiries/types";
 
-type ThreadKind = "connection" | "trip";
-type FilterTab = "all" | "connections" | "trips" | "archived";
+type ThreadKind = "connection" | "trip" | "direct" | "event";
+type FilterTab = "all" | "active" | "pending" | "archived";
+type MessagingState = "inactive" | "active" | "archived";
+
+type ThreadContextTag =
+  | "connection_request"
+  | "hosting_request"
+  | "trip_join_request"
+  | "event_chat"
+  | "regular_chat"
+  | "activity"
+  | "service_inquiry";
+type ThreadStatusTag =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "cancelled"
+  | "active"
+  | "completed"
+  | "expired"
+  | "info_shared"
+  | "inquiry_followup_pending";
 
 type ParsedThread = { kind: ThreadKind; id: string };
-
-type MessageRowDb = {
-  id?: string;
-  connection_id?: string;
-  sender_id?: string;
-  body?: string | null;
-  created_at?: string;
-};
 
 type ProfileRow = {
   user_id?: string;
@@ -41,6 +78,12 @@ type ThreadRow = {
   threadId: string;
   dbThreadId: string | null;
   kind: ThreadKind;
+  contextTag?: ThreadContextTag;
+  statusTag?: ThreadStatusTag;
+  hasPendingRequest?: boolean;
+  hasAcceptedInteraction?: boolean;
+  isRelationshipPending?: boolean;
+  metaLabel?: string;
   title: string;
   subtitle: string;
   avatarUrl: string | null;
@@ -48,6 +91,11 @@ type ThreadRow = {
   updatedAt: string;
   unreadCount: number;
   badge: string;
+  otherUserId?: string | null;
+  messagingState?: MessagingState;
+  activatedAt?: string | null;
+  activationCycleStart?: string | null;
+  activationCycleEnd?: string | null;
 };
 
 type ThreadDbRow = {
@@ -55,6 +103,9 @@ type ThreadDbRow = {
   thread_type?: string;
   connection_id?: string | null;
   trip_id?: string | null;
+  event_id?: string | null;
+  direct_user_low?: string | null;
+  direct_user_high?: string | null;
   last_message_at?: string | null;
   created_at?: string | null;
 };
@@ -64,11 +115,16 @@ type ThreadMessageDbRow = {
   thread_id?: string;
   sender_id?: string;
   body?: string | null;
+  message_type?: string | null;
+  context_tag?: string | null;
+  status_tag?: string | null;
+  metadata?: unknown;
   created_at?: string;
 };
 
 type ComposeConnectionTarget = {
   connectionId: string;
+  otherUserId: string;
   displayName: string;
   subtitle: string;
   avatarUrl: string | null;
@@ -96,6 +152,10 @@ type MessageItem = {
   senderId: string;
   body: string;
   createdAt: string;
+  messageType?: "text" | "system" | "request";
+  contextTag?: ThreadContextTag;
+  statusTag?: ThreadStatusTag;
+  metadata?: Record<string, unknown>;
   status?: "sending" | "sent" | "failed";
   localOnly?: boolean;
 };
@@ -121,6 +181,8 @@ type ReplyTarget = {
 
 type ActiveThreadMeta = {
   kind: ThreadKind;
+  contextTag?: ThreadContextTag;
+  statusTag?: ThreadStatusTag;
   title: string;
   subtitle: string;
   avatarUrl: string | null;
@@ -129,6 +191,99 @@ type ActiveThreadMeta = {
   connectionId: string | null;
   tripId: string | null;
   threadId: string | null;
+  messagingState?: MessagingState;
+  activatedAt?: string | null;
+  activationCycleStart?: string | null;
+  activationCycleEnd?: string | null;
+  hasAcceptedInteraction?: boolean;
+  isRelationshipPending?: boolean;
+  serviceInquiryId?: string | null;
+  serviceInquiryRequesterId?: string | null;
+  serviceInquiryRecipientId?: string | null;
+  serviceInquiryFollowupUsed?: boolean;
+};
+
+type ContactSidebarData = {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  city: string;
+  country: string;
+  roles: string[];
+  danceStyles: string[];
+  interests: string[];
+  availability: string[];
+  languages: string[];
+  referencesTotal: number;
+  referencesPositive: number;
+  referencesByContext: Record<ReferenceContextTag, number>;
+  tripsJoinedAccepted: number;
+  hostingAccepted: number;
+  connectionsCount: number;
+  canHost: boolean;
+  hostingStatus: string;
+  maxGuests: number | null;
+  hostingLastMinuteOk: boolean;
+  hostingPreferredGuestGender: HostingPreferredGuestGender;
+  hostingKidFriendly: boolean;
+  hostingPetFriendly: boolean;
+  hostingSmokingAllowed: boolean;
+  hostingSleepingArrangement: HostingSleepingArrangement;
+  hostingGuestShare: string | null;
+  hostingTransitAccess: string | null;
+  verified: boolean;
+  verifiedLabel: string | null;
+};
+
+type ReferencePromptItem = {
+  id: string;
+  peerUserId: string;
+  contextTag: ReferenceContextTag;
+  sourceTable: string;
+  sourceId: string;
+  dueAt: string;
+  expiresAt: string;
+};
+
+type SubmittedReferenceState = {
+  contextTags: Set<ReferenceContextTag>;
+  latestSubmittedAt: string | null;
+};
+
+type ThreadContextRow = {
+  id?: string;
+  thread_id?: string;
+  source_table?: string;
+  source_id?: string;
+  context_tag?: string;
+  status_tag?: string;
+  title?: string | null;
+  city?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  requester_id?: string | null;
+  recipient_id?: string | null;
+  metadata?: unknown;
+  updated_at?: string | null;
+  created_at?: string | null;
+};
+
+type ThreadContextItem = {
+  id: string;
+  threadId: string;
+  sourceTable: string;
+  sourceId: string;
+  contextTag: ThreadContextTag;
+  statusTag: ThreadStatusTag;
+  title: string | null;
+  city: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  requesterId: string | null;
+  recipientId: string | null;
+  metadata: Record<string, unknown>;
+  updatedAt: string;
+  createdAt: string;
 };
 
 type ThreadPrefsPatch = {
@@ -138,6 +293,30 @@ type ThreadPrefsPatch = {
   last_read_at?: string | null;
 };
 
+type ThreadParticipantDbRow = {
+  thread_id?: string;
+  user_id?: string;
+  last_read_at?: string | null;
+  archived_at?: string | null;
+  muted_until?: string | null;
+  pinned_at?: string | null;
+  messaging_state?: string | null;
+  activated_at?: string | null;
+  activation_cycle_start?: string | null;
+  activation_cycle_end?: string | null;
+};
+
+type MessagingSummary = {
+  plan: "free" | "premium";
+  activeCount: number;
+  activeLimit: number;
+  monthlyUsed: number;
+  monthlyLimit: number;
+  pendingCount: number;
+  cycleStart: string | null;
+  cycleEnd: string | null;
+};
+
 type VisibleConnectionLite = {
   id: string;
   other_user_id: string;
@@ -145,9 +324,61 @@ type VisibleConnectionLite = {
   connect_context: string | null;
 };
 
+type ActivityDraft = {
+  activityType: ActivityType;
+  note: string;
+  startAt: string;
+  endAt: string;
+};
+
+const ContactSidebarPanel = dynamic(() => import("@/components/messages/ContactSidebarPanel"), {
+  ssr: false,
+  loading: () => (
+    <div className="space-y-4 animate-pulse">
+      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(155deg,rgba(10,22,24,0.95),rgba(12,14,18,0.98))] p-4">
+        <div className="mx-auto h-40 w-40 rounded-full border-2 border-white/10 bg-white/[0.06]" />
+        <div className="mt-4 text-center">
+          <div className="mx-auto h-7 w-40 rounded-full bg-white/[0.08]" />
+          <div className="mx-auto mt-2 h-4 w-28 rounded-full bg-white/[0.06]" />
+          <div className="mt-3 flex justify-center gap-2">
+            <div className="h-6 w-24 rounded-full bg-white/[0.06]" />
+            <div className="h-6 w-28 rounded-full bg-white/[0.06]" />
+          </div>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+        <div className="h-3 w-28 rounded-full bg-white/[0.08]" />
+        <div className="h-11 rounded-xl bg-white/[0.05]" />
+        <div className="h-11 rounded-xl bg-white/[0.05]" />
+        <div className="h-20 rounded-xl bg-white/[0.05]" />
+      </div>
+    </div>
+  ),
+});
+const ReportDialog = dynamic(() => import("@/components/messages/ReportDialog"), { ssr: false });
+const BlockDialog = dynamic(() => import("@/components/messages/BlockDialog"), { ssr: false });
+const ComposeDialog = dynamic(() => import("@/components/messages/ComposeDialog"), { ssr: false });
+
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
 const QUICK_STARTERS = ["Hey! 👋", "Are you available this week?", "Sounds good ✅", "Let’s coordinate details."];
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👏", "😮", "😢", "🙏"];
+const DEFAULT_ACTIVITY_DRAFT: ActivityDraft = {
+  activityType: "practice",
+  note: "",
+  startAt: "",
+  endAt: "",
+};
+const PRIMARY_ACTIVITY_QUICK_FILTERS: ActivityType[] = [
+  "practice",
+  "social_dance",
+  "travel_together",
+  "hosting",
+  "private_class",
+  "collaboration",
+];
+const SECONDARY_ACTIVITY_QUICK_FILTERS: ActivityType[] = ACTIVITY_TYPES.filter(
+  (item) => !PRIMARY_ACTIVITY_QUICK_FILTERS.includes(item)
+);
 const LOCAL_REACTIONS_STORAGE_KEY = "cx_messages_reactions_local_v1";
 const LOCAL_MANUAL_UNREAD_STORAGE_KEY = "cx_messages_manual_unread_v1";
 const LOCAL_THREAD_DRAFTS_STORAGE_KEY = "cx_messages_thread_drafts_v1";
@@ -180,6 +411,7 @@ function buildComposeTargets(
     const subtitle = row.trip_id || row.connect_context === "trip" || row.connect_context === "traveller" ? "Trip thread" : cityCountry || "Connection";
     dedupe.set(row.id, {
       connectionId: row.id,
+      otherUserId: row.other_user_id,
       displayName: profile?.displayName ?? "Connection",
       subtitle,
       avatarUrl: profile?.avatarUrl ?? null,
@@ -235,6 +467,62 @@ function formatDateShort(iso: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
 }
 
+function formatActivityDateTime(iso?: string) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatActivityWindow(startAt?: string, endAt?: string) {
+  const start = formatActivityDateTime(startAt);
+  const end = formatActivityDateTime(endAt);
+  if (start && end) return `${start} - ${end}`;
+  return start || end || "No dates set";
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function activityTypeIcon(value: string) {
+  switch (value) {
+    case "practice":
+      return "sports_gymnastics";
+    case "social_dance":
+      return "music_note";
+    case "event":
+      return "event";
+    case "festival":
+      return "celebration";
+    case "travel_together":
+      return "flight_takeoff";
+    case "hosting":
+      return "home";
+    case "stay_as_guest":
+      return "luggage";
+    case "private_class":
+      return "school";
+    case "group_class":
+      return "groups";
+    case "workshop":
+      return "construction";
+    case "collaboration":
+      return "handshake";
+    case "content_video":
+      return "videocam";
+    case "competition":
+      return "emoji_events";
+    default:
+      return "bolt";
+  }
+}
+
 function parseTripLabel(row: TripRow | null | undefined) {
   if (!row?.destination_city || !row.destination_country) return "Trip chat";
   const datePart = row.start_date ? formatDateShort(row.start_date) : "TBD";
@@ -246,6 +534,398 @@ function formatTime(iso?: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function supportsSyncedMessageReactions(kind: ThreadKind) {
+  return kind === "connection" || kind === "trip";
+}
+
+const CONTEXT_LABELS: Record<ThreadContextTag, string> = {
+  connection_request: "Connection request",
+  hosting_request: "Hosting request",
+  trip_join_request: "Trip join request",
+  event_chat: "Event chat",
+  activity: "Activity",
+  service_inquiry: "Service inquiry",
+  regular_chat: "Chat",
+};
+
+const STATUS_LABELS: Record<ThreadStatusTag, string> = {
+  pending: "Pending",
+  accepted: "Accepted",
+  declined: "Declined",
+  cancelled: "Cancelled",
+  active: "Active",
+  completed: "Completed",
+  expired: "Expired",
+  info_shared: "Info shared",
+  inquiry_followup_pending: "Follow-up pending",
+};
+
+function contextGroupLabel(tag: ThreadContextTag) {
+  if (tag === "connection_request") return "Connections";
+  if (tag === "trip_join_request") return "Trips";
+  if (tag === "hosting_request") return "Hosting";
+  if (tag === "event_chat") return "Events";
+  if (tag === "service_inquiry") return "Service inquiries";
+  if (tag === "activity") return "Connections";
+  return "Connections";
+}
+
+function contextSupportsCancel(tag: ThreadContextTag, metadata?: Record<string, unknown>) {
+  if (tag === "connection_request") return true;
+  if (tag === "trip_join_request") return true;
+  if (tag === "hosting_request") return true;
+  if (tag === "event_chat") return typeof metadata?.event_id === "string" && metadata.event_id.length > 0;
+  if (tag === "activity") return true;
+  return false;
+}
+
+function normalizeContextTag(value: string | null | undefined, fallback: ThreadContextTag = "regular_chat"): ThreadContextTag {
+  if (value === "connection_request") return value;
+  if (value === "hosting_request") return value;
+  if (value === "trip_join_request") return value;
+  if (value === "event_chat") return value;
+  if (value === "activity") return value;
+  if (value === "service_inquiry") return value;
+  if (value === "regular_chat") return value;
+  return fallback;
+}
+
+function normalizeStatusTag(value: string | null | undefined, fallback: ThreadStatusTag = "active"): ThreadStatusTag {
+  if (value === "pending") return value;
+  if (value === "accepted") return value;
+  if (value === "declined") return value;
+  if (value === "cancelled") return value;
+  if (value === "active") return value;
+  if (value === "completed") return value;
+  if (value === "expired") return value;
+  if (value === "info_shared") return value;
+  if (value === "inquiry_followup_pending") return value;
+  return fallback;
+}
+
+function normalizeMessagingState(value: string | null | undefined, fallback: MessagingState = "inactive"): MessagingState {
+  if (value === "inactive") return value;
+  if (value === "active") return value;
+  if (value === "archived") return value;
+  return fallback;
+}
+
+function normalizeMessageType(value: string | null | undefined): "text" | "system" | "request" {
+  if (value === "request" || value === "system" || value === "text") return value;
+  return "text";
+}
+
+const CHAT_UNLOCK_CONTEXT_TAGS: ThreadContextTag[] = [
+  "connection_request",
+  "trip_join_request",
+  "hosting_request",
+  "event_chat",
+  "activity",
+  "service_inquiry",
+];
+
+function isAcceptedInteractionStatus(status: ThreadStatusTag) {
+  return status === "accepted" || status === "active" || status === "completed";
+}
+
+function contextToneClasses(tag: ThreadContextTag) {
+  if (tag === "connection_request") return "border-cyan-300/35 bg-cyan-300/10 text-cyan-100";
+  if (tag === "hosting_request") return "border-fuchsia-300/35 bg-fuchsia-300/10 text-fuchsia-100";
+  if (tag === "trip_join_request") return "border-violet-300/35 bg-violet-300/10 text-violet-100";
+  if (tag === "event_chat") return "border-sky-300/35 bg-sky-300/10 text-sky-100";
+  if (tag === "activity") return "border-cyan-300/35 bg-[linear-gradient(90deg,rgba(0,245,255,0.14),rgba(255,0,255,0.08))] text-cyan-100";
+  if (tag === "service_inquiry") return "border-amber-300/35 bg-amber-300/10 text-amber-100";
+  return "border-white/20 bg-white/[0.05] text-slate-200";
+}
+
+function statusToneClasses(tag: ThreadStatusTag) {
+  if (tag === "pending") return "border-fuchsia-300/35 bg-fuchsia-300/10 text-fuchsia-100";
+  if (tag === "accepted" || tag === "active") return "border-emerald-300/35 bg-emerald-300/10 text-emerald-100";
+  if (tag === "completed") return "border-cyan-300/35 bg-cyan-300/10 text-cyan-100";
+  if (tag === "info_shared") return "border-cyan-300/35 bg-cyan-300/10 text-cyan-100";
+  if (tag === "inquiry_followup_pending") return "border-amber-300/35 bg-amber-300/10 text-amber-100";
+  if (tag === "declined") return "border-rose-300/35 bg-rose-300/10 text-rose-100";
+  if (tag === "expired") return "border-amber-300/35 bg-amber-300/10 text-amber-100";
+  if (tag === "cancelled") return "border-white/20 bg-white/[0.05] text-slate-300";
+  return "border-white/20 bg-white/[0.05] text-slate-300";
+}
+
+function isPendingLikeStatus(status: ThreadStatusTag) {
+  return status === "pending" || status === "inquiry_followup_pending";
+}
+
+function parseContextMetadata(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Ignore invalid JSON payloads.
+    }
+  }
+  return {};
+}
+
+function parseTeacherInquiryShareSnapshot(metadata: Record<string, unknown>): TeacherInquiryShareSnapshot | null {
+  if (asString(metadata.card_type) !== "teacher_inquiry_share") return null;
+  const inquiryId = asString(metadata.service_inquiry_id).trim();
+  const inquiryKind = asString(metadata.inquiry_kind).trim();
+  if (!inquiryId || !inquiryKind || !SERVICE_INQUIRY_KIND_LABELS[inquiryKind as ServiceInquiryKind]) return null;
+
+  const teacherSummaryRaw = asRecord(metadata.teacher_summary);
+  const selectedBlocksRaw = Array.isArray(metadata.selected_blocks) ? metadata.selected_blocks : [];
+  const selectedBlocks = selectedBlocksRaw
+    .map((row) => ({
+      id: asString(asRecord(row).id),
+      userId: asString(asRecord(row).userId || asRecord(row).user_id),
+      kind: asString(asRecord(row).kind) as TeacherInfoBlock["kind"],
+      title: asString(asRecord(row).title),
+      shortSummary: asString(asRecord(row).shortSummary ?? asRecord(row).short_summary) || null,
+      contentJson: parseContextMetadata(asRecord(row).contentJson ?? asRecord(row).content_json) as TeacherInfoBlock["contentJson"],
+      isActive: Boolean(asRecord(row).isActive ?? asRecord(row).is_active ?? true),
+      position: Number(asRecord(row).position ?? 0) || 0,
+      createdAt: asString(asRecord(row).createdAt ?? asRecord(row).created_at) || new Date(0).toISOString(),
+      updatedAt: asString(asRecord(row).updatedAt ?? asRecord(row).updated_at) || new Date(0).toISOString(),
+    }))
+    .filter((block) => block.id && block.userId && block.title);
+
+  return {
+    inquiryId,
+    inquiryKind: inquiryKind as ServiceInquiryKind,
+    headline: asString(metadata.headline).trim() || null,
+    introText: asString(metadata.intro_text).trim() || null,
+    teacherIntroNote: asString(metadata.teacher_intro_note).trim() || null,
+    teacherSummary: {
+      userId: asString(teacherSummaryRaw.userId ?? teacherSummaryRaw.user_id),
+      displayName: asString(teacherSummaryRaw.displayName ?? teacherSummaryRaw.display_name) || "Teacher",
+      avatarUrl: asString(teacherSummaryRaw.avatarUrl ?? teacherSummaryRaw.avatar_url) || null,
+      city: asString(teacherSummaryRaw.city) || null,
+      country: asString(teacherSummaryRaw.country) || null,
+    },
+    selectedBlocks,
+    profileConfig: null,
+    sharedAt: asString(metadata.shared_at) || new Date().toISOString(),
+  };
+}
+
+function isSchemaMissingMessage(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("schema cache") ||
+    text.includes("does not exist") ||
+    text.includes("could not find the table") ||
+    text.includes("column") ||
+    text.includes("relation") ||
+    text.includes("record \"r\" has no field")
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function asStringArrayLoose(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+    return trimmed
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeReferenceContext(value: string): ReferenceContextTag {
+  return normalizeReferenceContextTag(value);
+}
+
+function emptyReferenceContextCounts(): Record<ReferenceContextTag, number> {
+  return REFERENCE_CONTEXT_TAGS.reduce(
+    (acc, tag) => {
+      acc[tag] = 0;
+      return acc;
+    },
+    {} as Record<ReferenceContextTag, number>
+  );
+}
+
+function parseDanceStyleKeys(rawDanceSkills: unknown, rawDanceStyles: unknown) {
+  const fromSkills =
+    rawDanceSkills && typeof rawDanceSkills === "object" && !Array.isArray(rawDanceSkills)
+      ? Object.keys(rawDanceSkills as Record<string, unknown>)
+      : [];
+  const fromStyles = asStringArrayLoose(rawDanceStyles);
+  return Array.from(
+    new Set(
+      [...fromSkills, ...fromStyles]
+        .map((style) => style.trim())
+        .filter(Boolean)
+        .map((style) => style.toLowerCase())
+    )
+  );
+}
+
+function describeContextMeta(context: ThreadContextItem) {
+  const parts: string[] = [];
+  const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
+  const inquiryKind = asString(context.metadata.inquiry_kind);
+  if (context.contextTag === "activity" && activityType) {
+    const activityLabel = activityTypeLabel(activityType);
+    if (!context.title || context.title.trim().toLowerCase() !== activityLabel.trim().toLowerCase()) {
+      parts.push(activityLabel);
+    }
+  }
+  if (context.contextTag === "service_inquiry" && inquiryKind && SERVICE_INQUIRY_KIND_LABELS[inquiryKind as ServiceInquiryKind]) {
+    parts.push(SERVICE_INQUIRY_KIND_LABELS[inquiryKind as ServiceInquiryKind]);
+  }
+  if (context.city) parts.push(context.city);
+  const dateParts = [context.startDate ? formatDateShort(context.startDate) : "", context.endDate ? formatDateShort(context.endDate) : ""].filter(Boolean);
+  if (dateParts.length === 2) {
+    parts.push(`${dateParts[0]} - ${dateParts[1]}`);
+  } else if (dateParts.length === 1) {
+    parts.push(dateParts[0]);
+  }
+  return parts.join(" • ");
+}
+
+function describeServiceInquiryRequest(context: ThreadContextItem) {
+  if (context.contextTag !== "service_inquiry") return [];
+  const parts: Array<{ label: string; value: string }> = [];
+  const inquiryKind = asString(context.metadata.inquiry_kind);
+  const inquiryLabel =
+    inquiryKind && SERVICE_INQUIRY_KIND_LABELS[inquiryKind as ServiceInquiryKind]
+      ? SERVICE_INQUIRY_KIND_LABELS[inquiryKind as ServiceInquiryKind]
+      : "";
+  const requestedDates = asString(context.metadata.requested_dates_text).trim();
+  const requesterMessage = asString(context.metadata.requester_message).trim();
+
+  if (inquiryLabel) {
+    parts.push({ label: "Request type", value: inquiryLabel });
+  }
+  if (requestedDates) {
+    parts.push({ label: "Requested dates", value: requestedDates });
+  }
+  if (requesterMessage) {
+    parts.push({ label: "Note", value: requesterMessage });
+  }
+  return parts;
+}
+
+function contextHistoryTitle(context: ThreadContextItem) {
+  const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
+  if (context.contextTag === "activity" && activityType) {
+    return activityTypeLabel(activityType);
+  }
+  return CONTEXT_LABELS[context.contextTag];
+}
+
+function contextHistoryIcon(context: ThreadContextItem) {
+  const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
+  if (context.contextTag === "activity") return activityTypeIcon(activityType);
+  if (context.contextTag === "connection_request") return "person_add";
+  if (context.contextTag === "trip_join_request") return "flight_takeoff";
+  if (context.contextTag === "hosting_request") return "home";
+  if (context.contextTag === "event_chat") return "event";
+  if (context.contextTag === "service_inquiry") return "school";
+  return "bolt";
+}
+
+function contextHistorySummary(context: ThreadContextItem) {
+  const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
+  const contextLabel =
+    context.contextTag === "activity" && activityType
+      ? activityTypeLabel(activityType)
+      : CONTEXT_LABELS[context.contextTag];
+
+  if (context.statusTag === "accepted" || context.statusTag === "active") {
+    if (context.contextTag === "connection_request") return "Connection accepted. Chat unlocked.";
+    if (context.contextTag === "activity") return `${contextLabel} accepted.`;
+    if (context.contextTag === "service_inquiry") return "Professional inquiry converted into a normal chat.";
+    return `${contextLabel} accepted.`;
+  }
+  if (context.statusTag === "info_shared") {
+    return "Details shared. The requester can send one follow-up message.";
+  }
+  if (context.statusTag === "inquiry_followup_pending") {
+    return "Follow-up received. Accept the conversation to open normal chat.";
+  }
+  if (context.statusTag === "completed") {
+    return `${contextLabel} completed. Reference prompt becomes available from this interaction.`;
+  }
+  if (context.statusTag === "declined") {
+    return `${contextLabel} declined.`;
+  }
+  if (context.statusTag === "cancelled") {
+    return `${contextLabel} cancelled.`;
+  }
+  return `${contextLabel} logged in this thread.`;
+}
+
+function threadPreviewFromContext(context: ThreadContextItem) {
+  const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
+  const contextLabel =
+    context.contextTag === "activity" && activityType
+      ? activityTypeLabel(activityType)
+      : CONTEXT_LABELS[context.contextTag];
+
+  if (context.statusTag === "pending") {
+    if (context.contextTag === "activity") return `${contextLabel} requested.`;
+    if (context.contextTag === "service_inquiry") return `${contextLabel} pending.`;
+    return `${contextLabel} pending.`;
+  }
+  if (context.statusTag === "info_shared") return "Information shared. One follow-up is available.";
+  if (context.statusTag === "inquiry_followup_pending") return "Follow-up waiting for teacher approval.";
+
+  return contextHistorySummary(context);
+}
+
+function defaultThreadPreview(kind: ThreadKind) {
+  if (kind === "trip") return "Trip thread";
+  if (kind === "event") return "Event thread";
+  if (kind === "connection") return "No messages yet.";
+  return "Start chatting";
+}
+
+function latestTextPreview(messages: MessageItem[], fallback: string) {
+  const lastText = [...messages]
+    .filter((message) => (message.messageType ?? "text") === "text")
+    .sort((a, b) => toTime(a.createdAt) - toTime(b.createdAt))
+    .at(-1);
+  if (!lastText) return fallback;
+  const parsed = parseReplyPayload(lastText.body);
+  const text = parsed.text.trim();
+  return text || fallback;
+}
+
+function threadContextResolutionWeight(context: ThreadContextItem) {
+  if (context.statusTag === "completed") return 60;
+  if (context.statusTag === "accepted") return 50;
+  if (context.statusTag === "active") return 45;
+  if (context.statusTag === "info_shared") return 44;
+  if (context.statusTag === "inquiry_followup_pending") return 43;
+  if (context.statusTag === "pending") return 40;
+  if (context.statusTag === "declined") return 30;
+  if (context.statusTag === "cancelled") return 20;
+  return 0;
 }
 
 function formatChatDayLabel(iso?: string) {
@@ -270,14 +950,26 @@ function parseThreadToken(rawToken: string): ParsedThread | null {
   if (!rawToken) return null;
   if (rawToken.startsWith("conn:")) return { kind: "connection", id: rawToken.slice(5) };
   if (rawToken.startsWith("trip:")) return { kind: "trip", id: rawToken.slice(5) };
+  if (rawToken.startsWith("direct:")) return { kind: "direct", id: rawToken.slice(7) };
+  if (rawToken.startsWith("event:")) return { kind: "event", id: rawToken.slice(6) };
   return { kind: "connection", id: rawToken };
 }
 
-function msUntilLocalMidnight(nowMs: number) {
-  const now = new Date(nowMs);
-  const next = new Date(now);
-  next.setHours(24, 0, 0, 0);
-  return Math.max(0, next.getTime() - nowMs);
+function parseFilterTab(rawTab: string | null): FilterTab | null {
+  if (!rawTab) return null;
+  if (rawTab === "all") return "all";
+  if (rawTab === "active") return "active";
+  if (rawTab === "pending") return "pending";
+  if (rawTab === "archived") return "archived";
+  return null;
+}
+
+function daysUntilPendingExpiry(context: ThreadContextItem) {
+  const base = toTime(context.createdAt || context.updatedAt);
+  if (!base) return null;
+  const expiry = base + 14 * 24 * 60 * 60 * 1000;
+  const diff = expiry - Date.now();
+  return Math.max(0, Math.ceil(diff / (24 * 60 * 60 * 1000)));
 }
 
 function formatRemaining(ms: number) {
@@ -346,31 +1038,299 @@ function shouldFallbackPrefs(message: string) {
   );
 }
 
+function normalizeThreadContextRow(row: ThreadContextRow): ThreadContextItem | null {
+  const id = row.id ?? "";
+  const threadId = row.thread_id ?? "";
+  const sourceTable = row.source_table ?? "";
+  const sourceId = row.source_id ?? "";
+  if (!id || !threadId || !sourceTable || !sourceId) return null;
+
+  return {
+    id,
+    threadId,
+    sourceTable,
+    sourceId,
+    contextTag: normalizeContextTag(row.context_tag),
+    statusTag: normalizeStatusTag(row.status_tag),
+    title: row.title ?? null,
+    city: row.city ?? null,
+    startDate: row.start_date ?? null,
+    endDate: row.end_date ?? null,
+    requesterId: row.requester_id ?? null,
+    recipientId: row.recipient_id ?? null,
+    metadata: parseContextMetadata(row.metadata),
+    updatedAt: row.updated_at ?? row.created_at ?? new Date().toISOString(),
+    createdAt: row.created_at ?? row.updated_at ?? new Date().toISOString(),
+  };
+}
+
+function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[]): ThreadRow {
+  const sorted = collapseDuplicateThreadContexts(contexts);
+  const pending = sorted.find((context) => isPendingLikeStatus(context.statusTag)) ?? null;
+  const primary = pending ?? sorted[0] ?? null;
+  const hasAcceptedInteraction = sorted.some(
+    (context) => CHAT_UNLOCK_CONTEXT_TAGS.includes(context.contextTag) && isAcceptedInteractionStatus(context.statusTag)
+  );
+  const isRelationshipPending = Boolean(pending) && !hasAcceptedInteraction;
+
+  const fallbackContext: ThreadContextTag = thread.kind === "event" ? "event_chat" : "regular_chat";
+  const contextTag = primary?.contextTag ?? thread.contextTag ?? fallbackContext;
+  const statusTag = primary?.statusTag ?? thread.statusTag ?? "active";
+  const metaLabel = primary ? describeContextMeta(primary) : thread.metaLabel ?? "";
+
+  return {
+    ...thread,
+    contextTag,
+    statusTag,
+    hasPendingRequest: sorted.some((context) => isPendingLikeStatus(context.statusTag)) || Boolean(thread.hasPendingRequest),
+    hasAcceptedInteraction,
+    isRelationshipPending,
+    metaLabel,
+    preview: primary && isPendingLikeStatus(primary.statusTag) ? threadPreviewFromContext(primary) : thread.preview,
+  };
+}
+
+function threadContextPriority(context: ThreadContextItem) {
+  const pendingBoost = isPendingLikeStatus(context.statusTag) ? 100 : 0;
+  const statusWeight =
+    context.statusTag === "accepted" ? 50 :
+    context.statusTag === "completed" ? 40 :
+    context.statusTag === "active" ? 30 :
+    context.statusTag === "info_shared" ? 28 :
+    context.statusTag === "inquiry_followup_pending" ? 26 :
+    context.statusTag === "declined" ? 20 :
+    context.statusTag === "cancelled" ? 10 :
+    0;
+  const tagWeight =
+    context.contextTag === "connection_request" ? 50 :
+    context.contextTag === "trip_join_request" ? 40 :
+    context.contextTag === "hosting_request" ? 30 :
+    context.contextTag === "event_chat" ? 20 :
+    context.contextTag === "service_inquiry" ? 15 :
+    context.contextTag === "activity" ? 10 :
+    0;
+  return pendingBoost + statusWeight + tagWeight;
+}
+
+function collapseDuplicateThreadContexts(contexts: ThreadContextItem[]): ThreadContextItem[] {
+  const bySource = new Map<string, ThreadContextItem>();
+
+  contexts.forEach((context) => {
+    const key = `${context.sourceTable}:${context.sourceId}`;
+    const existing = bySource.get(key);
+    if (!existing) {
+      bySource.set(key, context);
+      return;
+    }
+
+    const contextTime = toTime(context.updatedAt);
+    const existingTime = toTime(existing.updatedAt);
+    const contextResolution = threadContextResolutionWeight(context);
+    const existingResolution = threadContextResolutionWeight(existing);
+    const contextPriority = threadContextPriority(context);
+    const existingPriority = threadContextPriority(existing);
+
+    if (
+      contextResolution > existingResolution ||
+      (contextResolution === existingResolution &&
+        (contextTime > existingTime ||
+          (contextTime === existingTime && contextPriority > existingPriority)))
+    ) {
+      bySource.set(key, context);
+    }
+  });
+
+  const collapsed = Array.from(bySource.values());
+  const canonicalConnection = [...collapsed]
+    .filter((context) => context.contextTag === "connection_request")
+    .sort((a, b) => {
+      const resolutionDelta = threadContextResolutionWeight(b) - threadContextResolutionWeight(a);
+      if (resolutionDelta !== 0) return resolutionDelta;
+      const timeDelta = toTime(b.updatedAt) - toTime(a.updatedAt);
+      if (timeDelta !== 0) return timeDelta;
+      return threadContextPriority(b) - threadContextPriority(a);
+    })[0];
+
+  const filtered = canonicalConnection
+    ? collapsed.filter((context) => context.contextTag !== "connection_request" || context.id === canonicalConnection.id)
+    : collapsed;
+
+  return filtered.sort((a, b) => {
+    const aPriority = threadContextPriority(a);
+    const bPriority = threadContextPriority(b);
+    if (aPriority !== bPriority) return bPriority - aPriority;
+    return toTime(b.updatedAt) - toTime(a.updatedAt);
+  });
+}
+
+function isStableInboxSubtitle(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes("•")) return false;
+  if (/^from\b/i.test(trimmed)) return false;
+  if (/^trip\b/i.test(trimmed)) return false;
+  if (/^event\b/i.test(trimmed)) return false;
+  return true;
+}
+
+function normalizeInboxThreadSummary(thread: ThreadRow, candidates: ThreadRow[] = [thread]): ThreadRow {
+  const hasPending = isPendingLikeStatus(thread.statusTag ?? "active") || Boolean(thread.hasPendingRequest);
+  if (thread.kind !== "connection" && thread.kind !== "direct") {
+    return hasPending ? thread : { ...thread, metaLabel: "" };
+  }
+
+  const preferredSubtitle =
+    candidates
+      .map((row) => row.subtitle)
+      .find((value) => isStableInboxSubtitle(value)) ||
+    candidates
+      .map((row) => row.metaLabel ?? "")
+      .find((value) => isStableInboxSubtitle(value)) ||
+    thread.subtitle;
+
+  return {
+    ...thread,
+    subtitle: hasPending ? thread.subtitle : preferredSubtitle,
+    metaLabel: hasPending ? thread.metaLabel : "",
+  };
+}
+
+function collapseDuplicateInboxThreads(rows: ThreadRow[]): ThreadRow[] {
+  const byKey = new Map<string, ThreadRow>();
+
+  rows.forEach((row) => {
+    const dedupeKey =
+      (row.kind === "connection" || row.kind === "direct") && row.otherUserId
+        ? `member:${row.otherUserId}`
+        : `thread:${row.threadId}`;
+    const existing = byKey.get(dedupeKey);
+    if (!existing) {
+      byKey.set(dedupeKey, row);
+      return;
+    }
+
+    const rowTime = toTime(row.updatedAt);
+    const existingTime = toTime(existing.updatedAt);
+    const preferRow =
+      rowTime > existingTime ||
+      (rowTime === existingTime &&
+        row.kind === "direct" &&
+        existing.kind !== "direct");
+
+    const winner = preferRow ? row : existing;
+    const loser = preferRow ? existing : row;
+
+    const merged = {
+      ...winner,
+      unreadCount: Math.max(winner.unreadCount, loser.unreadCount),
+      hasPendingRequest: Boolean(winner.hasPendingRequest || loser.hasPendingRequest),
+    } satisfies ThreadRow;
+
+    byKey.set(dedupeKey, normalizeInboxThreadSummary(merged, [winner, loser]));
+  });
+
+  return Array.from(byKey.values())
+    .map((row) => normalizeInboxThreadSummary(row))
+    .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt));
+}
+
+function deriveThreadPreviewFromState(params: {
+  thread: ThreadRow;
+  contexts: ThreadContextItem[];
+  messages: MessageItem[];
+}) {
+  const collapsed = collapseDuplicateThreadContexts(params.contexts);
+  const pending = collapsed.find((context) => isPendingLikeStatus(context.statusTag)) ?? null;
+  if (pending) return threadPreviewFromContext(pending);
+  return latestTextPreview(params.messages, defaultThreadPreview(params.thread.kind));
+}
+
+function messageMirrorsRenderedContext(
+  message: MessageItem,
+  renderedContexts: ThreadContextItem[],
+  allContexts: ThreadContextItem[]
+) {
+  const messageType = message.messageType ?? "text";
+  if (messageType === "text") return false;
+
+  const contextTag = message.contextTag ?? "regular_chat";
+  const statusTag = message.statusTag ?? "active";
+  if (contextTag === "regular_chat") return false;
+
+  if (
+    contextTag === "connection_request" &&
+    allContexts.some(
+      (context) =>
+        context.contextTag === "connection_request" &&
+        (context.statusTag === "accepted" || context.statusTag === "active")
+    )
+  ) {
+    return true;
+  }
+
+  if (contextTag === "activity") {
+    const activityId = asString(message.metadata?.activity_id);
+    const activityType = asString(message.metadata?.activity_type);
+    return renderedContexts.some((context) => {
+      if (context.contextTag !== "activity") return false;
+      if (statusTag !== "pending" && context.statusTag !== statusTag) return false;
+      if (statusTag === "pending" && context.statusTag !== "pending") return false;
+      if (activityId && context.sourceTable === "activities" && context.sourceId === activityId) return true;
+      return Boolean(activityType) && asString(context.metadata.activity_type) === activityType;
+    });
+  }
+
+  if (isPendingLikeStatus(statusTag)) {
+    return renderedContexts.some((context) => context.contextTag === contextTag && isPendingLikeStatus(context.statusTag));
+  }
+
+  return renderedContexts.some((context) => context.contextTag === contextTag && context.statusTag === statusTag);
+}
+
 const remoteImageLoader = ({ src }: ImageLoaderProps) => src;
 
 function MessagesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const forceMobileThread = searchParams.get("mobile") === "1";
+  const initialTab = parseFilterTab(searchParams.get("tab")) ?? "all";
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [threadsHydrated, setThreadsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<FilterTab>("all");
+  const [activeTab, setActiveTab] = useState<FilterTab>(initialTab);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeQuery, setComposeQuery] = useState("");
   const [composeConnectionTargets, setComposeConnectionTargets] = useState<ComposeConnectionTarget[]>([]);
   const [composeTripTargets, setComposeTripTargets] = useState<ComposeTripTarget[]>([]);
+  const [threadContextsByDbId, setThreadContextsByDbId] = useState<Record<string, ThreadContextItem[]>>({});
+  const [activeFallbackContext, setActiveFallbackContext] = useState<ThreadContextItem | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [meId, setMeId] = useState<string | null>(null);
   const [activeThreadToken, setActiveThreadToken] = useState<string | null>(null);
   const [activeMeta, setActiveMeta] = useState<ActiveThreadMeta | null>(null);
+  const [contactSidebar, setContactSidebar] = useState<ContactSidebarData | null>(null);
+  const [activeReferencePrompt, setActiveReferencePrompt] = useState<ReferencePromptItem | null>(null);
+  const [submittedReferenceState, setSubmittedReferenceState] = useState<SubmittedReferenceState>({
+    contextTags: new Set<ReferenceContextTag>(),
+    latestSubmittedAt: null,
+  });
+  const [pendingReferenceCountsByPeer, setPendingReferenceCountsByPeer] = useState<Record<string, number>>({});
+  const [contactSidebarLoading, setContactSidebarLoading] = useState(false);
+  const [contactSidebarError, setContactSidebarError] = useState<string | null>(null);
   const [activeMessages, setActiveMessages] = useState<MessageItem[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
+  const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(null);
+  const [messagingSummaryLoading, setMessagingSummaryLoading] = useState(false);
+  const [activityComposerOpen, setActivityComposerOpen] = useState(false);
+  const [activityDraft, setActivityDraft] = useState<ActivityDraft>(DEFAULT_ACTIVITY_DRAFT);
+  const [activityBusy, setActivityBusy] = useState(false);
+  const [activityMoreFiltersOpen, setActivityMoreFiltersOpen] = useState(false);
   const [threadDbSupported, setThreadDbSupported] = useState(true);
   const [threadBody, setThreadBody] = useState("");
   const [sending, setSending] = useState(false);
-  const [dailyLimitReached, setDailyLimitReached] = useState(false);
   const [threadInfo, setThreadInfo] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("Scam or fraud");
@@ -391,6 +1351,12 @@ function MessagesPageContent() {
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [openThreadRowMenuId, setOpenThreadRowMenuId] = useState<string | null>(null);
   const [threadActionsOpen, setThreadActionsOpen] = useState(false);
+  const [archiveToContinueOpen, setArchiveToContinueOpen] = useState(false);
+  const [requestActionBusyId, setRequestActionBusyId] = useState<string | null>(null);
+  const [shareInquiryContext, setShareInquiryContext] = useState<ThreadContextItem | null>(null);
+  const [shareInquiryBlocks, setShareInquiryBlocks] = useState<TeacherInfoBlock[]>([]);
+  const [shareInquiryBusy, setShareInquiryBusy] = useState(false);
+  const [shareInquiryError, setShareInquiryError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [manualUnreadByThread, setManualUnreadByThread] = useState<Record<string, true>>({});
@@ -407,6 +1373,26 @@ function MessagesPageContent() {
   const [meAvatarUrl, setMeAvatarUrl] = useState<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [clockMs, setClockMs] = useState(Date.now());
+
+  const buildInboxUrl = useCallback(
+    (options?: { tab?: FilterTab | null; threadToken?: string | null }) => {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      const nextTab = options && "tab" in options ? options.tab ?? "all" : activeTab;
+
+      if (!nextTab || nextTab === "all") nextParams.delete("tab");
+      else nextParams.set("tab", nextTab);
+
+      if (options && "threadToken" in options) {
+        if (options.threadToken) nextParams.set("thread", options.threadToken);
+        else nextParams.delete("thread");
+      }
+
+      const qs = nextParams.toString();
+      return qs ? `/messages?${qs}` : "/messages";
+    },
+    [activeTab, searchParams]
+  );
+
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const threadActionsRef = useRef<HTMLDivElement | null>(null);
@@ -417,6 +1403,7 @@ function MessagesPageContent() {
   const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const typingLastSentAtRef = useRef(0);
   const typingTimeoutRef = useRef<number | null>(null);
+  const composerLockReasonRef = useRef<string | null>(null);
   const swipeGestureRef = useRef<{
     messageId: string;
     startX: number;
@@ -425,10 +1412,70 @@ function MessagesPageContent() {
     endY: number;
   } | null>(null);
 
+  const resolveAccessToken = useCallback(async () => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const sessionRes = await supabase.auth.getSession();
+      const accessToken = sessionRes.data.session?.access_token?.trim() ?? "";
+      if (accessToken) return accessToken;
+
+      const userRes = await supabase.auth.getUser();
+      if (userRes.data.user) {
+        const refreshed = await supabase.auth.refreshSession();
+        const refreshedToken = refreshed.data.session?.access_token?.trim() ?? "";
+        if (refreshedToken) return refreshedToken;
+      }
+
+      await wait(150);
+    }
+
+    throw new Error("Missing auth session token.");
+  }, []);
+
+  const loadOwnTeacherInquiryBlocks = useCallback(async () => {
+    if (!meId) return [] as TeacherInfoBlock[];
+    const rows = await fetchTeacherInfoBlocks(supabase, meId, { activeOnly: true });
+    setShareInquiryBlocks(rows);
+    return rows;
+  }, [meId]);
+
+  const refreshMessagingSummary = useCallback(async () => {
+    setMessagingSummaryLoading(true);
+    try {
+      const rpc = await supabase.rpc("cx_sync_user_messaging_state");
+      if (rpc.error) throw rpc.error;
+      const data = asRecord(rpc.data);
+      const summary: MessagingSummary = {
+        plan: asString(data.plan) === "premium" ? "premium" : "free",
+        activeCount: Number(data.activeCount) || 0,
+        activeLimit: Number(data.activeLimit) || 10,
+        monthlyUsed: Number(data.monthlyUsed) || 0,
+        monthlyLimit: Number(data.monthlyLimit) || 10,
+        pendingCount: Number(data.pendingCount) || 0,
+        cycleStart: asString(data.cycleStart) || null,
+        cycleEnd: asString(data.cycleEnd) || null,
+      };
+      setMessagingSummary(summary);
+      return summary;
+    } catch {
+      setMessagingSummary((prev) => prev);
+      return null;
+    } finally {
+      setMessagingSummaryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setInterval(() => setClockMs(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!meId) {
+      setMessagingSummary(null);
+      return;
+    }
+    void refreshMessagingSummary();
+  }, [meId, refreshMessagingSummary, reloadTick]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -473,6 +1520,7 @@ function MessagesPageContent() {
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem(LOCAL_MANUAL_UNREAD_STORAGE_KEY, JSON.stringify(manualUnreadByThread));
+      window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
     } catch {
       // Ignore local storage failures.
     }
@@ -673,6 +1721,13 @@ function MessagesPageContent() {
 
   const loadThreadReactions = useCallback(
     async (params: { kind: ThreadKind; threadScopeId: string; viewerId: string; threadToken?: string }) => {
+      if (!supportsSyncedMessageReactions(params.kind)) {
+        setReactionsServerSupported(false);
+        const nextMap = params.threadToken ? localReactionsByThreadRef.current[params.threadToken] ?? {} : {};
+        setMessageReactions(nextMap);
+        return false;
+      }
+
       const res = await supabase
         .from("message_reactions")
         .select("message_id,reactor_id,emoji")
@@ -706,20 +1761,83 @@ function MessagesPageContent() {
   );
 
   const loadThreadByToken = useCallback(async (token: string, userId: string) => {
-    const parsed = parseThreadToken(token);
+    let parsed = parseThreadToken(token);
     if (!parsed) return;
+    let canonicalToken = token;
 
     setThreadLoading(true);
     setThreadError(null);
     setThreadInfo(null);
-    setDailyLimitReached(false);
     setThreadDbSupported(true);
     setMessageReactions(localReactionsByThreadRef.current[token] ?? {});
+    setActiveFallbackContext(null);
 
     try {
       if (parsed.kind === "connection") {
+        const contextRes = await supabase
+          .from("thread_contexts")
+          .select("thread_id")
+          .eq("source_table", "connections")
+          .eq("source_id", parsed.id)
+          .order("updated_at", { ascending: false })
+          .maybeSingle();
+        const contextThreadId =
+          !contextRes.error && contextRes.data && typeof (contextRes.data as { thread_id?: unknown }).thread_id === "string"
+            ? ((contextRes.data as { thread_id?: string }).thread_id ?? null)
+            : null;
+        if (contextThreadId) {
+          parsed = { kind: "direct", id: contextThreadId };
+          canonicalToken = `direct:${contextThreadId}`;
+        }
+      } else if (parsed.kind === "trip") {
+        const contextRes = await supabase
+          .from("thread_contexts")
+          .select("thread_id")
+          .eq("context_tag", "trip_join_request")
+          .contains("metadata", { trip_id: parsed.id })
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const contextThreadId =
+          !contextRes.error && contextRes.data && typeof (contextRes.data as { thread_id?: unknown }).thread_id === "string"
+            ? ((contextRes.data as { thread_id?: string }).thread_id ?? null)
+            : null;
+        if (contextThreadId) {
+          parsed = { kind: "direct", id: contextThreadId };
+          canonicalToken = `direct:${contextThreadId}`;
+        }
+      }
+
+      if (canonicalToken !== token) {
+        setActiveThreadToken(canonicalToken);
+        router.replace(buildInboxUrl({ threadToken: canonicalToken }));
+      }
+      if (!parsed) return;
+
+      const hydrateContextState = async (threadId: string | null) => {
+        if (!threadId) return [] as ThreadContextItem[];
+        const res = await supabase
+          .from("thread_contexts")
+          .select("id,thread_id,source_table,source_id,context_tag,status_tag,title,city,start_date,end_date,requester_id,recipient_id,metadata,created_at,updated_at")
+          .eq("thread_id", threadId)
+          .order("updated_at", { ascending: false })
+          .limit(80);
+        if (res.error) return [] as ThreadContextItem[];
+        const normalized = ((res.data ?? []) as ThreadContextRow[])
+          .map((row) => normalizeThreadContextRow(row))
+          .filter((row): row is ThreadContextItem => row !== null);
+        setThreadContextsByDbId((prev) => ({ ...prev, [threadId]: normalized }));
+        return normalized;
+      };
+
+      if (parsed && parsed.kind === "connection") {
+        const parsedConnectionId = parsed.id;
         const visibleRows = await fetchVisibleConnections(supabase, userId);
-        const row = visibleRows.find((item) => item.id === parsed.id && item.is_visible_in_messages);
+        const row = visibleRows.find(
+          (item) =>
+            item.id === parsedConnectionId &&
+            (item.is_visible_in_messages || item.is_incoming_pending || item.is_outgoing_pending)
+        );
         if (!row) throw new Error("This conversation is not available.");
 
         const profileRes = await supabase
@@ -758,6 +1876,9 @@ function MessagesPageContent() {
             }
           }
         }
+
+        let contexts: ThreadContextItem[] = [];
+        let participantState: ThreadParticipantDbRow | null = null;
         if (threadId) {
           await supabase.from("thread_participants").upsert(
             [
@@ -769,13 +1890,14 @@ function MessagesPageContent() {
 
           const participantRes = await supabase
             .from("thread_participants")
-            .select("last_read_at")
+            .select("last_read_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end,archived_at")
             .eq("thread_id", threadId)
             .eq("user_id", userId)
             .maybeSingle();
           if (!participantRes.error) {
-            const participantRow = participantRes.data as { last_read_at?: string | null } | null;
+            const participantRow = participantRes.data as ThreadParticipantDbRow | null;
             previousLastReadAt = participantRow?.last_read_at ?? null;
+            participantState = participantRow;
           }
 
           const peerParticipantRes = await supabase
@@ -790,27 +1912,80 @@ function MessagesPageContent() {
           } else {
             setActivePeerLastReadAt(null);
           }
+
+          contexts = await hydrateContextState(threadId);
         } else {
           setActivePeerLastReadAt(null);
         }
         setActiveLastReadAt(previousLastReadAt);
 
+        const fallbackStatusTag: ThreadStatusTag =
+          row.status === "pending"
+            ? "pending"
+            : row.status === "accepted"
+            ? "accepted"
+            : row.status === "declined"
+            ? "declined"
+            : row.status === "cancelled"
+            ? "cancelled"
+            : "active";
+        const fallbackContextTag: ThreadContextTag = fallbackStatusTag === "active" ? "regular_chat" : "connection_request";
+        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const hasAcceptedInteraction = contexts.some(
+          (ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag)
+        );
+        if (!primaryContext && fallbackContextTag === "connection_request") {
+          setActiveFallbackContext({
+            id: `fallback-connection-${row.id}`,
+            threadId: threadId ?? token,
+            sourceTable: "connections",
+            sourceId: row.id,
+            contextTag: fallbackContextTag,
+            statusTag: fallbackStatusTag,
+            title: "Connection request",
+            city: [profile?.city ?? "", profile?.country ?? ""].filter(Boolean).join(", ") || null,
+            startDate: null,
+            endDate: null,
+            requesterId: row.requester_id,
+            recipientId: row.target_id,
+            metadata: {},
+            updatedAt: row.created_at ?? new Date().toISOString(),
+            createdAt: row.created_at ?? new Date().toISOString(),
+          });
+        }
+
         setActiveMeta({
           kind: "connection",
+          contextTag: primaryContext?.contextTag ?? fallbackContextTag,
+          statusTag: primaryContext?.statusTag ?? fallbackStatusTag,
           title: profile?.display_name ?? "Connection",
           subtitle: [profile?.city ?? "", profile?.country ?? ""].filter(Boolean).join(", ") || "Connection",
           avatarUrl: profile?.avatar_url ?? null,
           badge: "Connection",
           otherUserId: row.other_user_id,
           connectionId: row.id,
-          tripId: null,
+          tripId: row.trip_id ?? null,
           threadId,
+          messagingState: normalizeMessagingState(participantState?.messaging_state, participantState?.archived_at ? "archived" : "inactive"),
+          activatedAt: participantState?.activated_at ?? null,
+          activationCycleStart: participantState?.activation_cycle_start ?? null,
+          activationCycleEnd: participantState?.activation_cycle_end ?? null,
+          hasAcceptedInteraction,
+          isRelationshipPending: isPendingLikeStatus(primaryContext?.statusTag ?? fallbackStatusTag) && !hasAcceptedInteraction,
+          serviceInquiryId: null,
+          serviceInquiryRequesterId: null,
+          serviceInquiryRecipientId: null,
+          serviceInquiryFollowupUsed: false,
         });
         setActiveMessages(
           ((messagesRes.data ?? []) as Array<Record<string, unknown>>).map((m) => ({
             id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
             senderId: typeof m.sender_id === "string" ? m.sender_id : "",
             body: typeof m.body === "string" ? m.body : "",
+            messageType: "text",
+            contextTag: "regular_chat",
+            statusTag: "active",
+            metadata: {},
             createdAt: typeof m.created_at === "string" ? m.created_at : "",
             status: "sent",
           }))
@@ -821,7 +1996,10 @@ function MessagesPageContent() {
           viewerId: userId,
           threadToken: token,
         });
-      } else {
+        return;
+      }
+
+      if (parsed.kind === "trip") {
         const tripRes = await supabase
           .from("trips")
           .select("id,user_id,destination_city,destination_country,start_date,end_date")
@@ -854,15 +2032,21 @@ function MessagesPageContent() {
           setActiveLastReadAt(null);
           setActiveMeta({
             kind: "trip",
+            contextTag: "trip_join_request",
+            statusTag: "active",
             title: trip.destination_city ? `Trip to ${trip.destination_city}` : "Trip chat",
             subtitle: parseTripLabel(trip),
             avatarUrl: null,
-            badge: "Trip",
-            otherUserId: null,
-            connectionId: null,
-            tripId: trip.id ?? null,
-            threadId: null,
-          });
+          badge: "Trip",
+          otherUserId: null,
+          connectionId: null,
+          tripId: trip.id ?? null,
+          threadId: null,
+          serviceInquiryId: null,
+          serviceInquiryRequesterId: null,
+          serviceInquiryRecipientId: null,
+          serviceInquiryFollowupUsed: false,
+        });
           setActiveMessages([]);
           setThreadLoading(false);
           return;
@@ -871,6 +2055,7 @@ function MessagesPageContent() {
 
         let threadId = (existingThreadRes.data as { id?: string } | null)?.id ?? null;
         let previousLastReadAt: string | null = null;
+        let participantState: ThreadParticipantDbRow | null = null;
         if (!threadId) {
           const createThreadRes = await supabase
             .from("threads")
@@ -886,22 +2071,25 @@ function MessagesPageContent() {
           threadId = (createThreadRes.data as { id?: string } | null)?.id ?? null;
         }
 
+        let contexts: ThreadContextItem[] = [];
         if (threadId) {
           const participantRes = await supabase
             .from("thread_participants")
-            .select("last_read_at")
+            .select("last_read_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end,archived_at")
             .eq("thread_id", threadId)
             .eq("user_id", userId)
             .maybeSingle();
           if (!participantRes.error) {
-            const participantRow = participantRes.data as { last_read_at?: string | null } | null;
+            const participantRow = participantRes.data as ThreadParticipantDbRow | null;
             previousLastReadAt = participantRow?.last_read_at ?? null;
+            participantState = participantRow;
           }
 
           await supabase.from("thread_participants").upsert(
             { thread_id: threadId, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
             { onConflict: "thread_id,user_id" }
           );
+          contexts = await hydrateContextState(threadId);
         }
         setActivePeerLastReadAt(null);
         setActiveLastReadAt(previousLastReadAt);
@@ -909,15 +2097,18 @@ function MessagesPageContent() {
         const tripMsgRes = threadId
           ? await supabase
               .from("thread_messages")
-              .select("id,sender_id,body,created_at")
+              .select("id,sender_id,body,message_type,context_tag,status_tag,metadata,created_at")
               .eq("thread_id", threadId)
               .order("created_at", { ascending: true })
               .limit(1000)
           : { data: [], error: null };
         if (tripMsgRes.error) throw new Error(tripMsgRes.error.message);
 
+        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
         setActiveMeta({
           kind: "trip",
+          contextTag: primaryContext?.contextTag ?? "trip_join_request",
+          statusTag: primaryContext?.statusTag ?? "active",
           title: trip.destination_city ? `Trip to ${trip.destination_city}` : "Trip chat",
           subtitle: parseTripLabel(trip),
           avatarUrl: null,
@@ -926,12 +2117,28 @@ function MessagesPageContent() {
           connectionId: null,
           tripId: trip.id ?? null,
           threadId,
+          messagingState: normalizeMessagingState(participantState?.messaging_state, participantState?.archived_at ? "archived" : "inactive"),
+          activatedAt: participantState?.activated_at ?? null,
+          activationCycleStart: participantState?.activation_cycle_start ?? null,
+          activationCycleEnd: participantState?.activation_cycle_end ?? null,
+          hasAcceptedInteraction: contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag)),
+          isRelationshipPending:
+            isPendingLikeStatus(primaryContext?.statusTag ?? "active") &&
+            !contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag)),
+          serviceInquiryId: null,
+          serviceInquiryRequesterId: null,
+          serviceInquiryRecipientId: null,
+          serviceInquiryFollowupUsed: false,
         });
         setActiveMessages(
           ((tripMsgRes.data ?? []) as Array<Record<string, unknown>>).map((m) => ({
             id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
             senderId: typeof m.sender_id === "string" ? m.sender_id : "",
             body: typeof m.body === "string" ? m.body : "",
+            messageType: normalizeMessageType(typeof m.message_type === "string" ? m.message_type : null),
+            contextTag: normalizeContextTag(typeof m.context_tag === "string" ? m.context_tag : null),
+            statusTag: normalizeStatusTag(typeof m.status_tag === "string" ? m.status_tag : null, "active"),
+            metadata: parseContextMetadata(m.metadata),
             createdAt: typeof m.created_at === "string" ? m.created_at : "",
             status: "sent",
           }))
@@ -944,6 +2151,205 @@ function MessagesPageContent() {
             threadToken: token,
           });
         }
+        return;
+      }
+
+      if (parsed.kind === "direct") {
+        const threadRes = await supabase
+          .from("threads")
+          .select("id,thread_type,direct_user_low,direct_user_high")
+          .eq("id", parsed.id)
+          .maybeSingle();
+        if (threadRes.error) throw new Error(threadRes.error.message);
+        const thread = (threadRes.data ?? null) as ThreadDbRow | null;
+        if (!thread?.id || thread.thread_type !== "direct") throw new Error("Direct chat not found.");
+
+        let otherUserId = (thread.direct_user_low === userId ? thread.direct_user_high : thread.direct_user_low) ?? null;
+        const memberRes = await supabase
+          .from("thread_participants")
+          .select("user_id,last_read_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end,archived_at")
+          .eq("thread_id", thread.id)
+          .in("user_id", [userId, otherUserId].filter(Boolean) as string[]);
+
+        if (memberRes.error) throw new Error(memberRes.error.message);
+        const participantRows = (memberRes.data ?? []) as ThreadParticipantDbRow[];
+        const meParticipant = participantRows.find((row) => row.user_id === userId);
+        if (!meParticipant) throw new Error("You do not have access to this chat.");
+        if (!otherUserId) {
+          otherUserId = participantRows.find((row) => row.user_id && row.user_id !== userId)?.user_id ?? null;
+        }
+        setActiveLastReadAt(meParticipant.last_read_at ?? null);
+        setActivePeerLastReadAt(participantRows.find((row) => row.user_id === otherUserId)?.last_read_at ?? null);
+
+        await supabase.from("thread_participants").upsert(
+          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+          { onConflict: "thread_id,user_id" }
+        );
+
+        const [profileRes, messagesRes] = await Promise.all([
+          otherUserId
+            ? supabase
+                .from("profiles")
+                .select("user_id,display_name,avatar_url,city,country")
+                .eq("user_id", otherUserId)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          supabase
+            .from("thread_messages")
+            .select("id,sender_id,body,message_type,context_tag,status_tag,metadata,created_at")
+            .eq("thread_id", thread.id)
+            .order("created_at", { ascending: true })
+            .limit(1000),
+        ]);
+        if (messagesRes.error) throw new Error(messagesRes.error.message);
+        const profile = (profileRes.data ?? null) as ProfileRow | null;
+        const contexts = await hydrateContextState(thread.id);
+        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const connectionContext = contexts.find((ctx) => ctx.sourceTable === "connections");
+        const tripContext = contexts.find((ctx) => ctx.contextTag === "trip_join_request");
+        const serviceInquiryContext = contexts.find((ctx) => ctx.contextTag === "service_inquiry") ?? null;
+        const hasAcceptedInteraction = contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag));
+        const tripIdFromContext =
+          typeof tripContext?.metadata?.trip_id === "string" && tripContext.metadata.trip_id.length > 0
+            ? tripContext.metadata.trip_id
+            : null;
+
+        setActiveMeta({
+          kind: "direct",
+          contextTag: primaryContext?.contextTag ?? "regular_chat",
+          statusTag: primaryContext?.statusTag ?? "active",
+          title: profile?.display_name ?? "Direct chat",
+          subtitle: [profile?.city ?? "", profile?.country ?? ""].filter(Boolean).join(", ") || "Member chat",
+          avatarUrl: profile?.avatar_url ?? null,
+          badge: contextGroupLabel(primaryContext?.contextTag ?? "regular_chat"),
+          otherUserId,
+          connectionId: connectionContext?.sourceId ?? null,
+          tripId: tripIdFromContext,
+          threadId: thread.id,
+          messagingState: normalizeMessagingState(meParticipant?.messaging_state, meParticipant?.archived_at ? "archived" : "inactive"),
+          activatedAt: meParticipant?.activated_at ?? null,
+          activationCycleStart: meParticipant?.activation_cycle_start ?? null,
+          activationCycleEnd: meParticipant?.activation_cycle_end ?? null,
+          hasAcceptedInteraction,
+          isRelationshipPending: isPendingLikeStatus(primaryContext?.statusTag ?? "active") && !hasAcceptedInteraction,
+          serviceInquiryId: serviceInquiryContext?.sourceId ?? null,
+          serviceInquiryRequesterId: serviceInquiryContext?.requesterId ?? null,
+          serviceInquiryRecipientId: serviceInquiryContext?.recipientId ?? null,
+          serviceInquiryFollowupUsed: Boolean(serviceInquiryContext?.metadata.requester_followup_used),
+        });
+        setActiveMessages(
+          ((messagesRes.data ?? []) as Array<Record<string, unknown>>).map((m) => ({
+            id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
+            senderId: typeof m.sender_id === "string" ? m.sender_id : "",
+            body: typeof m.body === "string" ? m.body : "",
+            messageType: normalizeMessageType(typeof m.message_type === "string" ? m.message_type : null),
+            contextTag: normalizeContextTag(typeof m.context_tag === "string" ? m.context_tag : null),
+            statusTag: normalizeStatusTag(typeof m.status_tag === "string" ? m.status_tag : null, "active"),
+            metadata: parseContextMetadata(m.metadata),
+            createdAt: typeof m.created_at === "string" ? m.created_at : "",
+            status: "sent",
+          }))
+        );
+        await loadThreadReactions({
+          kind: "direct",
+          threadScopeId: thread.id,
+          viewerId: userId,
+          threadToken: token,
+        });
+        return;
+      }
+
+      if (parsed.kind === "event") {
+        const threadRes = await supabase
+          .from("threads")
+          .select("id,thread_type,event_id")
+          .eq("event_id", parsed.id)
+          .maybeSingle();
+        if (threadRes.error) throw new Error(threadRes.error.message);
+        const thread = (threadRes.data ?? null) as ThreadDbRow | null;
+        if (!thread?.id || thread.thread_type !== "event") throw new Error("Event chat not found.");
+
+        const memberRes = await supabase
+          .from("thread_participants")
+          .select("last_read_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end,archived_at")
+          .eq("thread_id", thread.id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (memberRes.error || !memberRes.data) {
+          throw new Error("You do not have access to this event chat.");
+        }
+        const meParticipant = memberRes.data as ThreadParticipantDbRow;
+        setActiveLastReadAt(meParticipant.last_read_at ?? null);
+        setActivePeerLastReadAt(null);
+
+        await supabase.from("thread_participants").upsert(
+          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+          { onConflict: "thread_id,user_id" }
+        );
+
+        const [eventRes, messagesRes] = await Promise.all([
+          supabase.from("events").select("id,title,city,country,starts_at").eq("id", parsed.id).maybeSingle(),
+          supabase
+            .from("thread_messages")
+            .select("id,sender_id,body,message_type,context_tag,status_tag,metadata,created_at")
+            .eq("thread_id", thread.id)
+            .order("created_at", { ascending: true })
+            .limit(1200),
+        ]);
+        if (messagesRes.error) throw new Error(messagesRes.error.message);
+        const eventRow = (eventRes.data ?? null) as Record<string, unknown> | null;
+        const title = typeof eventRow?.title === "string" ? eventRow.title : "Event chat";
+        const location = [typeof eventRow?.city === "string" ? eventRow.city : "", typeof eventRow?.country === "string" ? eventRow.country : ""]
+          .filter(Boolean)
+          .join(", ");
+        const date = typeof eventRow?.starts_at === "string" ? formatDateShort(eventRow.starts_at) : "";
+        const contexts = await hydrateContextState(thread.id);
+        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const hasAcceptedInteraction = contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag));
+
+        setActiveMeta({
+          kind: "event",
+          contextTag: primaryContext?.contextTag ?? "event_chat",
+          statusTag: primaryContext?.statusTag ?? "active",
+          title,
+          subtitle: [location, date].filter(Boolean).join(" • ") || "Event",
+          avatarUrl: null,
+          badge: "Event",
+          otherUserId: null,
+          connectionId: null,
+          tripId: null,
+          threadId: thread.id,
+          messagingState: normalizeMessagingState(meParticipant?.messaging_state, meParticipant?.archived_at ? "archived" : "inactive"),
+          activatedAt: meParticipant?.activated_at ?? null,
+          activationCycleStart: meParticipant?.activation_cycle_start ?? null,
+          activationCycleEnd: meParticipant?.activation_cycle_end ?? null,
+          hasAcceptedInteraction,
+          isRelationshipPending: isPendingLikeStatus(primaryContext?.statusTag ?? "active") && !hasAcceptedInteraction,
+          serviceInquiryId: null,
+          serviceInquiryRequesterId: null,
+          serviceInquiryRecipientId: null,
+          serviceInquiryFollowupUsed: false,
+        });
+        setActiveMessages(
+          ((messagesRes.data ?? []) as Array<Record<string, unknown>>).map((m) => ({
+            id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
+            senderId: typeof m.sender_id === "string" ? m.sender_id : "",
+            body: typeof m.body === "string" ? m.body : "",
+            messageType: normalizeMessageType(typeof m.message_type === "string" ? m.message_type : null),
+            contextTag: normalizeContextTag(typeof m.context_tag === "string" ? m.context_tag : null),
+            statusTag: normalizeStatusTag(typeof m.status_tag === "string" ? m.status_tag : null, "active"),
+            metadata: parseContextMetadata(m.metadata),
+            createdAt: typeof m.created_at === "string" ? m.created_at : "",
+            status: "sent",
+          }))
+        );
+        await loadThreadReactions({
+          kind: "event",
+          threadScopeId: thread.id,
+          viewerId: userId,
+          threadToken: token,
+        });
+        return;
       }
     } catch (e: unknown) {
       setThreadError(e instanceof Error ? e.message : "Failed to load thread.");
@@ -954,11 +2360,12 @@ function MessagesPageContent() {
     } finally {
       setThreadLoading(false);
     }
-  }, [loadThreadReactions]);
+  }, [buildInboxUrl, loadThreadReactions, router]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setThreadsHydrated(false);
       setLoading(true);
       setError(null);
       setThreadPrefsInLocalMode(false);
@@ -991,12 +2398,14 @@ function MessagesPageContent() {
         let archivedFromDb: Record<string, true> = {};
         let mutedFromDb: Record<string, string> = {};
         let pinnedFromDb: Record<string, true> = {};
+        let localContextsByThreadId: Record<string, ThreadContextItem[]> = {};
         const visibleRows = await fetchVisibleConnections(supabase, user.id);
+        const allConnections = visibleRows;
         const visibleConnections = visibleRows.filter((row) => row.is_visible_in_messages);
-        const otherUserIds = Array.from(new Set(visibleConnections.map((row) => row.other_user_id).filter(Boolean)));
+        const otherUserIds = Array.from(new Set(allConnections.map((row) => row.other_user_id).filter(Boolean)));
         const tripIds = Array.from(new Set(visibleConnections.map((row) => row.trip_id).filter(Boolean))) as string[];
-        const connectionsById: Record<string, (typeof visibleConnections)[number]> = Object.fromEntries(
-          visibleConnections.map((row) => [row.id, row])
+        const connectionsById: Record<string, (typeof allConnections)[number]> = Object.fromEntries(
+          allConnections.map((row) => [row.id, row])
         );
 
         const tripRequestColumnsPrimary = "id,trip_id,requester_id,status,decided_at,updated_at,created_at";
@@ -1080,7 +2489,8 @@ function MessagesPageContent() {
 
         const threadsRes = await supabase
           .from("threads")
-          .select("id,thread_type,connection_id,trip_id,last_message_at,created_at")
+          .select("id,thread_type,connection_id,trip_id,event_id,direct_user_low,direct_user_high,last_message_at,created_at")
+          .in("thread_type", ["connection", "trip", "direct", "event"])
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(500);
 
@@ -1102,16 +2512,28 @@ function MessagesPageContent() {
           const tripThreadIds = Array.from(
             new Set(threadRows.filter((row) => row.thread_type === "trip").map((row) => row.trip_id ?? "").filter(Boolean))
           );
+          const eventThreadIds = Array.from(
+            new Set(threadRows.filter((row) => row.thread_type === "event").map((row) => row.event_id ?? "").filter(Boolean))
+          );
+          const directCounterpartIds = Array.from(
+            new Set(
+              threadRows
+                .filter((row) => row.thread_type === "direct")
+                .flatMap((row) => [row.direct_user_low ?? "", row.direct_user_high ?? ""])
+                .filter((id) => id && id !== user.id)
+            )
+          );
           const threadOtherUserIds = Array.from(
             new Set(
-              [...otherUserIds, ...connectionThreadIds]
+              [...otherUserIds, ...connectionThreadIds, ...directCounterpartIds]
                 .map((connectionId) => connectionsById[connectionId]?.other_user_id ?? "")
+                .concat(directCounterpartIds)
                 .filter((value): value is string => Boolean(value))
             )
           );
           const allTripIds = Array.from(new Set([...tripIds, ...tripThreadIds, ...acceptedTripIds]));
 
-          const [profilesRes, tripsRes, threadMessagesRes, threadParticipantsRes] = await Promise.all([
+          const [profilesRes, tripsRes, eventsRes, threadMessagesRes, threadParticipantsRes, threadContextsRes, threadParticipantsAllRes] = await Promise.all([
             threadOtherUserIds.length
               ? supabase
                   .from("profiles")
@@ -1124,10 +2546,13 @@ function MessagesPageContent() {
                   .select("id,destination_city,destination_country,start_date,end_date")
                   .in("id", allTripIds)
               : Promise.resolve({ data: [], error: null }),
+            eventThreadIds.length
+              ? supabase.from("events").select("id,title,city,country,starts_at").in("id", eventThreadIds)
+              : Promise.resolve({ data: [], error: null }),
             threadIds.length
               ? supabase
                   .from("thread_messages")
-                  .select("id,thread_id,sender_id,body,created_at")
+                  .select("id,thread_id,sender_id,body,created_at,message_type")
                   .in("thread_id", threadIds)
                   .order("created_at", { ascending: false })
                   .limit(1000)
@@ -1135,8 +2560,22 @@ function MessagesPageContent() {
             threadIds.length
               ? supabase
                   .from("thread_participants")
-                  .select("thread_id,last_read_at,archived_at,muted_until,pinned_at")
+                  .select("thread_id,last_read_at,archived_at,muted_until,pinned_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end")
                   .eq("user_id", user.id)
+                  .in("thread_id", threadIds)
+              : Promise.resolve({ data: [], error: null }),
+            threadIds.length
+              ? supabase
+                  .from("thread_contexts")
+                  .select("id,thread_id,source_table,source_id,context_tag,status_tag,title,city,start_date,end_date,requester_id,recipient_id,metadata,created_at,updated_at")
+                  .in("thread_id", threadIds)
+                  .order("updated_at", { ascending: false })
+                  .limit(1500)
+              : Promise.resolve({ data: [], error: null }),
+            threadIds.length
+              ? supabase
+                  .from("thread_participants")
+                  .select("thread_id,user_id")
                   .in("thread_id", threadIds)
               : Promise.resolve({ data: [], error: null }),
           ]);
@@ -1170,6 +2609,17 @@ function MessagesPageContent() {
             if (!key) return;
             tripsById[key] = row;
           });
+          const eventsById: Record<string, { title: string; city: string; country: string; startsAt: string | null }> = {};
+          ((eventsRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+            const id = typeof row.id === "string" ? row.id : "";
+            if (!id) return;
+            eventsById[id] = {
+              title: typeof row.title === "string" ? row.title : "Event chat",
+              city: typeof row.city === "string" ? row.city : "",
+              country: typeof row.country === "string" ? row.country : "",
+              startsAt: typeof row.starts_at === "string" ? row.starts_at : null,
+            };
+          });
           setComposeTripTargets(buildTripComposeTargets(acceptedTripIds, tripsById, acceptedTripUpdatedAtById));
 
           const lastByThread: Record<string, { body: string; senderId: string; createdAt: string }> = {};
@@ -1177,6 +2627,8 @@ function MessagesPageContent() {
           ((threadMessagesRes.data ?? []) as ThreadMessageDbRow[]).forEach((row) => {
             const key = row.thread_id ?? "";
             if (!key) return;
+            const messageType = normalizeMessageType(typeof row.message_type === "string" ? row.message_type : null);
+            if (messageType !== "text") return;
             if (!lastByThread[key]) {
               const parsedBody = parseReplyPayload(row.body ?? "");
               lastByThread[key] = {
@@ -1193,6 +2645,11 @@ function MessagesPageContent() {
           });
 
           const lastReadByThread: Record<string, string> = {};
+          const messagingStateByThread: Record<
+            string,
+            { messagingState: MessagingState; activatedAt: string | null; activationCycleStart: string | null; activationCycleEnd: string | null }
+          > = {};
+          const participantUserIdsByThread: Record<string, string[]> = {};
           const archivedByToken: Record<string, true> = {};
           const mutedUntilByToken: Record<string, string> = {};
           const pinnedByToken: Record<string, true> = {};
@@ -1206,19 +2663,44 @@ function MessagesPageContent() {
             }
             if (row.thread_type === "trip" && row.trip_id) {
               tokenByDbThreadId[dbThreadId] = `trip:${row.trip_id}`;
+              return;
+            }
+            if (row.thread_type === "direct") {
+              tokenByDbThreadId[dbThreadId] = `direct:${dbThreadId}`;
+              return;
+            }
+            if (row.thread_type === "event" && row.event_id) {
+              tokenByDbThreadId[dbThreadId] = `event:${row.event_id}`;
             }
           });
 
-          ((threadParticipantsRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+          ((threadParticipantsAllRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
             const threadId = typeof row.thread_id === "string" ? row.thread_id : "";
-            const lastReadAt = typeof row.last_read_at === "string" ? row.last_read_at : "";
+            const participantId = typeof row.user_id === "string" ? row.user_id : "";
+            if (!threadId || !participantId) return;
+            if (!participantUserIdsByThread[threadId]) participantUserIdsByThread[threadId] = [];
+            participantUserIdsByThread[threadId].push(participantId);
+          });
+
+          ((threadParticipantsRes.data ?? []) as ThreadParticipantDbRow[]).forEach((row) => {
+            const threadId = row.thread_id ?? "";
+            const lastReadAt = row.last_read_at ?? "";
             if (threadId) lastReadByThread[threadId] = lastReadAt;
+
+            if (threadId) {
+              messagingStateByThread[threadId] = {
+                messagingState: normalizeMessagingState(row.messaging_state, row.archived_at ? "archived" : "inactive"),
+                activatedAt: row.activated_at ?? null,
+                activationCycleStart: row.activation_cycle_start ?? null,
+                activationCycleEnd: row.activation_cycle_end ?? null,
+              };
+            }
 
             const token = tokenByDbThreadId[threadId] ?? "";
             if (!token) return;
-            const archivedAt = typeof row.archived_at === "string" ? row.archived_at : "";
-            const mutedUntil = typeof row.muted_until === "string" ? row.muted_until : "";
-            const pinnedAt = typeof row.pinned_at === "string" ? row.pinned_at : "";
+            const archivedAt = row.archived_at ?? "";
+            const mutedUntil = row.muted_until ?? "";
+            const pinnedAt = row.pinned_at ?? "";
             if (archivedAt) archivedByToken[token] = true;
             if (mutedUntil && toTime(mutedUntil) > Date.now()) mutedUntilByToken[token] = mutedUntil;
             if (pinnedAt) pinnedByToken[token] = true;
@@ -1227,6 +2709,17 @@ function MessagesPageContent() {
           archivedFromDb = archivedByToken;
           mutedFromDb = mutedUntilByToken;
           pinnedFromDb = pinnedByToken;
+
+          const contextsByThread: Record<string, ThreadContextItem[]> = {};
+          if (!threadContextsRes.error) {
+            ((threadContextsRes.data ?? []) as ThreadContextRow[]).forEach((row) => {
+              const normalized = normalizeThreadContextRow(row);
+              if (!normalized) return;
+              if (!contextsByThread[normalized.threadId]) contextsByThread[normalized.threadId] = [];
+              contextsByThread[normalized.threadId].push(normalized);
+            });
+          }
+          localContextsByThreadId = contextsByThread;
 
           const unreadCountByThread: Record<string, number> = {};
           Object.entries(threadMessagesByThread).forEach(([threadId, rows]) => {
@@ -1254,23 +2747,23 @@ function MessagesPageContent() {
                 const connection = connectionsById[connectionId];
                 if (!connection) return null;
                 const other = profilesById[connection.other_user_id];
-                const cameFromTrip =
-                  connection.connect_context === "trip" ||
-                  connection.connect_context === "traveller" ||
-                  Boolean(connection.trip_id);
+                const participantState = messagingStateByThread[threadId];
                 return {
                   threadId: `conn:${connection.id}`,
                   dbThreadId: threadId,
                   kind: "connection",
                   title: other?.displayName ?? "Connection",
-                  subtitle: cameFromTrip
-                    ? `From trip • ${parseTripLabel((connection.trip_id ? tripsById[connection.trip_id] : null) ?? null)}`
-                    : [other?.city ?? "", other?.country ?? ""].filter(Boolean).join(", ") || "Connection",
+                  subtitle: [other?.city ?? "", other?.country ?? ""].filter(Boolean).join(", ") || "Connection",
                   avatarUrl: other?.avatarUrl ?? null,
                   preview: last?.body || "No messages yet.",
                   updatedAt,
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Connection",
+                  otherUserId: connection.other_user_id,
+                  messagingState: participantState?.messagingState ?? "inactive",
+                  activatedAt: participantState?.activatedAt ?? null,
+                  activationCycleStart: participantState?.activationCycleStart ?? null,
+                  activationCycleEnd: participantState?.activationCycleEnd ?? null,
                 } satisfies ThreadRow;
               }
 
@@ -1278,6 +2771,7 @@ function MessagesPageContent() {
                 const id = row.trip_id ?? "";
                 if (!id) return null;
                 const trip = tripsById[id];
+                const participantState = messagingStateByThread[threadId];
                 return {
                   threadId: `trip:${id}`,
                   dbThreadId: threadId,
@@ -1289,6 +2783,58 @@ function MessagesPageContent() {
                   updatedAt,
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Trip",
+                  otherUserId: null,
+                  messagingState: participantState?.messagingState ?? "inactive",
+                  activatedAt: participantState?.activatedAt ?? null,
+                  activationCycleStart: participantState?.activationCycleStart ?? null,
+                  activationCycleEnd: participantState?.activationCycleEnd ?? null,
+                } satisfies ThreadRow;
+              }
+              if (row.thread_type === "direct") {
+                const participantIds = (participantUserIdsByThread[threadId] ?? []).filter((id) => id !== user.id);
+                const otherUserId = participantIds[0] ?? "";
+                const other = profilesById[otherUserId];
+                const participantState = messagingStateByThread[threadId];
+                return {
+                  threadId: `direct:${threadId}`,
+                  dbThreadId: threadId,
+                  kind: "direct",
+                  title: other?.displayName ?? "Direct chat",
+                  subtitle: [other?.city ?? "", other?.country ?? ""].filter(Boolean).join(", ") || "Member chat",
+                  avatarUrl: other?.avatarUrl ?? null,
+                  preview: last?.body || "Start chatting",
+                  updatedAt,
+                  unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
+                  badge: "Chat",
+                  otherUserId,
+                  messagingState: participantState?.messagingState ?? "inactive",
+                  activatedAt: participantState?.activatedAt ?? null,
+                  activationCycleStart: participantState?.activationCycleStart ?? null,
+                  activationCycleEnd: participantState?.activationCycleEnd ?? null,
+                } satisfies ThreadRow;
+              }
+              if (row.thread_type === "event") {
+                const eventId = row.event_id ?? "";
+                const event = eventsById[eventId];
+                const location = [event?.city ?? "", event?.country ?? ""].filter(Boolean).join(", ");
+                const date = event?.startsAt ? formatDateShort(event.startsAt) : "";
+                const participantState = messagingStateByThread[threadId];
+                return {
+                  threadId: `event:${eventId}`,
+                  dbThreadId: threadId,
+                  kind: "event",
+                  title: event?.title ? `Event: ${event.title}` : "Event chat",
+                  subtitle: [location, date].filter(Boolean).join(" • ") || "Event",
+                  avatarUrl: null,
+                  preview: last?.body || "Event thread",
+                  updatedAt,
+                  unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
+                  badge: "Event",
+                  otherUserId: null,
+                  messagingState: participantState?.messagingState ?? "inactive",
+                  activatedAt: participantState?.activatedAt ?? null,
+                  activationCycleStart: participantState?.activationCycleStart ?? null,
+                  activationCycleEnd: participantState?.activationCycleEnd ?? null,
                 } satisfies ThreadRow;
               }
               return null;
@@ -1296,162 +2842,156 @@ function MessagesPageContent() {
 
           const mappedFromThreads: ThreadRow[] = mappedFromThreadsUnfiltered
             .filter((row): row is ThreadRow => row !== null)
+            .map((row) => enrichThreadWithContext(row, contextsByThread[row.dbThreadId ?? ""] ?? []))
             .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt));
 
-          const mappedThreadIds = new Set(mappedFromThreads.map((item) => item.threadId));
-          const fallbackConnectionThreads: ThreadRow[] = visibleConnections
-            .filter((row) => !mappedThreadIds.has(`conn:${row.id}`))
-            .map((row) => {
-              const other = profilesById[row.other_user_id];
-              const cameFromTrip =
-                row.connect_context === "trip" || row.connect_context === "traveller" || Boolean(row.trip_id);
-              return {
-                threadId: `conn:${row.id}`,
-                dbThreadId: null,
-                kind: "connection",
-                title: other?.displayName ?? "Connection",
-                subtitle: cameFromTrip
-                  ? `From trip • ${parseTripLabel((row.trip_id ? tripsById[row.trip_id] : null) ?? null)}`
-                  : [other?.city ?? "", other?.country ?? ""].filter(Boolean).join(", ") || "Connection",
-                avatarUrl: other?.avatarUrl ?? null,
-                preview: "No messages yet.",
-                updatedAt: row.created_at || new Date().toISOString(),
-                unreadCount: 0,
-                badge: "Connection",
-              };
-            });
-
-          const fallbackTripThreads: ThreadRow[] = acceptedTripIds
-            .filter((tripId) => !mappedThreadIds.has(`trip:${tripId}`))
-            .map((tripId) => {
-              const trip = tripsById[tripId];
-              const updatedAt = acceptedTripUpdatedAtById[tripId] || trip?.start_date || new Date().toISOString();
-              return {
-                threadId: `trip:${tripId}`,
-                dbThreadId: null,
-                kind: "trip",
-                title: trip?.destination_city ? `Trip to ${trip.destination_city}` : "Trip chat",
-                subtitle: parseTripLabel(trip ?? null),
-                avatarUrl: null,
-                preview: "Open trip chat",
-                updatedAt,
-                unreadCount: 0,
-                badge: "Trip",
-              } satisfies ThreadRow;
-            });
-
-          mergedThreads = [...mappedFromThreads, ...fallbackConnectionThreads, ...fallbackTripThreads].sort(
-            (a, b) => toTime(b.updatedAt) - toTime(a.updatedAt)
+          mergedThreads = collapseDuplicateInboxThreads(
+            mappedFromThreads
+            .map((thread) => enrichThreadWithContext(thread, thread.dbThreadId ? localContextsByThreadId[thread.dbThreadId] ?? [] : []))
+            .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
           );
         } else if (threadsRes.error && !threadsRelationMissing) {
           throw new Error(threadsRes.error.message);
         }
 
         if (mergedThreads.length === 0) {
-          const allTripIdsFallback = Array.from(new Set([...tripIds, ...acceptedTripIds]));
-          const [profilesRes, tripsRes, messagesRes] = await Promise.all([
-            otherUserIds.length
-              ? supabase
-                  .from("profiles")
-                  .select("user_id,display_name,avatar_url,city,country")
-                  .in("user_id", otherUserIds)
-              : Promise.resolve({ data: [], error: null }),
-            allTripIdsFallback.length
-              ? supabase
-                  .from("trips")
-                  .select("id,destination_city,destination_country,start_date,end_date")
-                  .in("id", allTripIdsFallback)
-              : Promise.resolve({ data: [], error: null }),
-            supabase
-              .from("messages")
-              .select("id,connection_id,sender_id,body,created_at")
-              .order("created_at", { ascending: false })
-              .limit(500),
-          ]);
-
-          const profilesById: Record<string, { displayName: string; avatarUrl: string | null; city: string; country: string }> = {};
-          ((profilesRes.data ?? []) as ProfileRow[]).forEach((row) => {
-            const key = row.user_id ?? "";
-            if (!key) return;
-            profilesById[key] = {
-              displayName: row.display_name ?? "Unknown",
-              avatarUrl: row.avatar_url ?? null,
-              city: row.city ?? "",
-              country: row.country ?? "",
-            };
-          });
-          setComposeConnectionTargets(
-            buildComposeTargets(
-              visibleConnections.map((row) => ({
-                id: row.id,
-                other_user_id: row.other_user_id,
-                trip_id: row.trip_id ?? null,
-                connect_context: row.connect_context ?? null,
-              })),
-              profilesById
-            )
+          const fallbackConnectionRows = allConnections.filter(
+            (row) => row.is_visible_in_messages || row.is_incoming_pending || row.is_outgoing_pending
           );
 
-          const tripsById: Record<string, TripRow> = {};
-          ((tripsRes.data ?? []) as TripRow[]).forEach((row) => {
-            const key = row.id ?? "";
-            if (!key) return;
-            tripsById[key] = row;
-          });
-          setComposeTripTargets(buildTripComposeTargets(acceptedTripIds, tripsById, acceptedTripUpdatedAtById));
+          if (fallbackConnectionRows.length > 0 || acceptedTripIds.length > 0) {
+            const fallbackOtherUserIds = Array.from(
+              new Set(fallbackConnectionRows.map((row) => row.other_user_id).filter(Boolean))
+            );
+            const fallbackTripIds = Array.from(
+              new Set([...acceptedTripIds, ...fallbackConnectionRows.map((row) => row.trip_id ?? "").filter(Boolean)])
+            );
+            const fallbackConnectionIds = fallbackConnectionRows.map((row) => row.id).filter(Boolean);
 
-          const lastByConnection: Record<string, { body: string; senderId: string; createdAt: string }> = {};
-          ((messagesRes.data ?? []) as MessageRowDb[]).forEach((row) => {
-            const connectionId = row.connection_id ?? "";
-            if (!connectionId || lastByConnection[connectionId]) return;
-            const parsedBody = parseReplyPayload(row.body ?? "");
-            lastByConnection[connectionId] = {
-              body: parsedBody.text,
-              senderId: row.sender_id ?? "",
-              createdAt: row.created_at ?? "",
+            const [fallbackProfilesRes, fallbackTripsRes, fallbackMessagesRes] = await Promise.all([
+              fallbackOtherUserIds.length
+                ? supabase
+                    .from("profiles")
+                    .select("user_id,display_name,avatar_url,city,country")
+                    .in("user_id", fallbackOtherUserIds)
+                : Promise.resolve({ data: [], error: null }),
+              fallbackTripIds.length
+                ? supabase
+                    .from("trips")
+                    .select("id,destination_city,destination_country,start_date,end_date")
+                    .in("id", fallbackTripIds)
+                : Promise.resolve({ data: [], error: null }),
+              fallbackConnectionIds.length
+                ? supabase
+                    .from("messages")
+                    .select("connection_id,sender_id,body,created_at")
+                    .in("connection_id", fallbackConnectionIds)
+                    .order("created_at", { ascending: false })
+                    .limit(2000)
+                : Promise.resolve({ data: [], error: null }),
+            ]);
+
+            const fallbackProfilesById: Record<
+              string,
+              { displayName: string; avatarUrl: string | null; city: string; country: string }
+            > = {};
+            ((fallbackProfilesRes.data ?? []) as ProfileRow[]).forEach((row) => {
+              const key = row.user_id ?? "";
+              if (!key) return;
+              fallbackProfilesById[key] = {
+                displayName: row.display_name ?? "Connection",
+                avatarUrl: row.avatar_url ?? null,
+                city: row.city ?? "",
+                country: row.country ?? "",
+              };
+            });
+
+            const fallbackTripsById: Record<string, TripRow> = {};
+            ((fallbackTripsRes.data ?? []) as TripRow[]).forEach((row) => {
+              const key = row.id ?? "";
+              if (!key) return;
+              fallbackTripsById[key] = row;
+            });
+
+            const latestMessageByConnection: Record<string, { body: string; senderId: string; createdAt: string }> = {};
+            ((fallbackMessagesRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+              const connectionId = typeof row.connection_id === "string" ? row.connection_id : "";
+              if (!connectionId || latestMessageByConnection[connectionId]) return;
+              latestMessageByConnection[connectionId] = {
+                body: typeof row.body === "string" ? row.body : "",
+                senderId: typeof row.sender_id === "string" ? row.sender_id : "",
+                createdAt: typeof row.created_at === "string" ? row.created_at : "",
+              };
+            });
+
+            const mapConnectionStatus = (value: string): ThreadStatusTag => {
+              const normalized = value.trim().toLowerCase();
+              if (normalized === "pending") return "pending";
+              if (normalized === "accepted") return "accepted";
+              if (normalized === "declined") return "declined";
+              if (normalized === "cancelled") return "cancelled";
+              return "active";
             };
-          });
 
-          const connectionThreads: ThreadRow[] = visibleConnections.map((row) => {
-            const other = profilesById[row.other_user_id];
-            const last = lastByConnection[row.id];
-            const cameFromTrip =
-              row.connect_context === "trip" || row.connect_context === "traveller" || Boolean(row.trip_id);
+            const fallbackConnections: ThreadRow[] = fallbackConnectionRows.map((row) => {
+              const profile = fallbackProfilesById[row.other_user_id];
+              const latest = latestMessageByConnection[row.id];
+              const statusTag = mapConnectionStatus(row.status ?? "");
+              const contextTag: ThreadContextTag = statusTag === "active" ? "regular_chat" : "connection_request";
+              return {
+                threadId: `conn:${row.id}`,
+                dbThreadId: null,
+                kind: "connection",
+                contextTag,
+                statusTag,
+                hasPendingRequest: statusTag === "pending",
+                title: profile?.displayName ?? "Connection",
+                metaLabel: "",
+                subtitle: [profile?.city ?? "", profile?.country ?? ""].filter(Boolean).join(", ") || "Connection",
+                avatarUrl: profile?.avatarUrl ?? null,
+                preview: latest?.body
+                  ? parseReplyPayload(latest.body).text
+                  : statusTag === "pending"
+                  ? row.is_incoming_pending
+                    ? "Request pending. Open to respond."
+                    : "Awaiting response."
+                  : statusTag === "declined"
+                  ? "Request declined."
+                  : statusTag === "cancelled"
+                  ? "Request cancelled."
+                  : "No messages yet.",
+                updatedAt: latest?.createdAt || row.created_at || new Date().toISOString(),
+                unreadCount: latest && latest.senderId && latest.senderId !== user.id ? 1 : 0,
+                badge: "Connection",
+                otherUserId: row.other_user_id,
+              } satisfies ThreadRow;
+            });
 
-            return {
-              threadId: `conn:${row.id}`,
-              dbThreadId: null,
-              kind: "connection",
-              title: other?.displayName ?? "Connection",
-              subtitle: cameFromTrip
-                ? `From trip • ${parseTripLabel((row.trip_id ? tripsById[row.trip_id] : null) ?? null)}`
-                : [other?.city ?? "", other?.country ?? ""].filter(Boolean).join(", ") || "Connection",
-              avatarUrl: other?.avatarUrl ?? null,
-              preview: last?.body || "No messages yet.",
-              updatedAt: last?.createdAt || row.created_at || new Date().toISOString(),
-              unreadCount: last && last.senderId !== user.id ? 1 : 0,
-              badge: "Connection",
-            };
-          });
+            const fallbackTrips: ThreadRow[] = acceptedTripIds.map((tripId) => {
+              const trip = fallbackTripsById[tripId];
+              return {
+                threadId: `trip:${tripId}`,
+                dbThreadId: null,
+                kind: "trip",
+                contextTag: "trip_join_request",
+                statusTag: "active",
+                hasPendingRequest: false,
+                metaLabel: "",
+                title: trip?.destination_city ? `Trip to ${trip.destination_city}` : "Trip chat",
+                subtitle: parseTripLabel(trip ?? null),
+                avatarUrl: null,
+                preview: "Trip thread",
+                updatedAt: acceptedTripUpdatedAtById[tripId] || trip?.start_date || new Date().toISOString(),
+                unreadCount: 0,
+                badge: "Trip",
+                otherUserId: null,
+              } satisfies ThreadRow;
+            });
 
-          const tripThreads: ThreadRow[] = acceptedTripIds.map((tripId) => {
-            const trip = tripsById[tripId];
-            const updatedAt = acceptedTripUpdatedAtById[tripId] || trip?.start_date || new Date().toISOString();
-            return {
-              threadId: `trip:${tripId}`,
-              dbThreadId: null,
-              kind: "trip",
-              title: trip?.destination_city ? `Trip to ${trip.destination_city}` : "Trip chat",
-              subtitle: parseTripLabel(trip ?? null),
-              avatarUrl: null,
-              preview: "Open trip chat",
-              updatedAt,
-              unreadCount: 0,
-              badge: "Trip",
-            } satisfies ThreadRow;
-          });
-
-          mergedThreads = [...connectionThreads, ...tripThreads].sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt));
+            mergedThreads = collapseDuplicateInboxThreads(
+              [...fallbackConnections, ...fallbackTrips].sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
+            );
+          }
         }
 
         if (!cancelled) {
@@ -1462,20 +3002,24 @@ function MessagesPageContent() {
             return Object.fromEntries(Object.entries(merged).filter(([, until]) => toTime(until) > now));
           });
           setPinnedThreads((prev) => ({ ...prev, ...pinnedFromDb }));
+          setThreadContextsByDbId(localContextsByThreadId);
           setThreads(mergedThreads);
           setActiveThreadToken((prev) => {
             const validPrev = prev && mergedThreads.some((row) => row.threadId === prev);
             if (validPrev) return prev;
             return mergedThreads[0]?.threadId ?? null;
           });
+          setThreadsHydrated(true);
           setLoading(false);
         }
       } catch (e: unknown) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load inbox.");
           setThreads([]);
+          setThreadContextsByDbId({});
           setComposeConnectionTargets([]);
           setComposeTripTargets([]);
+          setThreadsHydrated(true);
           setLoading(false);
         }
       }
@@ -1494,12 +3038,31 @@ function MessagesPageContent() {
   }, [searchParams, threads]);
 
   useEffect(() => {
+    const requestedTab = parseFilterTab(searchParams.get("tab"));
+    const nextTab = requestedTab ?? "all";
+    setActiveTab((prev) => (prev === nextTab ? prev : nextTab));
+  }, [searchParams]);
+
+  const selectFilterTab = useCallback(
+    (tab: FilterTab) => {
+      setActiveTab(tab);
+      router.replace(buildInboxUrl({ tab }), { scroll: false });
+    },
+    [buildInboxUrl, router]
+  );
+
+  const mobileThreadOpen = forceMobileThread && Boolean(activeThreadToken);
+
+  useEffect(() => {
     if (!meId || !activeThreadToken) {
       setActiveMeta(null);
+      setContactSidebar(null);
+      setContactSidebarError(null);
       setActiveMessages([]);
       setThreadError(null);
       setActiveLastReadAt(null);
       setActivePeerLastReadAt(null);
+      setActiveFallbackContext(null);
       setOpenMessageMenuId(null);
       setOpenThreadRowMenuId(null);
       setThreadActionsOpen(false);
@@ -1521,6 +3084,390 @@ function MessagesPageContent() {
   }, [activeThreadToken, loadThreadByToken, meId, reloadTick]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!meId) {
+      setPendingReferenceCountsByPeer({});
+      return;
+    }
+
+    (async () => {
+      try {
+        const nowIso = new Date().toISOString();
+        const promptRes = await supabase
+          .from("reference_requests")
+          .select("peer_user_id,context_tag,due_at,expires_at,status")
+          .eq("user_id", meId)
+          .eq("status", "pending")
+          .lte("due_at", nowIso)
+          .gte("expires_at", nowIso)
+          .limit(500);
+
+        if (promptRes.error) {
+          if (isSchemaMissingMessage(promptRes.error.message)) {
+            if (!cancelled) setPendingReferenceCountsByPeer({});
+            return;
+          }
+          throw new Error(promptRes.error.message);
+        }
+
+        const counts: Record<string, number> = {};
+        for (const raw of ((promptRes.data ?? []) as Array<Record<string, unknown>>)) {
+          const row = asRecord(raw);
+          const peerUserId = asString(row.peer_user_id);
+          if (!peerUserId) continue;
+          counts[peerUserId] = (counts[peerUserId] ?? 0) + 1;
+        }
+        if (!cancelled) setPendingReferenceCountsByPeer(counts);
+      } catch {
+        if (!cancelled) setPendingReferenceCountsByPeer({});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meId, reloadTick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targetUserId = activeMeta?.otherUserId;
+    if (!targetUserId) {
+      setContactSidebar(null);
+      setContactSidebarError(null);
+      setContactSidebarLoading(false);
+      return;
+    }
+
+    setContactSidebarLoading(true);
+    setContactSidebar(null);
+    setContactSidebarError(null);
+
+    (async () => {
+      try {
+        const fullProfileRes = await supabase
+          .from("profiles")
+          .select(
+            [
+              "user_id",
+              "display_name",
+              "avatar_url",
+              "city",
+              "country",
+              "roles",
+              "languages",
+              "dance_styles",
+              "dance_skills",
+              "interests",
+              "availability",
+              "verified",
+              "verified_label",
+              "connections_count",
+              "can_host",
+              "hosting_status",
+              "max_guests",
+              "hosting_last_minute_ok",
+              "hosting_preferred_guest_gender",
+              "hosting_kid_friendly",
+              "hosting_pet_friendly",
+              "hosting_smoking_allowed",
+              "hosting_sleeping_arrangement",
+              "hosting_guest_share",
+              "hosting_transit_access",
+            ].join(",")
+          )
+          .eq("user_id", targetUserId)
+          .maybeSingle();
+
+        let profileRecord: Record<string, unknown> | null = null;
+        if (fullProfileRes.error) {
+          if (!isSchemaMissingMessage(fullProfileRes.error.message)) {
+            throw new Error(fullProfileRes.error.message);
+          }
+          const fallbackProfileRes = await supabase
+            .from("profiles")
+            .select(
+              [
+                "user_id",
+                "display_name",
+                "avatar_url",
+                "city",
+                "country",
+                "roles",
+                "languages",
+                "dance_styles",
+                "dance_skills",
+                "interests",
+                "availability",
+                "verified",
+                "verified_label",
+                "connections_count",
+              ].join(",")
+            )
+            .eq("user_id", targetUserId)
+            .maybeSingle();
+          if (fallbackProfileRes.error) throw new Error(fallbackProfileRes.error.message);
+          profileRecord = fallbackProfileRes.data ? asRecord(fallbackProfileRes.data) : null;
+        } else {
+          profileRecord = fullProfileRes.data ? asRecord(fullProfileRes.data) : null;
+        }
+
+        if (!profileRecord) throw new Error("Member profile not found.");
+
+        const fetchReferenceRowsForRecipient = async (columns: Array<"recipient_id" | "to_user_id" | "target_id">) => {
+          const merged: Array<Record<string, unknown>> = [];
+          const seen = new Set<string>();
+          for (const column of columns) {
+            const res = await supabase
+              .from("references")
+              .select(`id,sentiment,rating,context_tag,entity_type,context,${column}`)
+              .eq(column, targetUserId)
+              .limit(800);
+            if (res.error) {
+              if (isSchemaMissingMessage(res.error.message)) continue;
+              throw new Error(res.error.message);
+            }
+            for (const row of (res.data ?? []) as Array<Record<string, unknown>>) {
+              const id = asString(row.id);
+              if (!id || seen.has(id)) continue;
+              seen.add(id);
+              merged.push(row);
+            }
+          }
+          return merged;
+        };
+
+        const [refsRows, tripsJoinedRes, hostingRes] = await Promise.all([
+          fetchReferenceRowsForRecipient(["recipient_id", "to_user_id", "target_id"]),
+          supabase.from("trip_requests").select("id", { count: "exact", head: true }).eq("requester_id", targetUserId).eq("status", "accepted"),
+          supabase
+            .from("hosting_requests")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "accepted")
+            .or(
+              `and(request_type.eq.request_hosting,recipient_user_id.eq.${targetUserId}),and(request_type.eq.offer_to_host,sender_user_id.eq.${targetUserId})`
+            ),
+        ]);
+        const referencesByContext: Record<ReferenceContextTag, number> = emptyReferenceContextCounts();
+        let referencesTotal = 0;
+        let referencesPositive = 0;
+
+        refsRows.forEach((row) => {
+          referencesTotal += 1;
+          const sentimentRaw = asString(row.sentiment ?? row.rating).toLowerCase();
+          if (sentimentRaw === "positive" || sentimentRaw === "4" || sentimentRaw === "5") {
+            referencesPositive += 1;
+          }
+          const ctxRaw = asString(row.context_tag ?? row.entity_type ?? row.context ?? "collaboration");
+          const context = normalizeReferenceContext(ctxRaw);
+          referencesByContext[context] += 1;
+        });
+
+        let tripsJoinedAccepted = 0;
+        if (!tripsJoinedRes.error) {
+          tripsJoinedAccepted = tripsJoinedRes.count ?? 0;
+        } else if (!isSchemaMissingMessage(tripsJoinedRes.error.message)) {
+          throw new Error(tripsJoinedRes.error.message);
+        }
+
+        let hostingAccepted = 0;
+        if (!hostingRes.error) {
+          hostingAccepted = hostingRes.count ?? 0;
+        } else if (!isSchemaMissingMessage(hostingRes.error.message)) {
+          throw new Error(hostingRes.error.message);
+        }
+
+        if (cancelled) return;
+
+        setContactSidebar({
+          userId: targetUserId,
+          displayName: asString(profileRecord.display_name || "Member") || "Member",
+          avatarUrl: typeof profileRecord.avatar_url === "string" ? profileRecord.avatar_url : null,
+          city: asString(profileRecord.city),
+          country: asString(profileRecord.country),
+          roles: asStringArrayLoose(profileRecord.roles),
+          danceStyles: parseDanceStyleKeys(profileRecord.dance_skills, profileRecord.dance_styles),
+          interests: asStringArrayLoose(profileRecord.interests),
+          availability: asStringArrayLoose(profileRecord.availability),
+          languages: asStringArrayLoose(profileRecord.languages),
+          referencesTotal,
+          referencesPositive,
+          referencesByContext,
+          tripsJoinedAccepted,
+          hostingAccepted,
+          connectionsCount:
+            typeof profileRecord.connections_count === "number" && Number.isFinite(profileRecord.connections_count)
+              ? profileRecord.connections_count
+              : 0,
+          canHost: profileRecord.can_host === true,
+          hostingStatus:
+            typeof profileRecord.hosting_status === "string" && profileRecord.hosting_status.trim().length > 0
+              ? profileRecord.hosting_status
+              : "inactive",
+          maxGuests:
+            typeof profileRecord.max_guests === "number" && Number.isFinite(profileRecord.max_guests)
+              ? profileRecord.max_guests
+              : null,
+          hostingLastMinuteOk: profileRecord.hosting_last_minute_ok === true,
+          hostingPreferredGuestGender: normalizeHostingPreferredGuestGender(profileRecord.hosting_preferred_guest_gender),
+          hostingKidFriendly: profileRecord.hosting_kid_friendly === true,
+          hostingPetFriendly: profileRecord.hosting_pet_friendly === true,
+          hostingSmokingAllowed: profileRecord.hosting_smoking_allowed === true,
+          hostingSleepingArrangement: normalizeHostingSleepingArrangement(profileRecord.hosting_sleeping_arrangement),
+          hostingGuestShare:
+            typeof profileRecord.hosting_guest_share === "string" && profileRecord.hosting_guest_share.trim().length > 0
+              ? profileRecord.hosting_guest_share
+              : null,
+          hostingTransitAccess:
+            typeof profileRecord.hosting_transit_access === "string" && profileRecord.hosting_transit_access.trim().length > 0
+              ? profileRecord.hosting_transit_access
+              : null,
+          verified: profileRecord.verified === true,
+          verifiedLabel:
+            typeof profileRecord.verified_label === "string" && profileRecord.verified_label.trim().length > 0
+              ? profileRecord.verified_label
+              : null,
+        });
+      } catch (e: unknown) {
+        if (cancelled) return;
+        setContactSidebar(null);
+        setContactSidebarError(e instanceof Error ? e.message : "Failed to load member details.");
+      } finally {
+        if (!cancelled) setContactSidebarLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMeta?.otherUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targetUserId = activeMeta?.otherUserId;
+    if (!meId || !targetUserId) {
+      setActiveReferencePrompt(null);
+      setSubmittedReferenceState({ contextTags: new Set<ReferenceContextTag>(), latestSubmittedAt: null });
+      return;
+    }
+
+    (async () => {
+      try {
+        const accessToken = await resolveAccessToken();
+
+        const syncRes = await fetch("/api/references/prompts/sync", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const syncPayload = (await syncRes.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!syncRes.ok || !syncPayload?.ok) {
+          const errorMessage = syncPayload?.error ?? "Failed to sync reference prompts.";
+          if (!isSchemaMissingMessage(errorMessage)) {
+            throw new Error(errorMessage);
+          }
+        }
+
+        const nowIso = new Date().toISOString();
+        const [promptRes, authoredRefsRes] = await Promise.all([
+          supabase
+            .from("reference_requests")
+            .select("id,peer_user_id,context_tag,source_table,source_id,due_at,expires_at,status")
+            .eq("user_id", meId)
+            .eq("peer_user_id", targetUserId)
+            .eq("status", "pending")
+            .lte("due_at", nowIso)
+            .gte("expires_at", nowIso)
+            .order("due_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from("references")
+            .select("id,created_at,context_tag,context,entity_type")
+            .eq("author_id", meId)
+            .eq("recipient_id", targetUserId)
+            .order("created_at", { ascending: false })
+            .limit(100),
+        ]);
+
+        if (promptRes.error) {
+          if (isSchemaMissingMessage(promptRes.error.message)) {
+            if (!cancelled) {
+              setActiveReferencePrompt(null);
+              setSubmittedReferenceState({ contextTags: new Set<ReferenceContextTag>(), latestSubmittedAt: null });
+            }
+            return;
+          }
+          throw new Error(promptRes.error.message);
+        }
+
+        if (authoredRefsRes.error && !isSchemaMissingMessage(authoredRefsRes.error.message)) {
+          throw new Error(authoredRefsRes.error.message);
+        }
+
+        const submittedTags = new Set<ReferenceContextTag>();
+        let latestSubmittedAt: string | null = null;
+        for (const rawRow of ((authoredRefsRes.data ?? []) as Array<Record<string, unknown>>)) {
+          const row = asRecord(rawRow);
+          const context = normalizeReferenceContext(
+            asString(row.context_tag ?? row.context ?? row.entity_type ?? "collaboration")
+          );
+          submittedTags.add(context);
+          const createdAt = asString(row.created_at);
+          if (createdAt && (!latestSubmittedAt || createdAt > latestSubmittedAt)) {
+            latestSubmittedAt = createdAt;
+          }
+        }
+
+        const row = promptRes.data ? asRecord(promptRes.data) : null;
+        if (!row) {
+          if (!cancelled) {
+            setActiveReferencePrompt(null);
+            setSubmittedReferenceState({ contextTags: submittedTags, latestSubmittedAt });
+          }
+          return;
+        }
+
+        const id = asString(row.id);
+        const peerUserId = asString(row.peer_user_id);
+        const sourceTable = asString(row.source_table);
+        const sourceId = asString(row.source_id);
+        const dueAt = asString(row.due_at);
+        const expiresAt = asString(row.expires_at);
+        if (!id || !peerUserId || !sourceTable || !sourceId || !dueAt || !expiresAt) {
+          if (!cancelled) {
+            setActiveReferencePrompt(null);
+            setSubmittedReferenceState({ contextTags: submittedTags, latestSubmittedAt });
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setSubmittedReferenceState({ contextTags: submittedTags, latestSubmittedAt });
+          setActiveReferencePrompt({
+            id,
+            peerUserId,
+            contextTag: normalizeReferenceContext(asString(row.context_tag || "collaboration")),
+            sourceTable,
+            sourceId,
+            dueAt,
+            expiresAt,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveReferencePrompt(null);
+          setSubmittedReferenceState({ contextTags: new Set<ReferenceContextTag>(), latestSubmittedAt: null });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMeta?.otherUserId, meId, resolveAccessToken]);
+
+  useEffect(() => {
     if (!activeThreadToken) return;
     setThreadDrafts((prev) => {
       const current = prev[activeThreadToken] ?? "";
@@ -1535,13 +3482,33 @@ function MessagesPageContent() {
     });
   }, [activeThreadToken, threadBody]);
 
+  useEffect(() => {
+    setActivityComposerOpen(false);
+    setActivityDraft(DEFAULT_ACTIVITY_DRAFT);
+    setActivityBusy(false);
+    setActivityMoreFiltersOpen(false);
+  }, [activeThreadToken]);
+
   const sendActiveMessage = useCallback(async () => {
     const text = threadBody.trim();
     if (!text || !meId || !activeMeta) return;
+    const currentComposerLockReason = composerLockReasonRef.current;
+    if (currentComposerLockReason) {
+      return;
+    }
+    const currentCanSendFreeServiceInquiryFollowup = Boolean(
+      activeMeta.contextTag === "service_inquiry" &&
+        activeMeta.statusTag === "info_shared" &&
+        activeMeta.serviceInquiryId &&
+        activeMeta.serviceInquiryRequesterId === meId &&
+        !activeMeta.serviceInquiryFollowupUsed
+    );
+    const isServiceInquiryFollowup = Boolean(
+      currentCanSendFreeServiceInquiryFollowup && activeMeta.serviceInquiryId
+    );
     const outboundText = replyTo ? `[[reply:${replyTo.id}]]\n${text}` : text;
     setSending(true);
     setThreadError(null);
-    setDailyLimitReached(false);
     const optimisticId = `local-${crypto.randomUUID()}`;
     const optimisticCreatedAt = new Date().toISOString();
     const optimisticMessage: MessageItem = {
@@ -1549,65 +3516,249 @@ function MessagesPageContent() {
       senderId: meId,
       body: outboundText,
       createdAt: optimisticCreatedAt,
+      messageType: "text",
+      contextTag: isServiceInquiryFollowup ? "service_inquiry" : "regular_chat",
+      statusTag: isServiceInquiryFollowup ? "inquiry_followup_pending" : "active",
+      metadata: {},
       status: "sending",
       localOnly: true,
     };
     setActiveMessages((prev) => [...prev, optimisticMessage]);
+    if (activeThreadToken) {
+      const previewText = parseReplyPayload(outboundText).text;
+      setThreads((prev) =>
+        [...prev.map((thread) => (thread.threadId === activeThreadToken ? { ...thread, preview: previewText, updatedAt: optimisticCreatedAt } : thread))].sort(
+          (a, b) => toTime(b.updatedAt) - toTime(a.updatedAt)
+        )
+      );
+    }
     setThreadBody("");
 
     try {
-      if (activeMeta.kind === "connection" && activeMeta.connectionId) {
-        const rpc = await supabase.rpc("send_message", {
-          p_connection_id: activeMeta.connectionId,
+      if (isServiceInquiryFollowup && activeMeta.serviceInquiryId) {
+        const token = await resolveAccessToken();
+        const response = await fetch(`/api/service-inquiries/${encodeURIComponent(activeMeta.serviceInquiryId)}/followup`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ body: outboundText }),
+        });
+        const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!response.ok || !result?.ok) {
+          throw new Error(result?.error ?? "Failed to send follow-up.");
+        }
+        if (activeThreadToken && meId) {
+          await loadThreadByToken(activeThreadToken, meId);
+          setReloadTick((value) => value + 1);
+        }
+        await refreshMessagingSummary();
+      } else {
+        const rpc = await supabase.rpc("cx_send_inbox_message", {
+          p_thread_id: activeMeta.threadId ?? null,
+          p_connection_id: activeMeta.connectionId ?? null,
           p_body: outboundText,
         });
         if (rpc.error) throw rpc.error;
-      } else if (activeMeta.kind === "trip" && activeMeta.threadId) {
-        const insert = await supabase.from("thread_messages").insert({
-          thread_id: activeMeta.threadId,
-          sender_id: meId,
-          body: outboundText,
-        });
-        if (insert.error) throw insert.error;
-      } else {
-        throw new Error("Thread messaging is unavailable for this chat.");
+        const payload = asRecord(rpc.data);
+        const returnedThreadId = asString(payload.threadId) || activeMeta.threadId || null;
+        const returnedMessagingState = normalizeMessagingState(asString(payload.messagingState), "active");
+        const returnedCycleStart = asString(payload.cycleStart) || null;
+        const returnedCycleEnd = asString(payload.cycleEnd) || null;
+        const nextSummary: MessagingSummary = {
+          plan: asString(payload.plan) === "premium" ? "premium" : "free",
+          activeCount: Number(payload.activeCount) || 0,
+          activeLimit: Number(payload.activeLimit) || 10,
+          monthlyUsed: Number(payload.monthlyUsed) || 0,
+          monthlyLimit: Number(payload.monthlyLimit) || 10,
+          pendingCount: messagingSummary?.pendingCount ?? 0,
+          cycleStart: returnedCycleStart,
+          cycleEnd: returnedCycleEnd,
+        };
+        setMessagingSummary(nextSummary);
+        setActiveMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                threadId: returnedThreadId,
+                messagingState: returnedMessagingState,
+                activatedAt: optimisticCreatedAt,
+                activationCycleStart: returnedCycleStart,
+                activationCycleEnd: returnedCycleEnd,
+              }
+            : prev
+        );
+        if (activeThreadToken) {
+          setThreads((prev) =>
+            [...prev.map((thread) =>
+              thread.threadId === activeThreadToken
+                ? {
+                    ...thread,
+                    dbThreadId: returnedThreadId,
+                    preview: parseReplyPayload(outboundText).text,
+                    updatedAt: optimisticCreatedAt,
+                    messagingState: returnedMessagingState,
+                    activatedAt: optimisticCreatedAt,
+                    activationCycleStart: returnedCycleStart,
+                    activationCycleEnd: returnedCycleEnd,
+                  }
+                : thread
+            )].sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
+          );
+        }
       }
       setActiveMessages((prev) =>
         prev.map((message) => (message.id === optimisticId ? { ...message, status: "sent", localOnly: false } : message))
       );
       setReplyTo(null);
       setThreadInfo(null);
-      setReloadTick((v) => v + 1);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to send message.";
       if (
-        message.toLowerCase().includes("daily limit") ||
-        message.toLowerCase().includes("daily_limit_reached") ||
-        message.toLowerCase().includes("rate limit")
+        message.toLowerCase().includes("monthly_activation_limit_reached") ||
+        message.toLowerCase().includes("monthly activation") ||
+        message.toLowerCase().includes("concurrent_active_limit_reached") ||
+        message.toLowerCase().includes("concurrent active")
       ) {
-        setDailyLimitReached(true);
+        await refreshMessagingSummary();
+        if (
+          message.toLowerCase().includes("concurrent_active_limit_reached") ||
+          message.toLowerCase().includes("concurrent active")
+        ) {
+          setArchiveToContinueOpen(true);
+        }
+        setThreadError(message);
         setActiveMessages((prev) =>
           prev.map((item) => (item.id === optimisticId ? { ...item, status: "failed" } : item))
+        );
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.threadId === activeThreadToken ? { ...thread, preview: "Failed to send message." } : thread
+          )
         );
       } else {
         setThreadError(message);
         setActiveMessages((prev) =>
           prev.map((item) => (item.id === optimisticId ? { ...item, status: "failed" } : item))
         );
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.threadId === activeThreadToken ? { ...thread, preview: "Failed to send message." } : thread
+          )
+        );
       }
     } finally {
       setSending(false);
     }
-  }, [activeMeta, meId, replyTo, threadBody]);
+  }, [
+    activeMeta,
+    activeThreadToken,
+    loadThreadByToken,
+    meId,
+    messagingSummary?.pendingCount,
+    refreshMessagingSummary,
+    replyTo,
+    resolveAccessToken,
+    threadBody,
+  ]);
+
+  const submitActivityInvite = useCallback(async () => {
+    if ((!activeMeta?.threadId && !activeMeta?.connectionId) || !activeMeta?.otherUserId || !meId) return;
+    setActivityBusy(true);
+    setThreadError(null);
+    setThreadInfo(null);
+    try {
+      const accessToken = await resolveAccessToken();
+
+      const response = await fetch("/api/activities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          threadId: activeMeta.threadId || undefined,
+          connectionId: activeMeta.connectionId || undefined,
+          recipientUserId: activeMeta.otherUserId,
+          activityType: activityDraft.activityType,
+          note: activityDraft.note || null,
+          startAt: activityDraft.startAt || null,
+          endAt: activityDraft.endAt || null,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; id?: string; threadId?: string | null } | null;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error ?? "Failed to create activity.");
+      }
+
+      const resolvedThreadId = typeof result?.threadId === "string" && result.threadId ? result.threadId : activeMeta.threadId;
+      if (!resolvedThreadId) throw new Error("Missing thread for activity.");
+
+      setActivityComposerOpen(false);
+      setActivityDraft(DEFAULT_ACTIVITY_DRAFT);
+      setActiveMeta((prev) => (prev ? { ...prev, threadId: resolvedThreadId } : prev));
+      const nowIso = new Date().toISOString();
+      const optimisticContextId = typeof result?.id === "string" && result.id ? `activity:${result.id}` : `activity:optimistic:${Date.now()}`;
+      const optimisticContext: ThreadContextItem = {
+        id: optimisticContextId,
+        threadId: resolvedThreadId,
+        sourceTable: "activities",
+        sourceId: typeof result?.id === "string" && result.id ? result.id : optimisticContextId,
+        contextTag: "activity",
+        statusTag: "pending",
+        title: activityTypeLabel(activityDraft.activityType),
+        city: null,
+        startDate: activityDraft.startAt ? activityDraft.startAt.slice(0, 10) : null,
+        endDate: (activityDraft.endAt || activityDraft.startAt) ? (activityDraft.endAt || activityDraft.startAt).slice(0, 10) : null,
+        requesterId: meId,
+        recipientId: activeMeta.otherUserId,
+        metadata: {
+          activity_type: activityDraft.activityType,
+          title: activityTypeLabel(activityDraft.activityType),
+          note: activityDraft.note || null,
+          start_at: activityDraft.startAt || null,
+          end_at: activityDraft.endAt || null,
+          activity_id: typeof result?.id === "string" ? result.id : null,
+        },
+        updatedAt: nowIso,
+        createdAt: nowIso,
+      };
+      setThreadContextsByDbId((prev) => {
+        const current = prev[resolvedThreadId] ?? [];
+        const next = [optimisticContext, ...current.filter((item) => !(item.sourceTable === optimisticContext.sourceTable && item.sourceId === optimisticContext.sourceId))];
+        return { ...prev, [resolvedThreadId]: next };
+      });
+      setThreads((prev) =>
+        prev.map((thread) =>
+          thread.threadId === activeThreadToken || thread.dbThreadId === resolvedThreadId
+            ? {
+                ...thread,
+                dbThreadId: resolvedThreadId,
+                hasPendingRequest: true,
+                statusTag: "pending",
+                contextTag: "activity",
+                preview: threadPreviewFromContext(optimisticContext),
+                metaLabel: describeContextMeta(optimisticContext),
+                updatedAt: nowIso,
+              }
+            : thread
+        )
+      );
+      setThreadInfo(`${activityTypeLabel(activityDraft.activityType)} request sent.`);
+    } catch (e: unknown) {
+      setThreadError(e instanceof Error ? e.message : "Failed to create activity.");
+    } finally {
+      setActivityBusy(false);
+    }
+  }, [activeMeta, activityDraft, activeThreadToken, meId, resolveAccessToken]);
 
   const submitReport = useCallback(async () => {
     if (!activeMeta?.connectionId) return;
     setReportBusy(true);
     setReportError(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token ?? "";
-      if (!accessToken) throw new Error("Missing auth session token");
+      const accessToken = await resolveAccessToken();
 
       const response = await fetch("/api/connections/action", {
         method: "POST",
@@ -1621,7 +3772,7 @@ function MessagesPageContent() {
           reason: reportReason,
           note: [reportNote.trim(), reportFromMessageId ? `Message ID: ${reportFromMessageId}` : ""].filter(Boolean).join("\n") || undefined,
           context: "message",
-          contextId: activeMeta.connectionId,
+          contextId: reportFromMessageId ?? activeMeta.connectionId,
         }),
       });
 
@@ -1640,7 +3791,7 @@ function MessagesPageContent() {
     } finally {
       setReportBusy(false);
     }
-  }, [activeMeta?.connectionId, reportFromMessageId, reportNote, reportReason]);
+  }, [activeMeta?.connectionId, reportFromMessageId, reportNote, reportReason, resolveAccessToken]);
 
   const upsertThreadPrefs = useCallback(
     async (dbThreadId: string | null, patch: ThreadPrefsPatch) => {
@@ -1682,44 +3833,98 @@ function MessagesPageContent() {
     async (threadToken: string, dbThreadId: string | null) => {
       setThreadError(null);
       try {
-        await upsertThreadPrefs(dbThreadId, { archived_at: new Date().toISOString() });
+        if (dbThreadId) {
+          const rpc = await supabase.rpc("cx_set_thread_messaging_state", {
+            p_thread_id: dbThreadId,
+            p_next_state: "archived",
+          });
+          if (rpc.error) throw rpc.error;
+          const payload = asRecord(rpc.data);
+          setMessagingSummary((prev) => ({
+            plan: asString(payload.plan) === "premium" ? "premium" : prev?.plan ?? "free",
+            activeCount: Number(payload.activeCount) || 0,
+            activeLimit: Number(payload.activeLimit) || prev?.activeLimit || 10,
+            monthlyUsed: Number(payload.monthlyUsed) || prev?.monthlyUsed || 0,
+            monthlyLimit: Number(payload.monthlyLimit) || prev?.monthlyLimit || 10,
+            pendingCount: prev?.pendingCount ?? 0,
+            cycleStart: asString(payload.cycleStart) || prev?.cycleStart || null,
+            cycleEnd: asString(payload.cycleEnd) || prev?.cycleEnd || null,
+          }));
+        } else {
+          await upsertThreadPrefs(dbThreadId, { archived_at: new Date().toISOString() });
+        }
         setArchivedThreads((prev) => ({ ...prev, [threadToken]: true }));
-        setThreadInfo("Thread archived. Open the Archived filter to restore it.");
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.threadId === threadToken ? { ...thread, messagingState: "archived" } : thread
+          )
+        );
+        setActiveMeta((prev) =>
+          prev && activeThreadToken === threadToken ? { ...prev, messagingState: "archived" } : prev
+        );
+        setThreadInfo("Thread archived. Use thread actions to unarchive.");
 
         if (activeThreadToken === threadToken) {
           const next = threads.find((item) => item.threadId !== threadToken && !archivedThreads[item.threadId]);
           if (next) {
             setActiveThreadToken(next.threadId);
-            router.replace(`/messages?thread=${encodeURIComponent(next.threadId)}`);
+            router.replace(buildInboxUrl({ threadToken: next.threadId }));
           } else {
             setActiveThreadToken(null);
-            router.replace("/messages");
+            router.replace(buildInboxUrl({ threadToken: null }));
           }
         }
       } catch (e: unknown) {
         setThreadError(e instanceof Error ? e.message : "Failed to archive thread.");
       }
     },
-    [activeThreadToken, archivedThreads, router, threads, upsertThreadPrefs]
+    [activeThreadToken, archivedThreads, buildInboxUrl, router, threads, upsertThreadPrefs]
   );
 
   const unarchiveThread = useCallback(
     async (threadToken: string, dbThreadId: string | null) => {
       setThreadError(null);
       try {
-        await upsertThreadPrefs(dbThreadId, { archived_at: null });
+        if (dbThreadId) {
+          const rpc = await supabase.rpc("cx_set_thread_messaging_state", {
+            p_thread_id: dbThreadId,
+            p_next_state: "inactive",
+          });
+          if (rpc.error) throw rpc.error;
+          const payload = asRecord(rpc.data);
+          setMessagingSummary((prev) => ({
+            plan: asString(payload.plan) === "premium" ? "premium" : prev?.plan ?? "free",
+            activeCount: Number(payload.activeCount) || 0,
+            activeLimit: Number(payload.activeLimit) || prev?.activeLimit || 10,
+            monthlyUsed: Number(payload.monthlyUsed) || prev?.monthlyUsed || 0,
+            monthlyLimit: Number(payload.monthlyLimit) || prev?.monthlyLimit || 10,
+            pendingCount: prev?.pendingCount ?? 0,
+            cycleStart: asString(payload.cycleStart) || prev?.cycleStart || null,
+            cycleEnd: asString(payload.cycleEnd) || prev?.cycleEnd || null,
+          }));
+        } else {
+          await upsertThreadPrefs(dbThreadId, { archived_at: null });
+        }
         setArchivedThreads((prev) => {
           if (!prev[threadToken]) return prev;
           const copy = { ...prev };
           delete copy[threadToken];
           return copy;
         });
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.threadId === threadToken ? { ...thread, messagingState: "inactive" } : thread
+          )
+        );
+        setActiveMeta((prev) =>
+          prev && activeThreadToken === threadToken ? { ...prev, messagingState: "inactive" } : prev
+        );
         setThreadInfo("Thread restored.");
       } catch (e: unknown) {
         setThreadError(e instanceof Error ? e.message : "Failed to restore thread.");
       }
     },
-    [upsertThreadPrefs]
+    [activeThreadToken, upsertThreadPrefs]
   );
 
   const muteThreadForHours = useCallback(
@@ -1845,15 +4050,661 @@ function MessagesPageContent() {
     return threads.find((thread) => thread.threadId === activeThreadToken)?.dbThreadId ?? null;
   }, [activeMeta?.threadId, activeThreadToken, threads]);
 
+  const activeThreadContexts = useMemo(() => {
+    const contexts = activeDbThreadId ? [...(threadContextsByDbId[activeDbThreadId] ?? [])] : [];
+    if (activeFallbackContext) {
+      const exists = contexts.some((item) => item.sourceTable === activeFallbackContext.sourceTable && item.sourceId === activeFallbackContext.sourceId);
+      if (!exists) contexts.push(activeFallbackContext);
+    }
+    return collapseDuplicateThreadContexts(contexts);
+  }, [activeDbThreadId, activeFallbackContext, threadContextsByDbId]);
+
+  const activePendingContext = useMemo(
+    () => activeThreadContexts.find((context) => isPendingLikeStatus(context.statusTag)) ?? null,
+    [activeThreadContexts]
+  );
+  const activePendingContexts = useMemo(
+    () => activeThreadContexts.filter((context) => isPendingLikeStatus(context.statusTag)),
+    [activeThreadContexts]
+  );
+  const pinnedPendingContexts = useMemo(
+    () => (activePendingContext ? [activePendingContext] : []),
+    [activePendingContext]
+  );
+  const activePrimaryContext = activePendingContext ?? activeThreadContexts[0] ?? null;
+  const historicalThreadContexts = useMemo(
+    () =>
+      activeThreadContexts
+        .filter((context) => context.contextTag !== "regular_chat" && !isPendingLikeStatus(context.statusTag))
+        .sort((a, b) => toTime(a.updatedAt) - toTime(b.updatedAt)),
+    [activeThreadContexts]
+  );
+  const renderedContextItems = useMemo(
+    () => [...pinnedPendingContexts, ...historicalThreadContexts],
+    [historicalThreadContexts, pinnedPendingContexts]
+  );
+  const latestCompletedActivityReferenceTag = useMemo(() => {
+    const completedActivities = [...historicalThreadContexts]
+      .filter((context) => context.contextTag === "activity" && context.statusTag === "completed")
+      .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt));
+    const latest = completedActivities[0];
+    if (!latest) return null;
+    const activityType = asString(latest.metadata.activity_type);
+    return activityType ? normalizeReferenceContext(activityType) : null;
+  }, [historicalThreadContexts]);
+
+  const showThreadPlaceholderSkeleton =
+    loading ||
+    !threadsHydrated ||
+    threadLoading ||
+    (Boolean(activeThreadToken) && !activeMeta) ||
+    (!activeMeta && threads.length === 0 && !error);
+  const hasSubmittedLatestCompletedActivityReference = useMemo(() => {
+    if (!latestCompletedActivityReferenceTag) return false;
+    return submittedReferenceState.contextTags.has(latestCompletedActivityReferenceTag);
+  }, [latestCompletedActivityReferenceTag, submittedReferenceState]);
+  const activeReferencePromptTag = activeReferencePrompt?.contextTag ?? null;
+  const activeServiceInquiryContext = useMemo(
+    () => activeThreadContexts.find((context) => context.contextTag === "service_inquiry") ?? null,
+    [activeThreadContexts]
+  );
+  const viewerIsServiceInquiryRequester = Boolean(
+    meId && activeServiceInquiryContext && activeServiceInquiryContext.requesterId === meId
+  );
+  const viewerIsServiceInquiryRecipient = Boolean(
+    meId && activeServiceInquiryContext && activeServiceInquiryContext.recipientId === meId
+  );
+  const serviceInquiryFollowupUsed = Boolean(activeServiceInquiryContext?.metadata.requester_followup_used);
+  const canSendFreeServiceInquiryFollowup = Boolean(
+    activeServiceInquiryContext &&
+      activeServiceInquiryContext.statusTag === "info_shared" &&
+      viewerIsServiceInquiryRequester &&
+      !serviceInquiryFollowupUsed
+  );
+  const acceptedInteractionContexts = useMemo(
+    () =>
+      activeThreadContexts.filter(
+        (context) => CHAT_UNLOCK_CONTEXT_TAGS.includes(context.contextTag) && isAcceptedInteractionStatus(context.statusTag)
+      ),
+    [activeThreadContexts]
+  );
+  const hasAcceptedConnectionContext = useMemo(
+    () =>
+      acceptedInteractionContexts.some(
+        (context) => context.contextTag === "connection_request" && isAcceptedInteractionStatus(context.statusTag)
+      ),
+    [acceptedInteractionContexts]
+  );
+  const hasAcceptedNonConnectionContext = useMemo(
+    () =>
+      acceptedInteractionContexts.some(
+        (context) => context.contextTag !== "connection_request" && isAcceptedInteractionStatus(context.statusTag)
+      ),
+    [acceptedInteractionContexts]
+  );
+  const hasHistoricalFreeText = useMemo(
+    () => activeMessages.some((message) => (message.messageType ?? "text") === "text"),
+    [activeMessages]
+  );
+  const [interactionBlocked, setInteractionBlocked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const connectionSourceIds = activeThreadContexts
+        .filter((context) => context.sourceTable === "connections")
+        .map((context) => context.sourceId)
+        .filter(Boolean);
+      if (connectionSourceIds.length === 0) {
+        setInteractionBlocked(false);
+        return;
+      }
+      const res = await supabase
+        .from("connections")
+        .select("id,status,blocked_by")
+        .in("id", connectionSourceIds);
+      if (cancelled) return;
+      if (res.error) {
+        setInteractionBlocked(false);
+        return;
+      }
+      const blocked = ((res.data ?? []) as Array<Record<string, unknown>>).some((row) => {
+        const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
+        const blockedBy = row.blocked_by;
+        return status === "blocked" || Boolean(blockedBy);
+      });
+      setInteractionBlocked(blocked);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThreadContexts]);
+
+  const updateRequestContext = useCallback(
+    async (contextId: string, action: "accept" | "decline" | "cancel") => {
+      if (!meId) return;
+      const context = activeThreadContexts.find((item) => item.id === contextId);
+      if (!context || context.statusTag !== "pending") return;
+
+      if (context.contextTag === "service_inquiry" && action === "accept") {
+        setRequestActionBusyId(`${context.id}:${action}`);
+        setThreadError(null);
+        setThreadInfo(null);
+        setShareInquiryError(null);
+        try {
+          await loadOwnTeacherInquiryBlocks();
+          setShareInquiryContext(context);
+        } catch (loadError) {
+          setThreadError(loadError instanceof Error ? loadError.message : "Could not load your teacher info blocks.");
+        } finally {
+          setRequestActionBusyId(null);
+        }
+        return;
+      }
+
+      setRequestActionBusyId(`${context.id}:${action}`);
+      setThreadError(null);
+      setThreadInfo(null);
+      try {
+        const token = await resolveAccessToken();
+
+        if (context.contextTag === "connection_request") {
+          const actionPayload = action === "accept" ? "accept" : action === "decline" ? "decline" : "cancel";
+          const response = await fetch("/api/connections/action", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              connId: context.sourceId,
+              action: actionPayload,
+              context: "message",
+              contextId: context.sourceId,
+            }),
+          });
+          const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+          if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to update request.");
+        } else if (context.contextTag === "trip_join_request") {
+          const response = await fetch(`/api/trips/requests/${encodeURIComponent(context.sourceId)}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action }),
+          });
+          const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+          if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to update trip request.");
+        } else if (context.contextTag === "hosting_request") {
+          if (action === "cancel") {
+            const response = await fetch(`/api/hosting/requests/${encodeURIComponent(context.sourceId)}/cancel`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+            if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to cancel hosting request.");
+          } else {
+            const response = await fetch(`/api/hosting/requests/${encodeURIComponent(context.sourceId)}/respond`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: action === "accept" ? "accepted" : "declined" }),
+            });
+            const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+            if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to update hosting request.");
+          }
+        } else if (context.contextTag === "event_chat") {
+          if (action === "cancel") {
+            const eventId = typeof context.metadata.event_id === "string" ? context.metadata.event_id : "";
+            if (!eventId) throw new Error("Missing event id for cancellation.");
+            const response = await fetch(`/api/events/${encodeURIComponent(eventId)}/join`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: "cancel_request" }),
+            });
+            const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+            if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to cancel event request.");
+          } else {
+            const response = await fetch("/api/events/requests", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                requestId: context.sourceId,
+                action,
+              }),
+            });
+            const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+            if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to update event request.");
+          }
+        } else if (context.contextTag === "activity") {
+          const response = await fetch(`/api/activities/${encodeURIComponent(context.sourceId)}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action }),
+          });
+          const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+          if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to update activity.");
+        } else if (context.contextTag === "service_inquiry") {
+          const endpoint =
+            action === "decline"
+              ? `/api/service-inquiries/${encodeURIComponent(context.sourceId)}/decline`
+              : null;
+          if (!endpoint) {
+            throw new Error("Service inquiries do not support this action.");
+          }
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+          if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Failed to update service inquiry.");
+        }
+
+      const nextStatus: ThreadStatusTag = action === "accept" ? "accepted" : action === "decline" ? "declined" : "cancelled";
+      const resolvedContextStatus: ThreadStatusTag =
+        context.contextTag === "service_inquiry" && action === "accept" ? "info_shared" : nextStatus;
+      const nowIso = new Date().toISOString();
+      const activeThreadId = context.threadId || activeDbThreadId || activeMeta?.threadId || null;
+      const nextContexts = collapseDuplicateThreadContexts(
+        activeThreadContexts.map((item) =>
+          item.id === context.id
+            ? {
+                ...item,
+                statusTag: resolvedContextStatus,
+                updatedAt: nowIso,
+                metadata: {
+                  ...item.metadata,
+                  accepted_at: action === "accept" ? nowIso : item.metadata.accepted_at ?? null,
+                },
+              }
+            : item
+        )
+      );
+      const nextPrimaryContext = nextContexts.find((item) => isPendingLikeStatus(item.statusTag)) ?? nextContexts[0] ?? null;
+      const nextHasAcceptedInteraction = nextContexts.some(
+        (item) => CHAT_UNLOCK_CONTEXT_TAGS.includes(item.contextTag) && isAcceptedInteractionStatus(item.statusTag)
+      );
+      if (activeThreadId) {
+        setThreadContextsByDbId((prev) => {
+          const current = prev[activeThreadId] ?? [];
+          const next = current.map((item) =>
+            item.id === context.id
+              ? {
+                    ...item,
+                    statusTag: resolvedContextStatus,
+                    updatedAt: nowIso,
+                    metadata: {
+                      ...item.metadata,
+                      accepted_at: action === "accept" ? nowIso : item.metadata.accepted_at ?? null,
+                    },
+                  }
+                : item
+            );
+            return { ...prev, [activeThreadId]: next };
+          });
+        }
+
+        setActiveMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                contextTag: nextPrimaryContext?.contextTag ?? prev.contextTag,
+                statusTag: nextPrimaryContext?.statusTag ?? prev.statusTag,
+                hasAcceptedInteraction: nextHasAcceptedInteraction,
+                isRelationshipPending: Boolean(
+                  isPendingLikeStatus(nextPrimaryContext?.statusTag ?? "active") && !nextHasAcceptedInteraction
+                ),
+              }
+            : prev
+        );
+
+        if (context.contextTag === "activity") {
+          setActiveMessages((prev) =>
+            prev.filter(
+              (message) =>
+                !(
+                  message.contextTag === "activity" &&
+                  asString(message.metadata?.activity_id) === context.sourceId
+                )
+            )
+          );
+        }
+
+        setThreads((prev) =>
+          prev.map((thread) => {
+            if (thread.threadId !== activeThreadToken) return thread;
+            const remainingPending = nextContexts.some((item) => isPendingLikeStatus(item.statusTag));
+            const primaryContext = nextContexts.find((item) => isPendingLikeStatus(item.statusTag)) ?? nextContexts[0] ?? null;
+            return {
+              ...thread,
+              hasPendingRequest: remainingPending,
+              statusTag:
+                primaryContext?.statusTag ??
+                (remainingPending ? "pending" : thread.statusTag === "pending" ? "active" : thread.statusTag),
+              contextTag: primaryContext?.contextTag ?? thread.contextTag,
+              metaLabel:
+                remainingPending && primaryContext ? describeContextMeta(primaryContext) : thread.kind === "connection" || thread.kind === "direct" ? "" : thread.metaLabel,
+              preview: deriveThreadPreviewFromState({
+                thread,
+                contexts: nextContexts,
+                messages: activeMessages,
+              }),
+              updatedAt: nowIso,
+              hasAcceptedInteraction: nextHasAcceptedInteraction,
+              isRelationshipPending: remainingPending && !nextHasAcceptedInteraction,
+            };
+          })
+        );
+
+        await refreshMessagingSummary();
+
+        setThreadInfo(
+          context.contextTag === "activity"
+            ? action === "accept"
+              ? "Activity accepted."
+              : action === "decline"
+              ? "Activity declined."
+              : "Activity cancelled."
+            : action === "accept"
+            ? "Request accepted."
+            : action === "decline"
+            ? "Request declined."
+            : "Request cancelled."
+        );
+      } catch (e: unknown) {
+        setThreadError(e instanceof Error ? e.message : "Failed to update request.");
+      } finally {
+        setRequestActionBusyId(null);
+      }
+    },
+    [
+      activeDbThreadId,
+      activeMessages,
+      activeMeta?.threadId,
+      activeThreadContexts,
+      activeThreadToken,
+      loadOwnTeacherInquiryBlocks,
+      meId,
+      refreshMessagingSummary,
+      resolveAccessToken,
+    ]
+  );
+
+  const refreshActiveInquiryThread = useCallback(async () => {
+    if (!activeThreadToken || !meId) return;
+    await loadThreadByToken(activeThreadToken, meId);
+    setReloadTick((value) => value + 1);
+  }, [activeThreadToken, loadThreadByToken, meId]);
+
+  const acceptServiceInquiryShare = useCallback(
+    async (payload: { selectedBlockIds: string[]; introNote: string | null }) => {
+      if (!shareInquiryContext) return;
+      setShareInquiryBusy(true);
+      setShareInquiryError(null);
+      setThreadError(null);
+      setThreadInfo(null);
+      try {
+        const token = await resolveAccessToken();
+        const response = await fetch(`/api/service-inquiries/${encodeURIComponent(shareInquiryContext.sourceId)}/accept`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!response.ok || !result?.ok) {
+          throw new Error(result?.error ?? "Could not share the selected information.");
+        }
+
+        setShareInquiryContext(null);
+        setShareInquiryBlocks([]);
+        setThreadInfo("Information shared.");
+        await refreshActiveInquiryThread();
+      } catch (shareError) {
+        setShareInquiryError(shareError instanceof Error ? shareError.message : "Could not share the selected information.");
+      } finally {
+        setShareInquiryBusy(false);
+      }
+    },
+    [refreshActiveInquiryThread, resolveAccessToken, shareInquiryContext]
+  );
+
+  const convertServiceInquiryConversation = useCallback(async () => {
+    const context =
+      activeThreadContexts.find(
+        (item) => item.contextTag === "service_inquiry" && item.statusTag === "inquiry_followup_pending"
+      ) ?? null;
+    if (!context) return;
+
+    setRequestActionBusyId(`${context.id}:convert`);
+    setThreadError(null);
+    setThreadInfo(null);
+    try {
+      const token = await resolveAccessToken();
+      const response = await fetch(`/api/service-inquiries/${encodeURIComponent(context.sourceId)}/convert`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error ?? "Could not activate the conversation.");
+      }
+      setThreadInfo("Conversation activated.");
+      await refreshActiveInquiryThread();
+      await refreshMessagingSummary();
+    } catch (convertError) {
+      setThreadError(convertError instanceof Error ? convertError.message : "Could not activate the conversation.");
+    } finally {
+      setRequestActionBusyId(null);
+    }
+  }, [activeThreadContexts, refreshActiveInquiryThread, refreshMessagingSummary, resolveAccessToken]);
+
+  const declineServiceInquiryConversation = useCallback(async () => {
+    const context =
+      activeThreadContexts.find(
+        (item) =>
+          item.contextTag === "service_inquiry" &&
+          (item.statusTag === "info_shared" || item.statusTag === "inquiry_followup_pending")
+      ) ?? null;
+    if (!context) return;
+
+    setRequestActionBusyId(`${context.id}:decline`);
+    setThreadError(null);
+    setThreadInfo(null);
+    try {
+      const token = await resolveAccessToken();
+      const response = await fetch(`/api/service-inquiries/${encodeURIComponent(context.sourceId)}/decline`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error ?? "Could not decline this inquiry.");
+      }
+      setThreadInfo("Service inquiry declined.");
+      const nowIso = new Date().toISOString();
+      const nextContexts = collapseDuplicateThreadContexts(
+        activeThreadContexts.map((item) =>
+          item.id === context.id
+            ? {
+                ...item,
+                statusTag: "declined",
+                updatedAt: nowIso,
+                metadata: {
+                  ...item.metadata,
+                  declined_at: nowIso,
+                },
+              }
+            : item
+        )
+      );
+      const nextPrimaryContext = nextContexts.find((item) => isPendingLikeStatus(item.statusTag)) ?? nextContexts[0] ?? null;
+      const nextHasAcceptedInteraction = nextContexts.some(
+        (item) => CHAT_UNLOCK_CONTEXT_TAGS.includes(item.contextTag) && isAcceptedInteractionStatus(item.statusTag)
+      );
+      const activeThreadId = context.threadId || activeDbThreadId || activeMeta?.threadId || null;
+      if (activeThreadId) {
+        setThreadContextsByDbId((prev) => ({ ...prev, [activeThreadId]: nextContexts }));
+      }
+      setActiveMeta((prev) =>
+        prev
+          ? {
+              ...prev,
+              contextTag: nextPrimaryContext?.contextTag ?? prev.contextTag,
+              statusTag: nextPrimaryContext?.statusTag ?? "declined",
+              hasAcceptedInteraction: nextHasAcceptedInteraction,
+              isRelationshipPending: Boolean(
+                isPendingLikeStatus(nextPrimaryContext?.statusTag ?? "active") && !nextHasAcceptedInteraction
+              ),
+            }
+          : prev
+      );
+      setThreads((prev) =>
+        prev.map((thread) =>
+          thread.threadId === activeThreadToken
+            ? {
+                ...thread,
+                hasPendingRequest: nextContexts.some((item) => isPendingLikeStatus(item.statusTag)),
+                statusTag: nextPrimaryContext?.statusTag ?? "declined",
+              }
+            : thread
+        )
+      );
+      await Promise.allSettled([refreshActiveInquiryThread(), refreshMessagingSummary()]);
+    } catch (declineError) {
+      setThreadError(declineError instanceof Error ? declineError.message : "Could not decline this inquiry.");
+    } finally {
+      setRequestActionBusyId(null);
+    }
+  }, [activeDbThreadId, activeMeta?.threadId, activeThreadContexts, activeThreadToken, refreshActiveInquiryThread, refreshMessagingSummary, resolveAccessToken]);
+
+  const pendingActionsForContext = useCallback(
+    (context: ThreadContextItem): Array<{ key: "accept" | "decline" | "cancel"; label: string }> => {
+      if (!meId) return [];
+      const isRequester = context.requesterId === meId;
+      const isRecipient = context.recipientId === meId;
+      if (isRequester) {
+        if (contextSupportsCancel(context.contextTag, context.metadata)) {
+          return [{ key: "cancel", label: "Cancel request" }];
+        }
+        return [];
+      }
+      if (isRecipient) {
+        if (context.contextTag === "service_inquiry") {
+          return [
+            { key: "accept", label: "Accept & share" },
+            { key: "decline", label: "Decline" },
+          ];
+        }
+        return [
+          { key: "accept", label: "Accept" },
+          { key: "decline", label: "Decline" },
+        ];
+      }
+      return [];
+    },
+    [meId]
+  );
+
+  const composerLockReason = useMemo(() => {
+    if (!activeMeta) return null;
+    if (interactionBlocked) {
+      return "Messaging is disabled for this thread.";
+    }
+    if (activeServiceInquiryContext) {
+      if (activeServiceInquiryContext.statusTag === "active") {
+        return null;
+      }
+      if (activeServiceInquiryContext.statusTag === "info_shared") {
+        if (viewerIsServiceInquiryRequester) {
+          return canSendFreeServiceInquiryFollowup ? null : "Your free follow-up has already been used.";
+        }
+        return "You can send one follow-up message after receiving details.";
+      }
+      if (activeServiceInquiryContext.statusTag === "inquiry_followup_pending") {
+        return viewerIsServiceInquiryRecipient
+          ? "Accept the conversation to open normal chat."
+          : "Waiting for the teacher to accept your follow-up.";
+      }
+      if (activeServiceInquiryContext.statusTag === "declined" || activeServiceInquiryContext.statusTag === "expired") {
+        return "This professional inquiry is closed.";
+      }
+    }
+    if (acceptedInteractionContexts.length > 0) {
+      return null;
+    }
+    if (
+      (activePrimaryContext?.contextTag ?? activeMeta.contextTag ?? "regular_chat") === "regular_chat" &&
+      hasHistoricalFreeText
+    ) {
+      return null;
+    }
+
+    const context = activePendingContext ?? activePrimaryContext;
+    const contextTag = context?.contextTag ?? activeMeta.contextTag ?? "regular_chat";
+    const statusTag = context?.statusTag ?? activeMeta.statusTag ?? "active";
+    if (statusTag === "pending") {
+      if (contextTag === "service_inquiry") {
+        return viewerIsServiceInquiryRecipient
+          ? "Review the inquiry and choose what information to share."
+          : "Waiting for the teacher to review this professional inquiry.";
+      }
+      if (contextTag === "connection_request") return "Messaging unlocks once this connection request is accepted.";
+      if (contextTag === "trip_join_request") return "Messaging unlocks after the trip request is accepted.";
+      if (contextTag === "hosting_request") return "Messaging unlocks after the hosting request is accepted.";
+      if (contextTag === "event_chat") return "Messaging unlocks after this event request is accepted.";
+      if (contextTag === "activity") return "Messaging unlocks after at least one interaction in this thread is accepted.";
+      return "Messaging unlocks once at least one request is accepted.";
+    }
+    if (statusTag === "declined" || statusTag === "cancelled") {
+      return "Messaging is locked until one interaction is accepted.";
+    }
+    return "Messaging is locked until one interaction is accepted.";
+  }, [
+    acceptedInteractionContexts.length,
+    activeMeta,
+    activePendingContext,
+    activePrimaryContext,
+    activeServiceInquiryContext,
+    canSendFreeServiceInquiryFollowup,
+    hasHistoricalFreeText,
+    interactionBlocked,
+    viewerIsServiceInquiryRecipient,
+    viewerIsServiceInquiryRequester,
+  ]);
+
+  useEffect(() => {
+    composerLockReasonRef.current = composerLockReason;
+  }, [composerLockReason]);
+
   const blockConnection = useCallback(async () => {
     if (!activeMeta?.connectionId) return;
 
     setBlockBusy(true);
     setThreadError(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token ?? "";
-      if (!accessToken) throw new Error("Missing auth session token");
+      const accessToken = await resolveAccessToken();
 
       const response = await fetch("/api/connections/action", {
         method: "POST",
@@ -1888,40 +4739,105 @@ function MessagesPageContent() {
     } finally {
       setBlockBusy(false);
     }
-  }, [activeDbThreadId, activeMeta?.connectionId, activeThreadToken, blockNote, blockReason, upsertThreadPrefs]);
+  }, [activeDbThreadId, activeMeta?.connectionId, activeThreadToken, blockNote, blockReason, resolveAccessToken, upsertThreadPrefs]);
 
-  const archivedCount = useMemo(() => threads.filter((thread) => Boolean(archivedThreads[thread.threadId])).length, [archivedThreads, threads]);
-  const activeIsArchived = Boolean(activeThreadToken && archivedThreads[activeThreadToken]);
+  const activeIsArchived = Boolean(activeMeta?.messagingState === "archived" || (activeThreadToken && archivedThreads[activeThreadToken]));
   const activeIsPinned = Boolean(activeThreadToken && pinnedThreads[activeThreadToken]);
   const activeMuteUntil = activeThreadToken ? mutedUntilByThread[activeThreadToken] : undefined;
   const activeIsMuted = Boolean(activeMuteUntil && toTime(activeMuteUntil) > clockMs);
   const activeMuteRemaining = activeIsMuted ? formatRemaining(toTime(activeMuteUntil) - clockMs) : "";
-  const dailyResetIn = useMemo(() => formatRemaining(msUntilLocalMidnight(clockMs)), [clockMs]);
-
+  const monthlyActivationRemaining = useMemo(() => {
+    if (!messagingSummary) return null;
+    return Math.max(0, messagingSummary.monthlyLimit - messagingSummary.monthlyUsed);
+  }, [messagingSummary]);
+  const activeMessagingState: MessagingState = normalizeMessagingState(activeMeta?.messagingState, activeIsArchived ? "archived" : "inactive");
+  const activationCoveredThisCycle = Boolean(
+    messagingSummary?.cycleStart && activeMeta?.activationCycleStart && activeMeta.activationCycleStart === messagingSummary.cycleStart
+  );
+  const needsActiveSlot = Boolean(
+    activeMeta && !composerLockReason && !interactionBlocked && activeMessagingState !== "active" && !canSendFreeServiceInquiryFollowup
+  );
+  const activationRequiredToSend = Boolean(needsActiveSlot && !activationCoveredThisCycle);
+  const concurrentLimitReachedForComposer = Boolean(
+    messagingSummary && needsActiveSlot && messagingSummary.activeCount >= messagingSummary.activeLimit
+  );
+  const monthlyLimitReachedForComposer = Boolean(
+    messagingSummary && activationRequiredToSend && monthlyActivationRemaining !== null && monthlyActivationRemaining <= 0
+  );
+  const composerDisabled = Boolean(composerLockReason || concurrentLimitReachedForComposer || monthlyLimitReachedForComposer);
+  const canCreateActivity = Boolean(
+    activeMeta?.otherUserId &&
+      !interactionBlocked &&
+      meId &&
+      (
+        (activeMeta?.connectionId &&
+          isAcceptedInteractionStatus(activePrimaryContext?.statusTag ?? activeMeta.statusTag ?? "active")) ||
+        acceptedInteractionContexts.some((context) => context.contextTag !== "activity")
+      )
+  );
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const rows = threads.filter((thread) => {
-      const isArchived = Boolean(archivedThreads[thread.threadId]);
-      if (activeTab === "archived") {
-        if (!isArchived) return false;
-      } else if (isArchived) {
-        return false;
-      }
+      const isArchived = thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]);
+      const isUnread = thread.unreadCount > 0 || Boolean(manualUnreadByThread[thread.threadId]);
+      const contextTag = thread.contextTag ?? (thread.kind === "event" ? "event_chat" : thread.kind === "trip" ? "trip_join_request" : "regular_chat");
+      const isPendingRelationship = Boolean(thread.isRelationshipPending);
 
-      if (activeTab === "connections" && thread.kind !== "connection") return false;
-      if (activeTab === "trips" && thread.kind !== "trip") return false;
+      if (activeTab === "all" && isArchived) return false;
+      if (activeTab === "archived" && !isArchived) return false;
+      if (activeTab === "pending" && (!isPendingRelationship || isArchived)) return false;
+      if (activeTab === "active" && (isArchived || isPendingRelationship || thread.messagingState !== "active")) return false;
 
       if (!q) return true;
-      const haystack = [thread.title, thread.subtitle, thread.preview, thread.badge].join(" ").toLowerCase();
+      const haystack = [
+        thread.title,
+        thread.subtitle,
+        thread.preview,
+        thread.badge,
+        thread.metaLabel ?? "",
+        CONTEXT_LABELS[contextTag],
+        STATUS_LABELS[thread.statusTag ?? "active"],
+        isUnread ? "unread" : "",
+      ]
+        .join(" ")
+        .toLowerCase();
       return haystack.includes(q);
     });
     return rows.sort((a, b) => {
+      if (activeTab === "active") {
+        const aUnread = a.unreadCount > 0 || Boolean(manualUnreadByThread[a.threadId]);
+        const bUnread = b.unreadCount > 0 || Boolean(manualUnreadByThread[b.threadId]);
+        if (aUnread !== bUnread) return aUnread ? -1 : 1;
+      }
       const aPinned = Boolean(pinnedThreads[a.threadId]);
       const bPinned = Boolean(pinnedThreads[b.threadId]);
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
       return toTime(b.updatedAt) - toTime(a.updatedAt);
     });
-  }, [activeTab, archivedThreads, pinnedThreads, query, threads]);
+  }, [activeTab, archivedThreads, manualUnreadByThread, pinnedThreads, query, threads]);
+  const archivableActiveThreads = useMemo(
+    () =>
+      threads.filter(
+        (thread) =>
+          thread.threadId !== activeThreadToken &&
+          !thread.isRelationshipPending &&
+          thread.messagingState === "active" &&
+          !archivedThreads[thread.threadId]
+      ),
+    [activeThreadToken, archivedThreads, threads]
+  );
+
+  useEffect(() => {
+    if (searchParams.get("activity") !== "1") return;
+    if (!canCreateActivity || activityComposerOpen) return;
+
+    setActivityComposerOpen(true);
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("activity");
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/messages?${nextQuery}` : "/messages", { scroll: false });
+  }, [activityComposerOpen, canCreateActivity, router, searchParams]);
 
   const filteredComposeConnections = useMemo(() => {
     const needle = composeQuery.trim().toLowerCase();
@@ -1935,6 +4851,129 @@ function MessagesPageContent() {
     return composeTripTargets.filter((item) => `${item.displayName} ${item.subtitle}`.toLowerCase().includes(needle));
   }, [composeQuery, composeTripTargets]);
 
+  const pendingThreadCount = useMemo(
+    () => threads.filter((thread) => Boolean(thread.isRelationshipPending) && thread.messagingState !== "archived").length,
+    [threads]
+  );
+  const threadStateBanner = useMemo<{
+    tone: string;
+    title: string;
+    body: string;
+    ctaLabel?: string;
+    ctaHref?: string;
+    ctaAction?: () => void;
+  } | null>(() => {
+    if (!activeMeta) return null;
+
+    if (activeServiceInquiryContext?.statusTag === "info_shared") {
+      return {
+        tone: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
+        title: "Details shared",
+        body: viewerIsServiceInquiryRequester
+          ? "You can send one follow-up message after receiving details."
+          : "The requester can send one follow-up message after receiving details.",
+      };
+    }
+
+    if (activeServiceInquiryContext?.statusTag === "inquiry_followup_pending") {
+      if (viewerIsServiceInquiryRecipient) {
+        return {
+          tone: "border-amber-300/25 bg-amber-400/10 text-amber-50",
+          title: "Follow-up waiting",
+          body: "Accept the conversation to convert this inquiry into a normal active chat.",
+          ctaLabel: requestActionBusyId === `${activeServiceInquiryContext.id}:convert` ? "Activating..." : "Accept conversation",
+          ctaAction: () => void convertServiceInquiryConversation(),
+        };
+      }
+
+      return {
+        tone: "border-amber-300/25 bg-amber-400/10 text-amber-50",
+        title: "Waiting for teacher approval",
+        body: "Your follow-up has been sent. The teacher can now accept the conversation.",
+      };
+    }
+
+    if (activeMeta.isRelationshipPending && activePendingContext) {
+      if (activePendingContext.contextTag === "service_inquiry") {
+        return null;
+      }
+      const expiresInDays = daysUntilPendingExpiry(activePendingContext);
+      return {
+        tone: "border-amber-300/25 bg-amber-500/10 text-amber-50",
+        title: "Pending request",
+        body:
+          expiresInDays !== null
+            ? `Expires in ${expiresInDays} day${expiresInDays === 1 ? "" : "s"}.`
+            : "Waiting for the other member to respond.",
+      };
+    }
+
+    if (monthlyLimitReachedForComposer) {
+      const limit = messagingSummary?.monthlyLimit ?? 10;
+      return {
+        tone: "border-fuchsia-300/30 bg-fuchsia-500/10 text-fuchsia-100",
+        title: `You've used all ${limit} conversation activations this month`,
+        body: "Upgrade to continue activating new conversations.",
+        ctaLabel: "Upgrade to continue",
+        ctaHref: "/my-space",
+      };
+    }
+
+    if (concurrentLimitReachedForComposer) {
+      const limit = messagingSummary?.activeLimit ?? 10;
+      return {
+        tone: "border-rose-300/25 bg-rose-500/10 text-rose-100",
+        title: `You have ${limit} active conversations`,
+        body: "Archive one to continue.",
+        ctaLabel: "View active threads",
+        ctaAction: () => setArchiveToContinueOpen(true),
+      };
+    }
+
+    if (activeMessagingState === "archived") {
+      return {
+        tone: "border-white/15 bg-white/[0.04] text-slate-100",
+        title: "Archived conversation",
+        body: activationCoveredThisCycle
+          ? "Send a message to reactivate. No new activation will be used this cycle."
+          : "Send a message to reactivate.",
+      };
+    }
+
+    if (activeMessagingState === "active") {
+      return {
+        tone: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+        title: "Active conversation",
+        body: "Unlimited replies are available in this active conversation.",
+      };
+    }
+
+    if (!composerLockReason) return null;
+
+    return null;
+  }, [
+    activationCoveredThisCycle,
+    activeMessagingState,
+    activeMeta,
+    activePendingContext,
+    composerLockReason,
+    concurrentLimitReachedForComposer,
+    messagingSummary?.activeLimit,
+    messagingSummary?.monthlyLimit,
+    monthlyActivationRemaining,
+    monthlyLimitReachedForComposer,
+    activeServiceInquiryContext,
+    convertServiceInquiryConversation,
+    requestActionBusyId,
+    viewerIsServiceInquiryRecipient,
+    viewerIsServiceInquiryRequester,
+  ]);
+
+  const visibleActiveMessages = useMemo(
+    () => activeMessages.filter((message) => (message.messageType ?? "text") === "text"),
+    [activeMessages]
+  );
+
   const chatRows = useMemo(() => {
     const rows: Array<
       { type: "day"; key: string; label: string } | { type: "unread"; key: string } | { type: "message"; key: string; message: MessageItem }
@@ -1943,7 +4982,7 @@ function MessagesPageContent() {
     let unreadInserted = false;
     const unreadAfterTime = activeLastReadAt ? toTime(activeLastReadAt) : 0;
 
-    activeMessages.forEach((message) => {
+    visibleActiveMessages.forEach((message) => {
       const date = new Date(message.createdAt);
       const dayKey = Number.isNaN(date.getTime())
         ? ""
@@ -1975,7 +5014,7 @@ function MessagesPageContent() {
     });
 
     return rows;
-  }, [activeLastReadAt, activeMessages, meId]);
+  }, [activeLastReadAt, meId, visibleActiveMessages]);
 
   const parsedMessagesById = useMemo(() => {
     const map: Record<string, { replyToId: string | null; text: string }> = {};
@@ -1994,7 +5033,7 @@ function MessagesPageContent() {
   }, [activeMessages]);
 
   const latestReadOutgoingMessageId = useMemo(() => {
-    if (!meId || activeMeta?.kind !== "connection") return null;
+    if (!meId || activeMeta?.kind !== "direct") return null;
     const peerReadTime = toTime(activePeerLastReadAt);
     if (peerReadTime <= 0) return null;
 
@@ -2053,7 +5092,7 @@ function MessagesPageContent() {
   }, [activeMessages, meId, scrollToLatest]);
 
   useEffect(() => {
-    if (!activeMeta?.threadId || !activeMeta.otherUserId || activeMeta.kind !== "connection") {
+    if (!activeMeta?.threadId || !activeMeta.otherUserId || activeMeta.kind !== "direct") {
       return;
     }
 
@@ -2145,7 +5184,15 @@ function MessagesPageContent() {
   }, [activeMeta, meId, threadBody]);
 
   useEffect(() => {
-    if (reactionsServerSupported || !meId || !activeMeta || !activeThreadToken) return;
+    if (
+      reactionsServerSupported ||
+      !meId ||
+      !activeMeta ||
+      !activeThreadToken ||
+      !supportsSyncedMessageReactions(activeMeta.kind)
+    ) {
+      return;
+    }
     const threadScopeId = activeMeta.kind === "connection" ? activeMeta.connectionId : activeMeta.threadId;
     if (!threadScopeId) return;
 
@@ -2217,6 +5264,11 @@ function MessagesPageContent() {
         });
 
       applyLocalToggle();
+
+      if (!supportsSyncedMessageReactions(threadKind)) {
+        setThreadInfo("Reactions on this chat stay on this device for now.");
+        return;
+      }
 
       if (!reactionsServerSupported || message.localOnly) {
         return;
@@ -2345,7 +5397,7 @@ function MessagesPageContent() {
             .eq("connection_id", activeMeta.connectionId)
             .eq("sender_id", meId);
           if (res.error) throw new Error(res.error.message);
-        } else if (activeMeta?.kind === "trip" && activeMeta.threadId) {
+        } else if ((activeMeta?.kind === "trip" || activeMeta?.kind === "direct" || activeMeta?.kind === "event") && activeMeta.threadId) {
           const res = await supabase
             .from("thread_messages")
             .delete()
@@ -2368,18 +5420,23 @@ function MessagesPageContent() {
   );
 
   return (
-    <div className="font-sans h-screen bg-[#0A0A0A] text-white flex flex-col overflow-hidden">
+    <div className="font-sans flex h-[100dvh] max-h-[100svh] min-h-[100svh] flex-col overflow-hidden overscroll-none bg-[#08090c] text-white">
       <Nav />
 
-      <main className="flex-1 min-h-0 flex overflow-hidden">
-        <aside className="z-10 flex w-full min-h-0 flex-col border-r border-white/10 bg-[#121212] md:w-[460px]">
-          <div className="flex flex-col px-4 pt-5 pb-2 gap-4">
-            <div className="flex justify-between items-center">
-              <h1 className="text-2xl font-bold leading-tight">Inbox</h1>
+      <main className="flex min-h-0 flex-1 overflow-hidden overscroll-none">
+        <aside
+          className={[
+            "z-10 w-full min-h-0 flex-col overflow-hidden border-r border-white/10 bg-[linear-gradient(180deg,rgba(11,12,16,0.98),rgba(8,9,12,0.99))] md:w-[420px] lg:w-[440px] md:flex",
+            mobileThreadOpen ? "hidden" : "flex",
+          ].join(" ")}
+        >
+          <div className="flex flex-col gap-4 px-3 pt-4 pb-2 sm:px-4 sm:pt-5">
+              <div className="flex items-center justify-between">
+                <h1 className="text-2xl font-bold leading-tight">Inbox</h1>
               <button
                 aria-label="New Message"
                 onClick={() => setComposeOpen(true)}
-                className="flex items-center justify-center size-8 rounded-full bg-[#0df2f2]/10 hover:bg-[#0df2f2]/20 text-[#0df2f2] transition-colors"
+                className="flex size-10 items-center justify-center rounded-full bg-[#0df2f2]/10 text-[#0df2f2] transition-colors hover:bg-[#0df2f2]/20"
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
                   edit_square
@@ -2403,22 +5460,22 @@ function MessagesPageContent() {
               />
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
               {([
                 { key: "all", label: "All" },
-                { key: "connections", label: "Connections" },
-                { key: "trips", label: "Trips" },
-                { key: "archived", label: `Archived${archivedCount ? ` (${archivedCount})` : ""}` },
+                { key: "active", label: "Active" },
+                { key: "pending", label: "Pending" },
+                { key: "archived", label: "Archived" },
               ] as const).map((tab) => {
                 const selected = activeTab === tab.key;
                 return (
                   <button
                     key={tab.key}
                     type="button"
-                    onClick={() => setActiveTab(tab.key)}
+                    onClick={() => selectFilterTab(tab.key)}
                     data-testid={`thread-filter-${tab.key}`}
                     className={[
-                      "shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold border transition-colors",
+                      "min-h-10 shrink-0 rounded-full border px-4 py-2 text-sm font-semibold transition-colors",
                       selected
                         ? "border-[#0df2f2]/40 bg-[#0df2f2]/20 text-[#0df2f2]"
                         : "border-white/15 bg-white/[0.04] text-[#90cbcb] hover:text-white",
@@ -2429,18 +5486,45 @@ function MessagesPageContent() {
                 );
               })}
             </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Used this month</p>
+                <p className="text-sm font-semibold text-white">
+                  {messagingSummary ? `${messagingSummary.monthlyUsed} / ${messagingSummary.monthlyLimit}` : "—"}
+                </p>
+              </div>
+              <div className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Pending</p>
+                <p className="text-sm font-semibold text-white">
+                  {messagingSummary ? `${messagingSummary.pendingCount}` : `${pendingThreadCount}`}
+                </p>
+              </div>
+            </div>
           </div>
 
-	          <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          <div className="flex-1 space-y-1.5 overflow-y-auto overscroll-y-contain p-2">
             {error ? (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>
             ) : null}
             {loading ? (
-              <div className="p-3 text-sm text-[#90cbcb]">Loading conversations...</div>
-            ) : filtered.length === 0 ? (
-              <div className="p-3 text-sm text-[#90cbcb]">
-                {activeTab === "archived" ? "No archived threads yet." : "No threads found."}
+              <div className="space-y-2 p-2">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={index} className="flex min-h-[98px] items-center gap-3 rounded-xl border border-white/10 bg-black/25 p-3 animate-pulse">
+                    <div className="h-12 w-12 rounded-full bg-white/10" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="h-4 w-28 rounded bg-white/10" />
+                        <div className="h-3 w-12 rounded bg-white/10" />
+                      </div>
+                      <div className="h-3 w-24 rounded bg-white/10" />
+                      <div className="h-3 w-3/4 rounded bg-white/10" />
+                    </div>
+                  </div>
+                ))}
               </div>
+            ) : filtered.length === 0 ? (
+              <div className="p-3 text-sm text-[#90cbcb]">No threads found for this filter.</div>
             ) : (
               filtered.map((thread) => {
                 const mutedUntil = mutedUntilByThread[thread.threadId];
@@ -2448,6 +5532,12 @@ function MessagesPageContent() {
                 const isPinned = Boolean(pinnedThreads[thread.threadId]);
                 const rowMenuOpen = openThreadRowMenuId === thread.threadId;
                 const isUnread = thread.unreadCount > 0 || Boolean(manualUnreadByThread[thread.threadId]);
+                const contextTag = thread.contextTag ?? (thread.kind === "event" ? "event_chat" : thread.kind === "trip" ? "trip_join_request" : "regular_chat");
+                const statusTag = thread.statusTag ?? "active";
+                const contextLabel = CONTEXT_LABELS[contextTag];
+                const statusLabel = STATUS_LABELS[statusTag];
+                const contextClasses = contextToneClasses(contextTag);
+                const showPendingRequestChip = isPendingLikeStatus(statusTag) || Boolean(thread.hasPendingRequest);
                 const activateThread = () => {
                   setOpenThreadRowMenuId(null);
                   setManualUnreadByThread((prev) => {
@@ -2462,7 +5552,7 @@ function MessagesPageContent() {
                     return;
                   }
                   setActiveThreadToken(thread.threadId);
-                  router.replace(`/messages?thread=${encodeURIComponent(thread.threadId)}`);
+                  router.replace(buildInboxUrl({ threadToken: thread.threadId }));
                 };
                 return (
                   <div
@@ -2525,6 +5615,11 @@ function MessagesPageContent() {
                             <p className={`text-[11px] leading-tight ${isUnread ? "text-[#f472b6]" : "text-[#7fd8e0]"}`}>
                               {formatRelative(thread.updatedAt)}
                             </p>
+                            {thread.otherUserId && pendingReferenceCountsByPeer[thread.otherUserId] ? (
+                              <span className="inline-flex min-w-[18px] items-center justify-center rounded-full border border-cyan-300/35 bg-[linear-gradient(90deg,rgba(0,245,255,0.14),rgba(255,0,255,0.08))] px-1.5 py-0.5 text-[10px] font-semibold text-cyan-100" title={`${pendingReferenceCountsByPeer[thread.otherUserId]} pending references`}>
+                                {pendingReferenceCountsByPeer[thread.otherUserId]}
+                              </span>
+                            ) : null}
                             {isUnread ? <span data-testid="thread-unread-dot" className="h-2 w-2 rounded-full bg-[#db2777]" /> : null}
                             <button
                               type="button"
@@ -2533,7 +5628,7 @@ function MessagesPageContent() {
                                 setOpenThreadRowMenuId((prev) => (prev === thread.threadId ? null : thread.threadId));
                               }}
                               data-testid="thread-row-menu-button"
-                              className="inline-flex h-4 w-4 items-center justify-center text-slate-400 transition-colors hover:text-[#f5a5cf]"
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/5 hover:text-[#f5a5cf]"
                               aria-label="Thread row actions"
                             >
                               <span className="material-symbols-outlined" style={{ fontSize: 13, lineHeight: 1 }}>
@@ -2561,21 +5656,45 @@ function MessagesPageContent() {
                                   </span>
                                   {isUnread ? "Mark as read" : "Mark as unread"}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (archivedThreads[thread.threadId]) {
+                                      void unarchiveThread(thread.threadId, thread.dbThreadId);
+                                    } else {
+                                      void archiveThread(thread.threadId, thread.dbThreadId);
+                                    }
+                                    setOpenThreadRowMenuId(null);
+                                  }}
+                                  data-testid={archivedThreads[thread.threadId] ? "thread-unarchive" : "thread-archive"}
+                                  className="mt-1 flex w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-xs text-slate-200 hover:border-[#f39acb]/35 hover:bg-[#f39acb]/10"
+                                >
+                                  <span className="material-symbols-outlined text-sm">
+                                    {archivedThreads[thread.threadId] ? "unarchive" : "archive"}
+                                  </span>
+                                  {archivedThreads[thread.threadId] ? "Unarchive" : "Archive"}
+                                </button>
                               </div>
                             ) : null}
                           </div>
                         </div>
 
                         <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                          {thread.kind === "trip" ? (
-                            <span className="inline-flex items-center rounded-full bg-[#3b1f35] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#f7b5d9]">
-                              Trip
+                          {showPendingRequestChip && contextTag !== "regular_chat" ? (
+                            <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${contextClasses}`}>
+                              {contextLabel}
+                            </span>
+                          ) : null}
+                          {showPendingRequestChip ? (
+                            <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${statusToneClasses(statusTag)}`}>
+                              {isPendingLikeStatus(statusTag) ? statusLabel : STATUS_LABELS.pending}
                             </span>
                           ) : null}
                           {isPinned ? (
                             <span
                               data-testid="thread-pinned-indicator"
-                              className="material-symbols-outlined text-amber-200/90"
+                              className="material-symbols-outlined text-fuchsia-200/90"
                               style={{ fontSize: 12 }}
                               title="Pinned"
                             >
@@ -2594,6 +5713,7 @@ function MessagesPageContent() {
                           ) : null}
                           <span className="truncate text-[12px] text-[#90cbcb]">{thread.subtitle}</span>
                         </div>
+                        {thread.metaLabel ? <p className="mt-0.5 truncate text-[11px] text-slate-400">{thread.metaLabel}</p> : null}
 
                         <p className={`mt-1 truncate text-[13px] leading-snug ${isUnread ? "text-[#f5e6f0]" : "text-[#c3dddd]"}`}>{thread.preview}</p>
                       </div>
@@ -2630,8 +5750,22 @@ function MessagesPageContent() {
 	          </div>
         </aside>
 
-        <section className="hidden flex-1 min-h-0 flex-col bg-[#121212] md:flex">
-          {!activeMeta ? (
+        <section
+          className={[
+            mobileThreadOpen ? "flex" : "hidden md:flex",
+            "min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(10,11,15,0.99),rgba(7,8,11,0.99))]",
+          ].join(" ")}
+        >
+          {showThreadPlaceholderSkeleton ? (
+            <div className="flex h-full flex-col justify-center p-8">
+              <div className="mx-auto w-full max-w-2xl space-y-6 animate-pulse">
+                <div className="mx-auto h-28 w-28 rounded-full bg-white/10" />
+                <div className="mx-auto h-8 w-52 rounded bg-white/10" />
+                <div className="mx-auto h-4 w-80 max-w-full rounded bg-white/10" />
+                <div className="mx-auto h-12 w-56 rounded-full bg-white/10" />
+              </div>
+            </div>
+          ) : !activeMeta ? (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center">
               <div className="max-w-md flex flex-col items-center">
                 <div className="mb-6 rounded-full bg-[#162a2a] p-8">
@@ -2652,11 +5786,27 @@ function MessagesPageContent() {
               </div>
             </div>
           ) : (
-            <>
-              <header className="h-[88px] px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-[#121212]">
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 flex-1 flex-col">
+              <header className="flex min-h-[72px] items-center justify-between border-b border-white/10 bg-[linear-gradient(180deg,rgba(15,16,20,0.98),rgba(11,12,16,0.98))] px-4 py-3 sm:px-6 sm:py-4 md:h-[88px]">
                 <div className="flex items-center gap-4 min-w-0">
+                  {mobileThreadOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveThreadToken(null);
+                        router.replace(buildInboxUrl({ threadToken: null }));
+                      }}
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/20 text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100 md:hidden"
+                      aria-label="Back to inbox"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                        arrow_back
+                      </span>
+                    </button>
+                  ) : null}
                   {activeMeta.otherUserId ? (
-                    <Link href={`/members/${activeMeta.otherUserId}`} className="shrink-0">
+                    <Link href={`/profile/${activeMeta.otherUserId}`} className="shrink-0">
                       <div className="relative h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-[#223838] transition-colors hover:border-cyan-300/40">
                         {activeMeta.avatarUrl ? (
                           <Image
@@ -2701,25 +5851,40 @@ function MessagesPageContent() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       {activeMeta.otherUserId ? (
-                        <Link href={`/members/${activeMeta.otherUserId}`} className="truncate text-lg font-bold text-white hover:text-cyan-200">
+                        <Link href={`/profile/${activeMeta.otherUserId}`} className="truncate text-base font-bold text-white hover:text-cyan-200 sm:text-lg">
                           {activeMeta.title}
                         </Link>
                       ) : (
-                        <h2 className="text-lg font-bold text-white truncate">{activeMeta.title}</h2>
+                        <h2 className="truncate text-base font-bold text-white sm:text-lg">{activeMeta.title}</h2>
                       )}
-                      {activeMeta.kind === "trip" ? (
-                        <span className="px-2 py-0.5 rounded-full bg-[#0df2f2]/10 text-[#0df2f2] text-[10px] font-bold uppercase tracking-wider">
-                          Trip
-                        </span>
-                      ) : null}
                     </div>
-	                    <p className="text-xs text-[#90cbcb] truncate">{activeMeta.subtitle}</p>
-		                  </div>
-		                </div>
+                    <p className="truncate text-[11px] text-[#90cbcb] sm:text-xs">{activeMeta.subtitle}</p>
+                    {activeReferencePrompt ? (
+                      <div className="mt-2">
+                        <Link
+                          href="/references"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-cyan-100 hover:bg-cyan-300/15"
+                        >
+                          <span className="material-symbols-outlined text-[12px]">rate_review</span>
+                          Leave reference
+                        </Link>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
 
                 <div className="relative flex items-center gap-2" ref={threadActionsRef}>
+                  {canCreateActivity ? (
+                    <button
+                      type="button"
+                      onClick={() => setActivityComposerOpen(true)}
+                      className="inline-flex min-h-9 items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300/35 hover:text-cyan-100"
+                    >
+                      Invite to activity
+                    </button>
+                  ) : null}
                   {threadPrefsInLocalMode ? (
-                    <span className="rounded-full border border-amber-300/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-100">
+                    <span className="hidden rounded-full border border-cyan-300/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100 sm:inline-flex">
                       Local prefs mode
                     </span>
                   ) : null}
@@ -2845,7 +6010,7 @@ function MessagesPageContent() {
                         )
                       ) : null}
 
-                      {activeMeta.kind === "connection" && activeMeta.connectionId ? (
+                      {activeMeta.connectionId ? (
                         <>
                           <div className="my-1 h-px bg-white/10" />
                           <button
@@ -2881,10 +6046,101 @@ function MessagesPageContent() {
                 </div>
               </header>
 
-              <div className="relative flex-1 min-h-0">
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                {pinnedPendingContexts.length > 0 ? (
+                  <div
+                    data-testid="thread-pending-contexts"
+                    className="z-20 border-b border-cyan-300/12 bg-[linear-gradient(180deg,rgba(7,10,14,0.98),rgba(9,12,16,0.98))] px-4 py-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.22)] sm:px-6 sm:py-3"
+                  >
+                    <div className="space-y-2">
+                      {pinnedPendingContexts.map((pendingContext) => {
+                        const pendingContextActions = pendingActionsForContext(pendingContext);
+                        const serviceInquiryDetails = describeServiceInquiryRequest(pendingContext);
+                        return (
+                          <div
+                            key={pendingContext.id}
+                            data-testid="thread-pending-context-card"
+                            className="rounded-2xl border border-cyan-300/30 bg-[linear-gradient(135deg,rgba(13,242,242,0.12),rgba(219,39,119,0.10))] p-3 sm:p-3.5"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">Pending Request</p>
+                                <p className="mt-1 text-sm font-semibold text-white">
+                                  {pendingContext.title || CONTEXT_LABELS[pendingContext.contextTag]}
+                                </p>
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                  {pendingContext.contextTag !== "service_inquiry" ? (
+                                    <span
+                                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contextToneClasses(pendingContext.contextTag)}`}
+                                    >
+                                      {CONTEXT_LABELS[pendingContext.contextTag]}
+                                    </span>
+                                  ) : null}
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${statusToneClasses(pendingContext.statusTag)}`}
+                                  >
+                                    {STATUS_LABELS[pendingContext.statusTag]}
+                                  </span>
+                                  {describeContextMeta(pendingContext) ? (
+                                    <span className="text-[11px] text-slate-100/85">{describeContextMeta(pendingContext)}</span>
+                                  ) : null}
+                                  {daysUntilPendingExpiry(pendingContext) !== null ? (
+                                    <span className="text-[11px] text-slate-100/85">
+                                      Expires in {daysUntilPendingExpiry(pendingContext)} day
+                                      {daysUntilPendingExpiry(pendingContext) === 1 ? "" : "s"}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {serviceInquiryDetails.length > 0 ? (
+                                  <div className="mt-2 space-y-1.5 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
+                                    {serviceInquiryDetails.map((detail) => (
+                                      <div key={`${pendingContext.id}:${detail.label}`} className="flex flex-wrap items-start gap-2 text-xs">
+                                        <span className="font-semibold uppercase tracking-[0.08em] text-white/45">
+                                          {detail.label}
+                                        </span>
+                                        <span className="text-slate-100">{detail.value}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                              {pendingContextActions.length > 0 ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {pendingContextActions.map((action) => {
+                                    const busy = requestActionBusyId === `${pendingContext.id}:${action.key}`;
+                                    const isAccept = action.key === "accept";
+                                    const isDecline = action.key === "decline";
+                                    return (
+                                      <button
+                                        key={`${pendingContext.id}:${action.key}`}
+                                        type="button"
+                                        onClick={() => void updateRequestContext(pendingContext.id, action.key)}
+                                        disabled={Boolean(requestActionBusyId)}
+                                        className={[
+                                          "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60",
+                                          isAccept
+                                            ? "border-emerald-300/35 bg-emerald-300/15 text-emerald-100 hover:bg-emerald-300/25"
+                                            : isDecline
+                                            ? "border-rose-300/35 bg-rose-300/15 text-rose-100 hover:bg-rose-300/25"
+                                            : "border-white/20 bg-white/[0.06] text-slate-100 hover:bg-white/[0.12]",
+                                        ].join(" ")}
+                                      >
+                                        {busy ? "Saving..." : action.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 <div
                   ref={chatScrollRef}
-                  className="cx-scroll h-full overflow-y-auto p-6 space-y-4"
+                  className="cx-scroll h-full overflow-y-auto overscroll-y-contain p-4 space-y-3 sm:p-6 sm:space-y-4"
                   onClick={() => {
                     setOpenMessageMenuId(null);
                     setComposerEmojiOpen(false);
@@ -2893,15 +6149,184 @@ function MessagesPageContent() {
                   {threadLoading ? (
                     <div className="text-sm text-[#90cbcb]">Loading conversation...</div>
                   ) : null}
+                  {historicalThreadContexts.length > 0 ? (
+                    <div className="space-y-2.5">
+                        {historicalThreadContexts.map((context) => {
+                          const metaLabel = describeContextMeta(context);
+                          const note = asString(context.metadata.note).trim();
+                          const loggedAt = formatActivityDateTime(context.updatedAt || context.createdAt);
+                          const activityType = asString(context.metadata.activity_type);
+                          const contextReferenceTag =
+                            context.contextTag === "activity" && activityType
+                              ? normalizeReferenceContext(activityType)
+                              : null;
+                          const canReferenceFromCard =
+                            context.statusTag === "completed" &&
+                            context.contextTag === "activity" &&
+                            Boolean(contextReferenceTag);
+                          const cardHasPrompt = Boolean(
+                            canReferenceFromCard && contextReferenceTag && activeReferencePromptTag === contextReferenceTag
+                          );
+                          const cardAlreadySubmitted = Boolean(
+                            canReferenceFromCard &&
+                              contextReferenceTag &&
+                              submittedReferenceState.contextTags.has(contextReferenceTag)
+                          );
+                          return (
+                            <div
+                              key={context.id}
+                              className="rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                    <p className="text-[12px] font-medium text-slate-100">{contextHistoryTitle(context)}</p>
+                                    <span className="text-[10px] uppercase tracking-[0.08em] text-slate-500">
+                                      {STATUS_LABELS[context.statusTag]}
+                                    </span>
+                                    {metaLabel ? <span className="text-[10px] text-slate-500">{metaLabel}</span> : null}
+                                  </div>
+                                  <p className="mt-1 text-[11px] leading-5 text-slate-400">{contextHistorySummary(context)}</p>
+                                  {note ? <p className="mt-1 text-[11px] leading-5 text-slate-500">Note: {note}</p> : null}
+                                  {canReferenceFromCard ? (
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                      {cardHasPrompt ? (
+                                        <Link
+                                          href="/references"
+                                          className="inline-flex items-center rounded-full border border-white/12 px-2 py-0.5 text-[10px] font-medium text-slate-300 hover:border-white/20 hover:text-white"
+                                        >
+                                          Add reference
+                                        </Link>
+                                      ) : cardAlreadySubmitted ? (
+                                        <span className="inline-flex items-center rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                                          Reference submitted
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                                          Reference not available
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                {loggedAt ? <span className="shrink-0 text-[10px] text-slate-500">{loggedAt}</span> : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : null}
+                  {activeReferencePrompt ? (
+                    <div className="rounded-2xl border border-[#00F5FF]/30 bg-[linear-gradient(135deg,rgba(0,245,255,0.12),rgba(255,0,255,0.08))] p-3 sm:p-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">Reference Prompt</p>
+                          <p className="mt-1 text-sm font-semibold text-white">
+                            {referenceContextLabel(activeReferencePrompt.contextTag)} completed. Leave a quick reference.
+                          </p>
+                          <p className="mt-1 text-xs text-slate-200/80">Due since {formatDateShort(activeReferencePrompt.dueAt)}</p>
+                        </div>
+                        <Link
+                          href="/references"
+                          className="inline-flex items-center rounded-full border border-cyan-300/35 bg-cyan-300/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/25"
+                        >
+                          Leave reference
+                        </Link>
+                      </div>
+                    </div>
+                  ) : hasSubmittedLatestCompletedActivityReference && latestCompletedActivityReferenceTag ? (
+                    <div className="rounded-2xl border border-emerald-300/25 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,255,255,0.03))] p-3 sm:p-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-200">Reference Submitted</p>
+                          <p className="mt-1 text-sm font-semibold text-white">
+                            Your {referenceContextLabel(latestCompletedActivityReferenceTag)} reference for this member is already on file.
+                          </p>
+                          {submittedReferenceState.latestSubmittedAt ? (
+                            <p className="mt-1 text-xs text-slate-200/80">
+                              Submitted {formatDateShort(submittedReferenceState.latestSubmittedAt)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <Link
+                          href="/references"
+                          className="inline-flex items-center rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-300/20"
+                        >
+                          View references
+                        </Link>
+                      </div>
+                    </div>
+                  ) : null}
+                  {activeMeta?.otherUserId && hasAcceptedNonConnectionContext && !hasAcceptedConnectionContext && !interactionBlocked ? (
+                    <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-3 sm:p-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-sm text-cyan-50">
+                          Chat is unlocked from an accepted request. Add this user to your connections?
+                        </p>
+                        <Link
+                          href={`/profile/${activeMeta.otherUserId}`}
+                          className="inline-flex items-center rounded-full border border-cyan-300/35 bg-cyan-300/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/25"
+                        >
+                          Add this user to your connections
+                        </Link>
+                      </div>
+                    </div>
+                  ) : null}
                   {threadInfo ? (
                     <div className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 p-3 text-sm text-cyan-100">{threadInfo}</div>
                   ) : null}
                   {threadError ? (
                     <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-100">{threadError}</div>
                   ) : null}
-                  {dailyLimitReached ? (
-                    <div className="rounded-xl border border-amber-300/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-                      Daily message limit reached. Try again in {dailyResetIn}.
+                  {threadStateBanner ? (
+                    <div className={`rounded-xl border p-3 ${threadStateBanner.tone}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold">{threadStateBanner.title}</p>
+                          <p className="mt-1 text-xs opacity-90">{threadStateBanner.body}</p>
+                        </div>
+                        {threadStateBanner.ctaHref ? (
+                          <Link
+                            href={threadStateBanner.ctaHref}
+                            className="inline-flex items-center rounded-full border border-current/30 px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
+                          >
+                            {threadStateBanner.ctaLabel}
+                          </Link>
+                        ) : threadStateBanner.ctaAction ? (
+                          <button
+                            type="button"
+                            onClick={threadStateBanner.ctaAction}
+                            className="inline-flex items-center rounded-full border border-current/30 px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
+                          >
+                            {threadStateBanner.ctaLabel}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {activeServiceInquiryContext &&
+                  viewerIsServiceInquiryRecipient &&
+                  (activeServiceInquiryContext.statusTag === "info_shared" ||
+                    activeServiceInquiryContext.statusTag === "inquiry_followup_pending") ? (
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {activeServiceInquiryContext.statusTag === "inquiry_followup_pending" ? (
+                        <button
+                          type="button"
+                          onClick={() => void convertServiceInquiryConversation()}
+                          disabled={Boolean(requestActionBusyId)}
+                          className="rounded-full border border-emerald-300/35 bg-emerald-300/15 px-3 py-1.5 text-xs font-semibold text-emerald-100 disabled:opacity-60"
+                        >
+                          {requestActionBusyId === `${activeServiceInquiryContext.id}:convert` ? "Activating..." : "Accept conversation"}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void declineServiceInquiryConversation()}
+                        disabled={Boolean(requestActionBusyId)}
+                        className="rounded-full border border-rose-300/35 bg-rose-300/15 px-3 py-1.5 text-xs font-semibold text-rose-100 disabled:opacity-60"
+                      >
+                        {requestActionBusyId === `${activeServiceInquiryContext.id}:decline` ? "Declining..." : "Decline inquiry"}
+                      </button>
                     </div>
                   ) : null}
                   {!threadDbSupported && activeMeta.kind === "trip" ? (
@@ -2910,21 +6335,25 @@ function MessagesPageContent() {
                     </div>
                   ) : null}
                   {!threadLoading && activeMessages.length === 0 ? (
-                    <div className="py-10 space-y-4">
-                      <div className="text-center text-[#90cbcb] text-sm">No messages yet. Start with a quick text:</div>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        {QUICK_STARTERS.map((starter) => (
-                          <button
-                            key={starter}
-                            type="button"
-                            onClick={() => setThreadBody(starter)}
-                            className="rounded-full border border-white/15 bg-black/20 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100"
-                          >
-                            {starter}
-                          </button>
-                        ))}
+                    composerLockReason ? (
+                      <div className="py-12 text-center text-[#90cbcb] text-sm">No messages yet.</div>
+                    ) : (
+                      <div className="py-10 space-y-4">
+                        <div className="text-center text-[#90cbcb] text-sm">No messages yet. Start with a quick text:</div>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          {QUICK_STARTERS.map((starter) => (
+                            <button
+                              key={starter}
+                              type="button"
+                              onClick={() => setThreadBody(starter)}
+                              className="rounded-full border border-white/15 bg-black/20 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100"
+                            >
+                              {starter}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     chatRows.map((row) => {
                       if (row.type === "day") {
@@ -2952,7 +6381,7 @@ function MessagesPageContent() {
                       const message = row.message;
                       const mine = message.senderId === meId;
                       const showMenu = openMessageMenuId === message.id;
-                      const showReportOption = activeMeta.kind === "connection" && !mine;
+                      const showReportOption = Boolean(activeMeta.connectionId) && !mine;
                       const parsedMessage = parsedMessagesById[message.id] ?? parseReplyPayload(message.body);
                       const replyTarget = parsedMessage.replyToId ? messageById[parsedMessage.replyToId] ?? null : null;
                       const parsedReplyTarget = replyTarget ? parseReplyPayload(replyTarget.body) : null;
@@ -2960,9 +6389,141 @@ function MessagesPageContent() {
                       const reactions = messageReactions[message.id] ?? [];
                       const showSeenByRecipient =
                         mine &&
-                        activeMeta.kind === "connection" &&
+                        activeMeta.kind === "direct" &&
                         Boolean(activePeerLastReadAt) &&
                         latestReadOutgoingMessageId === message.id;
+                      const messageType = message.messageType ?? "text";
+                      const messageContextTag = message.contextTag ?? activeMeta.contextTag ?? "regular_chat";
+                      const messageStatusTag = message.statusTag ?? "active";
+
+                      if (messageType !== "text") {
+                        const teacherInquirySnapshot = parseTeacherInquiryShareSnapshot(message.metadata ?? {});
+                        if (teacherInquirySnapshot) {
+                          return (
+                            <div
+                              key={row.key}
+                              ref={(node) => {
+                                messageRefs.current[message.id] = node;
+                              }}
+                              className="mx-auto w-full max-w-3xl"
+                            >
+                              <TeacherInquiryCard snapshot={teacherInquirySnapshot} createdAt={message.createdAt} />
+                            </div>
+                          );
+                        }
+
+                        if (messageContextTag === "activity") {
+                          const activityMeta = asRecord(message.metadata);
+                          const activityTypeRaw = asString(activityMeta.activity_type);
+                          const activityLabel = activityTypeRaw ? activityTypeLabel(activityTypeRaw) : "Activity";
+                          const activityNote = asString(activityMeta.note).trim();
+                          const activityWindow = formatActivityWindow(
+                            asString(activityMeta.start_at) || undefined,
+                            asString(activityMeta.end_at) || undefined
+                          );
+                          const actorLabel = mine ? "You" : activeMeta.title;
+                          const statusLabel = STATUS_LABELS[messageStatusTag];
+                          const summaryText =
+                            messageStatusTag === "pending"
+                              ? `${actorLabel} invited ${mine ? activeMeta.title : "you"} to ${activityLabel.toLowerCase()}.`
+                              : messageStatusTag === "accepted"
+                              ? `${activityLabel} accepted.`
+                              : messageStatusTag === "declined"
+                              ? `${activityLabel} declined.`
+                              : messageStatusTag === "cancelled"
+                              ? `${activityLabel} cancelled.`
+                              : messageStatusTag === "completed"
+                              ? `${activityLabel} completed.`
+                              : parsedMessage.text;
+
+                          return (
+                            <div
+                              key={row.key}
+                              ref={(node) => {
+                                messageRefs.current[message.id] = node;
+                              }}
+                              className="mx-auto w-full max-w-2xl"
+                            >
+                              <div className="overflow-hidden rounded-2xl border border-cyan-300/20 bg-[linear-gradient(145deg,rgba(10,29,34,0.72),rgba(32,12,37,0.42),rgba(14,17,23,0.94))]">
+                                <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
+                                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(0,245,255,0.12),rgba(255,0,255,0.10))] text-cyan-100">
+                                    <span className="material-symbols-outlined text-[20px]">{activityTypeIcon(activityTypeRaw)}</span>
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="text-base font-semibold text-white">{activityLabel}</p>
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${statusToneClasses(messageStatusTag)}`}>
+                                        {statusLabel}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 text-sm text-slate-300">{summaryText}</p>
+                                  </div>
+                                  <span className="text-[11px] text-slate-400">{formatTime(message.createdAt)}</span>
+                                </div>
+                                <div className="space-y-3 px-4 py-3">
+                                  <div className="flex flex-wrap gap-2">
+                                    <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-200">
+                                      {referenceContextLabel(activityTypeRaw || "collaboration")}
+                                    </span>
+                                    <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-300">
+                                      {activityWindow}
+                                    </span>
+                                  </div>
+                                  {activityNote ? (
+                                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/45">Note</p>
+                                      <p className="mt-1.5 text-sm leading-6 text-slate-200">{activityNote}</p>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        const timelineAction =
+                          messageType === "request"
+                            ? messageStatusTag === "pending"
+                              ? "request_created"
+                              : messageStatusTag === "accepted"
+                              ? "request_accepted"
+                              : messageStatusTag === "declined"
+                              ? "request_declined"
+                              : messageStatusTag === "cancelled"
+                              ? "request_cancelled"
+                              : "request_updated"
+                            : "system_event";
+
+                        return (
+                          <div
+                            key={row.key}
+                            ref={(node) => {
+                              messageRefs.current[message.id] = node;
+                            }}
+                            className="mx-auto w-full max-w-2xl"
+                          >
+                            <div className="rounded-xl border border-white/15 bg-white/[0.03] px-3 py-2.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="inline-flex items-center rounded-full border border-white/20 bg-white/[0.06] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-200">
+                                  {timelineAction}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contextToneClasses(messageContextTag)}`}
+                                >
+                                  {CONTEXT_LABELS[messageContextTag]}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${statusToneClasses(messageStatusTag)}`}
+                                >
+                                  {STATUS_LABELS[messageStatusTag]}
+                                </span>
+                                <span className="ml-auto text-[10px] text-slate-400">{formatTime(message.createdAt)}</span>
+                              </div>
+                              <p className="mt-1.5 text-sm text-slate-200">{parsedMessage.text}</p>
+                            </div>
+                          </div>
+                        );
+                      }
 
                       return (
                         <div
@@ -2995,7 +6556,7 @@ function MessagesPageContent() {
                           ) : null}
 
                           <div
-                            className={`relative flex flex-col gap-1 max-w-[74%] md:max-w-[66%] ${mine ? "items-end" : "items-start"}`}
+                            className={`relative flex max-w-[82%] flex-col gap-1 sm:max-w-[74%] md:max-w-[66%] ${mine ? "items-end" : "items-start"}`}
                             onPointerDown={(event) => onMessagePointerDown(message.id, event)}
                             onPointerMove={(event) => onMessagePointerMove(message.id, event)}
                             onPointerUp={(event) => onMessagePointerUp(message, event)}
@@ -3201,7 +6762,7 @@ function MessagesPageContent() {
                                 (() => {
                                   const peerReadTime = toTime(activePeerLastReadAt);
                                   const isRead =
-                                    activeMeta.kind === "connection" &&
+                                    activeMeta.kind === "direct" &&
                                     peerReadTime > 0 &&
                                     toTime(message.createdAt) > 0 &&
                                     toTime(message.createdAt) <= peerReadTime;
@@ -3295,16 +6856,17 @@ function MessagesPageContent() {
                   <button
                     type="button"
                     onClick={() => scrollToLatest(true)}
-                    className="absolute bottom-4 right-6 rounded-full border border-cyan-300/35 bg-[#0d2324]/95 px-4 py-2 text-xs font-semibold text-cyan-100 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-[#123133]"
+                    className="absolute bottom-4 right-4 rounded-full border border-cyan-300/35 bg-[#0d2324]/95 px-4 py-2 text-xs font-semibold text-cyan-100 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-[#123133] sm:right-6"
                   >
                     Jump to latest
                   </button>
                 ) : null}
               </div>
 
-              <footer className="shrink-0 p-3 bg-[#121212] border-t border-slate-800">
+              {!composerLockReason ? (
+                <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2.5 sm:p-3">
                 {replyTo ? (
-                  <div className="max-w-4xl mx-auto mb-2 rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 flex items-start justify-between gap-3">
+                  <div className="mx-auto mb-2 max-w-4xl rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[10px] uppercase tracking-wider font-semibold text-cyan-100/90">
                         Replying to {replyTo.senderId === meId ? "you" : activeMeta?.title ?? "message"}
@@ -3323,11 +6885,11 @@ function MessagesPageContent() {
                     </button>
                   </div>
                 ) : null}
-                <div className="max-w-4xl mx-auto flex items-end gap-2">
+                <div className="mx-auto flex max-w-4xl items-end gap-2">
                   <div className="relative mb-1 shrink-0">
                     <button
                       type="button"
-                      disabled={dailyLimitReached}
+                      disabled={composerDisabled}
                       onClick={() => setComposerEmojiOpen((prev) => !prev)}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/25 text-slate-300 transition-colors hover:border-cyan-300/35 hover:text-cyan-100 disabled:opacity-50"
                       aria-label="Open emoji picker"
@@ -3359,9 +6921,17 @@ function MessagesPageContent() {
                   <div className="relative flex flex-1 items-end gap-1.5 rounded-full border border-slate-700/90 bg-black/35 px-2 py-1">
                   <textarea
                     className="flex-1 bg-transparent border-none px-2 py-1.5 text-[14px] leading-5 text-white placeholder-slate-500 focus:ring-0 resize-none max-h-28"
-                    placeholder={dailyLimitReached ? "Daily limit reached. Sending unlocks after reset." : "Type a message..."}
+                    placeholder={
+                      monthlyLimitReachedForComposer
+                        ? "Upgrade to activate more conversations."
+                        : concurrentLimitReachedForComposer
+                        ? "Archive one active conversation to continue."
+                        : activationRequiredToSend
+                        ? "Send a message to activate this conversation..."
+                        : "Type a message..."
+                    }
                     rows={1}
-                    disabled={dailyLimitReached}
+                    disabled={composerDisabled}
                     value={threadBody}
                     onChange={(e) => setThreadBody(e.target.value)}
                     onKeyDown={(e) => {
@@ -3374,7 +6944,7 @@ function MessagesPageContent() {
                   <button
                     type="button"
                     onClick={() => void sendActiveMessage()}
-                    disabled={sending || dailyLimitReached || !threadBody.trim()}
+                    disabled={sending || composerDisabled || !threadBody.trim()}
                     className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0df2f2] text-[#052328] hover:bg-[#0be0e0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
@@ -3383,10 +6953,19 @@ function MessagesPageContent() {
                   </button>
                   </div>
                 </div>
-                <div className="max-w-4xl mx-auto min-h-[16px] mt-1">
-                  {dailyLimitReached ? (
-                    <p className="text-[10px] text-amber-200/90">
-                      Messaging is paused by daily limit. You can send again in {dailyResetIn}.
+                <div className="mx-auto mt-1 min-h-[16px] max-w-4xl">
+                  {monthlyLimitReachedForComposer ? (
+                    <p className="text-[10px] text-fuchsia-200/90">
+                      You&apos;ve used all {messagingSummary?.monthlyLimit ?? 10} conversation activations this month.
+                    </p>
+                  ) : concurrentLimitReachedForComposer ? (
+                    <p className="text-[10px] text-rose-200/90">
+                      You have {messagingSummary?.activeLimit ?? 10} active conversations. Archive one to continue.
+                    </p>
+                  ) : activationRequiredToSend && monthlyActivationRemaining !== null ? (
+                    <p className="text-center text-[10px] font-medium text-cyan-100/95 animate-pulse">
+                      Sending a message will activate this conversation. {monthlyActivationRemaining} activation
+                      {monthlyActivationRemaining === 1 ? "" : "s"} remaining this month.
                     </p>
                   ) : threadPrefsInLocalMode ? (
                     <p className="text-[10px] text-slate-400">
@@ -3394,174 +6973,313 @@ function MessagesPageContent() {
                     </p>
                   ) : null}
                 </div>
-              </footer>
-            </>
+                </footer>
+              ) : null}
+              </div>
+
+              <aside className="hidden xl:flex w-[340px] shrink-0 flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))]">
+                <div className="cx-scroll h-full overflow-y-auto px-4 py-5 space-y-4">
+                  {contactSidebarLoading || contactSidebarError || contactSidebar ? (
+                    <ContactSidebarPanel
+                      loading={contactSidebarLoading}
+                      error={contactSidebarError}
+                      contact={contactSidebar}
+                      referencePromptLabel={activeReferencePrompt ? referenceContextLabel(activeReferencePrompt.contextTag) : null}
+                      onOpenReferences={activeReferencePrompt ? () => router.push("/references") : null}
+                      latestSubmittedReferenceLabel={
+                        !activeReferencePrompt && hasSubmittedLatestCompletedActivityReference && latestCompletedActivityReferenceTag
+                          ? referenceContextLabel(latestCompletedActivityReferenceTag)
+                          : null
+                      }
+                    />
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
+                      Member details are available for 1:1 chats.
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
           )}
         </section>
       </main>
 
       {reportOpen ? (
-        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#121414]">
-            <div className="h-px w-full bg-gradient-to-r from-rose-400/60 via-rose-400/10 to-[#0df2f2]/30" />
-            <div className="p-5 space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-bold text-white">{reportFromMessageId ? "Report Message" : "Report Conversation"}</h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (reportBusy) return;
-                    setReportOpen(false);
-                    setReportError(null);
-                    setReportFromMessageId(null);
-                  }}
-                  className="text-white/55 hover:text-white"
-                  aria-label="Close report modal"
-                >
-                  <span className="material-symbols-outlined">close</span>
-                </button>
+        <ReportDialog
+          reportBusy={reportBusy}
+          reportError={reportError}
+          reportFromMessageId={reportFromMessageId}
+          reportReason={reportReason}
+          reportNote={reportNote}
+          reportReasonOptions={REPORT_REASON_OPTIONS}
+          setReportReason={setReportReason}
+          setReportNote={setReportNote}
+          onClose={() => {
+            if (reportBusy) return;
+            setReportOpen(false);
+            setReportError(null);
+            setReportFromMessageId(null);
+          }}
+          onSubmit={() => void submitReport()}
+        />
+      ) : null}
+
+      {archiveToContinueOpen ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-[28px] border border-white/10 bg-[#101216] shadow-[0_30px_80px_rgba(0,0,0,0.5)]">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <div>
+                <p className="text-lg font-semibold text-white">Archive one to continue</p>
+                <p className="mt-1 text-sm text-slate-300">You have reached your active conversation limit.</p>
               </div>
-
-              {reportError ? (
-                <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-100">{reportError}</div>
-              ) : null}
-              {reportFromMessageId ? (
-                <div className="rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-100">
-                  Context attached to message <span className="font-semibold">{reportFromMessageId.slice(0, 8)}</span>.
-                </div>
-              ) : null}
-
-              <div className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-300">Reason</span>
-                <div className="max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-1">
-                  {REPORT_REASON_OPTIONS.map((option) => {
-                    const selected = reportReason === option;
-                    return (
+              <button
+                type="button"
+                onClick={() => setArchiveToContinueOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100"
+                aria-label="Close archive selector"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="max-h-[65vh] overflow-y-auto px-5 py-4">
+              {archivableActiveThreads.length === 0 ? (
+                <p className="text-sm text-slate-300">No other active conversations are available to archive right now.</p>
+              ) : (
+                <div className="space-y-3">
+                  {archivableActiveThreads.map((thread) => (
+                    <div
+                      key={`archive-choice-${thread.threadId}`}
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">{thread.title}</p>
+                        <p className="truncate text-xs text-slate-400">{thread.subtitle || thread.preview || "Conversation"}</p>
+                      </div>
                       <button
-                        key={option}
                         type="button"
-                        onClick={() => setReportReason(option)}
-                        className={[
-                          "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
-                          selected ? "bg-rose-500/20 text-rose-100" : "text-slate-200 hover:bg-white/5",
-                        ].join(" ")}
+                        onClick={() => {
+                          void archiveThread(thread.threadId, thread.dbThreadId);
+                          setArchiveToContinueOpen(false);
+                        }}
+                        className="inline-flex shrink-0 items-center rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
                       >
-                        <span>{option}</span>
-                        <span className="material-symbols-outlined text-base text-white/45">chevron_right</span>
+                        Archive
                       </button>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs text-slate-300">
-                If someone is in immediate danger, contact local emergency services.
-              </div>
-
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-300">Details (optional)</span>
-                <textarea
-                  value={reportNote}
-                  onChange={(e) => setReportNote(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-rose-300/35 focus:outline-none resize-none"
-                  placeholder="Add context for moderators..."
-                />
-              </label>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  disabled={reportBusy}
-                  onClick={() => {
-                    setReportOpen(false);
-                    setReportError(null);
-                    setReportFromMessageId(null);
-                  }}
-                  className="rounded-full border border-white/15 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white/70 hover:text-white disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={reportBusy}
-                  onClick={() => void submitReport()}
-                  className="rounded-full bg-rose-500 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white hover:bg-rose-400 disabled:opacity-60"
-                >
-                  {reportBusy ? "Sending..." : "Submit report"}
-                </button>
-              </div>
+              )}
             </div>
           </div>
         </div>
       ) : null}
 
       {blockOpen ? (
-        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#121414]">
-            <div className="h-px w-full bg-gradient-to-r from-rose-500/80 via-rose-400/20 to-[#0df2f2]/30" />
-            <div className="p-5 space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-bold text-white">Block Member</h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (blockBusy) return;
-                    setBlockOpen(false);
-                  }}
-                  className="text-white/55 hover:text-white"
-                  aria-label="Close block modal"
-                >
-                  <span className="material-symbols-outlined">close</span>
-                </button>
+        <BlockDialog
+          blockBusy={blockBusy}
+          blockReason={blockReason}
+          blockNote={blockNote}
+          setBlockReason={setBlockReason}
+          setBlockNote={setBlockNote}
+          onClose={() => {
+            if (blockBusy) return;
+            setBlockOpen(false);
+          }}
+          onConfirm={() => void blockConnection()}
+        />
+      ) : null}
+
+      {composeOpen ? (
+        <ComposeDialog
+          composeQuery={composeQuery}
+          filteredComposeConnections={filteredComposeConnections}
+          filteredComposeTrips={filteredComposeTrips}
+          setComposeQuery={setComposeQuery}
+          onClose={() => {
+            setComposeOpen(false);
+            setComposeQuery("");
+          }}
+          onSelectConnection={(target) => {
+            void (async () => {
+              if (!meId || !target.otherUserId) return;
+              try {
+                const { data, error } = await supabase.rpc("cx_ensure_pair_thread", {
+                  p_user_a: meId,
+                  p_user_b: target.otherUserId,
+                  p_actor: meId,
+                });
+                if (error) throw error;
+                const threadId = typeof data === "string" ? data : null;
+                if (!threadId) throw new Error("Failed to open direct thread.");
+                const token = `direct:${threadId}`;
+                setComposeOpen(false);
+                setComposeQuery("");
+                if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+                  router.push(`/messages/${encodeURIComponent(token)}`);
+                  return;
+                }
+                setActiveThreadToken(token);
+                router.replace(buildInboxUrl({ threadToken: token }));
+              } catch (error) {
+                setThreadError(error instanceof Error ? error.message : "Failed to open thread.");
+              }
+            })();
+          }}
+          onSelectTrip={(target) => {
+            const token = `trip:${target.tripId}`;
+            setComposeOpen(false);
+            setComposeQuery("");
+            if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+              router.push(`/messages/${encodeURIComponent(token)}`);
+              return;
+            }
+            setActiveThreadToken(token);
+            router.replace(buildInboxUrl({ threadToken: token }));
+          }}
+        />
+      ) : null}
+
+      {activityComposerOpen && activeMeta?.otherUserId ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-0 sm:items-center sm:px-4" onClick={() => !activityBusy && setActivityComposerOpen(false)}>
+          <div
+            data-testid="activity-composer-modal"
+            className="flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-[1.75rem] border border-white/10 bg-[#0e1317] shadow-[0_24px_90px_rgba(0,0,0,0.55)] sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-4 py-4 sm:px-6 sm:py-5">
+              <div>
+                <h3 className="text-xl font-bold text-white">Invite to activity</h3>
+                <p className="mt-1 text-sm text-slate-300">Create a shared activity with {activeMeta.title} in this thread.</p>
+              </div>
+              <button
+                type="button"
+                disabled={activityBusy}
+                onClick={() => setActivityComposerOpen(false)}
+                className="rounded-full border border-white/15 bg-white/[0.03] p-2 text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100 disabled:opacity-60"
+                aria-label="Close activity composer"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+              <div className="block">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Activity type</span>
+                  <button
+                    type="button"
+                    onClick={() => setActivityMoreFiltersOpen((prev) => !prev)}
+                    className="rounded-full border border-white/12 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-cyan-300/35 hover:text-cyan-100"
+                  >
+                    {activityMoreFiltersOpen ? "Less filters" : "More filters"}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {PRIMARY_ACTIVITY_QUICK_FILTERS.map((item) => {
+                    const selected = activityDraft.activityType === item;
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        data-testid={`activity-filter-${item}`}
+                        onClick={() => setActivityDraft((prev) => ({ ...prev, activityType: item }))}
+                        className={[
+                          "rounded-full border px-3 py-2 text-xs font-semibold transition",
+                          selected
+                            ? "border-cyan-300/40 bg-[linear-gradient(90deg,rgba(0,245,255,0.18),rgba(255,0,255,0.12))] text-white"
+                            : "border-white/12 bg-white/[0.03] text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100",
+                        ].join(" ")}
+                      >
+                        {activityTypeLabel(item)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {activityMoreFiltersOpen ? (
+                  <div className="mt-3 rounded-2xl border border-white/8 bg-black/20 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">More activity filters</p>
+                    <div className="flex flex-wrap gap-2">
+                      {SECONDARY_ACTIVITY_QUICK_FILTERS.map((item) => {
+                        const selected = activityDraft.activityType === item;
+                        return (
+                          <button
+                            key={item}
+                            type="button"
+                            data-testid={`activity-filter-more-${item}`}
+                            onClick={() => setActivityDraft((prev) => ({ ...prev, activityType: item }))}
+                            className={[
+                              "rounded-full border px-3 py-2 text-xs font-semibold transition",
+                              selected
+                                ? "border-cyan-300/40 bg-[linear-gradient(90deg,rgba(0,245,255,0.18),rgba(255,0,255,0.12))] text-white"
+                                : "border-white/12 bg-white/[0.03] text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100",
+                            ].join(" ")}
+                          >
+                            {activityTypeLabel(item)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-100">
-                They won’t be able to message you in this connection. The thread will be archived.
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Start date</span>
+                  <input
+                    data-testid="activity-composer-start"
+                    type="datetime-local"
+                    value={activityDraft.startAt}
+                    onChange={(event) => setActivityDraft((prev) => ({ ...prev, startAt: event.target.value }))}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/35"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">End date</span>
+                  <input
+                    data-testid="activity-composer-end"
+                    type="datetime-local"
+                    value={activityDraft.endAt}
+                    onChange={(event) => setActivityDraft((prev) => ({ ...prev, endAt: event.target.value }))}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/35"
+                  />
+                </label>
               </div>
 
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-300">Reason</span>
-                <select
-                  value={blockReason}
-                  onChange={(e) => setBlockReason(e.target.value)}
-                  className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2 text-sm text-white focus:border-rose-300/35 focus:outline-none"
-                >
-                  <option>Safety concern</option>
-                  <option>Harassment / abuse</option>
-                  <option>Spam / scams</option>
-                  <option>Boundary violation</option>
-                  <option>Other</option>
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-300">Note (optional)</span>
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Note</span>
                 <textarea
-                  value={blockNote}
-                  onChange={(e) => setBlockNote(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-rose-300/35 focus:outline-none resize-none"
-                  placeholder="Add context for moderation logs..."
+                  data-testid="activity-composer-note"
+                  rows={4}
+                  maxLength={600}
+                  value={activityDraft.note}
+                  onChange={(event) => setActivityDraft((prev) => ({ ...prev, note: event.target.value }))}
+                  placeholder="Add context, timing, or what you want to do together."
+                  className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/35"
                 />
+                <div className="mt-2 text-right text-[11px] text-slate-500">{activityDraft.note.length}/600</div>
               </label>
+            </div>
 
-              <div className="flex justify-end gap-2">
+            <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <p className="text-xs text-slate-400">No dates means completion starts 24h after acceptance.</p>
+              <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  disabled={blockBusy}
-                  onClick={() => setBlockOpen(false)}
-                  className="rounded-full border border-white/15 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white/70 hover:text-white disabled:opacity-60"
+                  disabled={activityBusy}
+                  onClick={() => setActivityComposerOpen(false)}
+                  className="rounded-full border border-white/15 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-200 hover:border-white/25 disabled:opacity-60"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  disabled={blockBusy}
-                  onClick={() => void blockConnection()}
-                  className="rounded-full bg-rose-500 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white hover:bg-rose-400 disabled:opacity-60"
+                  disabled={activityBusy}
+                  onClick={() => void submitActivityInvite()}
+                  data-testid="activity-composer-submit"
+                  className="rounded-full border border-cyan-300/30 bg-[linear-gradient(90deg,rgba(0,245,255,0.22),rgba(255,0,255,0.18))] px-4 py-2 text-sm font-semibold text-white hover:border-cyan-300/45 hover:bg-[linear-gradient(90deg,rgba(0,245,255,0.28),rgba(255,0,255,0.24))] disabled:opacity-60"
                 >
-                  {blockBusy ? "Blocking..." : "Confirm block"}
+                  {activityBusy ? "Sending..." : "Send Request"}
                 </button>
               </div>
             </div>
@@ -3569,156 +7287,24 @@ function MessagesPageContent() {
         </div>
       ) : null}
 
-      {composeOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-[#121414] shadow-[0_30px_60px_rgba(0,0,0,0.45)]">
-            <div className="h-px w-full bg-gradient-to-r from-[#0df2f2]/60 via-[#0df2f2]/10 to-[#f20db1]/60" />
-            <div className="p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-bold text-white">Start New Thread</h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setComposeOpen(false);
-                    setComposeQuery("");
-                  }}
-                  className="text-white/55 hover:text-white"
-                  aria-label="Close composer"
-                >
-                  <span className="material-symbols-outlined">close</span>
-                </button>
-              </div>
-
-              <div className="mt-3 relative">
-                <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">search</span>
-                <input
-                  value={composeQuery}
-                  onChange={(e) => setComposeQuery(e.target.value)}
-                  placeholder="Search connection or trip..."
-                  className="w-full rounded-xl border border-white/15 bg-black/25 py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
-                />
-              </div>
-
-              <div className="mt-3 max-h-[360px] space-y-3 overflow-y-auto pr-1">
-                {filteredComposeConnections.length === 0 && filteredComposeTrips.length === 0 ? (
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-400 space-y-3">
-                    <p>No eligible connections or trips available yet.</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href="/connections"
-                        className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
-                      >
-                        Find Connections
-                      </Link>
-                      <Link
-                        href="/trips"
-                        className="rounded-full border border-white/20 bg-black/25 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-cyan-300/30 hover:text-cyan-100"
-                      >
-                        Browse Trips
-                      </Link>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {filteredComposeConnections.length > 0 ? (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[11px] font-bold uppercase tracking-widest text-cyan-200/80">Connections</p>
-                        {filteredComposeConnections.map((target) => (
-                          <button
-                            key={target.connectionId}
-                            type="button"
-                            onClick={() => {
-                              const token = `conn:${target.connectionId}`;
-                              setComposeOpen(false);
-                              setComposeQuery("");
-                              if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-                                router.push(`/messages/${encodeURIComponent(token)}`);
-                                return;
-                              }
-                              setActiveThreadToken(token);
-                              router.replace(`/messages?thread=${encodeURIComponent(token)}`);
-                            }}
-                            className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left hover:border-cyan-300/30 hover:bg-[#1e2f2f]"
-                          >
-                            <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[#223838]">
-                              {target.avatarUrl ? (
-                                <Image
-                                  src={target.avatarUrl}
-                                  alt={target.displayName}
-                                  fill
-                                  sizes="40px"
-                                  loader={remoteImageLoader}
-                                  unoptimized
-                                  className="object-cover"
-                                />
-                              ) : (
-                                <div className="flex h-full w-full items-center justify-center text-cyan-100/80">
-                                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-                                    person
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-white">{target.displayName}</p>
-                              <p className="truncate text-xs text-slate-400">{target.subtitle}</p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {filteredComposeTrips.length > 0 ? (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[11px] font-bold uppercase tracking-widest text-cyan-200/80">Trips</p>
-                        {filteredComposeTrips.map((target) => (
-                          <button
-                            key={target.tripId}
-                            type="button"
-                            onClick={() => {
-                              const token = `trip:${target.tripId}`;
-                              setComposeOpen(false);
-                              setComposeQuery("");
-                              if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-                                router.push(`/messages/${encodeURIComponent(token)}`);
-                                return;
-                              }
-                              setActiveThreadToken(token);
-                              router.replace(`/messages?thread=${encodeURIComponent(token)}`);
-                            }}
-                            className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left hover:border-cyan-300/30 hover:bg-[#1e2f2f]"
-                          >
-                            <div className="h-10 w-10 shrink-0 rounded-full bg-[#223838] flex items-center justify-center text-cyan-200">
-                              <span className="material-symbols-outlined">luggage</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-white">{target.displayName}</p>
-                              <p className="truncate text-xs text-slate-400">{target.subtitle}</p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </div>
-
-              <div className="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setComposeOpen(false);
-                    setComposeQuery("");
-                  }}
-                  className="rounded-full border border-white/15 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white/70 hover:text-white"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ShareInquiryInfoModal
+        open={Boolean(shareInquiryContext)}
+        inquiryLabel={
+          shareInquiryContext && typeof shareInquiryContext.metadata.inquiry_kind === "string"
+            ? SERVICE_INQUIRY_KIND_LABELS[shareInquiryContext.metadata.inquiry_kind as ServiceInquiryKind] ?? "Service inquiry"
+            : shareInquiryContext?.title || "Service inquiry"
+        }
+        blocks={shareInquiryBlocks}
+        busy={shareInquiryBusy}
+        error={shareInquiryError}
+        onClose={() => {
+          if (shareInquiryBusy) return;
+          setShareInquiryContext(null);
+          setShareInquiryBlocks([]);
+          setShareInquiryError(null);
+        }}
+        onConfirm={(payload) => void acceptServiceInquiryShare(payload)}
+      />
 
       <style jsx global>{`
         .cx-scroll::-webkit-scrollbar {
@@ -3751,7 +7337,7 @@ function MessagesPageContent() {
 
 function MessagesPageFallback() {
   return (
-    <div className="font-sans h-screen bg-[#0A0A0A] text-white flex flex-col overflow-hidden">
+    <div className="font-sans flex h-[100dvh] flex-col overflow-hidden bg-[#0A0A0A] text-white">
       <Nav />
       <div className="flex-1 p-4 sm:p-6">
         <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/70">

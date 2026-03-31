@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type Session } from "@supabase/supabase-js";
 import type { Page } from "@playwright/test";
 
 type BootstrapResult =
@@ -26,6 +26,24 @@ type SeedContext =
       ready: false;
       reason: string;
     };
+
+type TripRequestSeedRuntime = {
+  ready: true;
+  adminClient: ReturnType<typeof createClient>;
+  ownerClient: ReturnType<typeof createClient>;
+  requesterClient: ReturnType<typeof createClient>;
+  ownerSession: Session;
+  requesterSession: Session;
+  ownerId: string;
+  requesterId: string;
+  supabaseUrl: string;
+  anonKey: string;
+  ownerEmail: string;
+  requesterEmail: string;
+  ownerName: string;
+  requesterName: string;
+  password: string;
+};
 
 export type TripRequestScenario = {
   tripId: string;
@@ -63,6 +81,8 @@ type TripLookupRow = {
 const E2E_TRIP_PURPOSE = "Social Dancing";
 
 let cachedDotenv: Record<string, string> | null = null;
+let cachedTripRequestSeedRuntimePromise: Promise<TripRequestSeedRuntime | { ready: false; reason: string }> | null =
+  null;
 
 function loadDotEnvLocal(): Record<string, string> {
   if (cachedDotenv) return cachedDotenv;
@@ -114,7 +134,8 @@ function withNamespacedEmail(baseEmail: string) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const namespace = sanitizeNamespace(explicit || implicit);
+  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
   const at = baseEmail.indexOf("@");
@@ -140,6 +161,18 @@ function isMissingSchemaError(message: string) {
   );
 }
 
+function shouldFallbackAcceptedConnectionRpc(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("threads_type_chk") ||
+    text.includes("cx_ensure_pair_thread") ||
+    text.includes("direct_user_low") ||
+    text.includes("direct_user_high") ||
+    (text.includes("thread") && text.includes("constraint")) ||
+    (text.includes("thread_type") && text.includes("check"))
+  );
+}
+
 function shouldFallbackTripRequestRpc(errorMessage: string) {
   const text = errorMessage.toLowerCase();
   return (
@@ -147,6 +180,7 @@ function shouldFallbackTripRequestRpc(errorMessage: string) {
     text.includes("column") ||
     text.includes("decided_by") ||
     text.includes("decided_at") ||
+    text.includes("not_authenticated") ||
     text.includes("schema cache") ||
     text.includes("on conflict")
   );
@@ -552,6 +586,11 @@ async function ensureAcceptedConnection(
   if (createReq.error) {
     const msg = createReq.error.message.toLowerCase();
     if (!msg.includes("already_pending_or_connected")) {
+      if (shouldFallbackAcceptedConnectionRpc(msg)) {
+        throw new Error(
+          "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+        );
+      }
       throw createReq.error;
     }
   }
@@ -568,7 +607,22 @@ async function ensureAcceptedConnection(
   if (firstPending?.id) {
     const accepter = firstPending.target_id === targetId ? targetClient : requesterClient;
     const accept = await accepter.rpc("accept_connection_request", { p_connection_id: firstPending.id });
-    if (accept.error) throw accept.error;
+    if (accept.error) {
+      if (!shouldFallbackAcceptedConnectionRpc(accept.error.message)) throw accept.error;
+      const fallbackAccept = await adminClient
+        .from("connections")
+        .update({ status: "accepted" })
+        .eq("id", firstPending.id)
+        .eq("status", "pending");
+      if (fallbackAccept.error) {
+        if (shouldFallbackAcceptedConnectionRpc(fallbackAccept.error.message)) {
+          throw new Error(
+            "connection_thread_schema_outdated: apply scripts/sql/2026-03-09_unified_inbox_request_threads.sql and scripts/sql/2026-03-11_pair_threads_chat_unlock.sql"
+          );
+        }
+        throw fallbackAccept.error;
+      }
+    }
   }
 
   const after = await adminClient
@@ -834,66 +888,56 @@ async function createPendingTripRequest(
 
     const existingId = ((existingRes.data ?? []) as Array<{ id?: string }>)[0]?.id ?? null;
     if (existingId) {
-      const updatePayloads: Array<Record<string, string>> = [
-        { status: "pending", reason: reasonValue, note: "E2E outgoing request" },
-        { status: "pending", reason: reasonValue },
-        { status: "pending", note: "E2E outgoing request" },
-        { status: "pending" },
-      ];
-      let updateError: { message: string } | null = null;
-      for (const payload of updatePayloads) {
-        const updateRes = await adminClient.from("trip_requests").update(payload).eq("id", existingId);
-        if (!updateRes.error) {
-          updateError = null;
-          break;
-        }
-        updateError = updateRes.error;
-        if (!isTripRequestCompatPayloadError(updateRes.error.message)) {
-          throw updateRes.error;
-        }
+      const deleteRes = await adminClient.from("trip_requests").delete().eq("id", existingId);
+      if (deleteRes.error) {
+        throw deleteRes.error;
       }
-      if (updateError) throw updateError;
-    } else {
-      const insertPayloads: Array<Record<string, string>> = [
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          reason: reasonValue,
-          note: "E2E outgoing request",
-          status: "pending",
-        },
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          reason: reasonValue,
-          status: "pending",
-        },
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          note: "E2E outgoing request",
-          status: "pending",
-        },
-        {
-          trip_id: tripId,
-          requester_id: requesterId,
-          status: "pending",
-        },
-      ];
-      let insertError: { message: string } | null = null;
-      for (const payload of insertPayloads) {
-        const insertRes = await adminClient.from("trip_requests").insert(payload);
-        if (!insertRes.error) {
-          insertError = null;
-          break;
-        }
-        insertError = insertRes.error;
-        if (!isTripRequestCompatPayloadError(insertRes.error.message)) {
-          throw insertRes.error;
-        }
-      }
-      if (insertError) throw insertError;
     }
+
+    const insertPayloads: Array<Record<string, string>> = [
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        reason: reasonValue,
+        note: "E2E outgoing request",
+        status: "pending",
+      },
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        reason: reasonValue,
+        status: "pending",
+      },
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        note: "E2E outgoing request",
+        status: "pending",
+      },
+      {
+        trip_id: tripId,
+        requester_id: requesterId,
+        status: "pending",
+      },
+    ];
+    let insertError: { message: string; code?: string } | null = null;
+    for (const payload of insertPayloads) {
+      const insertRes = await requesterClient.from("trip_requests").insert(payload);
+      if (!insertRes.error) {
+        insertError = null;
+        break;
+      }
+      const message = insertRes.error.message.toLowerCase();
+      if (insertRes.error.code === "23505" || message.includes("duplicate")) {
+        insertError = null;
+        break;
+      }
+      insertError = insertRes.error;
+      if (!isTripRequestCompatPayloadError(insertRes.error.message)) {
+        throw insertRes.error;
+      }
+    }
+    if (insertError) throw insertError;
   }
 
   const row = await adminClient
@@ -926,99 +970,166 @@ async function createPendingTripRequest(
   return requestId;
 }
 
-async function loginPageWithPasswordSession(
-  page: Page,
-  anonClient: ReturnType<typeof createClient>,
-  email: string,
-  password: string
-) {
-  const signIn = await withNetworkRetries(() => anonClient.auth.signInWithPassword({ email, password }));
-  if (signIn.error || !signIn.data.session) {
-    throw signIn.error ?? new Error("Missing session after sign in");
+async function loginPageWithSession(page: Page, session: Session) {
+  const context = buildSeedContext();
+  if (!context.ready) {
+    throw new Error(context.reason);
   }
 
-  const hashParams = new URLSearchParams({
-    access_token: signIn.data.session.access_token,
-    refresh_token: signIn.data.session.refresh_token,
-    token_type: "bearer",
-  });
+  const projectRef = new URL(context.supabaseUrl).hostname.split(".")[0];
+  const storageKeys = [`sb-${projectRef}-auth-token`, "supabase.auth.token"];
+  const sessionPayload = session;
 
-  await page.goto(`/auth/callback#${hashParams.toString()}`);
-  await page.waitForURL((url) => !url.pathname.startsWith("/auth/callback"), { timeout: 20_000 });
+  await page.addInitScript(
+    ({ keys, payload }) => {
+      const serialized = JSON.stringify(payload);
+      keys.forEach((key) => {
+        window.localStorage.setItem(key, serialized);
+        window.sessionStorage.setItem(key, serialized);
+      });
+    },
+    {
+      keys: storageKeys,
+      payload: sessionPayload,
+    }
+  );
+}
+
+async function gotoWithRetry(page: Page, url: string, attempts = 4) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil: "commit", timeout: 45_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) break;
+      await page.waitForTimeout(400 * attempt);
+    }
+  }
+  throw lastError ?? new Error(`Failed to navigate to ${url}`);
+}
+
+async function getTripRequestSeedRuntime(): Promise<TripRequestSeedRuntime | { ready: false; reason: string }> {
+  if (cachedTripRequestSeedRuntimePromise) {
+    return cachedTripRequestSeedRuntimePromise;
+  }
+
+  cachedTripRequestSeedRuntimePromise = (async () => {
+    const context = buildSeedContext();
+    if (!context.ready) return context;
+
+    try {
+      const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const ownerClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const requesterClient = createClient(context.supabaseUrl, context.anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const ownerId = await ensureUser(adminClient, {
+        email: context.ownerEmail,
+        password: context.password,
+        displayName: context.ownerName,
+        city: "Tallinn",
+        country: "Estonia",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.ownerEmail)}`,
+        primaryStyle: "bachata",
+      });
+
+      const requesterId = await ensureUser(adminClient, {
+        email: context.requesterEmail,
+        password: context.password,
+        displayName: context.requesterName,
+        city: "Lisbon",
+        country: "Portugal",
+        avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.requesterEmail)}`,
+        primaryStyle: "salsa",
+      });
+
+      const ownerSignIn = await withNetworkRetries(() =>
+        ownerClient.auth.signInWithPassword({ email: context.ownerEmail, password: context.password })
+      );
+      if (ownerSignIn.error || !ownerSignIn.data.session) {
+        throw ownerSignIn.error ?? new Error("Failed to sign in owner for trips e2e seed.");
+      }
+
+      const requesterSignIn = await withNetworkRetries(() =>
+        requesterClient.auth.signInWithPassword({
+          email: context.requesterEmail,
+          password: context.password,
+        })
+      );
+      if (requesterSignIn.error || !requesterSignIn.data.session) {
+        throw requesterSignIn.error ?? new Error("Failed to sign in requester for trips e2e seed.");
+      }
+
+      return {
+        ready: true,
+        adminClient,
+        ownerClient,
+        requesterClient,
+        ownerSession: ownerSignIn.data.session,
+        requesterSession: requesterSignIn.data.session,
+        ownerId,
+        requesterId,
+        supabaseUrl: context.supabaseUrl,
+        anonKey: context.anonKey,
+        ownerEmail: context.ownerEmail,
+        requesterEmail: context.requesterEmail,
+        ownerName: context.ownerName,
+        requesterName: context.requesterName,
+        password: context.password,
+      };
+    } catch (error) {
+      cachedTripRequestSeedRuntimePromise = null;
+      throw error;
+    }
+  })();
+
+  return cachedTripRequestSeedRuntimePromise;
 }
 
 async function ensureTripRequestScenario(): Promise<BootstrapResult> {
-  const context = buildSeedContext();
-  if (!context.ready) return context;
+  const runtime = await getTripRequestSeedRuntime();
+  if (!runtime.ready) return runtime;
 
-  const adminClient = createClient(context.supabaseUrl, context.serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const ownerClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const requesterClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const ownerId = await ensureUser(adminClient, {
-    email: context.ownerEmail,
-    password: context.password,
-    displayName: context.ownerName,
-    city: "Tallinn",
-    country: "Estonia",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.ownerEmail)}`,
-    primaryStyle: "bachata",
-  });
-
-  const requesterId = await ensureUser(adminClient, {
-    email: context.requesterEmail,
-    password: context.password,
-    displayName: context.requesterName,
-    city: "Lisbon",
-    country: "Portugal",
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(context.requesterEmail)}`,
-    primaryStyle: "salsa",
-  });
-
-  const ownerSignIn = await withNetworkRetries(() =>
-    ownerClient.auth.signInWithPassword({ email: context.ownerEmail, password: context.password })
+  await ensureAcceptedConnection(
+    runtime.adminClient,
+    runtime.ownerClient,
+    runtime.requesterClient,
+    runtime.ownerId,
+    runtime.requesterId
   );
-  if (ownerSignIn.error || !ownerSignIn.data.session) {
-    throw ownerSignIn.error ?? new Error("Failed to sign in owner for trips e2e seed.");
-  }
 
-  const requesterSignIn = await withNetworkRetries(() =>
-    requesterClient.auth.signInWithPassword({
-      email: context.requesterEmail,
-      password: context.password,
-    })
+  const tripId = await createTripScenario(runtime.adminClient, runtime.ownerId);
+  await enforceTripOwner(runtime.adminClient, tripId, runtime.ownerId);
+  await clearTripThread(runtime.adminClient, tripId);
+  await clearTripNotifications(runtime.adminClient, runtime.ownerId, runtime.requesterId);
+  await clearTripRequests(runtime.adminClient, tripId);
+  const requestId = await createPendingTripRequest(
+    runtime.adminClient,
+    runtime.requesterClient,
+    tripId,
+    runtime.requesterId,
+    runtime.ownerId
   );
-  if (requesterSignIn.error || !requesterSignIn.data.session) {
-    throw requesterSignIn.error ?? new Error("Failed to sign in requester for trips e2e seed.");
-  }
-
-  await ensureAcceptedConnection(adminClient, ownerClient, requesterClient, ownerId, requesterId);
-
-  const tripId = await createTripScenario(adminClient, ownerId);
-  await enforceTripOwner(adminClient, tripId, ownerId);
-  await clearTripThread(adminClient, tripId);
-  await clearTripNotifications(adminClient, ownerId, requesterId);
-  await clearTripRequests(adminClient, tripId);
-  const requestId = await createPendingTripRequest(adminClient, requesterClient, tripId, requesterId, ownerId);
 
   return {
     ready: true,
     scenario: {
       tripId,
       requestId,
-      ownerId,
-      requesterId,
-      ownerEmail: context.ownerEmail,
-      requesterEmail: context.requesterEmail,
-      ownerName: context.ownerName,
-      requesterName: context.requesterName,
-      password: context.password,
+      ownerId: runtime.ownerId,
+      requesterId: runtime.requesterId,
+      ownerEmail: runtime.ownerEmail,
+      requesterEmail: runtime.requesterEmail,
+      ownerName: runtime.ownerName,
+      requesterName: runtime.requesterName,
+      password: runtime.password,
     },
   };
 }
@@ -1030,16 +1141,12 @@ export async function bootstrapTripsRequestsE2E(
   const seeded = await ensureTripRequestScenario();
   if (!seeded.ready) return seeded;
 
-  const context = buildSeedContext();
-  if (!context.ready) return context;
+  const runtime = await getTripRequestSeedRuntime();
+  if (!runtime.ready) return runtime;
 
-  const browserAnonClient = createClient(context.supabaseUrl, context.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const loginEmail = actor === "owner" ? seeded.scenario.ownerEmail : seeded.scenario.requesterEmail;
-  await loginPageWithPasswordSession(page, browserAnonClient, loginEmail, seeded.scenario.password);
-  await page.goto(`/trips/${seeded.scenario.tripId}`);
+  const session = actor === "owner" ? runtime.ownerSession : runtime.requesterSession;
+  await loginPageWithSession(page, session);
+  await gotoWithRetry(page, `/trips/${seeded.scenario.tripId}`);
   await page.waitForLoadState("domcontentloaded");
 
   return seeded;

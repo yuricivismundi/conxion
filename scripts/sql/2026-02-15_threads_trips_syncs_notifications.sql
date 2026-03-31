@@ -15,6 +15,7 @@ create extension if not exists pgcrypto;
 create or replace function public.set_updated_at_ts()
 returns trigger
 language plpgsql
+set search_path = public
 as $function$
 begin
   new.updated_at = now();
@@ -237,6 +238,7 @@ for each row execute function public.bump_thread_message_daily_limit();
 create or replace function public.update_thread_last_message_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $function$
 begin
   update public.threads

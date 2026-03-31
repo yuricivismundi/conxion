@@ -1,6 +1,9 @@
 export const ONBOARDING_DRAFT_KEY = "onboarding_draft_v1";
 
 export type OnboardingDraft = {
+  ageConfirmed?: boolean;
+  ageConfirmedAt?: string;
+
   displayName?: string;
   country?: string;
   city?: string;

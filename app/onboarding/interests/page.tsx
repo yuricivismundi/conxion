@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import OnboardingShell from "@/components/OnboardingShell";
 import { readOnboardingDraft, writeOnboardingDraft } from "@/lib/onboardingDraft";
+import { supabase } from "@/lib/supabase/client";
 
 // ------------------------------
 // Config
@@ -118,7 +119,7 @@ export default function OnboardingInterestsPage() {
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]); // store style names as strings (core + other)
   const [styleLevels, setStyleLevels] = useState<Record<string, StyleLevel>>({});
 
-  // Other style (MVP: free text)
+  // Other style (free text)
   const [otherStyleEnabled, setOtherStyleEnabled] = useState(false);
   const [otherStyleName, setOtherStyleName] = useState("");
 
@@ -129,48 +130,71 @@ export default function OnboardingInterestsPage() {
   // ------------------------------
   // Hydrate from draft
   // ------------------------------
-  /* eslint-disable react-hooks/set-state-in-effect -- hydration from persisted draft. */
   useEffect(() => {
-    const d = readOnboardingDraft();
+    let cancelled = false;
+    (async () => {
+      const authRes = await supabase.auth.getUser();
+      const user = authRes.data.user;
+      if (!user) {
+        router.replace("/auth");
+        return;
+      }
 
-    const draftRoles: string[] = Array.isArray(d.roles) ? d.roles : [];
-    setRoles(draftRoles);
+      const d = readOnboardingDraft();
+      const draftAgeConfirmed = d.ageConfirmed === true;
+      const metadataAgeConfirmed = Boolean(user.user_metadata?.age_confirmed_at || user.user_metadata?.age_confirmed === true);
+      if (!draftAgeConfirmed && !metadataAgeConfirmed) {
+        router.replace("/onboarding/age");
+        return;
+      }
+      const draftRoles: string[] = Array.isArray(d.roles) ? d.roles : [];
+      if (draftRoles.length === 0) {
+        router.replace("/onboarding/profile");
+        return;
+      }
 
-    // interestsByRole (preferred)
-    const dIbr = d.interestsByRole;
-    if (dIbr && typeof dIbr === "object") {
-      const normalized = Object.fromEntries(
-        Object.entries(dIbr).map(([k, v]) => [k, Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []])
-      );
-      setInterestsByRole(normalized as InterestsByRole);
-    } else {
-      // Fallback: if only flat interests exist, don't guess assignment.
-      setInterestsByRole({});
-    }
+      if (cancelled) return;
+      setRoles(draftRoles);
 
-    // style levels (preferred)
-    const dLevels = d.styleLevels;
-    if (dLevels && typeof dLevels === "object") {
-      const next: Record<string, StyleLevel> = {};
-      Object.entries(dLevels).forEach(([k, v]) => {
-        if (typeof v === "string" && isStyleLevel(v)) next[k] = v;
-      });
-      setStyleLevels(next);
-    }
+      // interestsByRole (preferred)
+      const dIbr = d.interestsByRole;
+      if (dIbr && typeof dIbr === "object") {
+        const normalized = Object.fromEntries(
+          Object.entries(dIbr).map(([k, v]) => [k, Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []])
+        );
+        setInterestsByRole(normalized as InterestsByRole);
+      } else {
+        // Fallback: if only flat interests exist, don't guess assignment.
+        setInterestsByRole({});
+      }
 
-    // selected styles
-    const dStyles: string[] = Array.isArray(d.styles) ? d.styles : [];
-    setSelectedStyles(dStyles);
+      // style levels (preferred)
+      const dLevels = d.styleLevels;
+      if (dLevels && typeof dLevels === "object") {
+        const next: Record<string, StyleLevel> = {};
+        Object.entries(dLevels).forEach(([k, v]) => {
+          if (typeof v === "string" && isStyleLevel(v)) next[k] = v;
+        });
+        setStyleLevels(next);
+      }
 
-    // other style
-    const dOtherEnabled = !!d.otherStyleEnabled;
-    const dOtherName = typeof d.otherStyleName === "string" ? d.otherStyleName : "";
-    setOtherStyleEnabled(dOtherEnabled);
-    setOtherStyleName(dOtherName);
+      // selected styles
+      const dStyles: string[] = Array.isArray(d.styles) ? d.styles : [];
+      setSelectedStyles(dStyles);
 
-    setHydrated(true);
-  }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
+      // other style
+      const dOtherEnabled = !!d.otherStyleEnabled;
+      const dOtherName = typeof d.otherStyleName === "string" ? d.otherStyleName : "";
+      setOtherStyleEnabled(dOtherEnabled);
+      setOtherStyleName(dOtherName);
+
+      setHydrated(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   // Ensure interestsByRole has keys for each role (after roles hydrate)
   /* eslint-disable react-hooks/set-state-in-effect -- derived state sync. */
@@ -344,11 +368,6 @@ export default function OnboardingInterestsPage() {
   // Validation
   // ------------------------------
 
-  const interestsOk = useMemo(() => {
-    if (roles.length === 0) return false;
-    return roles.every((r) => Array.isArray(interestsByRole[r]) && interestsByRole[r].length >= 1);
-  }, [roles, interestsByRole]);
-
   const stylesOk = useMemo(() => {
     // must have at least one style selected with a level
     const resolvedOther = otherStyleEnabled ? otherStyleName.trim() : "";
@@ -364,7 +383,7 @@ export default function OnboardingInterestsPage() {
     });
   }, [selectedStyles, styleLevels, otherStyleEnabled, otherStyleName]);
 
-  const canContinue = interestsOk && stylesOk;
+  const canContinue = stylesOk;
 
   return (
     <OnboardingShell
@@ -434,7 +453,7 @@ export default function OnboardingInterestsPage() {
               );
             })}
 
-            {/* Other (MVP: free text, max 32 chars) */}
+            {/* Other (free text, max 32 chars) */}
             <div className="flex flex-col">
               <button
                 type="button"
@@ -500,7 +519,7 @@ export default function OnboardingInterestsPage() {
                     {normalizeRoleLabel(role)}
                   </div>
                   <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 border border-white/10 px-2 py-1 rounded">
-                    Select at least 1
+                    Optional
                   </div>
                 </div>
 
@@ -598,11 +617,7 @@ export default function OnboardingInterestsPage() {
           </button>
         </div>
 
-        {!canContinue ? (
-          <div className="text-[11px] text-white/40">
-            To continue: select at least 1 interest for each role, and select at least 1 dance style with a level.
-          </div>
-        ) : null}
+        {!canContinue ? <div className="text-[11px] text-white/40">To continue: select at least 1 dance style with a level.</div> : null}
       </div>
     </OnboardingShell>
   );

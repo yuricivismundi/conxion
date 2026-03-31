@@ -41,6 +41,98 @@ function readTextField(value: unknown) {
   return value.trim();
 }
 
+function notificationContentForKind(kind: string, params: {
+  userId: string;
+  tripId?: string;
+}) {
+  if (kind === "trip_request_received") {
+    return {
+      title: "Trip request received",
+      body: "A traveller sent you a request for this trip.",
+      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips",
+    };
+  }
+  if (kind === "trip_request_accepted") {
+    return {
+      title: "Trip request accepted",
+      body: "Your trip request was accepted.",
+      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips/my",
+    };
+  }
+  if (kind === "trip_request_declined") {
+    return {
+      title: "Trip request declined",
+      body: "A host declined this request. You can send a new one.",
+      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips/explore",
+    };
+  }
+  return {
+    title: "New reference received",
+    body: "You received a new reference.",
+    linkUrl: `/profile/${params.userId}`,
+  };
+}
+
+async function authorizeNotificationRequest(params: {
+  service: ReturnType<typeof getServiceClient>;
+  actorId: string;
+  userId: string;
+  kind: string;
+  metadata: Record<string, unknown>;
+}) {
+  if (params.metadata.sample === true) {
+    return params.userId === params.actorId;
+  }
+
+  if (params.kind === "reference_received") {
+    const referenceId = readTextField(params.metadata.reference_id);
+    if (!referenceId) return false;
+
+    const referenceRes = await params.service
+      .from("references")
+      .select("id,author_id,from_user_id,source_id,recipient_id,to_user_id,target_id")
+      .eq("id", referenceId)
+      .maybeSingle();
+    if (referenceRes.error || !referenceRes.data) return false;
+
+    const row = referenceRes.data as Record<string, unknown>;
+    const actorMatches = [row.author_id, row.from_user_id, row.source_id].some((value) => value === params.actorId);
+    const recipientMatches = [row.recipient_id, row.to_user_id, row.target_id].some((value) => value === params.userId);
+    return actorMatches && recipientMatches;
+  }
+
+  const requestId = readTextField(params.metadata.request_id);
+  const tripId = readTextField(params.metadata.trip_id);
+  if (!requestId || !tripId) return false;
+
+  const [requestRes, tripRes] = await Promise.all([
+    params.service
+      .from("trip_requests")
+      .select("id,trip_id,requester_id,status")
+      .eq("id", requestId)
+      .eq("trip_id", tripId)
+      .maybeSingle(),
+    params.service
+      .from("trips")
+      .select("id,user_id")
+      .eq("id", tripId)
+      .maybeSingle(),
+  ]);
+
+  if (requestRes.error || !requestRes.data || tripRes.error || !tripRes.data) return false;
+
+  const requestRow = requestRes.data as Record<string, unknown>;
+  const tripRow = tripRes.data as Record<string, unknown>;
+  if (params.kind === "trip_request_received") {
+    return requestRow.requester_id === params.actorId && tripRow.user_id === params.userId && requestRow.status === "pending";
+  }
+
+  if (requestRow.requester_id !== params.userId || tripRow.user_id !== params.actorId) return false;
+  if (params.kind === "trip_request_accepted") return requestRow.status === "accepted";
+  if (params.kind === "trip_request_declined") return requestRow.status === "declined";
+  return false;
+}
+
 function extractMissingColumnFromError(message: string) {
   const couldNotFind = message.match(/could not find the '([^']+)' column/i);
   if (couldNotFind?.[1]) return couldNotFind[1];
@@ -278,14 +370,11 @@ export async function POST(req: Request) {
 
     const userId = readTextField(body?.userId);
     const kind = readTextField(body?.kind);
-    const title = readTextField(body?.title);
-    const bodyText = readTextField(body?.body);
-    const linkUrl = readTextField(body?.linkUrl);
     const metadata = normalizeMetadata(body?.metadata);
 
-    if (!userId || !kind || !title) {
+    if (!userId || !kind) {
       return NextResponse.json(
-        { ok: false, error: "userId, kind, and title are required." },
+        { ok: false, error: "userId and kind are required." },
         { status: 400 }
       );
     }
@@ -305,6 +394,26 @@ export async function POST(req: Request) {
     }
 
     const service = getServiceClient();
+    const isAuthorized = await authorizeNotificationRequest({
+      service,
+      actorId: authData.user.id,
+      userId,
+      kind,
+      metadata,
+    });
+    if (!isAuthorized) {
+      return NextResponse.json({ ok: false, error: "Notification not allowed." }, { status: 403 });
+    }
+
+    const sampleMode = metadata.sample === true && userId === authData.user.id;
+    const tripId = readTextField(metadata.trip_id);
+    const trustedContent = sampleMode
+      ? {
+          title: readTextField(body?.title) || "Sample notification",
+          body: readTextField(body?.body),
+          linkUrl: readTextField(body?.linkUrl),
+        }
+      : notificationContentForKind(kind, { userId, tripId });
 
     const recent = await service
       .from("notifications")
@@ -338,9 +447,9 @@ export async function POST(req: Request) {
       userId,
       actorId: authData.user.id,
       kind,
-      title,
-      body: bodyText || "",
-      linkUrl: linkUrl || "",
+      title: trustedContent.title,
+      body: trustedContent.body || "",
+      linkUrl: trustedContent.linkUrl || "",
       metadata,
     });
 

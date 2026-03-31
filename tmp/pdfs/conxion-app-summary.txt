@@ -5,6 +5,11 @@ ConXion is a Next.js + Supabase MVP for trusted networking in the dance communit
 It helps members and trip travelers discover each other, connect with context,
 and message after acceptance.
 
+FOUNDER
+Founder: a Latino dancer with 10+ years of dance experience and 7+ years
+teaching bachata. The app is shaped by firsthand experience building trust,
+community, and useful connections across local scenes and travel.
+
 WHO IT IS FOR
 Primary persona: social dancers and dance ecosystem roles (organizers, teachers,
 DJs, artists, promoters, studio owners) who want local and travel connections.

@@ -7,6 +7,9 @@ type EventLinkInput = {
   type?: unknown;
 };
 
+const MIN_DESCRIPTION_LENGTH = 32;
+const MAX_DESCRIPTION_LENGTH = 1600;
+
 function sanitizeStyles(value: unknown) {
   if (!Array.isArray(value)) return [] as string[];
   return value
@@ -32,6 +35,20 @@ function sanitizeLinks(value: unknown) {
     .filter((item): item is { label: string; url: string; type: string } => Boolean(item));
 }
 
+function normalizeCoverUrl(value: unknown) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 function mapCreateErrorStatus(message: string) {
   if (message.includes("not_authenticated")) return 401;
   if (message.includes("not_authorized")) return 403;
@@ -44,12 +61,23 @@ function mapCreateErrorStatus(message: string) {
     message.includes("invalid_capacity") ||
     message.includes("invalid_cover_url") ||
     message.includes("invalid_cover_format") ||
-    message.includes("too_many_styles")
+    message.includes("too_many_styles") ||
+    message.includes("description_required") ||
+    message.includes("description_too_short") ||
+    message.includes("description_too_long") ||
+    message.includes("venue_required")
   ) {
     return 400;
   }
   if (message.includes("active_event_limit_reached")) return 409;
   return 500;
+}
+
+function formatCreateErrorMessage(message: string) {
+  if (message.includes("invalid_cover_format")) {
+    return "Cover image could not be used. Upload a JPG, PNG, or WEBP and we will crop it into a wide event banner.";
+  }
+  return message;
 }
 
 export async function POST(req: Request) {
@@ -66,14 +94,33 @@ export async function POST(req: Request) {
     const startsAt = typeof body?.startsAt === "string" ? body.startsAt : "";
     const endsAt = typeof body?.endsAt === "string" ? body.endsAt : "";
     const capacity = typeof body?.capacity === "number" && Number.isFinite(body.capacity) ? body.capacity : null;
-    const coverUrl = typeof body?.coverUrl === "string" ? body.coverUrl : "";
+    const coverUrl = normalizeCoverUrl(body?.coverUrl);
     const status = typeof body?.status === "string" ? body.status : "published";
+    const isDraft = status === "draft";
     const links = sanitizeLinks(body?.links);
     const styles = sanitizeStyles(body?.styles);
 
     if (!title || !city || !country || !startsAt || !endsAt) {
       return NextResponse.json(
         { ok: false, error: "title, city, country, startsAt, and endsAt are required." },
+        { status: 400 }
+      );
+    }
+    if (!isDraft && !venueName.trim()) {
+      return NextResponse.json({ ok: false, error: "venue_required" }, { status: 400 });
+    }
+    if (!description.trim() && !isDraft) {
+      return NextResponse.json({ ok: false, error: "description_required" }, { status: 400 });
+    }
+    if (!isDraft && description.trim().length < MIN_DESCRIPTION_LENGTH) {
+      return NextResponse.json(
+        { ok: false, error: `description_too_short: minimum ${MIN_DESCRIPTION_LENGTH} characters.` },
+        { status: 400 }
+      );
+    }
+    if (description.trim().length > MAX_DESCRIPTION_LENGTH) {
+      return NextResponse.json(
+        { ok: false, error: `description_too_long: maximum ${MAX_DESCRIPTION_LENGTH} characters.` },
         { status: 400 }
       );
     }
@@ -109,7 +156,7 @@ export async function POST(req: Request) {
 
     if (error) {
       const message = error.message ?? "Failed to create event.";
-      return NextResponse.json({ ok: false, error: message }, { status: mapCreateErrorStatus(message) });
+      return NextResponse.json({ ok: false, error: formatCreateErrorMessage(message) }, { status: mapCreateErrorStatus(message) });
     }
 
     return NextResponse.json({ ok: true, event_id: data ?? null });

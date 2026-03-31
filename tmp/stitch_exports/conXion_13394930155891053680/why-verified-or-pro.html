@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@700;800;900&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#0e0e0e",
+              "secondary-container": "#a900a9",
+              "on-tertiary-container": "#585656",
+              "surface-container-lowest": "#000000",
+              "tertiary-dim": "#eeeaea",
+              "primary": "#c1fffe",
+              "on-primary-container": "#005d5d",
+              "secondary-fixed-dim": "#ffa6f3",
+              "inverse-on-surface": "#565554",
+              "on-tertiary": "#605f5e",
+              "on-background": "#ffffff",
+              "surface-container-highest": "#262626",
+              "secondary-dim": "#ff51fa",
+              "tertiary": "#fcf8f8",
+              "surface": "#0e0e0e",
+              "surface-tint": "#c1fffe",
+              "inverse-primary": "#006a6a",
+              "outline-variant": "#494847",
+              "on-primary-fixed": "#004343",
+              "tertiary-fixed": "#ffffff",
+              "primary-container": "#00ffff",
+              "on-secondary-container": "#fff5f9",
+              "inverse-surface": "#fcf8f8",
+              "on-surface": "#ffffff",
+              "on-secondary-fixed-variant": "#920091",
+              "background": "#0e0e0e",
+              "on-surface-variant": "#adaaaa",
+              "on-primary-fixed-variant": "#006262",
+              "on-tertiary-fixed-variant": "#6e6d6c",
+              "on-secondary": "#400040",
+              "surface-container-low": "#131313",
+              "on-error-container": "#ffa8a3",
+              "outline": "#777575",
+              "error-dim": "#d7383b",
+              "secondary-fixed": "#ffbdf3",
+              "on-error": "#490006",
+              "surface-container-high": "#201f1f",
+              "primary-fixed-dim": "#00e6e6",
+              "tertiary-fixed-dim": "#f3f0ef",
+              "surface-variant": "#262626",
+              "primary-dim": "#00e6e6",
+              "surface-bright": "#2c2c2c",
+              "on-secondary-fixed": "#620061",
+              "error-container": "#9f0519",
+              "surface-container": "#1a1919",
+              "on-primary": "#006767",
+              "error": "#ff716c",
+              "tertiary-container": "#eeeaea",
+              "primary-fixed": "#00f5f5",
+              "on-tertiary-fixed": "#515050",
+              "secondary": "#ff51fa"
+            },
+            fontFamily: {
+              "headline": ["Epilogue"],
+              "body": ["Manrope"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-card {
+            background: rgba(38, 38, 38, 0.4);
+            backdrop-filter: blur(24px);
+        }
+        .neon-gradient-text {
+            background: linear-gradient(135deg, #c1fffe 0%, #ff51fa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .neon-gradient-bg {
+            background: linear-gradient(135deg, #c1fffe 0%, #ff51fa 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<nav class="fixed top-0 w-full z-50 bg-[#0e0e0e]/80 backdrop-blur-xl flex justify-between items-center px-6 h-16 w-full">
+<div class="flex items-center gap-4">
+<button class="text-[#00FFFF] hover:opacity-80 transition-opacity scale-95 duration-200">
+<span class="material-symbols-outlined" data-icon="arrow_back">arrow_back</span>
+</button>
+<span class="text-xl font-black text-[#00FFFF] font-epilogue tracking-tight">ConXion Pro</span>
+</div>
+<button class="text-gray-400 hover:opacity-80 transition-opacity scale-95 duration-200">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</nav>
+<main class="pt-24 pb-32 px-6 max-w-5xl mx-auto">
+<!-- Hero Section -->
+<header class="mb-16">
+<h1 class="font-headline text-5xl md:text-7xl font-black tracking-tighter mb-4">
+                Elevate Your <span class="neon-gradient-text">Identity.</span>
+</h1>
+<p class="font-body text-on-surface-variant text-lg md:text-xl max-w-2xl leading-relaxed">
+                Choose the path that fits your journey. Secure trust with verification or scale your influence with Pro visibility.
+            </p>
+</header>
+<!-- Bento Comparison Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-20">
+<!-- Verified Block -->
+<div class="group relative overflow-hidden rounded-lg bg-surface-container-low p-8 flex flex-col justify-between min-h-[480px]">
+<div class="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+<span class="material-symbols-outlined text-9xl" data-icon="verified" style="font-variation-settings: 'FILL' 1;">verified</span>
+</div>
+<div class="relative z-10">
+<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-surface-container-high border border-outline-variant/20 mb-6">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="verified" style="font-variation-settings: 'FILL' 1;">verified</span>
+<span class="font-label text-xs font-bold uppercase tracking-widest text-on-surface">Verified Status</span>
+</div>
+<h2 class="font-headline text-4xl font-extrabold mb-4">Trust &amp; Access</h2>
+<p class="text-on-surface-variant mb-8 leading-relaxed">
+                        A one-time verification to secure your professional legacy. Built for individuals who prioritize authenticity.
+                    </p>
+<ul class="space-y-4">
+<li class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" data-icon="check_circle">check_circle</span>
+<span class="font-body font-medium">One-time application fee</span>
+</li>
+<li class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" data-icon="check_circle">check_circle</span>
+<span class="font-body font-medium">Permanent blue check badge</span>
+</li>
+<li class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" data-icon="check_circle">check_circle</span>
+<span class="font-body font-medium">Unlock private hosting rights</span>
+</li>
+</ul>
+</div>
+<div class="relative z-10 mt-12">
+<button class="w-full py-4 rounded-full font-label font-bold text-on-primary-fixed bg-primary hover:opacity-90 transition-all">
+                        Apply for Verification
+                    </button>
+</div>
+</div>
+<!-- Pro Block -->
+<div class="group relative overflow-hidden rounded-lg bg-surface-container-high p-8 flex flex-col justify-between min-h-[480px]">
+<!-- Subtle Gradient Background Shadow -->
+<div class="absolute -top-24 -right-24 w-64 h-64 bg-secondary/10 blur-[100px]"></div>
+<div class="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity text-secondary">
+<span class="material-symbols-outlined text-9xl" data-icon="auto_awesome" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+</div>
+<div class="relative z-10">
+<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-secondary/10 border border-secondary/20 mb-6">
+<span class="material-symbols-outlined text-secondary text-sm" data-icon="bolt" style="font-variation-settings: 'FILL' 1;">bolt</span>
+<span class="font-label text-xs font-bold uppercase tracking-widest text-secondary">Pro Membership</span>
+</div>
+<h2 class="font-headline text-4xl font-extrabold mb-4">Scale &amp; Visibility</h2>
+<p class="text-on-surface-variant mb-8 leading-relaxed">
+                        Accelerate your growth with monthly boosts and priority placement. Designed for curators and power users.
+                    </p>
+<ul class="space-y-4">
+<li class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary" data-icon="check_circle">check_circle</span>
+<span class="font-body font-medium">10x Profile reach multiplier</span>
+</li>
+<li class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary" data-icon="check_circle">check_circle</span>
+<span class="font-body font-medium">Priority Event placement</span>
+</li>
+<li class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary" data-icon="check_circle">check_circle</span>
+<span class="font-body font-medium">Advanced audience analytics</span>
+</li>
+</ul>
+</div>
+<div class="relative z-10 mt-12">
+<button class="w-full py-4 rounded-full font-label font-bold text-on-primary-fixed neon-gradient-bg hover:scale-[1.02] transition-all">
+                        Go Pro Now
+                    </button>
+</div>
+</div>
+</div>
+<!-- FAQ Section -->
+<section class="max-w-3xl mx-auto">
+<div class="text-center mb-12">
+<h3 class="font-headline text-3xl font-bold mb-2">Common Inquiries</h3>
+<p class="text-on-surface-variant">Everything you need to know about our tiers.</p>
+</div>
+<div class="space-y-4">
+<!-- FAQ Item 1 -->
+<div class="bg-surface-container rounded-lg p-6 border border-outline-variant/10 hover:border-primary/20 transition-colors cursor-pointer group">
+<div class="flex justify-between items-center">
+<h4 class="font-body font-bold text-lg">Can I have both Verified and Pro?</h4>
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="expand_more">expand_more</span>
+</div>
+<div class="mt-4 text-on-surface-variant leading-relaxed">
+                        Absolutely. Most high-level curators use Verification for trust and Pro for the reach benefits. They complement each other to create the ultimate presence.
+                    </div>
+</div>
+<!-- FAQ Item 2 -->
+<div class="bg-surface-container rounded-lg p-6 border border-outline-variant/10 hover:border-primary/20 transition-colors cursor-pointer group">
+<div class="flex justify-between items-center">
+<h4 class="font-body font-bold text-lg">What happens if I cancel Pro?</h4>
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="expand_more">expand_more</span>
+</div>
+<div class="hidden mt-4 text-on-surface-variant leading-relaxed">
+                        Your reach will return to standard levels at the end of your billing cycle. If you are also Verified, your badge remains forever regardless of Pro status.
+                    </div>
+</div>
+<!-- FAQ Item 3 -->
+<div class="bg-surface-container rounded-lg p-6 border border-outline-variant/10 hover:border-primary/20 transition-colors cursor-pointer group">
+<div class="flex justify-between items-center">
+<h4 class="font-body font-bold text-lg">How long does Verification take?</h4>
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="expand_more">expand_more</span>
+</div>
+<div class="hidden mt-4 text-on-surface-variant leading-relaxed">
+                        Our manual review process typically takes 48-72 hours. We verify identity and professional credentials to maintain network integrity.
+                    </div>
+</div>
+</div>
+</section>
+<!-- Visual Detail/Texture Image -->
+<section class="mt-24">
+<div class="rounded-xl overflow-hidden h-64 relative">
+<img alt="" class="w-full h-full object-cover grayscale opacity-40 mix-blend-screen" data-alt="abstract flowing liquid metal background with iridescent neon reflections and dark cinematic lighting style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD3HNIMX6FPKZfbX4W7MGPCaQ6s4IB7qzZxkjlmkMYHiaKHYLY57iwPYEou8s87mYZda71ooWvfX1scknnbZUdpWrcrLSu9dSy38gLTwBK7no1184ifeKmWb4OqlmZPZu9G8IazJEdUcoV6ONuMxNss-yAeYN8ipNfFLnHRBu9JWPFakgY4iVPm76ET7PszkQ_p7rokqKPyvYwD4xi4EVLNtHGJkyTgT3778kEOGYvlrJk_nAj3oBgUr9ogjbkUN2vUHvXIF1nXOom3"/>
+<div class="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent"></div>
+<div class="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
+<h5 class="font-headline text-2xl font-black mb-2 italic">JOIN THE INNER CIRCLE</h5>
+<p class="font-label text-xs tracking-widest uppercase opacity-60">Over 10k verified experts already connected</p>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="md:hidden fixed bottom-0 w-full z-50 rounded-t-[32px] bg-[#0e0e0e]/90 backdrop-blur-2xl shadow-[0_-8px_32px_rgba(0,0,0,0.5)] flex justify-around items-center px-4 pb-6 pt-2 w-full">
+<a class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Feed</span>
+</a>
+<a class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" data-icon="diversity_3">diversity_3</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Connect</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-gradient-to-br from-[#00FFFF] to-[#ff51fa] text-black rounded-full p-3 mb-1 scale-90 active:scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" data-icon="auto_awesome" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+<span class="sr-only">Upgrade</span>
+</a>
+<a class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_today">calendar_today</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Events</span>
+</a>
+<a class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Profile</span>
+</a>
+</nav>
+</body></html>

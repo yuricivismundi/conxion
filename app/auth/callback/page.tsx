@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { buildAccountReactivatedMetadata, getAccountDeactivatedAt } from "@/lib/auth/account-status";
 import { supabase } from "@/lib/supabase/client";
 
 const BRAND = {
@@ -23,8 +24,6 @@ function AuthCallbackContent() {
   const [detail, setDetail] = useState<string | null>(null);
   const [progress, setProgress] = useState(20);
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
-  const [logoSrc, setLogoSrc] = useState("/branding/conxion-logo.svg");
-  const [logoFailed, setLogoFailed] = useState(false);
 
   const hasError = useMemo(() => Boolean(detail), [detail]);
 
@@ -59,68 +58,89 @@ function AuthCallbackContent() {
     }
 
     (async () => {
-      setMessage("Validating secure link...");
-      setDetail(null);
+      try {
+        setMessage("Validating secure link...");
+        setDetail(null);
 
-      if (code) {
-        const exchange = await supabase.auth.exchangeCodeForSession(code);
-        if (exchange.error) {
+        if (code) {
+          const exchange = await supabase.auth.exchangeCodeForSession(code);
+          if (exchange.error) {
+            setMessage("Sign-in failed.");
+            setDetail(exchange.error.message);
+            return;
+          }
+        } else {
+          const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+          const accessToken = hashParams.get("access_token");
+          const refreshToken = hashParams.get("refresh_token");
+
+          if (!accessToken || !refreshToken) {
+            setMessage("Sign-in failed.");
+            setDetail("Magic link token is missing or expired. Request a new link.");
+            return;
+          }
+
+          const sessionResult = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (sessionResult.error) {
+            setMessage("Sign-in failed.");
+            setDetail(sessionResult.error.message);
+            return;
+          }
+        }
+
+        setMessage("Loading your account...");
+        setProgress(72);
+
+        const sessionResult = await supabase.auth.getSession();
+        if (sessionResult.error || !sessionResult.data.session) {
           setMessage("Sign-in failed.");
-          setDetail(exchange.error.message);
+          setDetail(sessionResult.error?.message ?? "Session not found. Request a new link.");
           return;
         }
-      } else {
-        const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
 
-        if (!accessToken || !refreshToken) {
+        const userId = sessionResult.data.session.user?.id;
+        if (!userId) {
           setMessage("Sign-in failed.");
-          setDetail("Magic link token is missing or expired. Request a new link.");
+          setDetail("User ID missing from session.");
           return;
         }
 
-        const sessionResult = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        if (sessionResult.error) {
-          setMessage("Sign-in failed.");
-          setDetail(sessionResult.error.message);
+        const deactivatedAt = getAccountDeactivatedAt(sessionResult.data.session.user?.user_metadata);
+        if (deactivatedAt) {
+          setMessage("Reactivating your account...");
+          setProgress(78);
+          const reactivateRes = await supabase.auth.updateUser({
+            data: buildAccountReactivatedMetadata(new Date().toISOString()),
+          });
+          if (reactivateRes.error) {
+            console.warn("[auth-callback] account reactivation metadata update failed", reactivateRes.error.message);
+          }
+        }
+
+        setMessage("Preparing your workspace...");
+        const profile = await supabase.from("profiles").select("user_id").eq("user_id", userId).maybeSingle();
+        if (profile.error) {
+          setMessage("Signed in, but profile lookup failed.");
+          setDetail(profile.error.message);
           return;
         }
-      }
 
-      setMessage("Loading your account...");
-      setProgress(72);
-
-      const sessionResult = await supabase.auth.getSession();
-      if (sessionResult.error || !sessionResult.data.session) {
+        const ageConfirmed = Boolean(
+          sessionResult.data.session.user?.user_metadata?.age_confirmed_at ||
+            sessionResult.data.session.user?.user_metadata?.age_confirmed === true
+        );
+        const nextPath = profile.data ? "/connections" : ageConfirmed ? "/onboarding/profile" : "/onboarding/age";
+        setMessage("You're in. Redirecting...");
+        setProgress(100);
+        setDetail(null);
+        setRedirectPath(nextPath);
+      } catch (err: unknown) {
         setMessage("Sign-in failed.");
-        setDetail(sessionResult.error?.message ?? "Session not found. Request a new link.");
-        return;
+        setDetail(err instanceof Error ? err.message : "Could not complete sign-in. Please try again.");
       }
-
-      const userId = sessionResult.data.session.user?.id;
-      if (!userId) {
-        setMessage("Sign-in failed.");
-        setDetail("User ID missing from session.");
-        return;
-      }
-
-      setMessage("Preparing your workspace...");
-      const profile = await supabase.from("profiles").select("user_id").eq("user_id", userId).maybeSingle();
-      if (profile.error) {
-        setMessage("Signed in, but profile lookup failed.");
-        setDetail(profile.error.message);
-        return;
-      }
-
-      const nextPath = profile.data ? "/connections" : "/onboarding/profile";
-      setMessage("You're in. Redirecting...");
-      setProgress(100);
-      setDetail(null);
-      setRedirectPath(nextPath);
     })();
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [searchParams]);
@@ -137,35 +157,7 @@ function AuthCallbackContent() {
       />
 
       <div className="relative z-10 w-full max-w-[460px] text-center">
-        {!logoFailed ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={logoSrc}
-            alt="ConXion"
-            className="mx-auto h-24 w-auto select-none"
-            onError={() => {
-              if (logoSrc.endsWith(".svg")) {
-                setLogoSrc("/branding/conxion-short-logo.png");
-                return;
-              }
-              setLogoFailed(true);
-            }}
-          />
-        ) : (
-          <div
-            className="mx-auto text-4xl font-black italic tracking-tight"
-            style={{
-              backgroundImage: `linear-gradient(90deg, ${BRAND.cyan} 0%, ${BRAND.magenta} 100%)`,
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            CONXION
-          </div>
-        )}
-
-        <div className="mt-7 rounded-3xl border p-8" style={{ backgroundColor: BRAND.surface, borderColor: BRAND.border }}>
+        <div className="rounded-3xl border p-8" style={{ backgroundColor: BRAND.surface, borderColor: BRAND.border }}>
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-white/15 bg-black/25">
             <span className="material-symbols-outlined text-4xl" style={{ color: hasError ? BRAND.danger : BRAND.cyan }}>
               {hasError ? "error" : "check"}

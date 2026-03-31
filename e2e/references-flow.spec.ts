@@ -32,7 +32,7 @@ async function bootstrapOrFail(page: Page, actor: "author" | "recipient") {
     hardFail(`Bootstrap not ready: ${boot.reason}`);
   }
 
-  await expect(page.getByTestId("references-page-title")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("references-feed-filter-pending")).toBeVisible({ timeout: 10_000 });
   return boot.scenario;
 }
 
@@ -137,7 +137,6 @@ test("author creates reference for recent completed sync", async ({ page }) => {
   test.setTimeout(45_000);
   const scenario = await bootstrapOrFail(page, "author");
 
-  await page.getByTestId("references-candidates-filter-sync").click();
   const candidateById = page.locator(
     `[data-testid="reference-candidate"][data-entity-type="sync"][data-entity-id="${scenario.recentSyncId}"]`
   );
@@ -230,7 +229,6 @@ test("duplicate reference for same entity is blocked", async ({ page }) => {
 test("out-of-window sync is excluded and blocked", async ({ page }) => {
   const scenario = await bootstrapOrFail(page, "author");
 
-  await page.getByTestId("references-candidates-filter-sync").click();
   const oldSyncCandidate = page.locator(
     `[data-testid="reference-candidate"][data-entity-type="sync"][data-entity-id="${scenario.oldSyncId}"]`
   );

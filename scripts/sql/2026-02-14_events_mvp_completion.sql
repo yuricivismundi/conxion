@@ -867,6 +867,7 @@ with check (author_id = auth.uid());
 create or replace function public.set_event_feedback_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $function$
 begin
   new.updated_at = now();

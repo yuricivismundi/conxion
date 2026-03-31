@@ -7,6 +7,9 @@ type EventLinkInput = {
   type?: unknown;
 };
 
+const MIN_DESCRIPTION_LENGTH = 32;
+const MAX_DESCRIPTION_LENGTH = 1600;
+
 function sanitizeLinks(value: unknown) {
   if (!Array.isArray(value)) return [] as Array<{ label: string; url: string; type: string }>;
 
@@ -32,11 +35,26 @@ function sanitizeStyles(value: unknown) {
     .slice(0, 12);
 }
 
+function normalizeCoverUrl(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 function mapUpdateErrorStatus(message: string) {
   if (message.includes("not_authenticated")) return 401;
   if (message.includes("not_authorized")) return 403;
   if (message.includes("event_not_found")) return 404;
   if (message.includes("edit_rate_limit_daily")) return 429;
+  if (message.includes("active_event_limit_reached")) return 409;
   if (
     message.includes("title_required") ||
     message.includes("invalid_event_window") ||
@@ -50,6 +68,13 @@ function mapUpdateErrorStatus(message: string) {
     return 400;
   }
   return 500;
+}
+
+function formatUpdateErrorMessage(message: string) {
+  if (message.includes("invalid_cover_format")) {
+    return "Cover image could not be used. Upload a JPG, PNG, or WEBP and we will crop it into a wide event banner.";
+  }
+  return message;
 }
 
 export async function PATCH(
@@ -75,14 +100,34 @@ export async function PATCH(
     const startsAt = typeof body?.startsAt === "string" ? body.startsAt : null;
     const endsAt = typeof body?.endsAt === "string" ? body.endsAt : null;
     const capacity = typeof body?.capacity === "number" && Number.isFinite(body.capacity) ? body.capacity : null;
-    const coverUrl = typeof body?.coverUrl === "string" ? body.coverUrl : null;
+    const coverUrl = normalizeCoverUrl(body?.coverUrl);
     const status = typeof body?.status === "string" ? body.status : null;
+    const isDraft = status === "draft";
+    const trimmedDescription = typeof description === "string" ? description.trim() : "";
     const links = sanitizeLinks(body?.links);
     const styles = sanitizeStyles(body?.styles);
 
     if (!title || !city || !country || !startsAt || !endsAt) {
       return NextResponse.json(
         { ok: false, error: "title, city, country, startsAt, and endsAt are required." },
+        { status: 400 }
+      );
+    }
+    if (!isDraft && !venueName?.trim()) {
+      return NextResponse.json({ ok: false, error: "venue_required" }, { status: 400 });
+    }
+    if (!isDraft && !trimmedDescription) {
+      return NextResponse.json({ ok: false, error: "description_required" }, { status: 400 });
+    }
+    if (!isDraft && trimmedDescription.length < MIN_DESCRIPTION_LENGTH) {
+      return NextResponse.json(
+        { ok: false, error: `description_too_short: minimum ${MIN_DESCRIPTION_LENGTH} characters.` },
+        { status: 400 }
+      );
+    }
+    if (trimmedDescription.length > MAX_DESCRIPTION_LENGTH) {
+      return NextResponse.json(
+        { ok: false, error: `description_too_long: maximum ${MAX_DESCRIPTION_LENGTH} characters.` },
         { status: 400 }
       );
     }
@@ -119,7 +164,7 @@ export async function PATCH(
 
     if (error) {
       const message = error.message ?? "Failed to update event.";
-      return NextResponse.json({ ok: false, error: message }, { status: mapUpdateErrorStatus(message) });
+      return NextResponse.json({ ok: false, error: formatUpdateErrorMessage(message) }, { status: mapUpdateErrorStatus(message) });
     }
 
     return NextResponse.json({ ok: true, event_id: data ?? eventId });

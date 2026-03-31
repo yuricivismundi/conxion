@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -15,22 +16,27 @@
     "test:e2e:syncs-smoke": "npx playwright test e2e/syncs-lifecycle-flow.spec.ts",
     "test:e2e:trips-smoke": "npx playwright test e2e/trips-requests-flow.spec.ts",
     "test:e2e:trips-smoke:strict-notifications": "PLAYWRIGHT_REQUIRE_NOTIFICATIONS=1 npx playwright test e2e/trips-requests-flow.spec.ts",
-    "test:e2e:core-smoke": "npx playwright test e2e/messages-*.spec.ts e2e/trips-requests-flow.spec.ts e2e/syncs-lifecycle-flow.spec.ts e2e/references-flow.spec.ts",
-    "test:e2e:core-smoke:repeat": "npx playwright test e2e/messages-*.spec.ts e2e/trips-requests-flow.spec.ts e2e/syncs-lifecycle-flow.spec.ts e2e/references-flow.spec.ts --repeat-each=2",
+    "test:e2e:core-smoke": "npx playwright test --workers=1 e2e/messages-*.spec.ts e2e/trips-requests-flow.spec.ts e2e/syncs-lifecycle-flow.spec.ts e2e/references-flow.spec.ts",
+    "test:e2e:core-smoke:repeat": "npx playwright test --workers=1 e2e/messages-*.spec.ts e2e/trips-requests-flow.spec.ts e2e/syncs-lifecycle-flow.spec.ts e2e/references-flow.spec.ts --repeat-each=2",
     "test:e2e:ui": "npx playwright test --ui",
     "test:e2e:headed": "npx playwright test --headed",
     "e2e:messages:reset": "node scripts/e2e-messages-seed-reset.mjs",
     "e2e:references:reset": "node scripts/e2e-references-seed-reset.mjs",
     "e2e:trips:reset": "node scripts/e2e-trips-seed-reset.mjs",
-    "e2e:syncs:reset": "node scripts/e2e-syncs-seed-reset.mjs"
+    "e2e:syncs:reset": "node scripts/e2e-syncs-seed-reset.mjs",
+    "db:run-sql": "bash scripts/sql/run-remote-sql.sh",
+    "db:references:cycle": "bash scripts/sql/run-references-cycle.sh"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^6.0.0",
+    "@stripe/stripe-js": "^9.0.0",
     "@supabase/supabase-js": "^2.90.1",
     "country-state-city": "^3.2.1",
-    "next": "^16.1.6",
+    "next": "^16.1.7",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-select": "^5.10.2"
+    "react-select": "^5.10.2",
+    "stripe": "^20.4.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

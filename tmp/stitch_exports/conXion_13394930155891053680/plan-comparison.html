@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@400;700;800;900&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#0e0e0e",
+              "secondary-container": "#a900a9",
+              "on-tertiary-container": "#585656",
+              "surface-container-lowest": "#000000",
+              "tertiary-dim": "#eeeaea",
+              "primary": "#c1fffe",
+              "on-primary-container": "#005d5d",
+              "secondary-fixed-dim": "#ffa6f3",
+              "inverse-on-surface": "#565554",
+              "on-tertiary": "#605f5e",
+              "on-background": "#ffffff",
+              "surface-container-highest": "#262626",
+              "secondary-dim": "#ff51fa",
+              "tertiary": "#fcf8f8",
+              "surface": "#0e0e0e",
+              "surface-tint": "#c1fffe",
+              "inverse-primary": "#006a6a",
+              "outline-variant": "#494847",
+              "on-primary-fixed": "#004343",
+              "tertiary-fixed": "#ffffff",
+              "primary-container": "#00ffff",
+              "on-secondary-container": "#fff5f9",
+              "inverse-surface": "#fcf8f8",
+              "on-surface": "#ffffff",
+              "on-secondary-fixed-variant": "#920091",
+              "background": "#0e0e0e",
+              "on-surface-variant": "#adaaaa",
+              "on-primary-fixed-variant": "#006262",
+              "on-tertiary-fixed-variant": "#6e6d6c",
+              "on-secondary": "#400040",
+              "surface-container-low": "#131313",
+              "on-error-container": "#ffa8a3",
+              "outline": "#777575",
+              "error-dim": "#d7383b",
+              "secondary-fixed": "#ffbdf3",
+              "on-error": "#490006",
+              "surface-container-high": "#201f1f",
+              "primary-fixed-dim": "#00e6e6",
+              "tertiary-fixed-dim": "#f3f0ef",
+              "surface-variant": "#262626",
+              "primary-dim": "#00e6e6",
+              "surface-bright": "#2c2c2c",
+              "on-secondary-fixed": "#620061",
+              "error-container": "#9f0519",
+              "surface-container": "#1a1919",
+              "on-primary": "#006767",
+              "error": "#ff716c",
+              "tertiary-container": "#eeeaea",
+              "primary-fixed": "#00f5f5",
+              "on-tertiary-fixed": "#515050",
+              "secondary": "#ff51fa"
+            },
+            fontFamily: {
+              "headline": ["Epilogue"],
+              "body": ["Manrope"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-card {
+            background: rgba(38, 38, 38, 0.4);
+            backdrop-filter: blur(24px);
+        }
+        .neon-gradient-text {
+            background: linear-gradient(135deg, #c1fffe 0%, #ff51fa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .neon-gradient-bg {
+            background: linear-gradient(135deg, #c1fffe 0%, #ff51fa 100%);
+        }
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary-fixed">
+<!-- Top Navigation Bar -->
+<nav class="fixed top-0 w-full z-50 bg-[#0e0e0e]/80 backdrop-blur-xl flex justify-between items-center px-6 h-16 w-full">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-[#00FFFF] hover:opacity-80 transition-opacity cursor-pointer scale-95 duration-200" data-icon="arrow_back">arrow_back</span>
+<span class="font-epilogue font-bold tracking-tight text-on-surface text-xl font-black text-[#00FFFF]">ConXion Pro</span>
+</div>
+<span class="material-symbols-outlined text-gray-400 hover:opacity-80 transition-opacity cursor-pointer scale-95 duration-200" data-icon="settings">settings</span>
+</nav>
+<main class="pt-24 pb-32 px-4 max-w-md mx-auto">
+<!-- Header Section -->
+<header class="mb-12">
+<h1 class="font-headline text-4xl font-extrabold tracking-tight leading-none mb-4">Elevate your <span class="neon-gradient-text">Reach.</span></h1>
+<p class="text-on-surface-variant text-lg leading-relaxed">Choose the tier that fuels your professional growth and creative influence.</p>
+</header>
+<!-- Pricing Toggles / Horizontal Scroll Container -->
+<div class="flex gap-4 overflow-x-auto pb-8 snap-x no-scrollbar">
+<!-- Starter Card -->
+<div class="flex-none w-[280px] snap-center p-6 rounded-lg surface-container border border-outline-variant/10">
+<div class="mb-8">
+<span class="font-label text-xs uppercase tracking-widest text-on-surface-variant font-bold">Entry</span>
+<h2 class="font-headline text-3xl font-bold mt-1">Starter</h2>
+<div class="mt-4">
+<span class="text-4xl font-extrabold">$0</span>
+<span class="text-on-surface-variant">/mo</span>
+</div>
+</div>
+<button class="w-full py-3 rounded-full border border-outline-variant text-sm font-bold hover:bg-surface-container-high transition-colors">Current Plan</button>
+</div>
+<!-- Verified Card (Featured) -->
+<div class="flex-none w-[300px] snap-center p-6 rounded-lg neon-gradient-bg relative overflow-hidden shadow-[0_24px_48px_rgba(0,0,0,0.5)]">
+<div class="absolute -top-4 -right-4 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
+<div class="mb-8 relative z-10">
+<div class="flex justify-between items-start">
+<span class="font-label text-xs uppercase tracking-widest text-black/60 font-bold">Growth</span>
+<span class="bg-black text-primary text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-tighter">Recommended</span>
+</div>
+<h2 class="font-headline text-3xl font-black text-black mt-1">Verified</h2>
+<div class="mt-4">
+<span class="text-4xl font-black text-black">$12</span>
+<span class="text-black/60 font-bold">/mo</span>
+</div>
+</div>
+<button class="w-full py-3 rounded-full bg-black text-primary text-sm font-black shadow-xl scale-95 active:scale-100 transition-transform">Upgrade Now</button>
+</div>
+<!-- Pro Card -->
+<div class="flex-none w-[280px] snap-center p-6 rounded-lg surface-container-high border border-primary/20">
+<div class="mb-8">
+<span class="font-label text-xs uppercase tracking-widest text-primary font-bold">Elite</span>
+<h2 class="font-headline text-3xl font-bold mt-1 text-on-surface">Pro</h2>
+<div class="mt-4">
+<span class="text-4xl font-extrabold">$29</span>
+<span class="text-on-surface-variant">/mo</span>
+</div>
+</div>
+<button class="w-full py-3 rounded-full bg-surface-container-highest border border-outline-variant text-sm font-bold text-on-surface hover:border-primary transition-all">Go Pro</button>
+</div>
+</div>
+<!-- Comparison Table (Mobile List View) -->
+<div class="space-y-12 mt-4">
+<!-- Category: Profile & Media -->
+<section>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-10 h-10 rounded-md surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-xl" data-icon="photo_camera">photo_camera</span>
+</div>
+<h3 class="font-headline text-xl font-bold">Profile &amp; Media</h3>
+</div>
+<div class="space-y-4">
+<!-- Feature Row -->
+<div class="p-5 rounded-md surface-container-low flex flex-col gap-4">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-medium">Portfolio Uploads</span>
+<span class="material-symbols-outlined text-on-surface-variant text-sm" data-icon="info">info</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<div class="text-center p-2 rounded-md surface-container"><div class="text-[10px] text-on-surface-variant uppercase font-bold mb-1">Starter</div><div class="font-bold">5</div></div>
+<div class="text-center p-2 rounded-md surface-container-high border border-primary/20"><div class="text-[10px] text-primary uppercase font-bold mb-1">Verified</div><div class="font-bold">25</div></div>
+<div class="text-center p-2 rounded-md surface-container"><div class="text-[10px] text-on-surface-variant uppercase font-bold mb-1">Pro</div><div class="font-bold">∞</div></div>
+</div>
+</div>
+<!-- Feature Row -->
+<div class="p-5 rounded-md surface-container-low flex flex-col gap-4">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-medium">4K Video Support</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<div class="text-center p-2"><span class="material-symbols-outlined text-outline" data-icon="close">close</span></div>
+<div class="text-center p-2"><span class="material-symbols-outlined text-primary" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span></div>
+<div class="text-center p-2"><span class="material-symbols-outlined text-primary" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Category: Chats -->
+<section>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-10 h-10 rounded-md surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-xl" data-icon="chat_bubble">chat_bubble</span>
+</div>
+<h3 class="font-headline text-xl font-bold">Communication</h3>
+</div>
+<div class="space-y-4">
+<div class="p-5 rounded-md surface-container-low flex flex-col gap-4">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-medium">Direct Message limit</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<div class="text-center p-2 rounded-md surface-container"><div class="text-[10px] uppercase font-bold mb-1">10/day</div></div>
+<div class="text-center p-2 rounded-md surface-container-high border border-secondary/20"><div class="text-[10px] text-secondary uppercase font-bold mb-1">50/day</div></div>
+<div class="text-center p-2 rounded-md surface-container"><div class="text-[10px] uppercase font-bold mb-1">Unlimited</div></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Category: Visibility -->
+<section>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-10 h-10 rounded-md surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-xl" data-icon="visibility">visibility</span>
+</div>
+<h3 class="font-headline text-xl font-bold">Visibility</h3>
+</div>
+<div class="space-y-4">
+<div class="p-5 rounded-md surface-container-low flex flex-col gap-4">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-medium">Search Ranking</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<div class="text-center p-2"><span class="text-xs font-bold text-on-surface-variant">Standard</span></div>
+<div class="text-center p-2"><span class="text-xs font-bold text-primary">Priority</span></div>
+<div class="text-center p-2"><span class="text-xs font-bold text-primary-dim">Elite</span></div>
+</div>
+</div>
+<div class="p-5 rounded-md surface-container-low flex flex-col gap-4">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-medium">Verification Badge</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<div class="text-center p-2"><span class="material-symbols-outlined text-outline" data-icon="close">close</span></div>
+<div class="text-center p-2"><span class="material-symbols-outlined text-primary" data-icon="verified" style="font-variation-settings: 'FILL' 1;">verified</span></div>
+<div class="text-center p-2"><span class="material-symbols-outlined text-secondary" data-icon="stars" style="font-variation-settings: 'FILL' 1;">stars</span></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Category: Teacher Features -->
+<section>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-10 h-10 rounded-md surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-[#ff51fa] text-xl" data-icon="school">school</span>
+</div>
+<h3 class="font-headline text-xl font-bold">Teacher Features</h3>
+</div>
+<div class="space-y-4">
+<div class="p-6 rounded-lg glass-card border border-white/5 relative overflow-hidden">
+<img alt="Professional mentor teaching" class="absolute inset-0 w-full h-full object-cover opacity-10" data-alt="Close-up of a diverse professional mentor smiling warmly in a modern creative studio with soft bokeh background lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCbXhrrnBq5ZYFqR1jetXjo8WUEGVX2ptzDvCAbdWj7MDAHb2OPAAtOsVV3xaSYowImbRoIcGJNtxouUIMx-snda8b0-HYz1l7_7mwH2wqyQ4C6o0TLl5rUKtM8U7ubOa0l2jp47wfmVZWqa-hCqvwKeAtrxNlnh9xJeZestwvGoMOMevqYblUc01SKLu1QXsOUwJeAmbTp3MW6Rvn-cmYydOPdqerlhsJNW5ggQcOCbX9vqDHsjq6lK-2maA3xsMtWcV3kX6Kj09NO"/>
+<div class="relative z-10">
+<h4 class="font-headline font-bold text-on-surface mb-2">Host Classes &amp; Workshops</h4>
+<p class="text-on-surface-variant text-sm mb-4">Monetize your skills directly. Pro members get 0% commission on bookings.</p>
+<div class="flex gap-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-sm" data-icon="check_circle">check_circle</span>
+<span class="text-xs font-bold text-on-surface-variant">Unlimited Events</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-sm" data-icon="check_circle">check_circle</span>
+<span class="text-xs font-bold text-on-surface-variant">CRM Access</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Sticky Footer CTA -->
+<div class="mt-16 text-center">
+<p class="text-on-surface-variant text-sm mb-6 px-8">All plans include a 7-day trial. You can change your subscription at any time.</p>
+<div class="flex flex-col gap-4">
+<button class="neon-gradient-bg text-black font-black py-5 rounded-full shadow-[0_12px_24px_rgba(193,255,254,0.3)]">Continue with Verified</button>
+<button class="text-on-surface-variant font-bold text-sm py-2">Compare detailed technical specs</button>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 w-full z-50 rounded-t-[32px] bg-[#0e0e0e]/90 backdrop-blur-2xl shadow-[0_-8px_32px_rgba(0,0,0,0.5)] flex justify-around items-center px-4 pb-6 pt-2 w-full">
+<div class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300 cursor-pointer">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Feed</span>
+</div>
+<div class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300 cursor-pointer">
+<span class="material-symbols-outlined" data-icon="diversity_3">diversity_3</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Connect</span>
+</div>
+<div class="flex flex-col items-center justify-center bg-gradient-to-br from-[#00FFFF] to-[#ff51fa] text-black rounded-full p-3 mb-1 scale-90 active:scale-110 transition-transform duration-300 cursor-pointer">
+<span class="material-symbols-outlined" data-icon="auto_awesome">auto_awesome</span>
+</div>
+<div class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300 cursor-pointer">
+<span class="material-symbols-outlined" data-icon="calendar_today">calendar_today</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Events</span>
+</div>
+<div class="flex flex-col items-center justify-center text-gray-500 p-2 hover:text-[#00FFFF] transition-colors scale-90 active:scale-110 transition-transform duration-300 cursor-pointer">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-manrope text-[10px] font-bold uppercase tracking-widest mt-1">Profile</span>
+</div>
+</nav>
+</body></html>
