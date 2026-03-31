@@ -9,6 +9,8 @@ import TeacherInquiryCard from "@/components/messages/TeacherInquiryCard";
 import Nav from "@/components/Nav";
 import ShareInquiryInfoModal from "@/components/teacher/ShareInquiryInfoModal";
 import { supabase } from "@/lib/supabase/client";
+import { getBillingAccountState } from "@/lib/billing/account-state";
+import { getPlanLimits } from "@/lib/billing/limits";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
 import { fetchTeacherInfoBlocks } from "@/lib/teacher-info/read-model";
 import type { TeacherInfoBlock } from "@/lib/teacher-info/types";
@@ -1441,15 +1443,26 @@ function MessagesPageContent() {
   const refreshMessagingSummary = useCallback(async () => {
     setMessagingSummaryLoading(true);
     try {
-      const rpc = await supabase.rpc("cx_sync_user_messaging_state");
+      const [rpc, authData] = await Promise.all([
+        supabase.rpc("cx_sync_user_messaging_state"),
+        supabase.auth.getUser(),
+      ]);
       if (rpc.error) throw rpc.error;
       const data = asRecord(rpc.data);
+
+      // Derive the correct plan limits from auth metadata (RPC may return stale/free-tier values)
+      const userMeta = authData.data.user?.user_metadata;
+      const profileRes = await supabase.from("profiles").select("verified,verified_label").eq("user_id", authData.data.user?.id ?? "").maybeSingle();
+      const isVerified = (profileRes.data as { verified?: boolean } | null)?.verified === true;
+      const billingState = getBillingAccountState({ userMetadata: userMeta, isVerified });
+      const planLimits = getPlanLimits(billingState.currentPlanId);
+
       const summary: MessagingSummary = {
-        plan: asString(data.plan) === "premium" ? "premium" : "free",
+        plan: billingState.currentPlanId === "pro" ? "premium" : "free",
         activeCount: Number(data.activeCount) || 0,
-        activeLimit: Number(data.activeLimit) || 10,
+        activeLimit: planLimits.activeChatThreadsPerMonth ?? 10,
         monthlyUsed: Number(data.monthlyUsed) || 0,
-        monthlyLimit: Number(data.monthlyLimit) || 10,
+        monthlyLimit: planLimits.initiatedChatsPerMonth ?? 10,
         pendingCount: Number(data.pendingCount) || 0,
         cycleStart: asString(data.cycleStart) || null,
         cycleEnd: asString(data.cycleEnd) || null,
