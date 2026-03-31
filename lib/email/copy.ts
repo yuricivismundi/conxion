@@ -494,7 +494,7 @@ export function buildEmailCopy(params: {
         eyebrow: “Support Update”,
         subject: ticketCode ? `[${ticketCode}] Status updated` : “Support request updated”,
         title: ticketCode ? `${ticketCode} updated` : “Support request updated”,
-        intro: `Your report for “${supportSubject}” is now ${supportStatus.toLowerCase()}.`,
+        intro: `Your report for “${supportSubject}” is now ${(supportStatus ?? “updated”).toLowerCase()}.`,
         details: [`Current status: ${supportStatus}`],
         ctaLabel: “Open support”,
         footerNote: “Check the case details in ConXion for the latest moderation status and notes.”,
