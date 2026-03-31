@@ -175,7 +175,7 @@ const HOST_OFFER_TEMPLATES = [
   },
   {
     label: "Quick intro",
-    text: "I’m available to host for these dates. Send me your travel timing and we can see if it fits well.",
+    text: "I'm available to host for these dates. Send me your travel timing and we can see if it fits well.",
   },
 ] as const;
 
@@ -237,7 +237,7 @@ type Interest =
   | "Co-teach sessions"
   | "Exchange tips, curricula, and student referrals";
 
-type Availability = "Weekdays" | "Weekends" | "DayTime" | "Evenings" | "Travel for Events" | "I’d rather not say";
+type Availability = "Weekdays" | "Weekends" | "DayTime" | "Evenings" | "Travel for Events" | "I'd rather not say";
 const TRIP_PURPOSES = ["Holiday Trip", "Dance Festival", "Social Dancing", "Training / Workshops"] as const;
 
 const PURPOSE_META: Record<string, { icon: string; text: string; bg: string; border: string }> = {
@@ -3936,53 +3936,53 @@ function ConnectionsPageContent() {
       ) : null}
 
 {connectModal.open && (
-  <div className=”fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center”>
-    <div className=”relative w-full max-w-[480px] overflow-hidden rounded-[28px] border border-white/8 bg-[#080e14] shadow-[0_32px_80px_rgba(0,0,0,0.5)] sm:rounded-[32px]”
-      style={{ background: “radial-gradient(circle at top left, rgba(13,204,242,0.07), transparent 40%), radial-gradient(circle at bottom right, rgba(217,59,255,0.07), transparent 40%), #080e14” }}
+  <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
+    <div className="relative w-full max-w-[480px] overflow-hidden rounded-[28px] border border-white/8 bg-[#080e14] shadow-[0_32px_80px_rgba(0,0,0,0.5)] sm:rounded-[32px]"
+      style={{ background: "radial-gradient(circle at top left, rgba(13,204,242,0.07), transparent 40%), radial-gradient(circle at bottom right, rgba(217,59,255,0.07), transparent 40%), #080e14" }}
     >
       {/* Close */}
       <button
-        type=”button”
+        type="button"
         onClick={closeConnectModal}
-        className=”absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 hover:text-white transition”
-        aria-label=”Close”
+        className="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 hover:text-white transition"
+        aria-label="Close"
       >
-        <MSIcon name=”close” className=”text-[18px]” />
+        <MSIcon name="close" className="text-[18px]" />
       </button>
 
       {/* Header */}
-      <div className=”flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/8”>
-        <div className=”relative shrink-0”>
-          <div className=”h-14 w-14 rounded-2xl overflow-hidden border border-white/10”
+      <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/8">
+        <div className="relative shrink-0">
+          <div className="h-14 w-14 rounded-2xl overflow-hidden border border-white/10"
             style={{
               backgroundImage: connectModal.targetPhotoUrl
                 ? `url(${connectModal.targetPhotoUrl})`
-                : “linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))”,
-              backgroundSize: “cover”,
-              backgroundPosition: “center”,
+                : "linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))",
+              backgroundSize: "cover",
+              backgroundPosition: "center",
             }}
           />
-          <div className=”absolute -bottom-1 -right-1 rounded-full border-2 border-[#080e14] bg-[#0df2f2] p-[2px]”>
-            <MSIcon name=”check_circle” className=”text-[#080e14] text-[13px]” />
+          <div className="absolute -bottom-1 -right-1 rounded-full border-2 border-[#080e14] bg-[#0df2f2] p-[2px]">
+            <MSIcon name="check_circle" className="text-[#080e14] text-[13px]" />
           </div>
         </div>
-        <div className=”min-w-0”>
-          <p className=”text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40”>Connect with</p>
-          <h3 className=”truncate text-lg font-extrabold tracking-tight text-white”>{connectModal.targetName}</h3>
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Connect with</p>
+          <h3 className="truncate text-lg font-extrabold tracking-tight text-white">{connectModal.targetName}</h3>
         </div>
       </div>
 
-      <div className=”px-6 py-5 space-y-4”>
+      <div className="px-6 py-5 space-y-4">
         {/* Usage counter */}
         {connectRequestsLimit !== null && connectRequestsUsed !== null && (
-          <div className=”flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2.5 text-xs”>
-            <span className=”text-white/40”>Requests this month</span>
+          <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2.5 text-xs">
+            <span className="text-white/40">Requests this month</span>
             <span className={
               connectRequestsUsed >= connectRequestsLimit
-                ? “font-bold text-rose-400”
+                ? "font-bold text-rose-400"
                 : connectRequestsUsed >= connectRequestsLimit * 0.8
-                  ? “font-bold text-amber-400”
-                  : “font-semibold text-[#0df2f2]”
+                  ? "font-bold text-amber-400"
+                  : "font-semibold text-[#0df2f2]"
             }>
               {connectRequestsUsed} / {connectRequestsLimit}
             </span>
@@ -3991,59 +3991,59 @@ function ConnectionsPageContent() {
 
         {/* Reason — searchable select */}
         <div>
-          <label className=”text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40”>Reason to connect</label>
-          <div className=”relative mt-2”>
-            <span className=”material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[17px] text-white/25”>search</span>
+          <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Reason to connect</label>
+          <div className="relative mt-2">
+            <span className="material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[17px] text-white/25">search</span>
             <input
               value={connectReasonQuery}
               onChange={(e) => {
                 setConnectReasonQuery(e.target.value);
                 setSelectedReason(null);
               }}
-              placeholder=”Type to search reasons…”
-              className=”w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition”
+              placeholder="Type to search reasons…"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition"
             />
           </div>
           {connectReasonQuery.trim() && (
-            <div className=”mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]”>
+            <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]">
               {visibleConnectReasons.length === 0 ? (
-                <p className=”px-4 py-3 text-sm text-white/40”>No matches</p>
+                <p className="px-4 py-3 text-sm text-white/40">No matches</p>
               ) : (
                 visibleConnectReasons.map((r) => (
                   <button
                     key={r.id}
-                    type=”button”
+                    type="button"
                     onClick={() => {
                       setSelectedReason(r.id);
                       setConnectReasonQuery(r.label);
                     }}
-                    className=”w-full px-4 py-2.5 text-left text-sm text-white/80 hover:bg-white/[0.06] hover:text-white transition flex items-center justify-between gap-3”
+                    className="w-full px-4 py-2.5 text-left text-sm text-white/80 hover:bg-white/[0.06] hover:text-white transition flex items-center justify-between gap-3"
                   >
                     <span>{r.label}</span>
-                    <span className=”shrink-0 text-[11px] text-white/30”>{r.role}</span>
+                    <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
                   </button>
                 ))
               )}
             </div>
           )}
           {!connectReasonQuery.trim() && (
-            <div className=”mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]”>
-              {connectReasons.filter((r) => r.context === (connectModal.connectContext === “trip” ? “trip” : “member”)).map((r) => (
+            <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0b1219]">
+              {connectReasons.filter((r) => r.context === (connectModal.connectContext === "trip" ? "trip" : "member")).map((r) => (
                 <button
                   key={r.id}
-                  type=”button”
+                  type="button"
                   onClick={() => {
                     setSelectedReason(r.id);
                     setConnectReasonQuery(r.label);
                   }}
                   className={`w-full px-4 py-2.5 text-left text-sm transition flex items-center justify-between gap-3 ${
                     selectedReason === r.id
-                      ? “bg-[#0df2f2]/10 text-[#0df2f2]”
-                      : “text-white/80 hover:bg-white/[0.06] hover:text-white”
+                      ? "bg-[#0df2f2]/10 text-[#0df2f2]"
+                      : "text-white/80 hover:bg-white/[0.06] hover:text-white"
                   }`}
                 >
                   <span>{r.label}</span>
-                  <span className=”shrink-0 text-[11px] text-white/30”>{r.role}</span>
+                  <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
                 </button>
               ))}
             </div>
