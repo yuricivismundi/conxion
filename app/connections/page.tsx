@@ -4278,12 +4278,26 @@ function ConnectionsPageContent() {
                       : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
                   }}
                 />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Join Trip</p>
                   <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
                     {tripJoinModal.targetName}
                   </h3>
                 </div>
+                {tripRequestsLimit !== null && tripRequestsUsed !== null && (
+                  <div className="shrink-0 text-right">
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</p>
+                    <p className={`text-[13px] font-black tabular-nums leading-tight ${
+                      tripRequestsUsed >= tripRequestsLimit
+                        ? "text-rose-400"
+                        : tripRequestsUsed >= tripRequestsLimit * 0.8
+                          ? "text-amber-400"
+                          : "text-[#00F5FF]"
+                    }`}>
+                      {tripRequestsUsed}<span className="text-white/25 font-normal"> / {tripRequestsLimit}</span>
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Pending warning */}
@@ -4311,21 +4325,6 @@ function ConnectionsPageContent() {
                 </div>
               )}
 
-              {/* Usage counter */}
-              {tripRequestsLimit !== null && tripRequestsUsed !== null && (
-                <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
-                  <span className="text-white/50">Trip requests this month</span>
-                  <span className={
-                    tripRequestsUsed >= tripRequestsLimit
-                      ? "font-bold text-rose-400"
-                      : tripRequestsUsed >= tripRequestsLimit * 0.8
-                        ? "font-bold text-amber-400"
-                        : "font-semibold text-white"
-                  }>
-                    {tripRequestsUsed} / {tripRequestsLimit}
-                  </span>
-                </div>
-              )}
 
               {/* Trip destination + dates */}
               <div className="mb-5 flex items-center justify-center gap-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
