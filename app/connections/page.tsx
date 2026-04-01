@@ -638,6 +638,7 @@ function ConnectionsPageContent() {
   const [connectReasonQuery, setConnectReasonQuery] = useState("");
   const [sendingRequest, setSendingRequest] = useState(false);
   const [pendingWarning, setPendingWarning] = useState<string | null>(null);
+  const [connectModalError, setConnectModalError] = useState<string | null>(null);
 
   const [hostingModal, setHostingModal] = useState<HostingModalState>(EMPTY_HOSTING_MODAL);
   const [hostingSending, setHostingSending] = useState(false);
@@ -654,6 +655,7 @@ function ConnectionsPageContent() {
     setConnectReasonQuery("");
     setConnectReasons([]);
     setPendingWarning(null);
+    setConnectModalError(null);
   }, []);
 
   const closeHostingModal = useCallback(() => {
@@ -4063,6 +4065,14 @@ function ConnectionsPageContent() {
             )}
           </div>
         </div>
+
+          {/* Error */}
+          {connectModalError && (
+            <div className="flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+              <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
+              <span>{connectModalError}</span>
+            </div>
+          )}
       </div>
 
       {/* Actions */}
@@ -4082,7 +4092,7 @@ function ConnectionsPageContent() {
 
             try {
               setSendingRequest(true);
-              setUiError(null);
+              setConnectModalError(null);
 
               const {
                 data: { user },
@@ -4143,9 +4153,9 @@ function ConnectionsPageContent() {
 	              router.push(requestsRedirect);
 	            } catch (e) {
               const message = e instanceof Error ? e.message : "Failed to send request.";
-              setUiError(
+              setConnectModalError(
                 message.includes("Failed to fetch")
-                  ? "Network issue while sending request. Check your connection and Supabase env values, then retry."
+                  ? "Network issue while sending request. Check your connection and retry."
                   : message
               );
             } finally {
@@ -4171,90 +4181,96 @@ function ConnectionsPageContent() {
 )}
 
       {tripJoinModal.open ? (
-        <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/70 px-4 py-4 backdrop-blur-md sm:items-center">
-          <div className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[620px] overflow-y-auto overscroll-contain rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] p-6 shadow-2xl sm:max-h-[min(92dvh,860px)] sm:p-8">
+        <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
+          <div className="relative flex w-full max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] shadow-2xl" style={{ maxHeight: "calc(100dvh - 1.5rem)" }}>
             <button
               type="button"
               onClick={closeTripJoinModal}
-              className="absolute right-5 top-5 text-white/50 transition hover:text-white"
+              className="absolute right-5 top-5 z-10 text-white/50 transition hover:text-white"
               aria-label="Close trip request modal"
             >
               <MSIcon name="close" className="text-[22px]" />
             </button>
 
-            <div className="mb-6 flex items-center gap-4">
-              <div
-                className="h-14 w-14 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
-                style={{
-                  backgroundImage: tripJoinModal.targetPhotoUrl
-                    ? `url(${tripJoinModal.targetPhotoUrl})`
-                    : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                }}
-              />
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Join Trip</p>
-                <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
-                  {tripJoinModal.targetName}
-                </h3>
-                <p className="text-xs text-white/55">
-                  Send a trip join request. Once sent, the request continues inside Messages.
-                </p>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
+              <div className="mb-6 flex items-center gap-4">
+                <div
+                  className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
+                  style={{
+                    backgroundImage: tripJoinModal.targetPhotoUrl
+                      ? `url(${tripJoinModal.targetPhotoUrl})`
+                      : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                  }}
+                />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Join Trip</p>
+                  <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
+                    {tripJoinModal.targetName}
+                  </h3>
+                  <p className="text-xs text-white/55">
+                    Send a trip join request. Once sent, the request continues inside Messages.
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-white">{tripJoinModal.destinationCity || "Trip"}</span>
-                {tripJoinModal.destinationCountry ? <span className="text-white/45">• {tripJoinModal.destinationCountry}</span> : null}
-                {tripJoinModal.startDate && tripJoinModal.endDate ? (
-                  <span className="text-white/45">
-                    • {formatDateCompact(tripJoinModal.startDate)} - {formatDateCompact(tripJoinModal.endDate)}
+              <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-white">{tripJoinModal.destinationCity || "Trip"}</span>
+                  {tripJoinModal.destinationCountry ? <span className="text-white/45">• {tripJoinModal.destinationCountry}</span> : null}
+                  {tripJoinModal.startDate && tripJoinModal.endDate ? (
+                    <span className="text-white/45">
+                      • {formatDateCompact(tripJoinModal.startDate)} - {formatDateCompact(tripJoinModal.endDate)}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="mb-2 text-sm font-semibold text-white">Optional note</div>
+                <p className="mb-3 text-xs text-white/50">Keep it short. Explain why you want to join or any relevant coordination detail.</p>
+                <textarea
+                  value={tripJoinModal.note}
+                  onChange={(event) => setTripJoinModal((prev) => ({ ...prev, note: event.target.value }))}
+                  maxLength={500}
+                  rows={4}
+                  placeholder="Add context for your trip request."
+                  className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                />
+                <div className="mt-2 flex items-center justify-between text-[11px]">
+                  <span className={tripRequestMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
+                    No links, emails, social handles, or phone numbers.
                   </span>
+                  <span className={tripJoinModal.note.length > 480 ? "text-amber-200" : "text-white/45"}>
+                    {tripJoinModal.note.length}/500
+                  </span>
+                </div>
+                {tripRequestMessageValidation ? (
+                  <p className="mt-1 text-xs text-[#FFC6FA]">{tripRequestMessageValidation}</p>
                 ) : null}
               </div>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="mb-2 text-sm font-semibold text-white">Optional note</div>
-              <p className="mb-3 text-xs text-white/50">Keep it short. Explain why you want to join or any relevant coordination detail.</p>
-              <textarea
-                value={tripJoinModal.note}
-                onChange={(event) => setTripJoinModal((prev) => ({ ...prev, note: event.target.value }))}
-                maxLength={500}
-                rows={4}
-                placeholder="Add context for your trip request."
-                className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-              />
-              <div className="mt-2 flex items-center justify-between text-[11px]">
-                <span className={tripRequestMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
-                  No links, emails, social handles, or phone numbers.
-                </span>
-                <span className={tripJoinModal.note.length > 480 ? "text-amber-200" : "text-white/45"}>
-                  {tripJoinModal.note.length}/500
-                </span>
+            {/* Fixed footer buttons */}
+            <div className="shrink-0 border-t border-white/8 px-6 py-4 sm:px-8">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeTripJoinModal}
+                  className="h-12 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={tripRequestSending || Boolean(tripRequestMessageValidation)}
+                  onClick={sendTripJoinRequest}
+                  className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
+                  style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+                >
+                  {tripRequestSending ? "Sending…" : "Send trip request"}
+                </button>
               </div>
-              {tripRequestMessageValidation ? (
-                <p className="mt-1 text-xs text-[#FFC6FA]">{tripRequestMessageValidation}</p>
-              ) : null}
-            </div>
-
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-              <button
-                type="button"
-                onClick={closeTripJoinModal}
-                className="h-11 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={tripRequestSending || Boolean(tripRequestMessageValidation)}
-                onClick={sendTripJoinRequest}
-                className="h-11 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
-                style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
-              >
-                {tripRequestSending ? "Sending…" : "Send trip request"}
-              </button>
             </div>
           </div>
         </div>
