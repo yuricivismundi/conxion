@@ -4288,9 +4288,18 @@ function ConnectionsPageContent() {
 
               {/* Pending warning */}
               {tripJoinWarning && (
-                <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
-                  <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
-                  <span>{tripJoinWarning}</span>
+                <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+                  <span className="material-symbols-outlined mt-px text-[16px] text-amber-400 shrink-0">warning</span>
+                  <span>
+                    {tripJoinWarning}{" "}
+                    <Link
+                      href={`/messages?tab=requests`}
+                      onClick={closeTripJoinModal}
+                      className="font-semibold text-[#00F5FF] underline underline-offset-2 hover:text-white"
+                    >
+                      Open in Messages
+                    </Link>
+                  </span>
                 </div>
               )}
 
@@ -4319,26 +4328,29 @@ function ConnectionsPageContent() {
               )}
 
               {/* Trip destination + dates */}
-              <div className="mb-5 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                <div className="min-w-0 flex-1">
+              <div className="mb-5 flex items-center justify-center gap-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                <div className="text-center">
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Destination</p>
-                  <p className="mt-0.5 truncate text-sm font-bold text-white">
+                  <p className="mt-0.5 text-sm font-bold text-white">
                     {tripJoinModal.destinationCity || "Trip"}
                     {tripJoinModal.destinationCountry ? <span className="ml-1.5 font-normal text-white/50">{tripJoinModal.destinationCountry}</span> : null}
                   </p>
                 </div>
                 {tripJoinModal.startDate && tripJoinModal.endDate ? (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <div className="text-right">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">From</p>
-                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.startDate)}</p>
+                  <>
+                    <span className="text-white/20">|</span>
+                    <div className="flex items-center gap-2">
+                      <div className="text-center">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">From</p>
+                        <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.startDate)}</p>
+                      </div>
+                      <span className="material-symbols-outlined text-[16px] text-white/25">arrow_forward</span>
+                      <div className="text-center">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">To</p>
+                        <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.endDate)}</p>
+                      </div>
                     </div>
-                    <span className="material-symbols-outlined text-[16px] text-white/25">arrow_forward</span>
-                    <div className="text-left">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">To</p>
-                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.endDate)}</p>
-                    </div>
-                  </div>
+                  </>
                 ) : null}
               </div>
 
