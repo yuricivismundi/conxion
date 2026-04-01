@@ -7,6 +7,7 @@ export type PlanLimits = {
   firstMonthConnectionRequestsPerMonth: number | null;
   hostingOffersPerMonth: number | null;
   hostingRequestsPerMonth: number | null;
+  tripRequestsPerMonth: number | null;
   tripsPerMonth: number | null;
   eventsPerMonth: number | null;
   profileVideos: number | null;
@@ -21,6 +22,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     firstMonthConnectionRequestsPerMonth: 30,
     hostingOffersPerMonth: 5,
     hostingRequestsPerMonth: null,
+    tripRequestsPerMonth: 5,
     tripsPerMonth: 1,
     eventsPerMonth: 2,
     profileVideos: 2,
@@ -33,6 +35,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     firstMonthConnectionRequestsPerMonth: 30,
     hostingOffersPerMonth: 5,
     hostingRequestsPerMonth: 10,
+    tripRequestsPerMonth: 5,
     tripsPerMonth: 1,
     eventsPerMonth: 2,
     profileVideos: 2,
@@ -45,6 +48,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     firstMonthConnectionRequestsPerMonth: 30,
     hostingOffersPerMonth: 10,
     hostingRequestsPerMonth: 10,
+    tripRequestsPerMonth: 10,
     tripsPerMonth: 5,
     eventsPerMonth: 5,
     profileVideos: 2,

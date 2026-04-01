@@ -36,7 +36,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Travelling",
         items: [
           "Find travellers and join their trips",
-          "Join up to 1 trip per month",
+          "5 trip requests per month",
+          "Create 1 trip per month",
           "Send up to 5 hosting offers to travellers",
         ],
       },
@@ -110,6 +111,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Travelling",
         items: [
           "Find travellers and join their trips",
+          "10 trip requests per month",
           "Create 5 trips per month",
           "10 hosting requests per month",
           "Send up to 10 hosting offers to travellers",

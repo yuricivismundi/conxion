@@ -619,6 +619,8 @@ function ConnectionsPageContent() {
   const [connectRequestsLimit, setConnectRequestsLimit] = useState<number | null>(null);
   const [hostingOffersUsed, setHostingOffersUsed] = useState<number | null>(null);
   const [hostingOffersLimit, setHostingOffersLimit] = useState<number | null>(null);
+  const [tripRequestsUsed, setTripRequestsUsed] = useState<number | null>(null);
+  const [tripRequestsLimit, setTripRequestsLimit] = useState<number | null>(null);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<FiltersState>(EMPTY_FILTERS);
@@ -1498,6 +1500,14 @@ function ConnectionsPageContent() {
               .eq("request_type", "offer_to_host")
               .gte("created_at", monthStart.toISOString());
             setHostingOffersUsed(hostingCount ?? 0);
+
+            setTripRequestsLimit(limits.tripRequestsPerMonth);
+            const { count: tripReqCount } = await supabase
+              .from("trip_requests")
+              .select("id", { count: "exact", head: true })
+              .eq("requester_id", user.id)
+              .gte("created_at", monthStart.toISOString());
+            setTripRequestsUsed(tripReqCount ?? 0);
           } catch {}
 
 
@@ -4292,16 +4302,44 @@ function ConnectionsPageContent() {
                 </div>
               )}
 
-              <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-white">{tripJoinModal.destinationCity || "Trip"}</span>
-                  {tripJoinModal.destinationCountry ? <span className="text-white/45">• {tripJoinModal.destinationCountry}</span> : null}
-                  {tripJoinModal.startDate && tripJoinModal.endDate ? (
-                    <span className="text-white/45">
-                      • {formatDateCompact(tripJoinModal.startDate)} - {formatDateCompact(tripJoinModal.endDate)}
-                    </span>
-                  ) : null}
+              {/* Usage counter */}
+              {tripRequestsLimit !== null && tripRequestsUsed !== null && (
+                <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
+                  <span className="text-white/50">Trip requests this month</span>
+                  <span className={
+                    tripRequestsUsed >= tripRequestsLimit
+                      ? "font-bold text-rose-400"
+                      : tripRequestsUsed >= tripRequestsLimit * 0.8
+                        ? "font-bold text-amber-400"
+                        : "font-semibold text-white"
+                  }>
+                    {tripRequestsUsed} / {tripRequestsLimit}
+                  </span>
                 </div>
+              )}
+
+              {/* Trip destination + dates */}
+              <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="mb-3 text-center">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-white/40">Destination</p>
+                  <p className="mt-1 text-lg font-bold text-white">
+                    {tripJoinModal.destinationCity || "Trip"}
+                    {tripJoinModal.destinationCountry ? <span className="ml-2 text-white/50 font-normal text-sm">{tripJoinModal.destinationCountry}</span> : null}
+                  </p>
+                </div>
+                {tripJoinModal.startDate && tripJoinModal.endDate ? (
+                  <div className="flex items-center justify-center gap-3 rounded-xl border border-white/8 bg-black/25 px-4 py-3">
+                    <div className="text-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">From</p>
+                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.startDate)}</p>
+                    </div>
+                    <span className="material-symbols-outlined text-[18px] text-white/25">arrow_forward</span>
+                    <div className="text-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">To</p>
+                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.endDate)}</p>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
