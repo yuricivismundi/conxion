@@ -642,8 +642,12 @@ function ConnectionsPageContent() {
 
   const [hostingModal, setHostingModal] = useState<HostingModalState>(EMPTY_HOSTING_MODAL);
   const [hostingSending, setHostingSending] = useState(false);
+  const [hostingModalWarning, setHostingModalWarning] = useState<string | null>(null);
+  const [hostingModalError, setHostingModalError] = useState<string | null>(null);
   const [tripJoinModal, setTripJoinModal] = useState<TripJoinModalState>(EMPTY_TRIP_JOIN_MODAL);
   const [tripRequestSending, setTripRequestSending] = useState(false);
+  const [tripJoinWarning, setTripJoinWarning] = useState<string | null>(null);
+  const [tripJoinError, setTripJoinError] = useState<string | null>(null);
   const [membersPage, setMembersPage] = useState(1);
   const [travellersPage, setTravellersPage] = useState(1);
   useBodyScrollLock(Boolean(filtersOpen || connectModal.open || hostingModal.open || tripJoinModal.open || verificationModalOpen));
@@ -660,10 +664,14 @@ function ConnectionsPageContent() {
 
   const closeHostingModal = useCallback(() => {
     setHostingModal(EMPTY_HOSTING_MODAL);
+    setHostingModalWarning(null);
+    setHostingModalError(null);
   }, []);
 
   const closeTripJoinModal = useCallback(() => {
     setTripJoinModal(EMPTY_TRIP_JOIN_MODAL);
+    setTripJoinWarning(null);
+    setTripJoinError(null);
   }, []);
 
   const openTripJoinModal = useCallback((params: {
@@ -1338,6 +1346,69 @@ function ConnectionsPageContent() {
       } catch {}
     })();
   }, [connectModal.open, connectModal.connectContext, connectModal.targetUserId]);
+
+  // Check for existing hosting requests when hosting modal opens
+  useEffect(() => {
+    if (!hostingModal.open || !hostingModal.targetUserId) return;
+    setHostingModalWarning(null);
+    setHostingModalError(null);
+
+    (async () => {
+      try {
+        const { data: authUser } = await supabase.auth.getUser();
+        const userId = authUser?.user?.id;
+        if (!userId) return;
+
+        const { data: existing } = await supabase
+          .from("hosting_requests")
+          .select("id,status,sender_user_id,request_type")
+          .or(
+            `and(sender_user_id.eq.${userId},recipient_user_id.eq.${hostingModal.targetUserId}),and(sender_user_id.eq.${hostingModal.targetUserId},recipient_user_id.eq.${userId})`
+          )
+          .in("status", ["pending", "accepted"])
+          .limit(1)
+          .maybeSingle();
+
+        if (existing?.status === "pending") {
+          const type = existing.request_type === "offer_to_host" ? "hosting offer" : "hosting request";
+          const direction = existing.sender_user_id === userId ? "You already sent" : "You received";
+          setHostingModalWarning(`${direction} a pending ${type} with this member.`);
+        } else if (existing?.status === "accepted") {
+          setHostingModalWarning("There is already an accepted hosting arrangement with this member.");
+        }
+      } catch {}
+    })();
+  }, [hostingModal.open, hostingModal.targetUserId]);
+
+  // Check for existing trip requests when trip join modal opens
+  useEffect(() => {
+    if (!tripJoinModal.open || !tripJoinModal.tripId) return;
+    setTripJoinWarning(null);
+    setTripJoinError(null);
+
+    (async () => {
+      try {
+        const { data: authUser } = await supabase.auth.getUser();
+        const userId = authUser?.user?.id;
+        if (!userId) return;
+
+        const { data: existing } = await supabase
+          .from("trip_requests")
+          .select("id,status")
+          .eq("trip_id", tripJoinModal.tripId)
+          .eq("requester_id", userId)
+          .in("status", ["pending", "accepted"])
+          .limit(1)
+          .maybeSingle();
+
+        if (existing?.status === "pending") {
+          setTripJoinWarning("You already sent a pending join request for this trip.");
+        } else if (existing?.status === "accepted") {
+          setTripJoinWarning("You are already part of this trip.");
+        }
+      } catch {}
+    })();
+  }, [tripJoinModal.open, tripJoinModal.tripId]);
 
   useEffect(() => {
     (async () => {
@@ -2364,19 +2435,18 @@ function ConnectionsPageContent() {
 
   async function sendTripJoinRequest() {
     if (!tripJoinModal.tripId || !tripJoinModal.targetUserId) {
-      setUiError("Missing trip details.");
+      setTripJoinError("Missing trip details.");
       return;
     }
 
     if (tripRequestMessageValidation) {
-      setUiError(tripRequestMessageValidation);
+      setTripJoinError(tripRequestMessageValidation);
       return;
     }
 
     try {
       setTripRequestSending(true);
-      setUiError(null);
-      setUiInfo(null);
+      setTripJoinError(null);
 
       const note = tripJoinModal.note.trim();
       const sessionRes = await supabase.auth.getSession();
@@ -2404,7 +2474,7 @@ function ConnectionsPageContent() {
       router.replace("/messages?tab=requests");
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to send trip request.";
-      setUiError(
+      setTripJoinError(
         message.includes("Failed to fetch")
           ? "Network issue while sending request. Check your connection and retry."
           : message
@@ -2416,23 +2486,23 @@ function ConnectionsPageContent() {
 
   async function sendHostingRequest() {
     if (!hostingModal.targetUserId) {
-      setUiError("Missing target host/traveler.");
+      setHostingModalError("Missing target host/traveler.");
       return;
     }
     if (!hostingModal.arrivalDate || !hostingModal.departureDate) {
-      setUiError("Arrival and departure dates are required.");
+      setHostingModalError("Arrival and departure dates are required.");
       return;
     }
     if (hostingModal.departureDate < hostingModal.arrivalDate) {
-      setUiError("Departure must be after arrival.");
+      setHostingModalError("Departure must be after arrival.");
       return;
     }
     if (hostingModal.arrivalDate < new Date().toISOString().slice(0, 10)) {
-      setUiError("Arrival date must be today or later.");
+      setHostingModalError("Arrival date must be today or later.");
       return;
     }
     if (hostingModal.travellersCount < 1 || hostingModal.travellersCount > 20) {
-      setUiError("Number of travellers must be between 1 and 20.");
+      setHostingModalError("Number of travellers must be between 1 and 20.");
       return;
     }
 
@@ -2440,28 +2510,23 @@ function ConnectionsPageContent() {
     const hasMaxAllowed = maxAllowedRaw.length > 0;
     const parsedMaxAllowed = hasMaxAllowed ? Number(maxAllowedRaw) : Number.NaN;
     if (hostingModal.requestType === "offer_to_host" && !hasMaxAllowed) {
-      setUiError("Select how many travellers you can host.");
+      setHostingModalError("Select how many travellers you can host.");
       return;
     }
     if (hasMaxAllowed && (!Number.isFinite(parsedMaxAllowed) || parsedMaxAllowed < 1 || parsedMaxAllowed > 20)) {
-      setUiError("Host capacity must be between 1 and 20 when provided.");
-      return;
-    }
-    if (hostingModal.requestType !== "offer_to_host" && hasMaxAllowed && parsedMaxAllowed < hostingModal.travellersCount) {
-      setUiError("Host capacity must be equal or greater than traveller count.");
+      setHostingModalError("Host capacity must be between 1 and 20 when provided.");
       return;
     }
 
     const messageValidationError = validateSecureFreeText(hostingModal.message);
     if (messageValidationError) {
-      setUiError(messageValidationError);
+      setHostingModalError(messageValidationError);
       return;
     }
 
     try {
       setHostingSending(true);
-      setUiError(null);
-      setUiInfo(null);
+      setHostingModalError(null);
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token ?? "";
       if (!accessToken) throw new Error("Missing auth session token.");
@@ -2499,7 +2564,7 @@ function ConnectionsPageContent() {
       router.replace("/messages?tab=requests");
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to send hosting request.";
-      setUiError(
+      setHostingModalError(
         message.includes("Failed to fetch")
           ? "Network issue while sending request. Check your connection and retry."
           : message
@@ -4208,11 +4273,24 @@ function ConnectionsPageContent() {
                   <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
                     {tripJoinModal.targetName}
                   </h3>
-                  <p className="text-xs text-white/55">
-                    Send a trip join request. Once sent, the request continues inside Messages.
-                  </p>
                 </div>
               </div>
+
+              {/* Pending warning */}
+              {tripJoinWarning && (
+                <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+                  <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
+                  <span>{tripJoinWarning}</span>
+                </div>
+              )}
+
+              {/* Error */}
+              {tripJoinError && (
+                <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
+                  <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">error</span>
+                  <span>{tripJoinError}</span>
+                </div>
+              )}
 
               <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
                 <div className="flex flex-wrap items-center gap-2">
@@ -4304,11 +4382,24 @@ function ConnectionsPageContent() {
                 <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
                   {hostingModal.targetName}
                 </h3>
-                <p className="text-xs text-white/55">
-                  Trusted request flow with secure text filtering and anti-spam protections.
-                </p>
               </div>
             </div>
+
+            {/* Pending warning */}
+            {hostingModalWarning && (
+              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+                <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
+                <span>{hostingModalWarning}</span>
+              </div>
+            )}
+
+            {/* Error */}
+            {hostingModalError && (
+              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
+                <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">error</span>
+                <span>{hostingModalError}</span>
+              </div>
+            )}
 
             {hostingModal.requestType === "offer_to_host" && hostingOffersLimit !== null && hostingOffersUsed !== null && (
               <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
@@ -4397,6 +4488,11 @@ function ConnectionsPageContent() {
                 </div>
               ) : (
                 <>
+                  <style>{`
+                    input[type="date"]::-webkit-calendar-picker-indicator {
+                      filter: invert(1);
+                    }
+                  `}</style>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="space-y-1.5">
                       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Arrival date</span>
@@ -4441,7 +4537,7 @@ function ConnectionsPageContent() {
                     </label>
                   </div>
 
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div className="mt-4">
                     <label className="space-y-1.5">
                       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
                         Number of travellers
@@ -4449,34 +4545,20 @@ function ConnectionsPageContent() {
                       <input
                         type="number"
                         min={1}
-                        max={20}
+                        max={hostingModal.targetMaxGuests ?? 20}
                         value={hostingModal.travellersCount}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const cap = hostingModal.targetMaxGuests ?? 20;
                           setHostingModal((prev) => ({
                             ...prev,
-                            travellersCount: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
-                          }))
-                        }
+                            travellersCount: Math.max(1, Math.min(cap, Number(event.target.value) || 1)),
+                          }));
+                        }}
                         className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      />
-                    </label>
-
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
-                        Max travellers allowed (optional)
-                      </span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={hostingModal.maxTravellersAllowed}
-                        onChange={(event) => setHostingModal((prev) => ({ ...prev, maxTravellersAllowed: event.target.value }))}
-                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                        placeholder="Optional"
                       />
                       {hostingModal.targetMaxGuests && hostingModal.requestType === "request_hosting" ? (
-                        <p className="text-[11px] text-[#9EEBFF]">
-                          Host profile capacity: {hostingModal.targetMaxGuests} guests
+                        <p className="text-[11px] text-white/45">
+                          This host can accommodate up to {hostingModal.targetMaxGuests} {hostingModal.targetMaxGuests === 1 ? "guest" : "guests"}
                         </p>
                       ) : null}
                     </label>
