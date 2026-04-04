@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import {
   getCachedCitiesOfCountry,
@@ -354,7 +354,7 @@ function isValidTab(t: string | null): t is EditProfileTab {
   return VALID_TABS.includes(t as EditProfileTab);
 }
 
-export default function EditMePage() {
+function EditMePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -2430,5 +2430,13 @@ export default function EditMePage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function EditMePageWrapper() {
+  return (
+    <Suspense>
+      <EditMePage />
+    </Suspense>
   );
 }
