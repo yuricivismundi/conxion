@@ -36,7 +36,7 @@ export default function DiscoverLoading() {
             {Array.from({ length: 8 }).map((_, index) => (
               <div
                 key={`discover-loading-card-${index}`}
-                className="flex h-[420px] animate-pulse flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] md:h-64 md:flex-row"
+                className="flex min-h-[196px] animate-pulse flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] md:h-64 md:min-h-0 md:flex-row"
               >
                 <div className="h-44 w-full bg-white/5 md:h-full md:w-1/2" />
                 <div className="flex h-full w-full flex-col justify-between p-4 md:w-1/2">

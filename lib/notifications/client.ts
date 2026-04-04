@@ -127,6 +127,45 @@ export function formatNotificationRelativeTime(value: string | null | undefined)
   return `${years}y`;
 }
 
+export function notificationIcon(kind: string): { icon: string; colorClass: string; bgClass: string } {
+  const k = kind.toLowerCase();
+
+  // Accepted / approved / completed — emerald
+  if (k.includes("accepted") || k.includes("approved") || k.includes("completed"))
+    return { icon: "check_circle", colorClass: "text-emerald-400", bgClass: "bg-emerald-400/10 border-emerald-400/20" };
+
+  // Declined / rejected / cancelled / expired — rose
+  if (k.includes("declined") || k.includes("rejected") || k.includes("cancelled") || k.includes("expired"))
+    return { icon: "cancel", colorClass: "text-rose-400", bgClass: "bg-rose-400/10 border-rose-400/20" };
+
+  // References — fuchsia
+  if (k.includes("reference"))
+    return { icon: "verified", colorClass: "text-fuchsia-400", bgClass: "bg-fuchsia-400/10 border-fuchsia-400/20" };
+
+  // Hosting — amber
+  if (k.includes("hosting") || k.includes("host"))
+    return { icon: "home", colorClass: "text-amber-400", bgClass: "bg-amber-400/10 border-amber-400/20" };
+
+  // Trips — cyan
+  if (k.includes("trip"))
+    return { icon: "travel_explore", colorClass: "text-[#0df2f2]", bgClass: "bg-[#0df2f2]/10 border-[#0df2f2]/20" };
+
+  // Events — violet
+  if (k.includes("event"))
+    return { icon: "calendar_today", colorClass: "text-violet-400", bgClass: "bg-violet-400/10 border-violet-400/20" };
+
+  // Connection / request — cyan
+  if (k.includes("connection") || k.includes("request") || k.includes("connect"))
+    return { icon: "person_add", colorClass: "text-[#0df2f2]", bgClass: "bg-[#0df2f2]/10 border-[#0df2f2]/20" };
+
+  // Message / chat — sky
+  if (k.includes("message") || k.includes("chat"))
+    return { icon: "chat_bubble", colorClass: "text-sky-400", bgClass: "bg-sky-400/10 border-sky-400/20" };
+
+  // General / system — slate
+  return { icon: "notifications", colorClass: "text-slate-400", bgClass: "bg-white/[0.04] border-white/10" };
+}
+
 export function notificationCategory(kind: string): "requests" | "trips" | "hosting" | "references" | "events" | "general" {
   const value = kind.toLowerCase();
   if (value.includes("hosting") || value.includes("host")) return "hosting";
@@ -152,79 +191,4 @@ export function notificationCategoryLabel(category: ReturnType<typeof notificati
     default:
       return "General";
   }
-}
-
-export async function createSampleNotificationsForCurrentUser(): Promise<{ created: number; error: string | null }> {
-  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-  if (sessionErr) return { created: 0, error: sessionErr.message };
-
-  const token = sessionData.session?.access_token ?? "";
-  const userId = sessionData.session?.user?.id ?? "";
-  if (!token || !userId) return { created: 0, error: "You must be signed in to create sample notifications." };
-
-  const now = Date.now();
-  const suffix = Math.random().toString(36).slice(2, 8);
-  const samples: Array<{
-    kind: "trip_request_received" | "trip_request_accepted" | "trip_request_declined" | "reference_received";
-    title: string;
-    body: string;
-    linkUrl: string;
-    metadata: Record<string, unknown>;
-  }> = [
-    {
-      kind: "trip_request_received",
-      title: "New trip request",
-      body: "Alex wants to join your Tallinn dance trip.",
-      linkUrl: "/messages?filter=requests",
-      metadata: { sample: true, scenario: "trip_received", nonce: `${now}-1-${suffix}` },
-    },
-    {
-      kind: "trip_request_accepted",
-      title: "Trip request accepted",
-      body: "Your Barcelona trip request was accepted.",
-      linkUrl: "/trips/my",
-      metadata: { sample: true, scenario: "trip_accepted", nonce: `${now}-2-${suffix}` },
-    },
-    {
-      kind: "trip_request_declined",
-      title: "Trip request declined",
-      body: "A host declined this request. You can send a new one.",
-      linkUrl: "/trips/explore",
-      metadata: { sample: true, scenario: "trip_declined", nonce: `${now}-3-${suffix}` },
-    },
-    {
-      kind: "reference_received",
-      title: "New reference received",
-      body: "You received a new reference from a recent dance connection.",
-      linkUrl: "/references",
-      metadata: { sample: true, scenario: "reference_received", nonce: `${now}-4-${suffix}` },
-    },
-  ];
-
-  let created = 0;
-  for (const sample of samples) {
-    const res = await fetch("/api/notifications/create", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        userId,
-        kind: sample.kind,
-        title: sample.title,
-        body: sample.body,
-        linkUrl: sample.linkUrl,
-        metadata: sample.metadata,
-      }),
-    });
-
-    const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!res.ok || !payload?.ok) {
-      return { created, error: payload?.error ?? "Failed to create sample notifications." };
-    }
-    created += 1;
-  }
-
-  return { created, error: null };
 }

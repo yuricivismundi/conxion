@@ -2,6 +2,7 @@
 
 import { getRemaining } from "@/lib/billing/limits";
 import { getPlanDefinition, type PlanId } from "@/lib/billing/plans";
+import { cx } from "@/lib/cx";
 
 type Props = {
   label: string;
@@ -11,9 +12,6 @@ type Props = {
   onUpgrade?: (planId: PlanId) => void;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export default function UsageLimitBanner({ label, current, limit, upgradePlanId, onUpgrade }: Props) {
   if (limit === null) {

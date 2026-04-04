@@ -11,6 +11,7 @@ import {
 } from "@/lib/activities/types";
 import { REFERENCE_REPORT_REASON_OPTIONS, type ReferenceReportReason } from "@/lib/references/reporting";
 import { supabase } from "@/lib/supabase/client";
+import { cx } from "@/lib/cx";
 
 type ReferenceRecord = {
   id: string;
@@ -27,9 +28,6 @@ type LiteProfile = {
   avatarUrl: string | null;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function pickString(row: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {

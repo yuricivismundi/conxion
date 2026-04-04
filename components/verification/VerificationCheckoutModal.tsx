@@ -28,7 +28,7 @@ export default function VerificationCheckoutModal({
       open={open}
       title="Get Verified"
       badgeLabel="One-time trust upgrade"
-      submitLabel="Confirm Verification"
+      submitLabel="Confirm verification"
       loadingLabel="Preparing verification checkout…"
       onClose={onClose}
       onError={onError}

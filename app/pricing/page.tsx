@@ -188,7 +188,7 @@ export default function PricingPage() {
                 More visibility means more opportunities. Reach more dancers, keep more active chat threads open, create more trips and events, and stand out in the community.
               </p>
               <p className="mt-4 text-sm leading-6 text-slate-400">
-                It fits members who want more visibility, 30 monthly connection requests, 30 active chat threads, 10 hosting offers per month, up to 5 trips per month, 5 public or private events per month, and more room for profile photos.
+                It fits members who want more visibility, 30 monthly connection requests, 30 active chat threads, 10 hosting offers per month, 3 accepted trips per month, up to 5 created trips per month, 5 public or private events per month, and more room for profile photos.
               </p>
             </article>
           </section>
@@ -233,7 +233,7 @@ export default function PricingPage() {
           <section className="mt-8 rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,17,24,0.94),rgba(11,9,19,0.9))] p-6 sm:p-7">
             <h2 className="text-3xl font-black tracking-tight text-white">Start free, upgrade when you’re ready</h2>
             <p className="mt-3 max-w-[60ch] text-sm leading-7 text-slate-300">
-              Use Starter to discover dancers, travellers, and events with 5 hosting offers per month, get Verified when you want to request hosting or unlock professional access, or go Plus when you want more reach, 10 hosting offers, more trips, and more events.
+              Use Starter to discover dancers, travellers, and events with 5 hosting offers and 1 accepted trip per month, get Verified when you want to request hosting or unlock professional access, or go Plus when you want more reach, 10 hosting offers, 3 accepted trips, more created trips, and more events.
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button

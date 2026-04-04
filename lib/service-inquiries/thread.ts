@@ -14,7 +14,7 @@ function asString(value: unknown) {
 }
 
 export function serviceInquiryTitle(inquiryKind: ServiceInquiryRecord["inquiryKind"]) {
-  return `${SERVICE_INQUIRY_KIND_LABELS[inquiryKind]} inquiry`;
+  return `Teaching services — ${SERVICE_INQUIRY_KIND_LABELS[inquiryKind]}`;
 }
 
 export function buildServiceInquiryContextMetadata(inquiry: ServiceInquiryRecord) {

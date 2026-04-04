@@ -5,6 +5,11 @@ import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { isPaymentVerified } from "@/lib/verification";
+import {
+  ensureLinkedMemberPairThread,
+  mergeLinkedMemberContextMetadata,
+  resolveLinkedMember,
+} from "@/lib/requests/linked-members";
 
 type CreateHostingPayload = {
   recipientUserId?: string;
@@ -17,6 +22,7 @@ type CreateHostingPayload = {
   travellersCount?: number;
   maxTravellersAllowed?: number | null;
   message?: string | null;
+  linkedMemberUserId?: string | null;
 };
 
 function toDateOnly(value: unknown) {
@@ -63,6 +69,7 @@ export async function POST(req: Request) {
         ? null
         : Number(body.maxTravellersAllowed);
     const message = typeof body?.message === "string" ? body.message : null;
+    const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
 
     if (!recipientUserId) {
       return NextResponse.json({ ok: false, error: "recipientUserId is required." }, { status: 400 });
@@ -70,8 +77,11 @@ export async function POST(req: Request) {
     if (requestType !== "request_hosting" && requestType !== "offer_to_host") {
       return NextResponse.json({ ok: false, error: "Invalid requestType." }, { status: 400 });
     }
-    if (!arrivalDate || !departureDate) {
-      return NextResponse.json({ ok: false, error: "Arrival and departure dates are required." }, { status: 400 });
+    if (!arrivalDate) {
+      return NextResponse.json({ ok: false, error: "Arrival date is required." }, { status: 400 });
+    }
+    if (!departureDate && !departureFlexible) {
+      return NextResponse.json({ ok: false, error: "Enter a departure date or mark it as flexible." }, { status: 400 });
     }
 
     if (!Number.isFinite(travellersCount)) {
@@ -202,11 +212,45 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: messageText }, { status });
     }
 
+    const requestId = typeof data === "string" ? data : "";
+    if (requestId && requestType === "request_hosting") {
+      const linkedMember = await resolveLinkedMember({
+        serviceClient: service,
+        actorUserId: authData.user.id,
+        recipientUserId,
+        linkedMemberUserId,
+      });
+
+      if (linkedMember) {
+        const linkedUpdateRes = await service
+          .from("hosting_requests")
+          .update({ linked_member_user_id: linkedMember.userId } as never)
+          .eq("id", requestId);
+        if (linkedUpdateRes.error) {
+          throw new Error(linkedUpdateRes.error.message);
+        }
+
+        await mergeLinkedMemberContextMetadata({
+          serviceClient: service,
+          sourceTable: "hosting_requests",
+          sourceId: requestId,
+          linkedMember,
+        });
+
+        await ensureLinkedMemberPairThread({
+          serviceClient: service,
+          actorUserId: authData.user.id,
+          linkedMember,
+          recipientUserId,
+        });
+      }
+    }
+
     await sendAppEmailBestEffort({
       kind: "hosting_request_received",
       recipientUserId,
       actorUserId: authData.user.id,
-      hostingRequestId: typeof data === "string" ? data : null,
+      hostingRequestId: requestId || null,
       tripId,
       requestType,
     });

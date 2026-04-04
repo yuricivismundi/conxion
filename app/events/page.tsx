@@ -6,18 +6,24 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
+import EventHeroImage from "@/components/events/EventHeroImage";
 import { supabase } from "@/lib/supabase/client";
 import {
   type EventMemberRecord,
   type EventRecord,
+  type EventRequestRecord,
   type LiteProfile,
   mapEventMemberRows,
+  mapEventRequestRows,
   mapEventRows,
   mapProfileRows,
+  pickEventFallbackHeroUrl,
+  pickEventHeroUrl,
 } from "@/lib/events/model";
+import { cx } from "@/lib/cx";
 
 type DatePreset = "any" | "today" | "tomorrow" | "this_weekend" | "this_week" | "next_week" | "this_month" | "custom";
-type InterestState = "interested" | "going" | "not_interested";
+type EventResponseState = "interested" | "going" | "waitlist" | "request_sent";
 
 type DateRange = {
   start: string;
@@ -27,10 +33,8 @@ type DateRange = {
 const PUBLIC_EVENTS_CAP = 5;
 const EVENTS_PAGE_SIZE = 10;
 const PAST_EVENTS_CUTOFF_MONTHS = 3;
+const ACTION_TOAST_MS = 3000;
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function localIso(date: Date) {
   const y = date.getFullYear();
@@ -47,13 +51,6 @@ function addDays(date: Date, days: number) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
-}
-
-function formatPickerDate(iso: string) {
-  if (!iso) return "";
-  const parsed = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(parsed);
 }
 
 function resolveDateRange(preset: DatePreset, customFrom: string, customTo: string): DateRange {
@@ -105,21 +102,6 @@ function resolveDateRange(preset: DatePreset, customFrom: string, customTo: stri
   return { start: localIso(first), end: localIso(last) };
 }
 
-function datePresetLabel(preset: DatePreset, customFrom: string, customTo: string) {
-  if (preset === "any") return "Any date";
-  if (preset === "today") return "Today";
-  if (preset === "tomorrow") return "Tomorrow";
-  if (preset === "this_weekend") return "This weekend";
-  if (preset === "this_week") return "This week";
-  if (preset === "next_week") return "Next week";
-  if (preset === "this_month") return "This month";
-
-  if (customFrom && customTo) return `${formatPickerDate(customFrom)} - ${formatPickerDate(customTo)}`;
-  if (customFrom) return `From ${formatPickerDate(customFrom)}`;
-  if (customTo) return `Until ${formatPickerDate(customTo)}`;
-  return "Custom range";
-}
-
 function eventTypeBadge(eventType: string) {
   const normalized = eventType.toLowerCase();
   if (normalized.includes("festival")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
@@ -135,11 +117,6 @@ function summarize(text: string | null | undefined, max = 78) {
   if (!value) return "No description provided yet.";
   if (value.length <= max) return value;
   return `${value.slice(0, max - 1).trimEnd()}...`;
-}
-
-function seededEventCover(event: EventRecord) {
-  const seed = `${event.id}-${event.city}-${event.country}-${event.eventType}`;
-  return `https://picsum.photos/seed/conxion-event-${encodeURIComponent(seed)}/920/520`;
 }
 
 function eventDateBadgeParts(value: string) {
@@ -228,6 +205,132 @@ function friendSummary(names: string[], total: number) {
   return `${names[0]}, ${names[1]}, ${names[2]} and ${total - 3} friends`;
 }
 
+function getResponseStateFromMembership(membership: EventMemberRecord | null | undefined): EventResponseState | null {
+  if (!membership) return null;
+  if (membership.status === "going") return "going";
+  if (membership.status === "waitlist") return "waitlist";
+  if (membership.status === "interested") return "interested";
+  return null;
+}
+
+function getResponseStateFromParticipation(
+  membership: EventMemberRecord | null | undefined,
+  request: EventRequestRecord | null | undefined
+): EventResponseState | null {
+  if (request?.status === "pending") return "request_sent";
+  const membershipState = getResponseStateFromMembership(membership);
+  if (membershipState) return membershipState;
+  return null;
+}
+
+function responseLabel(state: EventResponseState | null) {
+  if (state === "going") return "Joining";
+  if (state === "waitlist") return "Waitlist";
+  if (state === "request_sent") return "Request sent";
+  return "Interested";
+}
+
+function responseButtonTone(state: EventResponseState | null) {
+  if (state === "going") {
+    return "border-emerald-300/35 bg-emerald-400/18 text-emerald-50 hover:bg-emerald-400/24";
+  }
+  if (state === "waitlist") {
+    return "border-amber-300/35 bg-amber-400/18 text-amber-50 hover:bg-amber-400/24";
+  }
+  if (state === "request_sent") {
+    return "border-fuchsia-300/35 bg-fuchsia-400/18 text-fuchsia-50 hover:bg-fuchsia-400/24";
+  }
+  if (state === "interested") {
+    return "border-cyan-300/35 bg-[linear-gradient(90deg,rgba(34,211,238,0.16),rgba(217,70,239,0.14))] text-cyan-50 hover:brightness-110";
+  }
+  return "border-white/10 bg-white/8 text-white/90 hover:bg-white/12";
+}
+
+function upsertLocalMembership(
+  memberships: EventMemberRecord[],
+  params: { eventId: string; userId: string; status: EventMemberRecord["status"] }
+) {
+  const nextMembership = memberships.find((membership) => membership.eventId === params.eventId && membership.userId === params.userId);
+  const nowIso = new Date().toISOString();
+
+  if (nextMembership) {
+    return memberships.map((membership) =>
+      membership.eventId === params.eventId && membership.userId === params.userId
+        ? {
+            ...membership,
+            status: params.status,
+            updatedAt: nowIso,
+          }
+        : membership
+    );
+  }
+
+  return [
+    ...memberships,
+    {
+      id: `local-${params.eventId}-${params.userId}`,
+      eventId: params.eventId,
+      userId: params.userId,
+      memberRole: "guest",
+      status: params.status,
+      joinedAt: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    },
+  ];
+}
+
+function upsertLocalRequest(
+  requests: EventRequestRecord[],
+  params: { eventId: string; requesterId: string; requestId?: string | null; status: EventRequestRecord["status"] }
+) {
+  const nowIso = new Date().toISOString();
+  const existing = requests.find(
+    (request) => request.eventId === params.eventId && request.requesterId === params.requesterId
+  );
+
+  if (existing) {
+    return requests.map((request) =>
+      request.eventId === params.eventId && request.requesterId === params.requesterId
+        ? {
+            ...request,
+            id: params.requestId ?? request.id,
+            status: params.status,
+            updatedAt: nowIso,
+          }
+        : request
+    );
+  }
+
+  return [
+    ...requests,
+    {
+      id: params.requestId ?? `local-request-${params.eventId}-${params.requesterId}`,
+      eventId: params.eventId,
+      requesterId: params.requesterId,
+      note: null,
+      status: params.status,
+      decidedBy: null,
+      decidedAt: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    },
+  ];
+}
+
+function removeLocalRequest(requests: EventRequestRecord[], params: { eventId: string; requesterId: string }) {
+  return requests.filter(
+    (request) => !(request.eventId === params.eventId && request.requesterId === params.requesterId)
+  );
+}
+
+function responseIcon(state: EventResponseState | null) {
+  if (state === "going") return "check_circle";
+  if (state === "waitlist") return "schedule";
+  if (state === "request_sent") return "mail";
+  return "star";
+}
+
 function compactLocation(event: EventRecord, isAuthenticated: boolean) {
   const venueAddress = (event.venueAddress ?? "").trim();
   if (venueAddress) {
@@ -265,6 +368,7 @@ function EventsExplorePageContent() {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [allMembers, setAllMembers] = useState<EventMemberRecord[]>([]);
   const [myMemberships, setMyMemberships] = useState<EventMemberRecord[]>([]);
+  const [myRequests, setMyRequests] = useState<EventRequestRecord[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, LiteProfile>>({});
   const [hostReferenceTotals, setHostReferenceTotals] = useState<Record<string, number>>({});
   const [connectedUserIds, setConnectedUserIds] = useState<string[]>([]);
@@ -282,12 +386,9 @@ function EventsExplorePageContent() {
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
 
-  const [dateMenuOpen, setDateMenuOpen] = useState(false);
-  const [dateCustomMode, setDateCustomMode] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [interestMenuEventId, setInterestMenuEventId] = useState<string | null>(null);
-  const [shareMenuEventId, setShareMenuEventId] = useState<string | null>(null);
-  const [interestStateByEvent, setInterestStateByEvent] = useState<Record<string, InterestState>>({});
+  const [responseMenuEventId, setResponseMenuEventId] = useState<string | null>(null);
+  const [responseBusyEventId, setResponseBusyEventId] = useState<string | null>(null);
   const [eventsPage, setEventsPage] = useState(1);
 
   const requestedView = searchParams.get("view");
@@ -303,11 +404,8 @@ function EventsExplorePageContent() {
   const effectiveCustomDateTo = !isAuthenticated && datePreset === "custom" ? "" : customDateTo;
 
   const closeMenus = useCallback(() => {
-    setDateMenuOpen(false);
-    setDateCustomMode(false);
     setFiltersOpen(false);
-    setInterestMenuEventId(null);
-    setShareMenuEventId(null);
+    setResponseMenuEventId(null);
   }, []);
 
   useEffect(() => {
@@ -317,6 +415,12 @@ function EventsExplorePageContent() {
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
   }, [closeMenus]);
+
+  useEffect(() => {
+    if (!actionInfo) return;
+    const timer = window.setTimeout(() => setActionInfo(null), ACTION_TOAST_MS);
+    return () => window.clearTimeout(timer);
+  }, [actionInfo]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -393,6 +497,7 @@ function EventsExplorePageContent() {
     if (!eventRows.length) {
       setAllMembers([]);
       setMyMemberships([]);
+      setMyRequests([]);
       setProfilesById({});
       setHostReferenceTotals({});
       setConnectedUserIds([]);
@@ -403,6 +508,7 @@ function EventsExplorePageContent() {
     if (!userId || !token) {
       setAllMembers([]);
       setMyMemberships([]);
+      setMyRequests([]);
       setProfilesById({});
       setHostReferenceTotals({});
       setConnectedUserIds([]);
@@ -413,13 +519,19 @@ function EventsExplorePageContent() {
     const eventIds = eventRows.map((event) => event.id);
     const hostIds = Array.from(new Set(eventRows.map((event) => event.hostUserId)));
 
-    const [membersRes, myMembersRes] = await Promise.all([
+    const [membersRes, myMembersRes, myRequestsRes] = await Promise.all([
       supabase
         .from("event_members")
         .select("*")
         .in("event_id", eventIds)
         .in("status", ["host", "going", "waitlist"]),
       supabase.from("event_members").select("*").eq("user_id", userId).in("event_id", eventIds),
+      supabase
+        .from("event_requests")
+        .select("*")
+        .eq("requester_id", userId)
+        .in("event_id", eventIds)
+        .eq("status", "pending"),
     ]);
 
     if (membersRes.error) {
@@ -428,6 +540,7 @@ function EventsExplorePageContent() {
       setAllMembers(mapEventMemberRows((membersRes.data ?? []) as unknown[]));
     }
     setMyMemberships(mapEventMemberRows((myMembersRes.data ?? []) as unknown[]));
+    setMyRequests(mapEventRequestRows((myRequestsRes.data ?? []) as unknown[]));
 
     let acceptedConnections: Array<{ requester_id?: string; target_id?: string }> = [];
     const connectionsRes = await supabase
@@ -502,7 +615,6 @@ function EventsExplorePageContent() {
   }, [effectivePastOnly]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData();
   }, [loadData]);
 
@@ -513,6 +625,14 @@ function EventsExplorePageContent() {
     });
     return map;
   }, [myMemberships]);
+
+  const requestStatusByEvent = useMemo(() => {
+    const map: Record<string, EventRequestRecord> = {};
+    myRequests.forEach((request) => {
+      map[request.eventId] = request;
+    });
+    return map;
+  }, [myRequests]);
 
   const connectedAttendeesByEvent = useMemo(() => {
     const set = new Set(connectedUserIds);
@@ -601,7 +721,12 @@ function EventsExplorePageContent() {
       }
       if (effectiveMyEventsOnly) {
         const isHost = Boolean(meId && event.hostUserId === meId);
-        const hasMembership = Boolean(memberStatusByEvent[event.id]);
+        const membershipStatus = memberStatusByEvent[event.id]?.status ?? null;
+        const hasMembership = Boolean(
+          membershipStatus &&
+            membershipStatus !== "left" &&
+            membershipStatus !== "not_interested"
+        );
         if (effectiveOrganizingOnly) {
           if (!isHost) return false;
         } else if (!isHost && !hasMembership) {
@@ -743,7 +868,6 @@ function EventsExplorePageContent() {
     }
   }, [router, searchParams, viewForcesPastOnly]);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- reset listing pagination when filters change. */
   useEffect(() => {
     setEventsPage(1);
   }, [
@@ -763,49 +887,126 @@ function EventsExplorePageContent() {
     effectiveOrganizingOnly,
     isAuthenticated,
   ]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const handleShareAction = useCallback(
-    async (eventId: string, action: "copy_link" | "share_feed" | "share_messenger" | "share_event" | "share_group" | "share_profile") => {
-      setActionInfo(null);
+  const handleCopyEventLink = useCallback(async (eventId: string) => {
+    setActionInfo(null);
+    setActionError(null);
+
+    const path = `/events/${eventId}`;
+    const absolute = typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(absolute);
+        setActionInfo("Event link copied.");
+        return;
+      }
+
+      setActionError("Clipboard is not available in this browser.");
+    } catch {
+      setActionError("Could not copy link.");
+    }
+  }, []);
+
+  const handleResponseAction = useCallback(
+    async (
+      event: EventRecord,
+      action: "interested" | "not_interested" | "join" | "request" | "cancel_request" | "request_sent_to_interested"
+    ) => {
+      if (!isAuthenticated) {
+        router.push(`/auth?next=${encodeURIComponent("/events")}`);
+        return;
+      }
+
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token?.trim() ?? "";
+      if (!token) {
+        router.push(`/auth?next=${encodeURIComponent("/events")}`);
+        return;
+      }
+
+      setResponseBusyEventId(event.id);
       setActionError(null);
+      setActionInfo(null);
 
-      const path = `/events/${eventId}`;
-      const absolute = typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
+      try {
+        async function postEventAction(nextAction: "interested" | "not_interested" | "join" | "request" | "cancel_request") {
+          const response = await fetch(`/api/events/${encodeURIComponent(event.id)}/join`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ action: nextAction }),
+          });
 
-      if (action === "copy_link") {
-        try {
-          if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(absolute);
-            setActionInfo("Event link copied.");
-          } else {
-            setActionError("Clipboard is not available in this browser.");
+          const json = (await response.json().catch(() => null)) as {
+            ok?: boolean;
+            error?: string;
+            status?: string | null;
+            request_id?: string | null;
+          } | null;
+          if (!response.ok || !json?.ok) {
+            throw new Error(json?.error ?? "Could not update response.");
           }
-        } catch {
-          setActionError("Could not copy link.");
+          return json;
         }
-        return;
-      }
 
-      if (action === "share_feed") {
-        setActionInfo("Share to feed is ready. Connect posting in the next iteration.");
-        return;
+        let json: { ok?: boolean; error?: string; status?: string | null; request_id?: string | null } | null;
+        if (action === "request_sent_to_interested") {
+          await postEventAction("cancel_request");
+          json = await postEventAction("interested");
+        } else {
+          json = await postEventAction(action);
+        }
+
+        const nextMembershipStatus: EventMemberRecord["status"] | null =
+          action === "join"
+            ? json?.status === "waitlist"
+              ? "waitlist"
+              : "going"
+            : action === "request" || action === "cancel_request"
+              ? null
+              : action === "not_interested"
+                ? "not_interested"
+                : "interested";
+
+        if (meId) {
+          if (nextMembershipStatus) {
+            setMyMemberships((prev) =>
+              upsertLocalMembership(prev, { eventId: event.id, userId: meId, status: nextMembershipStatus })
+            );
+          }
+          if (action === "request") {
+            setMyRequests((prev) =>
+              upsertLocalRequest(prev, {
+                eventId: event.id,
+                requesterId: meId,
+                requestId: typeof json?.request_id === "string" ? json.request_id : null,
+                status: "pending",
+              })
+            );
+          } else if (action === "cancel_request" || action === "join" || action === "request_sent_to_interested") {
+            setMyRequests((prev) => removeLocalRequest(prev, { eventId: event.id, requesterId: meId }));
+          }
+        }
+        setResponseMenuEventId(null);
+
+        if (nextMembershipStatus === "going") setActionInfo("You're joining this event.");
+        else if (nextMembershipStatus === "waitlist") setActionInfo("You're on the waitlist for this event.");
+        else if (action === "request") setActionInfo("Join request sent.");
+        else if (action === "cancel_request") setActionInfo("Request cancelled.");
+        else if (action === "request_sent_to_interested") setActionInfo("Marked as interested.");
+        else if (action === "not_interested") setActionInfo("Selection cleared.");
+        else setActionInfo("Marked as interested.");
+
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Could not update response.");
+      } finally {
+        setResponseBusyEventId(null);
       }
-      if (action === "share_messenger") {
-        setActionInfo("Messenger share flow is ready. Hook it to your chat integration next.");
-        return;
-      }
-      if (action === "share_event") {
-        setActionInfo("Event-to-event share slot prepared.");
-        return;
-      }
-      if (action === "share_group") {
-        setActionInfo("Group share slot prepared.");
-        return;
-      }
-      setActionInfo("Profile share slot prepared.");
     },
-    []
+    [isAuthenticated, meId, router]
   );
 
   const dateOptions: Array<{ key: DatePreset; label: string }> = useMemo(() => {
@@ -824,8 +1025,9 @@ function EventsExplorePageContent() {
 
   const renderEventCard = (event: EventRecord, featured = false) => {
     const myMembership = memberStatusByEvent[event.id];
-    const isHost = Boolean(meId && meId === event.hostUserId);
-    const hero = event.coverUrl || seededEventCover(event);
+    const myRequest = requestStatusByEvent[event.id] ?? null;
+    const hero = pickEventHeroUrl(event);
+    const fallbackHero = pickEventFallbackHeroUrl(event);
 
     const connectedMembersRaw = connectedAttendeesByEvent[event.id] ?? [];
     const connectedMembers = Array.from(new Map(connectedMembersRaw.map((row) => [row.userId, row])).values());
@@ -838,9 +1040,8 @@ function EventsExplorePageContent() {
     const dateBadge = eventDateBadgeParts(event.startsAt);
     const rangeLabel = formatEventRangeWithWeekday(event.startsAt, event.endsAt);
     const startTimeLabel = formatEventStartTime(event.startsAt);
-    const interestState =
-      interestStateByEvent[event.id] ?? (myMembership?.status === "going" || myMembership?.status === "waitlist" ? "going" : "interested");
-    const interestLabel = interestState === "going" ? "Going" : interestState === "not_interested" ? "Not interested" : "Interested";
+    const currentResponseState = getResponseStateFromParticipation(myMembership, myRequest);
+    const currentResponseLabel = responseLabel(currentResponseState);
     const eventTitle = isAuthenticated ? event.title : "Public dance event";
 
     return (
@@ -857,7 +1058,13 @@ function EventsExplorePageContent() {
 
         <Link href={`/events/${event.id}`} className="block">
           <div className={cx("relative h-[108px]", featured && "h-[112px]")}>
-            <img src={hero} alt={eventTitle} className="h-full w-full object-cover transition duration-700 hover:scale-105" />
+            <EventHeroImage
+              key={`${hero ?? ""}|${fallbackHero ?? ""}`}
+              primarySrc={hero}
+              fallbackSrc={fallbackHero}
+              alt={eventTitle}
+              className="h-full w-full object-cover transition duration-700 hover:scale-105"
+            />
             <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
 
             <div className="absolute left-2 top-2 flex items-center gap-1.5">
@@ -954,193 +1161,135 @@ function EventsExplorePageContent() {
               <button
                 type="button"
                 onClick={() => {
-                  setShareMenuEventId(null);
-                  setInterestMenuEventId((current) => (current === event.id ? null : event.id));
-                  setDateMenuOpen(false);
-                  setDateCustomMode(false);
+                  if (!isAuthenticated) {
+                    router.push(`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`);
+                    return;
+                  }
+                  if (!currentResponseState && myRequest?.status !== "pending") {
+                    void handleResponseAction(event, "interested");
+                    return;
+                  }
+                  setResponseMenuEventId((current) => (current === event.id ? null : event.id));
                 }}
-                className="flex h-[33px] w-full items-center justify-center gap-1 rounded-xl bg-white/8 text-[12px] font-semibold text-white/90 hover:bg-white/12"
+                disabled={responseBusyEventId === event.id}
+                className={cx(
+                  "flex h-[33px] w-full items-center justify-center gap-1 rounded-xl border text-[12px] font-semibold transition",
+                  responseButtonTone(currentResponseState),
+                  responseBusyEventId === event.id && "cursor-not-allowed opacity-65"
+                )}
               >
-                <span className="material-symbols-outlined text-[18px]">star</span>
-                {interestLabel}
-                <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                <span className="material-symbols-outlined text-[18px]">
+                  {responseIcon(currentResponseState)}
+                </span>
+                {responseBusyEventId === event.id ? "Saving..." : currentResponseLabel}
+                {currentResponseState === "interested" || currentResponseState === "request_sent" ? (
+                  <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                ) : null}
               </button>
 
-              {interestMenuEventId === event.id ? (
+              {responseMenuEventId === event.id ? (
                 <div className="absolute bottom-[46px] left-0 z-30 w-[260px] rounded-xl border border-white/10 bg-[#202326] p-2 shadow-2xl">
-                  {!isAuthenticated ? (
-                    <div className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/75">
-                      <span className="material-symbols-outlined text-[18px] text-cyan-300">lock</span>
-                      Interest actions are available after authentication
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setInterestStateByEvent((state) => ({ ...state, [event.id]: "interested" }));
-                          setInterestMenuEventId(null);
-                          setActionInfo("Marked as interested.");
-                        }}
-                        className={cx(
-                          "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
-                          interestState === "interested" ? "bg-white/10 text-blue-300" : "text-white hover:bg-white/6"
-                        )}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">star</span>
-                          Interested
-                        </span>
-                        {interestState === "interested" ? <span className="text-blue-300">●</span> : null}
-                      </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleResponseAction(
+                        event,
+                        event.visibility === "private" && myRequest?.status === "pending"
+                          ? "request_sent_to_interested"
+                          : "interested"
+                      )
+                    }
+                    className={cx(
+                      "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                      currentResponseState === "interested"
+                        ? "bg-cyan-400/14 text-cyan-100"
+                        : "text-white hover:bg-white/6"
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px]">star</span>
+                      Interested
+                    </span>
+                    {currentResponseState === "interested" ? <span className="text-cyan-200">●</span> : null}
+                  </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setInterestMenuEventId(null);
-                          router.push(`/events/${event.id}`);
-                        }}
-                        className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                          Going
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (event.visibility === "private" && myRequest?.status === "pending") {
+                        void handleResponseAction(event, "cancel_request");
+                        return;
+                      }
+                      void handleResponseAction(event, event.visibility === "private" ? "request" : "join");
+                    }}
+                    className={cx(
+                      "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                      currentResponseState === "going" || currentResponseState === "waitlist"
+                        ? "bg-emerald-400/14 text-emerald-100"
+                        : currentResponseState === "request_sent"
+                          ? "bg-fuchsia-400/14 text-fuchsia-100"
+                        : "text-white hover:bg-white/6"
+                    )}
+                  >
+                      <span className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px]">
+                          {event.visibility === "private" && myRequest?.status === "pending" ? "close" : event.visibility === "private" ? "mail" : "check_circle"}
                         </span>
-                      </button>
+                        {event.visibility === "private" && myRequest?.status === "pending" ? "Cancel request" : event.visibility === "private" ? "Request joining" : "Joining"}
+                      </span>
+                    {currentResponseState === "going" || currentResponseState === "waitlist" ? (
+                      <span className="text-emerald-200">●</span>
+                    ) : currentResponseState === "request_sent" ? (
+                      <span className="text-fuchsia-200">●</span>
+                    ) : null}
+                  </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setInterestStateByEvent((state) => ({ ...state, [event.id]: "not_interested" }));
-                          setInterestMenuEventId(null);
-                          setActionInfo("Marked as not interested.");
-                        }}
-                        className={cx(
-                          "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
-                          interestState === "not_interested" ? "bg-white/10 text-white" : "text-white hover:bg-white/6"
-                        )}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">cancel</span>
-                          Not interested
-                        </span>
-                        {interestState === "not_interested" ? <span className="text-blue-300">●</span> : null}
-                      </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleResponseAction(
+                        event,
+                        event.visibility === "private" && myRequest?.status === "pending" ? "cancel_request" : "not_interested"
+                      )
+                    }
+                    className={cx(
+                      "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                      "text-white hover:bg-white/6"
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px]">cancel</span>
+                      Not interested
+                    </span>
+                  </button>
 
-                      <div className="my-1 h-px bg-white/10" />
+                  <div className="my-1 h-px bg-white/10" />
 
-                      <Link
-                        href={`/events/${event.id}`}
-                        className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-cyan-100 hover:bg-white/6"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">open_in_new</span>
-                          View event details
-                        </span>
-                        <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                      </Link>
-                    </>
-                  )}
+                  <Link
+                    href={`/events/${event.id}`}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-cyan-100 hover:bg-white/6"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                      View event details
+                    </span>
+                    <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                  </Link>
                 </div>
               ) : null}
             </div>
 
-            <div className="relative">
+            <div>
               <button
                 type="button"
                 onClick={() => {
-                  setInterestMenuEventId(null);
-                  setShareMenuEventId((current) => (current === event.id ? null : event.id));
-                  setDateMenuOpen(false);
-                  setDateCustomMode(false);
+                  void handleCopyEventLink(event.id);
                 }}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-white/85 hover:bg-white/12"
-                aria-label="Event options"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/8 text-white/85 transition hover:bg-white/12"
+                aria-label="Copy event link"
               >
-                <span className="material-symbols-outlined text-[20px]">more_horiz</span>
+                <span className="material-symbols-outlined text-[20px]">share</span>
               </button>
-
-              {shareMenuEventId === event.id ? (
-                <div className="absolute right-0 top-[46px] z-30 w-[280px] rounded-xl border border-white/10 bg-[#202326] p-2 shadow-2xl">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleShareAction(event.id, "copy_link");
-                      setShareMenuEventId(null);
-                    }}
-                    className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                  >
-                    <span className="material-symbols-outlined text-[20px] text-cyan-200">link</span>
-                    <span>
-                      Copy event link
-                      <span className="block text-xs text-white/55">Invite others with direct access</span>
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleShareAction(event.id, "share_feed");
-                      setShareMenuEventId(null);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">edit_square</span>
-                    Share to Feed
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleShareAction(event.id, "share_messenger");
-                      setShareMenuEventId(null);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">chat</span>
-                    Send in Messenger
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleShareAction(event.id, "share_event");
-                      setShareMenuEventId(null);
-                    }}
-                    className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">event</span>
-                    <span>
-                      Share to an event
-                      <span className="block text-xs text-white/55">Reach dancers already engaging with similar events</span>
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleShareAction(event.id, "share_group");
-                      setShareMenuEventId(null);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">groups</span>
-                    Share to a group
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleShareAction(event.id, "share_profile");
-                      setShareMenuEventId(null);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/6"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">person_add</span>
-                    Share on a friend&apos;s profile
-                  </button>
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
@@ -1200,20 +1349,31 @@ function EventsExplorePageContent() {
         ) : null}
 
         <header className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm text-white/50">
+          <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pr-1 no-scrollbar sm:flex-wrap sm:gap-3 sm:overflow-visible sm:whitespace-normal">
+            <p className="shrink-0 text-[13px] text-white/50 sm:text-sm">
               Showing <span className="font-semibold text-white">{discoverEvents.length}</span>{" "}
               {effectivePastOnly ? "past events" : "events"}
             </p>
             {isAuthenticated ? (
-              <Link
-                href="/events/new"
-                className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-300/30"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <span className="material-symbols-outlined text-[18px]">add</span>
-                Create Event
-              </Link>
+              <>
+                <Link
+                  href="/events/my"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1.5 text-[13px] font-semibold text-white/85 hover:bg-white/[0.08] sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span className="material-symbols-outlined text-[16px] sm:text-[18px]">calendar_month</span>
+                  My Events
+                  <span className="rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-bold">{myEventsCount}</span>
+                </Link>
+                <Link
+                  href="/events/new"
+                  className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-3 py-1.5 text-[13px] font-semibold text-cyan-50 hover:bg-cyan-300/30 sm:ml-0 sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span className="material-symbols-outlined text-[16px] sm:text-[18px]">add</span>
+                  Create Event
+                </Link>
+              </>
             ) : null}
           </div>
 
@@ -1223,8 +1383,6 @@ function EventsExplorePageContent() {
               onClick={(event) => {
                 event.stopPropagation();
                 setFiltersOpen((value) => !value);
-                setDateMenuOpen(false);
-                setDateCustomMode(false);
               }}
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90 sm:w-auto"
             >
@@ -1359,7 +1517,7 @@ function EventsExplorePageContent() {
                       />
                     </label>
 
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-2">
                       <button
                         type="button"
                         onClick={() => setMyLocationOnly((value) => !value)}
@@ -1378,21 +1536,6 @@ function EventsExplorePageContent() {
                           My location
                         </span>
                         <span className="text-[11px] text-white/55">{myCity || myCountry ? "On map" : "No profile location"}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFiltersOpen(false);
-                          router.push("/events/my");
-                        }}
-                        className="inline-flex min-h-12 items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-semibold text-white/85 hover:bg-white/[0.06]"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">calendar_month</span>
-                          My Events
-                        </span>
-                        <span className="rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-bold">{myEventsCount}</span>
                       </button>
                     </div>
                   </section>
@@ -1577,7 +1720,10 @@ function EventsExplorePageContent() {
                   <div className="flex flex-wrap gap-2">
                     {styleOptions.map((option) => {
                       const selected = styleFilter === option;
-                      const label = option === "all" ? "All" : option;
+                      const label =
+                        option === "all"
+                          ? "All"
+                          : option.charAt(0).toUpperCase() + option.slice(1).toLowerCase();
                       return (
                         <button
                           key={option}
@@ -1691,9 +1837,6 @@ function EventsExplorePageContent() {
         {actionError ? (
           <div className="mb-4 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{actionError}</div>
         ) : null}
-        {actionInfo ? (
-          <div className="mb-4 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">{actionInfo}</div>
-        ) : null}
         {effectivePastOnly || effectiveMyEventsOnly ? (
           <div className="mb-4 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">
             {effectivePastOnly
@@ -1791,13 +1934,13 @@ function EventsExplorePageContent() {
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="animate-fade-in space-y-4">
             {featuredEvents.length ? (
               <section className="rounded-2xl border border-cyan-300/25 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.14),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.12),transparent_46%),#101214] p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <h2 className="text-sm font-bold uppercase tracking-wide text-cyan-100">Featured Events</h2>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="animate-fade-in-grid grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {featuredEvents.map((event) => renderEventCard(event, true))}
                 </div>
               </section>
@@ -1805,7 +1948,7 @@ function EventsExplorePageContent() {
 
             {regularEvents.length ? (
               <>
-                <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                <section className="animate-fade-in-grid grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                   {regularEvents.map((event) => renderEventCard(event))}
                 </section>
 
@@ -1864,6 +2007,11 @@ function EventsExplorePageContent() {
       </main>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-24 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A]/85 to-transparent" />
+      {actionInfo ? (
+        <div className="pointer-events-none fixed bottom-5 right-5 z-[80] max-w-sm rounded-2xl border border-cyan-300/35 bg-[#0f1a1f]/95 px-4 py-3 text-sm text-cyan-50 shadow-[0_14px_40px_rgba(0,0,0,0.42)] backdrop-blur">
+          {actionInfo}
+        </div>
+      ) : null}
     </div>
   );
 }

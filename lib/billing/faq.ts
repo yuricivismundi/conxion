@@ -45,7 +45,7 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
     id: "leave-reference",
     question: "How do I leave a reference?",
     answer:
-      "References become eligible after an activity is accepted by both sides. Examples include Practice, Social Dance, Travel Together, Hosting, Private Class, and Collaboration. If the activity has an end date, the prompt appears 24 hours after that end date. If it has no date range, it appears 24 hours after acceptance in your References tab and the relevant thread history.",
+      "References become eligible after an activity is accepted. If the activity has an end date, the prompt appears 24 hours after that end date. If it has one date, the prompt appears 24 hours after that date. If it has no date, the prompt appears 24 hours after acceptance in your References tab and thread history.",
   },
   {
     id: "chat-limit",

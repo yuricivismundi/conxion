@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
+import EventHeroImage from "@/components/events/EventHeroImage";
 import { supabase } from "@/lib/supabase/client";
 import {
   type EventMemberRecord,
@@ -16,15 +17,14 @@ import {
   mapEventRequestRows,
   mapEventRows,
   mapProfileRows,
+  pickEventFallbackHeroUrl,
   pickEventHeroUrl,
 } from "@/lib/events/model";
+import { cx } from "@/lib/cx";
 
 type RequestTab = "pending" | "accepted" | "declined";
 type RequestAction = "accept" | "decline";
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function normalizeRoleSignals(roles: string[]) {
   const lower = roles.map((role) => role.toLowerCase());
@@ -197,6 +197,7 @@ export default function EventInboxPage() {
   }, [members, requestCounts.declined, requestCounts.pending, rolesByUserId]);
 
   const eventHero = useMemo(() => (event ? event.coverUrl || pickEventHeroUrl(event) : null), [event]);
+  const eventHeroFallback = useMemo(() => (event ? pickEventFallbackHeroUrl(event) : null), [event]);
 
   async function respondRequest(requestId: string, action: RequestAction) {
     if (!accessToken) {
@@ -272,7 +273,13 @@ export default function EventInboxPage() {
               <div className="relative h-48">
                 {event ? (
                   eventHero ? (
-                    <img src={eventHero} alt={event.title} className="h-full w-full object-cover" />
+                    <EventHeroImage
+                      key={`${eventHero ?? ""}|${eventHeroFallback ?? ""}`}
+                      primarySrc={eventHero}
+                      fallbackSrc={eventHeroFallback}
+                      alt={event.title}
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <div className="h-full w-full bg-[#12262b]" />
                   )

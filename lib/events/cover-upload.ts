@@ -3,8 +3,8 @@ export const MAX_UPLOADED_COVER_SIZE_BYTES = 5 * 1024 * 1024;
 export const EVENT_COVER_ACCEPT_MIME = ["image/jpeg", "image/jpg", "image/png", "image/webp"] as const;
 
 const EVENT_COVER_OUTPUT_MIME = "image/jpeg";
-export const EVENT_COVER_WIDTH = 1600;
-export const EVENT_COVER_HEIGHT = 900;
+export const EVENT_COVER_WIDTH = 1920;
+export const EVENT_COVER_HEIGHT = 1005;
 export const EVENT_COVER_ASPECT_RATIO = EVENT_COVER_WIDTH / EVENT_COVER_HEIGHT;
 const EVENT_COVER_QUALITY_STEPS = [0.92, 0.86, 0.8] as const;
 

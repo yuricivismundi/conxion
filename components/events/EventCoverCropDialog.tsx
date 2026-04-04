@@ -215,7 +215,7 @@ export default function EventCoverCropDialog({
         <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4 sm:px-6">
           <div>
             <h3 className="text-lg font-bold text-white sm:text-xl">Adjust event cover</h3>
-            <p className="mt-1 text-sm text-slate-300">Drag to reposition, zoom in, then save the wide hero crop.</p>
+            <p className="mt-1 text-sm text-slate-300">Drag to reposition, zoom in, then save the 1.91:1 event cover.</p>
           </div>
           <button
             type="button"
@@ -234,7 +234,7 @@ export default function EventCoverCropDialog({
             <div className="rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(14,24,29,0.98),rgba(7,11,15,0.98))] p-4 sm:p-5">
               <div
                 ref={frameRef}
-                className="relative mx-auto aspect-[16/9] w-full max-w-[860px] overflow-hidden rounded-[22px] border border-white/12 bg-black touch-none"
+                className="relative mx-auto w-full max-w-[900px] overflow-hidden rounded-[22px] border border-white/12 bg-black touch-none"
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={stopDragging}
@@ -266,7 +266,9 @@ export default function EventCoverCropDialog({
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Wide 16:9 cover</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">1.91:1 event cover</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Recommended 1920 × 1005</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Keep key text centered for mobile</span>
               <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Drag image to reposition</span>
               <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Zoom keeps the exact saved crop</span>
             </div>

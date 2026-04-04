@@ -1,6 +1,7 @@
 "use client";
 
 import { getPlanDefinition, type PlanId } from "@/lib/billing/plans";
+import { cx } from "@/lib/cx";
 
 type Props = {
   currentPlanId: PlanId | null;
@@ -8,9 +9,6 @@ type Props = {
   renewalLabel?: string | null;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export default function CurrentPlanSummary({ currentPlanId, isVerified, renewalLabel }: Props) {
   const resolvedPlanId = currentPlanId ?? "starter";

@@ -1,5 +1,7 @@
 "use client";
 
+import { cx } from "@/lib/cx";
+
 type PaginationControlsProps = {
   page: number;
   totalPages: number;
@@ -10,9 +12,6 @@ type PaginationControlsProps = {
   className?: string;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export default function PaginationControls({
   page,

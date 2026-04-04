@@ -1,19 +1,11 @@
 import { NextResponse } from "next/server";
 import { fetchTeacherInfoBlocks, fetchTeacherInfoProfile } from "@/lib/teacher-info/read-model";
 import { requireServiceInquiryAuth, fetchTeacherProfileSummary, jsonError, singleLineTrimmed } from "@/lib/service-inquiries/server";
-import { ensureServiceInquiryThread, upsertServiceInquiryContext } from "@/lib/service-inquiries/thread";
+import { emitServiceInquiryEvent, ensureServiceInquiryThread, upsertServiceInquiryContext } from "@/lib/service-inquiries/thread";
 import { fetchServiceInquiryById, fetchServiceInquiryThreadByInquiryId } from "@/lib/service-inquiries/read-model";
 import { SERVICE_INQUIRY_KIND_LABELS } from "@/lib/service-inquiries/types";
 
 export const runtime = "nodejs";
-
-type RpcInvoker = {
-  rpc: (
-    fn: string,
-    args?: Record<string, unknown>,
-    options?: { head?: boolean; get?: boolean; count?: "exact" | "planned" | "estimated" }
-  ) => Promise<{ data: unknown; error: { message?: string } | null }>;
-};
 
 type AcceptPayload = {
   selectedBlockIds?: unknown;
@@ -105,14 +97,14 @@ export async function POST(req: Request, { params }: RouteParams) {
       },
     });
 
-    const emitEventRes = await (auth.userClient as unknown as RpcInvoker).rpc("cx_emit_thread_event", {
-      p_thread_id: threadId,
-      p_sender_id: auth.userId,
-      p_body: `${SERVICE_INQUIRY_KIND_LABELS[inquiry.inquiryKind]} details shared.`,
-      p_message_type: "system",
-      p_context_tag: "service_inquiry",
-      p_status_tag: "info_shared",
-      p_metadata: {
+    await emitServiceInquiryEvent({
+      serviceClient: auth.serviceClient,
+      threadId,
+      senderId: auth.userId,
+      body: `${SERVICE_INQUIRY_KIND_LABELS[inquiry.inquiryKind]} details shared.`,
+      messageType: "system",
+      statusTag: "info_shared",
+      metadata: {
         card_type: "teacher_inquiry_share",
         service_inquiry_id: inquiry.id,
         inquiry_kind: inquiry.inquiryKind,
@@ -135,9 +127,6 @@ export async function POST(req: Request, { params }: RouteParams) {
         })),
       },
     });
-    if (emitEventRes.error) {
-      throw emitEventRes.error;
-    }
 
     return NextResponse.json({
       ok: true,

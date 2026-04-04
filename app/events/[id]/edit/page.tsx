@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DismissibleBanner } from "@/components/DismissibleBanner";
 import { useParams, useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 import EventCoverCropDialog from "@/components/events/EventCoverCropDialog";
@@ -151,74 +152,80 @@ export default function EditEventPage() {
     let cancelled = false;
 
     (async () => {
-      if (!eventId) {
-        router.replace("/events");
-        return;
+      try {
+        if (!eventId) {
+          router.replace("/events");
+          return;
+        }
+
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr || !authData.user) {
+          router.replace("/auth");
+          return;
+        }
+
+        const userId = authData.user.id;
+        setMeId(userId);
+
+        const [{ data: sessionData }, eventRes] = await Promise.all([
+          supabase.auth.getSession(),
+          supabase.from("events").select("*").eq("id", eventId).maybeSingle(),
+        ]);
+
+        if (cancelled) return;
+
+        setAccessToken(sessionData.session?.access_token ?? null);
+
+        if (countriesAll.length === 0) {
+          const fetchedCountries = await getCountriesAll();
+          if (!cancelled && fetchedCountries.length > 0) setCountriesAll(fetchedCountries);
+        }
+
+        if (eventRes.error) {
+          setError(eventRes.error.message);
+          return;
+        }
+
+        const event = mapEventRows(eventRes.data ? [eventRes.data] : [])[0] ?? null;
+        if (!event) {
+          setError("Event not found.");
+          return;
+        }
+
+        if (event.hostUserId !== userId) {
+          setError("Only the host can edit this event.");
+          return;
+        }
+
+        setTitle(event.title);
+        setDescription(event.description ?? "");
+        setEventType(event.eventType);
+        setStylesInput(event.styles.join(", "));
+        setVisibility(event.visibility);
+        setCity(event.city);
+        setCountry(event.country);
+        setVenueName(event.venueName ?? "");
+        setVenueAddress(event.venueAddress ?? "");
+        setStartsAtLocal(isoToLocalDateTimeValue(event.startsAt));
+        setEndsAtLocal(isoToLocalDateTimeValue(event.endsAt));
+        setCoverUrl(event.coverUrl ?? "");
+        setStatusMode(event.status === "draft" ? "draft" : "published");
+        setHasCapacity(typeof event.capacity === "number");
+        setCapacity(typeof event.capacity === "number" ? event.capacity : "");
+        setLinks(
+          event.links.length
+            ? event.links.map((item) => ({ label: item.label, url: item.url, type: item.type }))
+            : []
+        );
+      } catch (bootstrapError) {
+        if (!cancelled) {
+          setError(bootstrapError instanceof Error ? bootstrapError.message : "Could not load event editor.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr || !authData.user) {
-        router.replace("/auth");
-        return;
-      }
-
-      const userId = authData.user.id;
-      setMeId(userId);
-
-      const [{ data: sessionData }, eventRes] = await Promise.all([
-        supabase.auth.getSession(),
-        supabase.from("events").select("*").eq("id", eventId).maybeSingle(),
-      ]);
-
-      if (cancelled) return;
-
-      setAccessToken(sessionData.session?.access_token ?? null);
-
-      if (countriesAll.length === 0) {
-        const fetchedCountries = await getCountriesAll();
-        if (!cancelled && fetchedCountries.length > 0) setCountriesAll(fetchedCountries);
-      }
-
-      if (eventRes.error) {
-        setError(eventRes.error.message);
-        setLoading(false);
-        return;
-      }
-
-      const event = mapEventRows(eventRes.data ? [eventRes.data] : [])[0] ?? null;
-      if (!event) {
-        setError("Event not found.");
-        setLoading(false);
-        return;
-      }
-
-      if (event.hostUserId !== userId) {
-        setError("Only the host can edit this event.");
-        setLoading(false);
-        return;
-      }
-
-      setTitle(event.title);
-      setDescription(event.description ?? "");
-      setEventType(event.eventType);
-      setStylesInput(event.styles.join(", "));
-      setVisibility(event.visibility);
-      setCity(event.city);
-      setCountry(event.country);
-      setVenueName(event.venueName ?? "");
-      setVenueAddress(event.venueAddress ?? "");
-      setStartsAtLocal(isoToLocalDateTimeValue(event.startsAt));
-      setEndsAtLocal(isoToLocalDateTimeValue(event.endsAt));
-      setCoverUrl(event.coverUrl ?? "");
-      setStatusMode(event.status === "draft" ? "draft" : "published");
-      setHasCapacity(typeof event.capacity === "number");
-      setCapacity(typeof event.capacity === "number" ? event.capacity : "");
-      setLinks(
-        event.links.length
-          ? event.links.map((item) => ({ label: item.label, url: item.url, type: item.type }))
-          : []
-      );
-      setLoading(false);
     })();
 
     return () => {
@@ -403,47 +410,52 @@ export default function EditEventPage() {
       .filter((item) => item.length > 0)
       .slice(0, 12);
 
-    const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`, {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        title: title.trim(),
-        description: trimmedDescription,
-        eventType,
-        styles,
-        visibility,
-        city: city.trim(),
-        country: country.trim(),
-        venueName: venueName.trim(),
-        venueAddress: venueAddress.trim(),
-        startsAt,
-        endsAt,
-        capacity: hasCapacity && typeof capacity === "number" ? capacity : null,
-        coverUrl: coverUrl.trim(),
-        links: cleanedLinks,
-        status: nextStatus,
-      }),
-    });
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: trimmedDescription,
+          eventType,
+          styles,
+          visibility,
+          city: city.trim(),
+          country: country.trim(),
+          venueName: venueName.trim(),
+          venueAddress: venueAddress.trim(),
+          startsAt,
+          endsAt,
+          capacity: hasCapacity && typeof capacity === "number" ? capacity : null,
+          coverUrl: coverUrl.trim(),
+          links: cleanedLinks,
+          status: nextStatus,
+        }),
+      });
 
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; event_id?: string } | null;
-    if (!response.ok || !json?.ok) {
+      const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; event_id?: string } | null;
+      if (!response.ok || !json?.ok) {
+        setSubmitting(false);
+        setError(json?.error ?? "Failed to update event.");
+        return;
+      }
+
+      setStatusMode(nextStatus);
+
+      if (nextStatus === "published") {
+        router.push(`/events/${encodeURIComponent(json?.event_id ?? eventId)}`);
+        return;
+      }
+
       setSubmitting(false);
-      setError(json?.error ?? "Failed to update event.");
-      return;
+      setInfo("Draft saved.");
+    } catch {
+      setSubmitting(false);
+      setError("Could not save event. Check your connection and try again.");
     }
-
-    setStatusMode(nextStatus);
-
-    if (nextStatus === "published") {
-      router.push(`/events/${encodeURIComponent(json?.event_id ?? eventId)}`);
-      return;
-    }
-
-    setSubmitting(false);
-    setInfo("Draft saved.");
   }
 
   async function lookupAddress() {
@@ -523,12 +535,10 @@ export default function EditEventPage() {
           <p className="mt-2 text-slate-300">Use the same premium event builder flow to update covers, location, and timing.</p>
         </header>
 
-        {error ? (
-          <div className="mb-5 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
-        ) : null}
-        {info ? (
-          <div className="mb-5 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">{info}</div>
-        ) : null}
+        <div className="mb-5 space-y-2">
+          <DismissibleBanner message={error} tone="error" onDismiss={() => setError(null)} />
+          <DismissibleBanner message={info} tone="info" onDismiss={() => setInfo(null)} />
+        </div>
 
         <div className="space-y-8 rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_35%),linear-gradient(180deg,rgba(11,18,25,0.96),rgba(5,7,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.36)] sm:p-8">
           <section className="space-y-4">
@@ -586,7 +596,7 @@ export default function EditEventPage() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-base font-semibold text-white">Upload event cover</p>
-                    <p className="text-sm text-slate-400">JPG, PNG, or WEBP. You can zoom and reposition it before it uploads.</p>
+                    <p className="text-sm text-slate-400">Use a 1.91:1 cover, ideally 1920 × 1005. Keep key text centered for mobile crops.</p>
                   </div>
                   <button
                     type="button"
@@ -1016,7 +1026,7 @@ export default function EditEventPage() {
                   disabled={submitting || uploadingCover || !canSaveDraft}
                   className="rounded-full border border-white/15 bg-white/[0.05] px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08] disabled:opacity-50"
                 >
-                  {submitting && statusMode === "draft" ? "Saving..." : "Save Draft"}
+                  {submitting && statusMode === "draft" ? "Saving..." : "Save draft"}
                 </button>
                 <button
                   type="button"
@@ -1024,7 +1034,7 @@ export default function EditEventPage() {
                   disabled={submitting || uploadingCover || !canPublish}
                   className="rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-7 py-2.5 text-sm font-bold text-[#052328] hover:opacity-95 disabled:opacity-60"
                 >
-                  {submitting ? "Saving..." : uploadingCover ? "Uploading cover..." : statusMode === "draft" ? "Publish Event" : "Save Changes"}
+                  {submitting ? "Saving..." : uploadingCover ? "Uploading cover..." : statusMode === "draft" ? "Publish event" : "Save changes"}
                 </button>
               </div>
             </div>

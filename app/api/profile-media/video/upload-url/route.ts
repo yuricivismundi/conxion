@@ -7,15 +7,63 @@ import {
 } from "@/lib/profile-media/limits";
 import { createCloudflareStreamDirectUpload, deleteCloudflareStreamVideo } from "@/lib/cloudflare-stream";
 import { getOwnerAvatarPhotoCount, jsonError, listOwnerProfileMedia, requireProfileMediaAuth } from "@/lib/profile-media/server";
+import type { SupabaseServiceClient } from "@/lib/supabase/service-role";
 
 export const runtime = "nodejs";
+
+const STALE_PENDING_VIDEO_UPLOAD_MS = 6 * 60 * 60 * 1000;
+
+function getMediaTimestampMs(value: string | null) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function cleanupStalePendingVideoUploads(params: {
+  serviceClient: SupabaseServiceClient;
+  userId: string;
+}) {
+  const media = await listOwnerProfileMedia(params.serviceClient, params.userId);
+  const staleItems = media.filter((item) => {
+    if (item.kind !== "video" || item.status !== "processing") return false;
+    if (item.playbackUrl) return false;
+    const updatedAtMs = getMediaTimestampMs(item.updatedAt) ?? getMediaTimestampMs(item.createdAt);
+    if (updatedAtMs === null) return false;
+    return Date.now() - updatedAtMs >= STALE_PENDING_VIDEO_UPLOAD_MS;
+  });
+
+  for (const item of staleItems) {
+    if (item.streamUid) {
+      await deleteCloudflareStreamVideo(item.streamUid).catch(() => undefined);
+    }
+    if (item.sourceStreamUid && item.sourceStreamUid !== item.streamUid) {
+      await deleteCloudflareStreamVideo(item.sourceStreamUid).catch(() => undefined);
+    }
+
+    const deleteRes = await params.serviceClient
+      .from("profile_media" as never)
+      .delete()
+      .eq("id", item.id)
+      .eq("user_id", params.userId);
+
+    if (deleteRes.error) {
+      throw deleteRes.error;
+    }
+  }
+
+  if (staleItems.length === 0) return media;
+  return listOwnerProfileMedia(params.serviceClient, params.userId);
+}
 
 export async function POST(req: Request) {
   try {
     const auth = await requireProfileMediaAuth(req);
     if ("error" in auth) return auth.error;
 
-    const media = await listOwnerProfileMedia(auth.serviceClient, auth.userId);
+    const media = await cleanupStalePendingVideoUploads({
+      serviceClient: auth.serviceClient,
+      userId: auth.userId,
+    });
     const billingState = getBillingAccountState({
       userMetadata: auth.authUser.user_metadata,
       isVerified: false,

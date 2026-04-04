@@ -36,6 +36,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Travelling",
         items: [
           "Find travellers and join their trips",
+          "1 accepted trip per month",
           "5 trip requests per month",
           "Create 1 trip per month",
           "Send up to 5 hosting offers to travellers",
@@ -46,6 +47,15 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         items: [
           "Create up to 2 public or private events per month",
           "Join events across the community",
+        ],
+      },
+      {
+        title: "Activities",
+        items: [
+          "Connect through activities like practice, lessons, travel, or collaboration",
+          "5 activity requests per month",
+          "Unlimited accepted activities",
+          "Leave references",
         ],
       },
       {
@@ -103,7 +113,6 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
           "Discover social dancers, teachers, organizers, DJs, and artists",
           "60 connection requests per month",
           "30 active chat threads per month",
-          "Better visibility in discovery",
           "Appear before free users",
         ],
       },
@@ -111,6 +120,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Travelling",
         items: [
           "Find travellers and join their trips",
+          "3 accepted trips per month",
           "10 trip requests per month",
           "Create 5 trips per month",
           "10 hosting requests per month",
@@ -134,11 +144,19 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         ],
       },
       {
+        title: "Activities",
+        items: [
+          "Connect through activities like practice, lessons, travel, or collaboration",
+          "15 activity requests per month",
+          "Unlimited accepted activities",
+          "Leave references",
+        ],
+      },
+      {
         title: "Extras",
         items: [
           "Priority support for important requests",
           "Early access to featured profile / event boosts",
-          "Call with Co-founder to discuss new features and dance topics",
           "Opportunity to become promoter of the brand in your city",
         ],
       },

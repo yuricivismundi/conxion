@@ -498,7 +498,7 @@ export default function LandingPage() {
           <div className="mx-auto w-full max-w-7xl">
             <div className="glass-card relative overflow-hidden rounded-[2rem] p-8 text-center sm:p-12">
               <div className="pointer-events-none absolute -left-20 -top-20 h-52 w-52 rounded-full bg-[#00F5FF]/10 blur-[70px]" />
-              <h2 className="text-3xl font-extrabold text-white sm:text-4xl">Confidence through Community.</h2>
+              <h2 className="text-3xl font-extrabold text-white sm:text-4xl">Confidence through community.</h2>
               <p className="mx-auto mt-4 max-w-2xl text-white/55">
                 We&apos;ve built ConXion with safety at its core, centered on mutual respect.
               </p>

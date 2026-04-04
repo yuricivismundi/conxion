@@ -12,6 +12,7 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
+import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
 import PaginationControls from "@/components/PaginationControls";
 import { useAppLanguage } from "@/components/AppLanguageProvider";
 import {
@@ -24,17 +25,23 @@ import VerifiedBadge from "@/components/VerifiedBadge";
 import VerificationRequiredDialog from "@/components/verification/VerificationRequiredDialog";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { clearVerificationResume, loadVerificationResume, type VerificationResumePayload } from "@/lib/verification-client";
-import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
-import { getPlanLimits } from "@/lib/billing/limits";
+import { VERIFICATION_SUCCESS_MESSAGE, isPaymentVerified } from "@/lib/verification";
+import { getPlanLimits, getPlanIdFromMeta } from "@/lib/billing/limits";
+import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
+import {
+  fetchLinkedConnectionOptions,
+  type LinkedMemberOption,
+} from "@/lib/requests/linked-members";
+import { type ProfileInterest } from "@/lib/interests";
 
 type Tab = "members" | "travellers";
 type DiscoverMode = "dancers" | "travelers" | "hosts";
 
 type Level = "Beginner" | "Improver" | "Intermediate" | "Advanced" | "Teacher/Competitor";
-type Role = "Social Dancer / Student" | "Organizer" | "Studio Owner" | "Promoter" | "DJ" | "Artist" | "Teacher";
+type Role = "Social Dancer" | "Student" | "Organizer" | "Studio Owner" | "Promoter" | "DJ" | "Artist" | "Teacher";
 type Style = "Bachata" | "Salsa" | "Kizomba" | "Zouk";
 const STYLE_OPTIONS: Style[] = ["Bachata", "Salsa", "Kizomba", "Zouk"];
-const ROLE_OPTIONS: Role[] = ["Social Dancer / Student", "Organizer", "Studio Owner", "Promoter", "DJ", "Artist", "Teacher"];
+const ROLE_OPTIONS: Role[] = ["Social Dancer", "Student", "Organizer", "Studio Owner", "Promoter", "DJ", "Artist", "Teacher"];
 
 type ConnectReason = {
   id: string;
@@ -78,6 +85,9 @@ type HostingModalState = {
   travellersCount: number;
   maxTravellersAllowed: string;
   message: string;
+  linkedMemberUserId: string;
+  destinationCity?: string | null;
+  destinationCountry?: string | null;
 };
 
 const EMPTY_HOSTING_MODAL: HostingModalState = {
@@ -95,6 +105,7 @@ const EMPTY_HOSTING_MODAL: HostingModalState = {
   travellersCount: 1,
   maxTravellersAllowed: "",
   message: "",
+  linkedMemberUserId: "",
 };
 
 type TripJoinModalState = {
@@ -108,6 +119,7 @@ type TripJoinModalState = {
   startDate: string | null;
   endDate: string | null;
   note: string;
+  linkedMemberUserId: string;
 };
 
 const EMPTY_TRIP_JOIN_MODAL: TripJoinModalState = {
@@ -121,6 +133,7 @@ const EMPTY_TRIP_JOIN_MODAL: TripJoinModalState = {
   startDate: null,
   endDate: null,
   note: "",
+  linkedMemberUserId: "",
 };
 
 const SECURE_TEXT_PATTERNS = {
@@ -206,36 +219,7 @@ const LEVEL_SHORT_LABEL: Record<Level, string> = {
   "Teacher/Competitor": "Pro",
 };
 
-type Interest =
-  | "Dance at local socials and events"
-  | "Find practice partners"
-  | "Get tips on the local dance scene"
-  | "Collaborate on video projects"
-  | "Find buddies for workshops, socials, accommodations, or rides"
-  | "Collaborate with artists/teachers for events/festivals"
-  | "Organize recurring local events"
-  | "Secure sponsorships and org collabs"
-  | "Offer volunteer roles for events"
-  | "Recruit guest dancers"
-  | "Promote special workshops and events"
-  | "Organize classes and schedules"
-  | "Collaborate with other studio owners"
-  | "Secure sponsorships and hire talent"
-  | "Partner to promote festivals"
-  | "Refer artists, DJs, and teachers"
-  | "Co-promote local parties/socials"
-  | "Exchange guest lists and shoutouts"
-  | "Share promo materials and audiences"
-  | "Produce new songs and tracks"
-  | "Collaborate on tracks or live sets"
-  | "Network for festival gigs"
-  | "DJ international and local events"
-  | "Feature in promo videos/socials"
-  | "Offer private/group lessons"
-  | "Teach regular classes"
-  | "Lead festival workshops"
-  | "Co-teach sessions"
-  | "Exchange tips, curricula, and student referrals";
+type Interest = ProfileInterest;
 
 type Availability = "Weekdays" | "Weekends" | "DayTime" | "Evenings" | "Travel for Events" | "I'd rather not say";
 const TRIP_PURPOSES = ["Holiday Trip", "Dance Festival", "Social Dancing", "Training / Workshops"] as const;
@@ -540,13 +524,6 @@ function formatShortDate(iso: string) {
   return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric" }).format(d);
 }
 
-function formatMemberSince(value: string | null | undefined) {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(d);
-}
-
 const MONTHS = [
   "January",
   "February",
@@ -619,6 +596,8 @@ function ConnectionsPageContent() {
   const [connectRequestsLimit, setConnectRequestsLimit] = useState<number | null>(null);
   const [hostingOffersUsed, setHostingOffersUsed] = useState<number | null>(null);
   const [hostingOffersLimit, setHostingOffersLimit] = useState<number | null>(null);
+  const [hostingRequestsUsed, setHostingRequestsUsed] = useState<number | null>(null);
+  const [hostingRequestsLimit, setHostingRequestsLimit] = useState<number | null>(null);
   const [tripRequestsUsed, setTripRequestsUsed] = useState<number | null>(null);
   const [tripRequestsLimit, setTripRequestsLimit] = useState<number | null>(null);
 
@@ -635,7 +614,6 @@ function ConnectionsPageContent() {
 
   const [connectModal, setConnectModal] = useState<ConnectModalState>(EMPTY_CONNECT_MODAL);
   const [connectReasons, setConnectReasons] = useState<ConnectReason[]>([]);
-  const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [connectReasonQuery, setConnectReasonQuery] = useState("");
   const [sendingRequest, setSendingRequest] = useState(false);
@@ -646,10 +624,15 @@ function ConnectionsPageContent() {
   const [hostingSending, setHostingSending] = useState(false);
   const [hostingModalWarning, setHostingModalWarning] = useState<string | null>(null);
   const [hostingModalError, setHostingModalError] = useState<string | null>(null);
+  const [linkedConnectionOptions, setLinkedConnectionOptions] = useState<LinkedMemberOption[]>([]);
+  const [hostingLinkedPickerOpen, setHostingLinkedPickerOpen] = useState(false);
+  const [hostingLinkedMemberQuery, setHostingLinkedMemberQuery] = useState("");
   const [tripJoinModal, setTripJoinModal] = useState<TripJoinModalState>(EMPTY_TRIP_JOIN_MODAL);
   const [tripRequestSending, setTripRequestSending] = useState(false);
   const [tripJoinWarning, setTripJoinWarning] = useState<string | null>(null);
   const [tripJoinError, setTripJoinError] = useState<string | null>(null);
+  const [tripLinkedPickerOpen, setTripLinkedPickerOpen] = useState(false);
+  const [tripLinkedMemberQuery, setTripLinkedMemberQuery] = useState("");
   const [membersPage, setMembersPage] = useState(1);
   const [travellersPage, setTravellersPage] = useState(1);
   useBodyScrollLock(Boolean(filtersOpen || connectModal.open || hostingModal.open || tripJoinModal.open || verificationModalOpen));
@@ -657,7 +640,6 @@ function ConnectionsPageContent() {
   const closeConnectModal = useCallback(() => {
     setConnectModal(EMPTY_CONNECT_MODAL);
     setSelectedReason(null);
-    setSelectedRole(null);
     setConnectReasonQuery("");
     setConnectReasons([]);
     setPendingWarning(null);
@@ -668,12 +650,16 @@ function ConnectionsPageContent() {
     setHostingModal(EMPTY_HOSTING_MODAL);
     setHostingModalWarning(null);
     setHostingModalError(null);
+    setHostingLinkedPickerOpen(false);
+    setHostingLinkedMemberQuery("");
   }, []);
 
   const closeTripJoinModal = useCallback(() => {
     setTripJoinModal(EMPTY_TRIP_JOIN_MODAL);
     setTripJoinWarning(null);
     setTripJoinError(null);
+    setTripLinkedPickerOpen(false);
+    setTripLinkedMemberQuery("");
   }, []);
 
   const openTripJoinModal = useCallback((params: {
@@ -697,7 +683,10 @@ function ConnectionsPageContent() {
       startDate: params.startDate ?? null,
       endDate: params.endDate ?? null,
       note: "",
+      linkedMemberUserId: "",
     });
+    setTripLinkedPickerOpen(false);
+    setTripLinkedMemberQuery("");
   }, []);
 
   const openConnect = useCallback((params: {
@@ -710,7 +699,6 @@ function ConnectionsPageContent() {
   }) => {
     const safeRoles = (params.targetRoles ?? []).filter(isNonEmptyString);
     setSelectedReason(null);
-    setSelectedRole(null);
     setConnectReasonQuery("");
     setConnectReasons([]);
     setConnectModal({
@@ -718,7 +706,7 @@ function ConnectionsPageContent() {
       targetUserId: params.targetUserId,
       targetName: params.targetName ?? "Member",
       targetPhotoUrl: params.targetPhotoUrl ?? undefined,
-      targetRoles: safeRoles.length ? safeRoles : ["Social Dancer / Student"],
+      targetRoles: safeRoles.length ? safeRoles : ["Social Dancer"],
       connectContext: params.connectContext ?? "member",
       tripId: params.tripId ?? null,
     });
@@ -733,16 +721,19 @@ function ConnectionsPageContent() {
     tripId?: string | null;
     prefillArrivalDate?: string | null;
     prefillDepartureDate?: string | null;
+    destinationCity?: string | null;
+    destinationCountry?: string | null;
   }) => {
     const todayIso = new Date().toISOString().slice(0, 10);
+    const isRequestHosting = params.requestType === "request_hosting";
     const arrivalPrefill =
       typeof params.prefillArrivalDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.prefillArrivalDate)
         ? params.prefillArrivalDate
-        : addDaysIso(todayIso, 14);
+        : isRequestHosting ? "" : addDaysIso(todayIso, 14);
     const departurePrefill =
       typeof params.prefillDepartureDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.prefillDepartureDate)
         ? params.prefillDepartureDate
-        : addDaysIso(arrivalPrefill, 2);
+        : isRequestHosting ? "" : addDaysIso(arrivalPrefill || addDaysIso(todayIso, 14), 2);
 
     setHostingModal({
       open: true,
@@ -761,7 +752,12 @@ function ConnectionsPageContent() {
         ? String(typeof params.targetMaxGuests === "number" && params.targetMaxGuests > 0 ? params.targetMaxGuests : 1)
         : "",
       message: "",
+      linkedMemberUserId: "",
+      destinationCity: params.destinationCity ?? null,
+      destinationCountry: params.destinationCountry ?? null,
     });
+    setHostingLinkedPickerOpen(false);
+    setHostingLinkedMemberQuery("");
   }, []);
 
   const requestHostingAccess = useCallback((params: {
@@ -829,15 +825,10 @@ function ConnectionsPageContent() {
     return connectReasons.find((r) => r.id === selectedReason) ?? null;
   }, [selectedReason, connectReasons]);
 
-  const connectRoleOptions = useMemo(() => {
-    return Array.from(new Set(connectReasons.map((reason) => reason.role).filter(isNonEmptyString))).sort((a, b) => a.localeCompare(b));
-  }, [connectReasons]);
-
   const visibleConnectReasons = useMemo(() => {
     const queryText = connectReasonQuery.trim().toLowerCase();
     return connectReasons
       .filter((reason) => {
-        if (selectedRole && reason.role !== selectedRole) return false;
         if (!queryText) return true;
         const haystack = `${reason.label} ${reason.role}`.toLowerCase();
         return haystack.includes(queryText);
@@ -849,23 +840,27 @@ function ConnectionsPageContent() {
         if (left !== right) return left - right;
         return a.label.localeCompare(b.label);
       });
-  }, [connectReasonQuery, connectReasons, selectedRole]);
+  }, [connectReasonQuery, connectReasons]);
 
   const [dbMembers, setDbMembers] = useState<MemberCard[]>([]);
   const [hostColumnsAvailable, setHostColumnsAvailable] = useState(false);
-  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [loadingMembers, setLoadingMembers] = useState(true);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [tripCards, setTripCards] = useState<TripCard[]>([]);
-  const [loadingTrips, setLoadingTrips] = useState(false);
+  const [loadingTrips, setLoadingTrips] = useState(true);
   const [tripsError, setTripsError] = useState<string | null>(null);
 
   const [iconsReady, setIconsReady] = useState(false);
   const autoRequestedHostRef = useRef<string | null>(null);
+  const discoverLoadRequestIdRef = useRef(0);
+  const connectModalLoadRequestIdRef = useRef(0);
+  const hostingModalLoadRequestIdRef = useRef(0);
+  const tripJoinModalLoadRequestIdRef = useRef(0);
 
   const filtersTitle =
-    tab === "travellers" ? "Filter Travellers" : discoverMode === "hosts" ? "Filter Hosts" : "Filter Dancers";
+    tab === "travellers" ? "Filter travellers" : discoverMode === "hosts" ? "Filter hosts" : "Filter dancers";
   const filtersApplyLabel =
-    tab === "travellers" ? "Show Travellers" : discoverMode === "hosts" ? "Show Hosts" : "Show Dancers";
+    tab === "travellers" ? "Show travellers" : discoverMode === "hosts" ? "Show hosts" : "Show dancers";
 
   useEffect(() => {
     let cancelled = false;
@@ -1297,9 +1292,12 @@ function ConnectionsPageContent() {
 
   useEffect(() => {
     if (!connectModal.open) return;
+    const requestId = connectModalLoadRequestIdRef.current + 1;
+    connectModalLoadRequestIdRef.current = requestId;
+    let cancelled = false;
+    const canCommit = () => !cancelled && connectModalLoadRequestIdRef.current === requestId;
 
     setSelectedReason(null);
-    setSelectedRole(null);
     setConnectReasonQuery("");
     setPendingWarning(null);
 
@@ -1307,8 +1305,8 @@ function ConnectionsPageContent() {
       try {
         const contexts =
           connectModal.connectContext === "traveller"
-            ? (["traveller", "trip", "member"] as const)
-            : (["member"] as const);
+            ? (["traveller", "trip", "member", "general"] as const)
+            : (["member", "general"] as const);
         const { data, error } = await supabase
           .from("connect_reasons")
           .select("id,label,role,sort_order")
@@ -1316,83 +1314,122 @@ function ConnectionsPageContent() {
           .in("context", [...contexts])
           .order("sort_order");
 
-        if (!error) setConnectReasons(data ?? []);
+        if (!error) {
+          const reasons = data ?? [];
+          if (!canCommit()) return;
+          setConnectReasons(reasons);
+          const defaultReason = reasons.find((r) => r.id === "default_start_conxion");
+          if (defaultReason) setSelectedReason(defaultReason.id);
+        }
       } catch {
-        setConnectReasons([]);
+        if (canCommit()) setConnectReasons([]);
       }
     })();
 
     // Check for existing pending/accepted request
     (async () => {
       try {
-        const { data: authUser } = await supabase.auth.getUser();
-        const userId = authUser?.user?.id;
         const targetId = connectModal.targetUserId;
-        if (!userId || !targetId) return;
+        if (!targetId) return;
 
+        const [pendingMessage, authUserRes] = await Promise.all([
+          fetchPendingPairConflict(targetId),
+          supabase.auth.getUser(),
+        ]);
+        if (!canCommit()) return;
+        setPendingWarning(pendingMessage);
+
+        const userId = authUserRes.data.user?.id;
+        if (!userId) return;
         const { data: existing } = await supabase
           .from("connections")
-          .select("id,status,requester_id")
+          .select("id,status")
           .or(
             `and(requester_id.eq.${userId},target_id.eq.${targetId}),and(requester_id.eq.${targetId},target_id.eq.${userId})`
           )
+          .eq("status", "accepted")
           .limit(1)
           .maybeSingle();
 
-        if (existing?.status === "pending") {
-          const direction = existing.requester_id === userId ? "You already sent" : "You received";
-          setPendingWarning(`${direction} a pending connection request with this member.`);
-        } else if (existing?.status === "accepted") {
-          setPendingWarning("You are already connected with this member.");
+        if (!pendingMessage && existing?.status === "accepted") {
+          if (canCommit()) setPendingWarning("You are already connected with this member.");
         }
       } catch {}
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [connectModal.open, connectModal.connectContext, connectModal.targetUserId]);
 
   // Check for existing hosting requests when hosting modal opens
   useEffect(() => {
     if (!hostingModal.open || !hostingModal.targetUserId) return;
+    const requestId = hostingModalLoadRequestIdRef.current + 1;
+    hostingModalLoadRequestIdRef.current = requestId;
+    let cancelled = false;
+    const canCommit = () => !cancelled && hostingModalLoadRequestIdRef.current === requestId;
     setHostingModalWarning(null);
     setHostingModalError(null);
 
     (async () => {
       try {
+        const targetUserId = hostingModal.targetUserId;
+        if (!targetUserId) return;
+
+        const pendingMessage = await fetchPendingPairConflict(targetUserId);
+        if (!canCommit()) return;
+        setHostingModalWarning(pendingMessage);
+        if (pendingMessage) return;
+
         const { data: authUser } = await supabase.auth.getUser();
         const userId = authUser?.user?.id;
         if (!userId) return;
-
         const { data: existing } = await supabase
           .from("hosting_requests")
-          .select("id,status,sender_user_id,request_type")
+          .select("id,status")
           .or(
-            `and(sender_user_id.eq.${userId},recipient_user_id.eq.${hostingModal.targetUserId}),and(sender_user_id.eq.${hostingModal.targetUserId},recipient_user_id.eq.${userId})`
+            `and(sender_user_id.eq.${userId},recipient_user_id.eq.${targetUserId}),and(sender_user_id.eq.${targetUserId},recipient_user_id.eq.${userId})`
           )
-          .in("status", ["pending", "accepted"])
+          .eq("status", "accepted")
           .limit(1)
           .maybeSingle();
 
-        if (existing?.status === "pending") {
-          const type = existing.request_type === "offer_to_host" ? "hosting offer" : "hosting request";
-          const direction = existing.sender_user_id === userId ? "You already sent" : "You received";
-          setHostingModalWarning(`${direction} a pending ${type} with this member.`);
-        } else if (existing?.status === "accepted") {
-          setHostingModalWarning("There is already an accepted hosting arrangement with this member.");
+        if (existing?.status === "accepted") {
+          if (canCommit()) {
+            setHostingModalWarning("There is already an accepted hosting arrangement with this member.");
+          }
         }
       } catch {}
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [hostingModal.open, hostingModal.targetUserId]);
 
   // Check for existing trip requests when trip join modal opens
   useEffect(() => {
     if (!tripJoinModal.open || !tripJoinModal.tripId) return;
+    const requestId = tripJoinModalLoadRequestIdRef.current + 1;
+    tripJoinModalLoadRequestIdRef.current = requestId;
+    let cancelled = false;
+    const canCommit = () => !cancelled && tripJoinModalLoadRequestIdRef.current === requestId;
     setTripJoinWarning(null);
     setTripJoinError(null);
 
     (async () => {
       try {
+        if (tripJoinModal.targetUserId) {
+          const pendingMessage = await fetchPendingPairConflict(tripJoinModal.targetUserId);
+          if (!canCommit()) return;
+          setTripJoinWarning(pendingMessage);
+          if (pendingMessage) return;
+        }
+
         const { data: authUser } = await supabase.auth.getUser();
         const userId = authUser?.user?.id;
-        if (!userId) return;
+        if (!userId || !tripJoinModal.tripId) return;
 
         const { data: existing } = await supabase
           .from("trip_requests")
@@ -1404,24 +1441,35 @@ function ConnectionsPageContent() {
           .maybeSingle();
 
         if (existing?.status === "pending") {
-          setTripJoinWarning("You already sent a pending join request for this trip.");
+          if (canCommit()) setTripJoinWarning("You already sent a pending join request for this trip.");
         } else if (existing?.status === "accepted") {
-          setTripJoinWarning("You are already part of this trip.");
+          if (canCommit()) setTripJoinWarning("You are already part of this trip.");
         }
       } catch {}
     })();
-  }, [tripJoinModal.open, tripJoinModal.tripId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripJoinModal.open, tripJoinModal.tripId, tripJoinModal.targetUserId]);
 
   useEffect(() => {
+    const requestId = discoverLoadRequestIdRef.current + 1;
+    discoverLoadRequestIdRef.current = requestId;
+    let cancelled = false;
+    const canCommit = () => !cancelled && discoverLoadRequestIdRef.current === requestId;
+
     (async () => {
       // 1) Auth sanity check
       try {
         const { error } = await supabase.auth.getSession();
         if (error) throw error;
       } catch {
-        setUiError(
-          "Supabase auth fetch failed. Verify NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local and restart dev server."
-        );
+        if (canCommit()) {
+          setUiError(
+            "Supabase auth fetch failed. Verify NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local and restart dev server."
+          );
+        }
       }
 
       let meId: string | null = null;
@@ -1430,7 +1478,10 @@ function ConnectionsPageContent() {
         const user = authData?.user;
         if (!user) {
           router.replace("/auth?next=%2Fdiscover%2Fdancers");
-          setLoadingMembers(false);
+          if (canCommit()) {
+            setLoadingMembers(false);
+            setLoadingTrips(false);
+          }
           return;
         }
         if (user) {
@@ -1466,21 +1517,29 @@ function ConnectionsPageContent() {
               if (uiLvl) myStyles[uiStyle] = uiLvl;
             }
           }
-          setMyCity(city);
-          setMyCountry(country);
-          setViewerVerified(isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null));
-          setMyRoles(myRoleList);
-          setMyLangCodes(myLangList);
-          setMyStyleLevels(myStyles);
+          if (canCommit()) {
+            setMyCity(city);
+            setMyCountry(country);
+            setViewerVerified(isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null));
+            setMyRoles(myRoleList);
+            setMyLangCodes(myLangList);
+            setMyStyleLevels(myStyles);
+          }
+          try {
+            const linkedOptions = await fetchLinkedConnectionOptions(supabase, user.id);
+            if (canCommit()) setLinkedConnectionOptions(linkedOptions);
+          } catch {
+            if (canCommit()) setLinkedConnectionOptions([]);
+          }
 
           // Load plan limits + monthly connection request count
           try {
             const { data: authUser } = await supabase.auth.getUser();
             const meta = authUser?.user?.user_metadata ?? {};
-            const isPro = meta.billing_plan === "pro" || meta.subscription_status === "active";
-            const planId = isPro ? "pro" : "starter";
+            const isVerified = isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null);
+            const planId = getPlanIdFromMeta(meta, isVerified);
             const limits = getPlanLimits(planId);
-            setConnectRequestsLimit(limits.connectionRequestsPerMonth);
+            if (canCommit()) setConnectRequestsLimit(limits.connectionRequestsPerMonth);
 
             const monthStart = new Date();
             monthStart.setDate(1);
@@ -1490,24 +1549,33 @@ function ConnectionsPageContent() {
               .select("id", { count: "exact", head: true })
               .eq("requester_id", user.id)
               .gte("created_at", monthStart.toISOString());
-            setConnectRequestsUsed(count ?? 0);
+            if (canCommit()) setConnectRequestsUsed(count ?? 0);
 
-            setHostingOffersLimit(limits.hostingOffersPerMonth);
+            if (canCommit()) setHostingOffersLimit(limits.hostingOffersPerMonth);
             const { count: hostingCount } = await supabase
               .from("hosting_requests")
               .select("id", { count: "exact", head: true })
               .eq("sender_user_id", user.id)
               .eq("request_type", "offer_to_host")
               .gte("created_at", monthStart.toISOString());
-            setHostingOffersUsed(hostingCount ?? 0);
+            if (canCommit()) setHostingOffersUsed(hostingCount ?? 0);
 
-            setTripRequestsLimit(limits.tripRequestsPerMonth);
+            if (canCommit()) setHostingRequestsLimit(limits.hostingRequestsPerMonth);
+            const { count: hostingReqCount } = await supabase
+              .from("hosting_requests")
+              .select("id", { count: "exact", head: true })
+              .eq("sender_user_id", user.id)
+              .eq("request_type", "request_hosting")
+              .gte("created_at", monthStart.toISOString());
+            if (canCommit()) setHostingRequestsUsed(hostingReqCount ?? 0);
+
+            if (canCommit()) setTripRequestsLimit(limits.tripRequestsPerMonth);
             const { count: tripReqCount } = await supabase
               .from("trip_requests")
               .select("id", { count: "exact", head: true })
               .eq("requester_id", user.id)
               .gte("created_at", monthStart.toISOString());
-            setTripRequestsUsed(tripReqCount ?? 0);
+            if (canCommit()) setTripRequestsUsed(tripReqCount ?? 0);
           } catch {}
 
 
@@ -1530,17 +1598,19 @@ function ConnectionsPageContent() {
                   .filter(isNonEmptyString)
               )
             );
-            setHiddenMemberIds(nextHiddenMemberIds);
+            if (canCommit()) setHiddenMemberIds(nextHiddenMemberIds);
           } else {
-            setHiddenMemberIds([]);
+            if (canCommit()) setHiddenMemberIds([]);
           }
         }
       } catch {}
 
       // 2) Load members from DB (profiles_feed with profiles fallback)
       try {
-        setLoadingMembers(true);
-        setMembersError(null);
+        if (canCommit()) {
+          setLoadingMembers(true);
+          setMembersError(null);
+        }
 
         const hostFieldsSelect = ["can_host", "hosting_status", "max_guests"];
 
@@ -1575,7 +1645,7 @@ function ConnectionsPageContent() {
         let lastLoadError: unknown = null;
         let hostFieldsOnSource = false;
 
-        let membersQuery = supabase.from("profiles_feed").select(feedSelect).limit(200);
+        let membersQuery = supabase.from("profiles_feed").select(feedSelect).neq("avatar_status", "rejected").limit(200);
         if (meId) membersQuery = membersQuery.neq("id", meId);
         const { data: feedData, error: feedError } = await membersQuery;
         if (!feedError) {
@@ -1687,7 +1757,7 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedRows) throw (lastLoadError ?? new Error("members_source_unavailable"));
-        setHostColumnsAvailable(hostFieldsOnSource);
+        if (canCommit()) setHostColumnsAvailable(hostFieldsOnSource);
 
         const mapped: MemberCard[] = rawRows
           .filter((row) => row.is_test !== true)
@@ -1782,19 +1852,23 @@ function ConnectionsPageContent() {
           }
         }
 
-        setDbMembers(mapped);
+        if (canCommit()) setDbMembers(mapped);
       } catch (e: unknown) {
-        setMembersError(errorMessage(e, "Failed to load members from database."));
-        setDbMembers([]);
-        setHostColumnsAvailable(false);
+        if (canCommit()) {
+          setMembersError(errorMessage(e, "Failed to load members from database."));
+          setDbMembers([]);
+          setHostColumnsAvailable(false);
+        }
       } finally {
-        setLoadingMembers(false);
+        if (canCommit()) setLoadingMembers(false);
       }
 
       // 3) Load trips for Travellers tab
       try {
-        setLoadingTrips(true);
-        setTripsError(null);
+        if (canCommit()) {
+          setLoadingTrips(true);
+          setTripsError(null);
+        }
 
         const today = new Date();
         const todayIso = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString().slice(0, 10);
@@ -1810,11 +1884,8 @@ function ConnectionsPageContent() {
           .limit(200);
         const { data: tripRows, error: tripErr } = await tripsQuery;
         if (!tripErr) {
-          const strictRows = (tripRows ?? []) as TripRow[];
-          if (strictRows.length > 0) {
-            trips = strictRows;
-            loadedTrips = true;
-          }
+          trips = (tripRows ?? []) as TripRow[];
+          loadedTrips = true;
         } else {
           lastTripsError = tripErr;
         }
@@ -1826,11 +1897,8 @@ function ConnectionsPageContent() {
             .limit(200);
           const { data: fallbackRows, error: fallbackErr } = await tripsQueryFallback;
           if (!fallbackErr) {
-            const broadRows = (fallbackRows ?? []) as TripRow[];
-            if (broadRows.length > 0) {
-              trips = broadRows;
-              loadedTrips = true;
-            }
+            trips = (fallbackRows ?? []) as TripRow[];
+            loadedTrips = true;
           } else {
             lastTripsError = fallbackErr;
           }
@@ -1843,11 +1911,8 @@ function ConnectionsPageContent() {
             .limit(200);
           const { data: fallbackRowsLite, error: fallbackErrLite } = await tripsQueryLite;
           if (!fallbackErrLite) {
-            const liteRows = (fallbackRowsLite ?? []) as TripRow[];
-            if (liteRows.length > 0) {
-              trips = liteRows;
-              loadedTrips = true;
-            }
+            trips = (fallbackRowsLite ?? []) as TripRow[];
+            loadedTrips = true;
           } else {
             lastTripsError = fallbackErrLite;
           }
@@ -1860,11 +1925,8 @@ function ConnectionsPageContent() {
             .limit(200);
           const { data: planRows, error: planErr } = await travelPlansQuery;
           if (!planErr) {
-            const planRowsSafe = (planRows ?? []) as TripRow[];
-            if (planRowsSafe.length > 0) {
-              trips = planRowsSafe;
-              loadedTrips = true;
-            }
+            trips = (planRows ?? []) as TripRow[];
+            loadedTrips = true;
           } else {
             lastTripsError = planErr;
           }
@@ -1977,14 +2039,20 @@ function ConnectionsPageContent() {
           };
         });
 
-        setTripCards(mappedTrips);
+        if (canCommit()) setTripCards(mappedTrips);
       } catch (e: unknown) {
-        setTripsError(errorMessage(e, "Failed to load trips."));
-        setTripCards([]);
+        if (canCommit()) {
+          setTripsError(errorMessage(e, "Failed to load trips."));
+          setTripCards([]);
+        }
       } finally {
-        setLoadingTrips(false);
+        if (canCommit()) setLoadingTrips(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   // Country + City library (same as onboarding)
@@ -2442,6 +2510,30 @@ function ConnectionsPageContent() {
     () => validateTripRequestText(tripJoinModal.note),
     [tripJoinModal.note]
   );
+  const tripLinkedMemberOptions = useMemo(
+    () => linkedConnectionOptions.filter((option) => option.userId !== tripJoinModal.targetUserId),
+    [linkedConnectionOptions, tripJoinModal.targetUserId]
+  );
+  const filteredTripLinkedMemberOptions = useMemo(() => {
+    const query = tripLinkedMemberQuery.trim().toLowerCase();
+    if (!query) return tripLinkedMemberOptions;
+    return tripLinkedMemberOptions.filter((option) => {
+      const haystack = [option.displayName, option.city, option.country].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [tripLinkedMemberOptions, tripLinkedMemberQuery]);
+  const hostingLinkedMemberOptions = useMemo(
+    () => linkedConnectionOptions.filter((option) => option.userId !== hostingModal.targetUserId),
+    [linkedConnectionOptions, hostingModal.targetUserId]
+  );
+  const filteredHostingLinkedMemberOptions = useMemo(() => {
+    const query = hostingLinkedMemberQuery.trim().toLowerCase();
+    if (!query) return hostingLinkedMemberOptions;
+    return hostingLinkedMemberOptions.filter((option) => {
+      const haystack = [option.displayName, option.city, option.country].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [hostingLinkedMemberOptions, hostingLinkedMemberQuery]);
 
   async function sendTripJoinRequest() {
     if (!tripJoinModal.tripId || !tripJoinModal.targetUserId) {
@@ -2472,6 +2564,7 @@ function ConnectionsPageContent() {
         body: JSON.stringify({
           tripId: tripJoinModal.tripId,
           note: note || null,
+          linkedMemberUserId: tripJoinModal.linkedMemberUserId || null,
         }),
       });
       const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
@@ -2499,15 +2592,20 @@ function ConnectionsPageContent() {
       setHostingModalError("Missing target host/traveler.");
       return;
     }
-    if (!hostingModal.arrivalDate || !hostingModal.departureDate) {
-      setHostingModalError("Arrival and departure dates are required.");
+    if (!hostingModal.arrivalDate) {
+      setHostingModalError("Arrival date is required.");
       return;
     }
-    if (hostingModal.departureDate < hostingModal.arrivalDate) {
+    if (!hostingModal.departureDate && !hostingModal.departureFlexible) {
+      setHostingModalError("Enter a departure date or mark it as flexible.");
+      return;
+    }
+    if (hostingModal.arrivalDate && hostingModal.departureDate && hostingModal.departureDate < hostingModal.arrivalDate) {
       setHostingModalError("Departure must be after arrival.");
       return;
     }
-    if (hostingModal.arrivalDate < new Date().toISOString().slice(0, 10)) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    if (hostingModal.arrivalDate && hostingModal.arrivalDate < todayIso) {
       setHostingModalError("Arrival date must be today or later.");
       return;
     }
@@ -2558,6 +2656,8 @@ function ConnectionsPageContent() {
           travellersCount: hostingModal.travellersCount,
           maxTravellersAllowed: hasMaxAllowed ? parsedMaxAllowed : null,
           message: hostingModal.message.trim() || null,
+          linkedMemberUserId:
+            hostingModal.requestType === "request_hosting" ? hostingModal.linkedMemberUserId || null : null,
         }),
       });
       const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
@@ -2708,8 +2808,8 @@ function ConnectionsPageContent() {
                   <option value="newest">Newest</option>
                   <option value="name_az">Name A-Z</option>
                   <option value="city_az">City A-Z</option>
-                  {tab === "members" ? <option value="connections_desc">Most Connections</option> : null}
-                  {tab === "members" ? <option value="references_desc">Most References</option> : null}
+                  {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
+                  {tab === "members" ? <option value="references_desc">Most references</option> : null}
                 </select>
                 <MSIcon name="expand_more" className="pointer-events-none absolute right-2.5 top-2.5 text-[16px] text-white/45" />
               </div>
@@ -2723,7 +2823,7 @@ function ConnectionsPageContent() {
                     disabled={!myCity}
                     className="h-5 w-9 accent-[#00F5FF]"
                   />
-                  {myCity ? `My City (${myCity})` : "My City (set your city in profile)"}
+                  {myCity ? `My city (${myCity})` : "My city (set your city in profile)"}
                 </label>
               ) : null}
             </div>
@@ -2767,12 +2867,12 @@ function ConnectionsPageContent() {
 
         {tab === "members" ? (
           <div className="relative mt-8">
-            <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+            <div className={`grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2${!loadingMembers ? " animate-fade-in-grid" : ""}`}>
               {loadingMembers ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <div
                     key={`sk-${i}`}
-                    className="connections-card flex min-h-[360px] flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] animate-pulse md:h-64 md:min-h-0 md:flex-row"
+                    className="connections-card flex min-h-[196px] flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] animate-pulse md:h-64 md:min-h-0 md:flex-row"
                   >
                     <div className="w-full md:w-1/2 h-44 md:h-full bg-white/5" />
                     <div className="w-full md:w-1/2 p-4 flex flex-col h-full justify-between">
@@ -2818,8 +2918,14 @@ function ConnectionsPageContent() {
                 return (
                   <div
                     key={m.id}
-                    className="connections-card overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
+                    className="connections-card relative overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
                   >
+                    {connectionsCount > 0 ? (
+                      <div className="absolute right-2.5 top-2.5 z-20 flex items-center gap-1">
+                        <MSIcon name="group" className="text-[13px] text-[#00F5FF]" />
+                        <span className="text-[10px] font-semibold text-white/70">{connectionsCount}</span>
+                      </div>
+                    ) : null}
                     <div className="flex min-h-[196px] md:hidden">
                       <div className="relative w-[42%] shrink-0 border-r border-white/10">
                         <button
@@ -2841,59 +2947,52 @@ function ConnectionsPageContent() {
 
                       <div className="flex min-w-0 flex-1 flex-col justify-between p-3">
                         <div className="space-y-2">
-                          <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start">
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <h3 className="truncate text-[18px] font-semibold tracking-tight text-white">{m.name}</h3>
-                                {m.verified ? <VerifiedBadge size={16} /> : null}
+                                {m.verified ? <VerifiedBadge size={19.5} /> : null}
                               </div>
                               <div className="mt-1 text-[13px] font-medium text-[#00F5FF]">
                                 {m.city}
                                 <span className="text-white/60">, {m.country}</span>
                               </div>
                             </div>
-
-                            {connectionsCount > 0 ? (
-                              <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-semibold text-white/70">
-                                <MSIcon name="group" className="text-[13px] text-[#00F5FF]" />
-                                <span>{connectionsCount}</span>
-                              </div>
-                            ) : null}
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2 text-[10px] font-medium text-white/55">
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] font-medium text-white/55">
                             <span className="inline-flex items-center gap-1">
-                              <MSIcon name="workspace_premium" className="text-[13px] text-[#00F5FF]" />
+                              <MSIcon name="workspace_premium" className="text-[15px] text-[#00F5FF]" />
                               <span className="text-white/80">{refTotal}</span>
                               refs
                             </span>
                             {refMember > 0 ? (
                               <span className="inline-flex items-center gap-1">
-                                <MSIcon name="person" className="text-[13px] text-[#00F5FF]" />
+                                <MSIcon name="person" className="text-[15px] text-[#00F5FF]" />
                                 <span className="text-white/80">{refMember}</span>
                               </span>
                             ) : null}
                             {refTrip > 0 ? (
                               <span className="inline-flex items-center gap-1">
-                                <MSIcon name="flight" className="text-[13px] text-[#00F5FF]" />
+                                <MSIcon name="flight" className="text-[15px] text-[#00F5FF]" />
                                 <span className="text-white/80">{refTrip}</span>
                               </span>
                             ) : null}
                           </div>
 
                           {m.roles.length ? (
-                            <div className="mt-0.5">
+                            <div className="mt-1.5">
                               <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
-                                <MSIcon name="badge" className="text-[13px] text-[#00F5FF]" />
+                                <MSIcon name="badge" className="text-[15px] text-[#00F5FF]" />
                                 <span>Roles</span>
                               </div>
-                              <div className="flex flex-wrap gap-1.5">
+                              <div className="flex flex-wrap gap-2">
                                 {m.roles.slice(0, 2).map((r) => (
                                   <span
                                     key={r}
-                                    className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium text-white/75"
+                                    className="text-[11px] font-medium text-white/75"
                                   >
-                                    {r}
+                                    {r.charAt(0).toUpperCase() + r.slice(1).toLowerCase()}
                                   </span>
                                 ))}
                               </div>
@@ -2901,23 +3000,23 @@ function ConnectionsPageContent() {
                           ) : null}
 
                           {Object.entries(m.danceSkills ?? {}).length || m.otherStyle ? (
-                            <div className="mt-1">
+                            <div className="mt-1.5">
                               <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
-                                <MSIcon name="person_play" className="text-[13px] text-[#00F5FF]" />
+                                <MSIcon name="person_play" className="text-[15px] text-[#00F5FF]" />
                                 <span>Dance styles</span>
                               </div>
-                              <div className="flex flex-wrap gap-1.5">
+                              <div className="flex flex-wrap gap-2">
                                 {Object.entries(m.danceSkills ?? {}).slice(0, 3).map(([style, lvl]) => (
                                   <span
                                     key={style}
                                     title={`Level: ${lvl}`}
-                                    className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/60"
+                                    className="text-[11px] font-medium text-white/60"
                                   >
-                                    {style}
+                                    {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
                                   </span>
                                 ))}
                                 {m.otherStyle ? (
-                                  <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/60">
+                                  <span className="text-[11px] font-medium text-white/60">
                                     Other
                                   </span>
                                 ) : null}
@@ -2926,13 +3025,13 @@ function ConnectionsPageContent() {
                           ) : null}
 
                           {m.langs?.length ? (
-                            <div className="mt-1 flex items-center gap-1.5">
-                              <MSIcon name="public" className="text-[14px] text-[#00F5FF]" />
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <MSIcon name="public" className="text-[15px] text-[#00F5FF]" />
                               <div className="flex flex-wrap gap-1.5">
                                 {m.langs.slice(0, 3).map((l) => (
                                   <div
                                     key={l}
-                                    className="flex size-5 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
+                                    className="flex size-[24px] items-center justify-center rounded-full border border-white/10 bg-white/5 text-[9px] font-bold text-white/70"
                                     title={l}
                                   >
                                     {l}
@@ -3005,16 +3104,9 @@ function ConnectionsPageContent() {
                       <div className="flex h-full w-1/2 flex-col justify-between p-4">
                         <div className="min-h-0">
                           <div className="relative">
-                            {connectionsCount > 0 ? (
-                              <div className="absolute right-0 top-0 flex items-center gap-1 text-[12px] font-semibold text-white/40">
-                                <MSIcon name="group" className="icon-sm text-[#00F5FF]" />
-                                <span>{connectionsCount}</span>
-                              </div>
-                            ) : null}
-
                             <div className="mb-2 flex items-center gap-1.5">
                               <h3 className="text-[20px] font-normal tracking-tight">{m.name}</h3>
-                              {m.verified ? <VerifiedBadge size={16} /> : null}
+                              {m.verified ? <VerifiedBadge size={19.5} /> : null}
                             </div>
 
                             <div className="mb-3 flex items-baseline gap-2">
@@ -3022,7 +3114,7 @@ function ConnectionsPageContent() {
                               <span className="text-[15px] font-medium leading-none text-white/65">, {m.country}</span>
                             </div>
 
-                            <div className="mb-3 flex items-center gap-3 text-[11px] font-medium text-white/45">
+                            <div className="mb-1.5 flex items-center gap-3 text-[12px] font-medium text-white/45">
                               <div className="flex items-center gap-1.5 whitespace-nowrap">
                                 <MSIcon name="workspace_premium" className="icon-xs text-[#00F5FF]" />
                                 <span className="font-medium text-white/70">{refTotal}</span>
@@ -3051,16 +3143,16 @@ function ConnectionsPageContent() {
                               ) : null}
                             </div>
 
-                            <div className="mb-2.5 space-y-1">
+                            <div className="mb-2.5 space-y-1.5">
                               <div className="flex items-center gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                                 <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                                <div className="flex gap-1.5">
+                                <div className="flex gap-2">
                                   {m.roles.map((r) => (
                                     <span
                                       key={r}
-                                      className="whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium text-white/70"
+                                      className="whitespace-nowrap text-[11px] font-medium text-white/70"
                                     >
-                                      {r}
+                                      {r.charAt(0).toUpperCase() + r.slice(1).toLowerCase()}
                                     </span>
                                   ))}
                                 </div>
@@ -3068,20 +3160,20 @@ function ConnectionsPageContent() {
 
                               <div className="flex items-center gap-2">
                                 <MSIcon name="person_play" className="icon-sm text-[#00F5FF]" />
-                                <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                                <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                                   {Object.entries(m.danceSkills ?? {}).map(([style, lvl]) => (
                                     <span
                                       key={style}
                                       title={`Level: ${lvl}`}
-                                      className="whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/55"
+                                      className="whitespace-nowrap text-[11px] font-medium text-white/55"
                                     >
-                                      {style}
+                                      {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
                                     </span>
                                   ))}
 
                                   {m.otherStyle ? (
                                     <span
-                                      className="whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/55"
+                                      className="whitespace-nowrap text-[11px] font-medium text-white/55"
                                       title="Other style"
                                     >
                                       Other
@@ -3097,7 +3189,7 @@ function ConnectionsPageContent() {
                                     {m.langs.slice(0, 3).map((l) => (
                                       <div
                                         key={l}
-                                        className="flex size-5 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
+                                        className="flex size-[24px] items-center justify-center rounded-full border border-white/10 bg-white/5 text-[9px] font-bold text-white/70"
                                         title={l}
                                       >
                                         {l}
@@ -3246,7 +3338,7 @@ function ConnectionsPageContent() {
                 No trips match these filters.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+              <div className="animate-fade-in-grid grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
                 {paginatedTrips.map((t) => {
                   const heroUrl = getTripHeroStorageUrl(t.destination_country);
                   const heroStorageFallback = getTripHeroStorageFolderUrl(t.destination_country);
@@ -3307,176 +3399,70 @@ function ConnectionsPageContent() {
                         </div>
                       </div>
 
-                      <div className="relative z-10 flex w-full flex-col gap-0.5 bg-[#121212] px-3 pb-4 pt-3 md:w-1/2 md:px-4 md:pb-4 md:pt-3">
-                        <div className="md:hidden">
-                          <div className="flex items-start justify-between gap-3">
+                      <div className="relative z-10 flex w-full flex-col gap-2 bg-[#121212] px-3 pb-4 pt-3 md:w-1/2 md:px-4">
+                        {/* Profile row — purpose label inline top-right, bigger avatar */}
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
+                            }
+                          }}
+                          className="flex flex-1 items-center gap-3 text-left"
+                        >
+                          <div className="relative shrink-0">
+                            <div className="absolute -inset-2 rounded-[22px] bg-[#d946ef]/20 blur-md" />
                             <div
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault();
-                                  router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
-                                }
+                              className="relative h-[116px] w-[116px] rounded-[22px] bg-cover bg-center ring-1 ring-white/10"
+                              style={{
+                                backgroundImage: t.avatar_url
+                                  ? `url(${t.avatar_url})`
+                                  : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
                               }}
-                              className="group min-w-0 flex-1 rounded-2xl text-left"
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className="relative shrink-0">
-                                  <div className="absolute -inset-2 rounded-[14px] bg-[#d946ef]/20 blur-md" />
-                                  <div
-                                    className="relative h-[68px] w-[68px] rounded-[14px] bg-cover bg-center ring-1 ring-white/10"
-                                    style={{
-                                      backgroundImage: t.avatar_url
-                                        ? `url(${t.avatar_url})`
-                                        : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                                    }}
-                                  />
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="truncate text-base font-bold tracking-tight text-white">{t.display_name}</span>
-                                  <span className="flex items-center gap-1 text-[12px] font-bold text-[#0dccf2] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#67F7FF]">
-                                    View profile
-                                    <MSIcon name="arrow_forward" className="text-[12px] transition-transform duration-200 group-hover:translate-x-0.5" />
-                                  </span>
-                                  {t.languages?.length ? (
-                                    <div className="mt-1 flex min-w-0 items-center gap-1">
-                                      <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
-                                      <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
-                                        {t.languages.map((l) => {
-                                          const code = langLabelToCode(l);
-                                          return (
-                                            <span
-                                              key={l}
-                                              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
-                                              title={l}
-                                            >
-                                              {code}
-                                            </span>
-                                          );
-                                        })}
-                                      </ScrollRow>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className={`shrink-0 rounded-2xl border px-3 py-2 ${purposeMeta.bg} ${purposeMeta.border}`}>
-                              <div className="flex items-center gap-2">
-                                <MSIcon name={purposeMeta.icon} className={`${purposeMeta.text} text-[16px]`} />
-                                <div className="flex flex-col">
-                                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/45">Purpose</span>
-                                  <span className={`text-[13px] font-semibold ${purposeMeta.text}`}>{t.purpose ?? "Trip"}</span>
-                                </div>
-                              </div>
-                            </div>
+                            />
                           </div>
-
-                          <div className="mt-2 flex min-w-0 items-center gap-0.5">
-                            <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                            <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
-                              {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
-                                <span
-                                  key={role}
-                                  className="shrink-0 whitespace-nowrap px-2 py-[2px] text-[8px] font-medium uppercase tracking-[0.14em] text-white/70"
-                                >
-                                  {role}
-                                </span>
-                              ))}
-                            </ScrollRow>
-                          </div>
-                        </div>
-
-                        <div className="hidden md:block">
-                          <div className="mb-0 flex items-center gap-3">
-                            <div className={`rounded-lg border p-2 ${purposeMeta.bg} ${purposeMeta.border}`}>
-                              <MSIcon name={purposeMeta.icon} className={`${purposeMeta.text} text-[18px]`} />
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold uppercase tracking-wider text-white/40">
-                                Trip Purpose
-                              </span>
-                              <span className={`text-base font-semibold ${purposeMeta.text}`}>
-                                {t.purpose ?? "Trip"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
-                              }
-                            }}
-                            className="group w-full rounded-2xl p-1.5 text-left"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="relative shrink-0">
-                                <div className="absolute -inset-2 rounded-[14px] bg-[#d946ef]/20 blur-md" />
-                                <div
-                                  className="relative h-[72px] w-[72px] rounded-[14px] bg-cover bg-center ring-1 ring-white/10"
-                                  style={{
-                                    backgroundImage: t.avatar_url
-                                      ? `url(${t.avatar_url})`
-                                      : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                                  }}
-                                />
-                              </div>
-                              <div className="flex min-w-0 flex-col">
-                                <span className="truncate text-base font-bold tracking-tight text-white">
-                                  {t.display_name}
-                                </span>
-                                <span className="flex items-center gap-1 text-[12px] font-bold text-[#0dccf2] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#67F7FF]">
-                                  View profile
-                                  <MSIcon name="arrow_forward" className="text-[12px] transition-transform duration-200 group-hover:translate-x-0.5" />
-                                </span>
-                                {t.languages?.length ? (
-                                  <div className="mt-0.5 flex min-w-0 items-center gap-0.5">
-                                    <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
-                                    <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
-                                      {t.languages.map((l) => {
-                                        const code = langLabelToCode(l);
-                                        return (
-                                          <span
-                                            key={l}
-                                            className="flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
-                                            title={l}
-                                          >
-                                            {code}
-                                          </span>
-                                        );
-                                      })}
-                                    </ScrollRow>
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-
-                            <div className="mt-2 space-y-0">
-                              <div className="flex min-w-0 items-center gap-0.5">
-                                <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                                <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
-                                  {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
-                                    <span
-                                      key={role}
-                                      className="shrink-0 whitespace-nowrap px-2 py-[2px] text-[8px] font-medium uppercase tracking-[0.14em] text-white/70"
-                                    >
-                                      {role}
-                                    </span>
-                                  ))}
+                          <div className="min-w-0 flex flex-col gap-1 justify-center">
+                            <span className={`text-[10px] font-bold uppercase tracking-[0.14em] ${purposeMeta.text}`}>{t.purpose ?? "Trip"}</span>
+                            <span className="truncate text-base font-bold tracking-tight text-white">{t.display_name}</span>
+                            {t.languages?.length ? (
+                              <div className="flex min-w-0 items-center gap-1">
+                                <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
+                                <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
+                                  {t.languages.map((l) => {
+                                    const code = langLabelToCode(l);
+                                    return (
+                                      <span
+                                        key={l}
+                                        className="flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
+                                        title={l}
+                                      >
+                                        {code}
+                                      </span>
+                                    );
+                                  })}
                                 </ScrollRow>
                               </div>
+                            ) : null}
+                            <div className="flex min-w-0 items-center gap-0.5">
+                              <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
+                              <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
+                                {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
+                                  <span
+                                    key={role}
+                                    className="shrink-0 whitespace-nowrap px-2 py-[2px] text-[8px] font-medium uppercase tracking-[0.14em] text-white/70"
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
+                              </ScrollRow>
                             </div>
                           </div>
                         </div>
 
-                        <div className="mt-auto grid grid-cols-2 gap-2 pt-2">
+                        <div className="mt-auto grid grid-cols-2 gap-2">
                           <button
                             type="button"
                             onClick={() =>
@@ -3507,11 +3493,13 @@ function ConnectionsPageContent() {
                                 tripId: t.id,
                                 prefillArrivalDate: t.start_date,
                                 prefillDepartureDate: t.end_date,
+                                destinationCity: t.destination_city,
+                                destinationCountry: t.destination_country,
                               })
                             }
                             className="w-full min-h-[38px] whitespace-nowrap rounded-full border border-[#FF00FF]/30 bg-[#FF00FF]/10 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#FFC6FA] transition hover:border-[#FF00FF]/50 hover:bg-[#FF00FF]/16 hover:text-white"
                           >
-                            Offer to Host
+                            Offer Hosting
                           </button>
                         </div>
                       </div>
@@ -3571,8 +3559,8 @@ function ConnectionsPageContent() {
                         <option value="newest">Newest</option>
                         <option value="name_az">Name A-Z</option>
                         <option value="city_az">City A-Z</option>
-                        {tab === "members" ? <option value="connections_desc">Most Connections</option> : null}
-                        {tab === "members" ? <option value="references_desc">Most References</option> : null}
+                        {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
+                        {tab === "members" ? <option value="references_desc">Most references</option> : null}
                       </select>
                       <MSIcon name="expand_more" className="pointer-events-none absolute right-3 top-3 text-[20px] text-white/40" />
                     </div>
@@ -4042,68 +4030,65 @@ function ConnectionsPageContent() {
       ) : null}
 
 {connectModal.open && (
-  <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
-    <div className="relative w-full max-w-[480px] overflow-hidden rounded-[28px] border border-white/8 bg-[#080e14] shadow-[0_32px_80px_rgba(0,0,0,0.5)] sm:rounded-[32px]"
-      style={{ background: "radial-gradient(circle at top left, rgba(13,204,242,0.07), transparent 40%), radial-gradient(circle at bottom right, rgba(217,59,255,0.07), transparent 40%), #080e14" }}
-    >
+  <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
+    <div className="relative flex w-full max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] shadow-2xl" style={{ maxHeight: "calc(100dvh - 1.5rem)" }}>
       {/* Close */}
       <button
         type="button"
         onClick={closeConnectModal}
-        className="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 hover:text-white transition"
+        className="absolute right-5 top-5 z-10 text-white/50 transition hover:text-white"
         aria-label="Close"
       >
-        <MSIcon name="close" className="text-[18px]" />
+        <MSIcon name="close" className="text-[22px]" />
       </button>
 
-      {/* Header */}
-      <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/8">
-        <div className="shrink-0">
-          <div className="h-14 w-14 rounded-2xl overflow-hidden border border-white/10"
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
+        {/* Header */}
+        <div className="mb-6 flex items-center gap-4">
+          <div
+            className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
             style={{
               backgroundImage: connectModal.targetPhotoUrl
                 ? `url(${connectModal.targetPhotoUrl})`
-                : "linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))",
-              backgroundSize: "cover",
-              backgroundPosition: "center",
+                : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,59,255,0.35))",
             }}
           />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Connect with</p>
+            <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">{connectModal.targetName}</h3>
+          </div>
+          {connectRequestsLimit !== null && connectRequestsUsed !== null && (
+            <div className="shrink-0 flex items-center gap-1.5">
+              <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
+              <span className={`text-[13px] font-black tabular-nums leading-tight ${
+                connectRequestsUsed >= connectRequestsLimit
+                  ? "text-rose-400"
+                  : connectRequestsUsed >= connectRequestsLimit * 0.8
+                    ? "text-amber-400"
+                    : "text-[#00F5FF]"
+              }`}>
+                {connectRequestsUsed}<span className="text-white/25 font-normal"> / {connectRequestsLimit}</span>
+              </span>
+            </div>
+          )}
         </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Connect with</p>
-          <h3 className="truncate text-lg font-extrabold tracking-tight text-white">{connectModal.targetName}</h3>
-        </div>
-      </div>
 
-      <div className="px-6 py-5 space-y-4">
         {/* Pending request warning */}
-        {pendingWarning && (
-          <div className="flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
-            <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
-            <span>{pendingWarning}</span>
+        {pendingWarning ? <PendingRequestBanner message={pendingWarning} className="mb-4" /> : null}
+
+        {/* Error */}
+        {connectModalError && (
+          <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
+            <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">error</span>
+            <span>{connectModalError}</span>
           </div>
         )}
 
-        {/* Usage counter */}
-        {connectRequestsLimit !== null && connectRequestsUsed !== null && (
-          <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2.5 text-xs">
-            <span className="text-white/40">Requests this month</span>
-            <span className={
-              connectRequestsUsed >= connectRequestsLimit
-                ? "font-bold text-rose-400"
-                : connectRequestsUsed >= connectRequestsLimit * 0.8
-                  ? "font-bold text-amber-400"
-                  : "font-semibold text-[#0df2f2]"
-            }>
-              {connectRequestsUsed} / {connectRequestsLimit}
-            </span>
-          </div>
-        )}
-
-        {/* Reason — menu with optional search */}
+        {/* Reason picker */}
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Reason to connect</label>
-          <div className="relative mt-2">
+          <div className="mb-3 text-sm font-semibold text-white">Reason to connect</div>
+          <div className="relative">
             <span className="material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[17px] text-white/25">search</span>
             <input
               value={connectReasonQuery}
@@ -4112,10 +4097,10 @@ function ConnectionsPageContent() {
                 setSelectedReason(null);
               }}
               placeholder="Filter reasons..."
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-2.5 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition"
+              className="w-full rounded-xl border border-white/10 bg-black/35 pl-10 pr-4 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 transition"
             />
           </div>
-          <div className="mt-2 max-h-48 overflow-y-auto rounded-xl bg-[#0b1219]">
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-xl bg-black/20">
             {visibleConnectReasons.length === 0 ? (
               <p className="px-4 py-3 text-sm text-white/40">No matches</p>
             ) : (
@@ -4129,127 +4114,119 @@ function ConnectionsPageContent() {
                   }}
                   className={`w-full px-4 py-2.5 text-left text-sm transition flex items-center justify-between gap-3 ${
                     selectedReason === r.id
-                      ? "bg-[#0df2f2]/10 text-[#0df2f2]"
+                      ? "bg-[#00F5FF]/10 text-[#00F5FF]"
                       : "text-white/80 hover:bg-white/[0.06] hover:text-white"
                   }`}
                 >
                   <span>{r.label}</span>
-                  <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
+                  {r.role && r.role !== "General" ? (
+                    <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
+                  ) : null}
                 </button>
               ))
             )}
           </div>
         </div>
-
-          {/* Error */}
-          {connectModalError && (
-            <div className="flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
-              <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
-              <span>{connectModalError}</span>
-            </div>
-          )}
       </div>
 
-      {/* Actions */}
-      <div className="flex flex-col gap-2 border-t border-white/8 px-6 py-5">
-        <button
-          type="button"
-          disabled={!selectedReason || sendingRequest}
-	          onClick={async () => {
-	            const targetId = connectModal.targetUserId;
-	            const reasonId = selectedReason;
-	            const role = selectedReasonObj?.role ?? selectedRole;
-	            const connectContext = connectModal.connectContext ?? "member";
-	            const tripId = connectModal.tripId ?? null;
-	            const requestsRedirect = "/messages?tab=requests";
+      {/* Footer */}
+      <div className="shrink-0 border-t border-white/8 px-6 py-4 sm:px-8">
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+          <button
+            type="button"
+            onClick={closeConnectModal}
+            className="h-12 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!selectedReason || sendingRequest || Boolean(pendingWarning)}
+            onClick={async () => {
+              const targetId = connectModal.targetUserId;
+              const reasonId = selectedReason;
+              const role = selectedReasonObj?.role ?? null;
+              const connectContext = connectModal.connectContext ?? "member";
+              const tripId = connectModal.tripId ?? null;
+              const requestsRedirect = "/messages?tab=requests";
 
-            if (!targetId || !reasonId || !role) return;
+              if (!targetId || !reasonId) return;
 
-            try {
-              setSendingRequest(true);
-              setConnectModalError(null);
+              try {
+                setSendingRequest(true);
+                setConnectModalError(null);
 
-              const {
-                data: { user },
-                error: authError,
-              } = await supabase.auth.getUser();
-              const { data: sessionData } = await supabase.auth.getSession();
-              const accessToken = sessionData.session?.access_token ?? "";
+                const {
+                  data: { user },
+                  error: authError,
+                } = await supabase.auth.getUser();
+                const { data: sessionData } = await supabase.auth.getSession();
+                const accessToken = sessionData.session?.access_token ?? "";
 
-              if (authError || !user) throw authError ?? new Error("Not authenticated");
-              if (!accessToken) throw new Error("Missing auth session token");
+                if (authError || !user) throw authError ?? new Error("Not authenticated");
+                if (!accessToken) throw new Error("Missing auth session token");
 
-              // 1) Check existing connection in either direction
-              const { data: existing, error: existingErr } = await supabase
-                .from("connections")
-                .select("id,status,requester_id,target_id")
-                .or(
-                  `and(requester_id.eq.${user.id},target_id.eq.${targetId}),and(requester_id.eq.${targetId},target_id.eq.${user.id})`
-                )
-                .limit(1)
-                .maybeSingle();
+                const { data: existing, error: existingErr } = await supabase
+                  .from("connections")
+                  .select("id,status,requester_id,target_id")
+                  .or(
+                    `and(requester_id.eq.${user.id},target_id.eq.${targetId}),and(requester_id.eq.${targetId},target_id.eq.${user.id})`
+                  )
+                  .limit(1)
+                  .maybeSingle();
 
-              if (existingErr) throw existingErr;
+                if (existingErr) throw existingErr;
 
-		              if (existing?.status === "accepted" || existing?.status === "pending") {
-		                if (existing.status === "accepted" && existing.id) {
-		                  closeConnectModal();
-		                  router.push(`/messages/${existing.id}`);
-		                  return;
-		                }
-		                throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
-	              }
+                if (existing?.status === "accepted" || existing?.status === "pending") {
+                  if (existing.status === "accepted" && existing.id) {
+                    closeConnectModal();
+                    router.push(`/messages?thread=${encodeURIComponent(`conn:${existing.id}`)}`);
+                    return;
+                  }
+                  throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
+                }
 
-              // 2) Create pending request through server endpoint (single validation path)
-              const response = await fetch("/api/connect", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${accessToken}`,
-                },
-	                body: JSON.stringify({
-	                  requesterId: user.id,
-	                  targetId,
-	                  payload: {
-	                    connect_context: connectContext,
-	                    connect_reason: reasonId,
-	                    connect_reason_role: role,
-	                    trip_id: tripId,
-	                  },
-	                }),
-	              });
-              const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-              if (!response.ok || !result?.ok) {
-                throw new Error(result?.error || "Failed to create connection request");
+                const response = await fetch("/api/connect", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${accessToken}`,
+                  },
+                  body: JSON.stringify({
+                    requesterId: user.id,
+                    targetId,
+                    payload: {
+                      connect_context: connectContext,
+                      connect_reason: reasonId,
+                      connect_reason_role: role,
+                      trip_id: tripId,
+                    },
+                  }),
+                });
+                const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+                if (!response.ok || !result?.ok) {
+                  throw new Error(result?.error || "Failed to create connection request");
+                }
+
+                closeConnectModal();
+                router.push(requestsRedirect);
+              } catch (e) {
+                const message = e instanceof Error ? e.message : "Failed to send request.";
+                setConnectModalError(
+                  message.includes("Failed to fetch")
+                    ? "Network issue while sending request. Check your connection and retry."
+                    : message
+                );
+              } finally {
+                setSendingRequest(false);
               }
-
-	              // 3) Close + route
-	              closeConnectModal();
-	              router.push(requestsRedirect);
-	            } catch (e) {
-              const message = e instanceof Error ? e.message : "Failed to send request.";
-              setConnectModalError(
-                message.includes("Failed to fetch")
-                  ? "Network issue while sending request. Check your connection and retry."
-                  : message
-              );
-            } finally {
-              setSendingRequest(false);
-            }
-          }}
-          className="w-full h-13 rounded-2xl font-bold text-sm text-[#040a0f] disabled:opacity-40 transition hover:brightness-110"
-          style={{ backgroundImage: "linear-gradient(90deg,#0df2f2 0%, #ff00ff 100%)" }}
-        >
-          {sendingRequest ? "Sending…" : "Send Request"}
-        </button>
-
-        <button
-          type="button"
-          onClick={closeConnectModal}
-          className="w-full h-10 rounded-2xl border border-white/8 text-white/40 text-sm font-medium hover:text-white/70 hover:border-white/15 transition"
-        >
-          Cancel
-        </button>
+            }}
+            className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
+            style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+          >
+            {sendingRequest ? "Sending…" : "Send request"}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -4269,7 +4246,7 @@ function ConnectionsPageContent() {
 
             {/* Scrollable content */}
             <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
-              <div className="mb-6 flex items-center gap-4">
+              <div className="mb-6 flex items-start gap-4">
                 <div
                   className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
                   style={{
@@ -4284,38 +4261,40 @@ function ConnectionsPageContent() {
                     {tripJoinModal.targetName}
                   </h3>
                 </div>
-                {tripRequestsLimit !== null && tripRequestsUsed !== null && (
-                  <div className="shrink-0 text-right">
-                    <p className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</p>
-                    <p className={`text-[13px] font-black tabular-nums leading-tight ${
-                      tripRequestsUsed >= tripRequestsLimit
-                        ? "text-rose-400"
-                        : tripRequestsUsed >= tripRequestsLimit * 0.8
-                          ? "text-amber-400"
-                          : "text-[#00F5FF]"
-                    }`}>
-                      {tripRequestsUsed}<span className="text-white/25 font-normal"> / {tripRequestsLimit}</span>
-                    </p>
-                  </div>
-                )}
+                <div className="mr-12 shrink-0 flex flex-col items-end gap-2 sm:mr-14">
+                  <button
+                    type="button"
+                    onClick={() => setTripLinkedPickerOpen((prev) => !prev)}
+                    className="inline-flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3.5 text-xs font-semibold text-white transition hover:border-[#00F5FF]/40 hover:text-[#9EFBFF]"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">group_add</span>
+                    Add Member
+                  </button>
+                  {tripRequestsLimit !== null && tripRequestsUsed !== null && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
+                      <span className={`text-[13px] font-black tabular-nums leading-tight ${
+                        tripRequestsUsed >= tripRequestsLimit
+                          ? "text-rose-400"
+                          : tripRequestsUsed >= tripRequestsLimit * 0.8
+                            ? "text-amber-400"
+                            : "text-[#00F5FF]"
+                      }`}>
+                        {tripRequestsUsed}<span className="text-white/25 font-normal"> / {tripRequestsLimit}</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Pending warning */}
-              {tripJoinWarning && (
-                <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
-                  <span className="material-symbols-outlined mt-px text-[16px] text-amber-400 shrink-0">warning</span>
-                  <span>
-                    {tripJoinWarning}{" "}
-                    <Link
-                      href={`/messages?tab=requests`}
-                      onClick={closeTripJoinModal}
-                      className="font-semibold text-[#00F5FF] underline underline-offset-2 hover:text-white"
-                    >
-                      Open in Messages
-                    </Link>
-                  </span>
-                </div>
-              )}
+              {tripJoinWarning ? (
+                <PendingRequestBanner
+                  message={tripJoinWarning}
+                  onCtaClick={closeTripJoinModal}
+                  className="mb-4"
+                />
+              ) : null}
 
               {/* Error */}
               {tripJoinError && (
@@ -4327,7 +4306,8 @@ function ConnectionsPageContent() {
 
 
               {/* Trip destination + dates */}
-              <div className="mb-5 flex items-center justify-center gap-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <div className="mb-5 flex items-center justify-center">
+              <div className="inline-flex items-center gap-6 rounded-2xl border border-white/8 bg-white/[0.03] px-5 py-3">
                 <div className="text-center">
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Destination</p>
                   <p className="mt-0.5 text-sm font-bold text-white">
@@ -4352,9 +4332,77 @@ function ConnectionsPageContent() {
                   </>
                 ) : null}
               </div>
+              </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="mb-2 text-sm font-semibold text-white">Optional note</div>
+              <div className="mb-5">
+                {tripJoinModal.linkedMemberUserId ? (
+                  <p className="text-xs text-[#9EFBFF]">
+                    Added: {tripLinkedMemberOptions.find((option) => option.userId === tripJoinModal.linkedMemberUserId)?.displayName ?? "Connection"}
+                  </p>
+                ) : null}
+                {tripLinkedPickerOpen ? (
+                  <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <input
+                      type="text"
+                      value={tripLinkedMemberQuery}
+                      onChange={(event) => setTripLinkedMemberQuery(event.target.value)}
+                      placeholder="Search connection..."
+                      className="mb-3 w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    />
+                    <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                      <button
+                        type="button"
+                        onClick={() => setTripJoinModal((prev) => ({ ...prev, linkedMemberUserId: "" }))}
+                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                          !tripJoinModal.linkedMemberUserId
+                            ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                            : "border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white"
+                        }`}
+                      >
+                        <span>No extra member</span>
+                        {!tripJoinModal.linkedMemberUserId ? (
+                          <span className="material-symbols-outlined text-[16px]">check</span>
+                        ) : null}
+                      </button>
+                      {filteredTripLinkedMemberOptions.map((option) => {
+                        const subtitle = [option.city, option.country].filter(Boolean).join(", ");
+                        const isSelected = tripJoinModal.linkedMemberUserId === option.userId;
+                        return (
+                          <button
+                            key={option.userId}
+                            type="button"
+                            onClick={() => {
+                              setTripJoinModal((prev) => ({ ...prev, linkedMemberUserId: option.userId }));
+                              setTripLinkedPickerOpen(false);
+                              setTripLinkedMemberQuery("");
+                            }}
+                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${
+                              isSelected
+                                ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                                : "border-white/10 bg-black/20 text-white/80 hover:border-white/20 hover:text-white"
+                            }`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold">{option.displayName}</span>
+                              {subtitle ? <span className="block truncate text-xs text-white/45">{subtitle}</span> : null}
+                            </span>
+                            {isSelected ? <span className="material-symbols-outlined text-[16px]">check</span> : null}
+                          </button>
+                        );
+                      })}
+                      {filteredTripLinkedMemberOptions.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-3 text-sm text-white/45">
+                          No matching connections.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Note */}
+              <div>
+                <div className="mb-2 text-sm font-semibold text-white">Note</div>
                 <textarea
                   value={tripJoinModal.note}
                   onChange={(event) => setTripJoinModal((prev) => ({ ...prev, note: event.target.value }))}
@@ -4389,7 +4437,7 @@ function ConnectionsPageContent() {
                 </button>
                 <button
                   type="button"
-                  disabled={tripRequestSending || Boolean(tripRequestMessageValidation)}
+                  disabled={tripRequestSending || Boolean(tripRequestMessageValidation) || Boolean(tripJoinWarning)}
                   onClick={sendTripJoinRequest}
                   className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
                   style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
@@ -4414,32 +4462,69 @@ function ConnectionsPageContent() {
               <MSIcon name="close" className="text-[22px]" />
             </button>
 
-            <div className="mb-6 flex items-center gap-4">
+            <div className="mb-6 flex items-start gap-4">
               <div
-                className="h-14 w-14 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
+                className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
                 style={{
                   backgroundImage: hostingModal.targetPhotoUrl
                     ? `url(${hostingModal.targetPhotoUrl})`
                     : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
                 }}
               />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">
-                  {hostingModal.requestType === "offer_to_host" ? "Offer to Host" : "Request Hosting"}
+                  {hostingModal.requestType === "offer_to_host" ? "Offer hosting" : "Request hosting"}
                 </p>
                 <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
                   {hostingModal.targetName}
                 </h3>
               </div>
+              {hostingModal.requestType === "request_hosting" ? (
+                <div className="mr-12 shrink-0 flex flex-col items-end gap-2 sm:mr-14">
+                  <button
+                    type="button"
+                    onClick={() => setHostingLinkedPickerOpen((prev) => !prev)}
+                    className="inline-flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3.5 text-xs font-semibold text-white transition hover:border-[#00F5FF]/40 hover:text-[#9EFBFF]"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">group_add</span>
+                    Add Member
+                  </button>
+                  {hostingRequestsLimit !== null && hostingRequestsUsed !== null ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
+                      <span
+                        className={`text-[13px] font-black tabular-nums leading-tight ${
+                          hostingRequestsUsed >= hostingRequestsLimit
+                            ? "text-rose-400"
+                            : hostingRequestsUsed >= hostingRequestsLimit * 0.8
+                              ? "text-amber-400"
+                              : "text-[#00F5FF]"
+                        }`}
+                      >
+                        {hostingRequestsUsed}<span className="font-normal text-white/25"> / {hostingRequestsLimit}</span>
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {hostingModal.requestType === "offer_to_host" && hostingOffersLimit !== null && hostingOffersUsed !== null && (
+                <div className="shrink-0 flex items-center gap-1.5">
+                  <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Offers</span>
+                  <span className={`text-[13px] font-black tabular-nums leading-tight ${
+                    hostingOffersUsed >= hostingOffersLimit
+                      ? "text-rose-400"
+                      : hostingOffersUsed >= hostingOffersLimit * 0.8
+                        ? "text-amber-400"
+                        : "text-[#00F5FF]"
+                  }`}>
+                    {hostingOffersUsed}<span className="text-white/25 font-normal"> / {hostingOffersLimit}</span>
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Pending warning */}
-            {hostingModalWarning && (
-              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
-                <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
-                <span>{hostingModalWarning}</span>
-              </div>
-            )}
+            {hostingModalWarning ? <PendingRequestBanner message={hostingModalWarning} className="mb-4" /> : null}
 
             {/* Error */}
             {hostingModalError && (
@@ -4449,33 +4534,34 @@ function ConnectionsPageContent() {
               </div>
             )}
 
-            {hostingModal.requestType === "offer_to_host" && hostingOffersLimit !== null && hostingOffersUsed !== null && (
-              <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs">
-                <span className="text-white/50">Hosting offers this month</span>
-                <span className={
-                  hostingOffersUsed >= hostingOffersLimit
-                    ? "font-bold text-rose-400"
-                    : hostingOffersUsed >= hostingOffersLimit * 0.8
-                      ? "font-bold text-amber-400"
-                      : "font-semibold text-white"
-                }>
-                  {hostingOffersUsed} / {hostingOffersLimit}
-                </span>
-              </div>
-            )}
-
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              {hostingModal.requestType === "offer_to_host" ? (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-[#FF00FF]/20 bg-[#FF00FF]/8 p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/55">Trip dates</div>
-                    <div className="mt-2 text-sm font-semibold text-white">
-                      {formatDateCompact(hostingModal.arrivalDate)} - {formatDateCompact(hostingModal.departureDate)}
+            {hostingModal.requestType === "offer_to_host" ? (
+              <div className="space-y-4">
+                {/* Destination + dates */}
+                <div className="flex items-center justify-center">
+                  <div className="inline-flex items-center gap-6 rounded-2xl border border-white/8 bg-white/[0.03] px-5 py-3">
+                    {(hostingModal.destinationCity || hostingModal.destinationCountry) && (
+                      <>
+                        <div className="text-center">
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Destination</p>
+                          <p className="mt-0.5 text-sm font-bold text-white">
+                            {hostingModal.destinationCity}
+                            {hostingModal.destinationCountry ? <span className="ml-1.5 font-normal text-white/50">{hostingModal.destinationCountry}</span> : null}
+                          </p>
+                        </div>
+                        <span className="text-white/20">|</span>
+                      </>
+                    )}
+                    <div className="text-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">From</p>
+                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(hostingModal.arrivalDate)}</p>
                     </div>
-                    <p className="mt-1 text-xs text-white/55">
-                      These dates come from the traveller trip. Set how many people you can host.
-                    </p>
+                    <span className="material-symbols-outlined text-[16px] text-white/25">arrow_forward</span>
+                    <div className="text-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">To</p>
+                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(hostingModal.departureDate)}</p>
+                    </div>
                   </div>
+                </div>
 
                   <label className="space-y-1.5">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
@@ -4502,7 +4588,7 @@ function ConnectionsPageContent() {
                       </span>
                     </div>
                     <p className="text-xs text-white/50">
-                      Optional short message to make the hosting offer clearer.
+                      Choose a quick template
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {HOST_OFFER_TEMPLATES.map((template, index) => (
@@ -4533,8 +4619,8 @@ function ConnectionsPageContent() {
                       <p className="text-xs text-[#FFC6FA]">{hostingMessageValidation}</p>
                     ) : null}
                   </div>
-                </div>
-              ) : (
+              </div>
+            ) : (
                 <>
                   <style>{`
                     input[type="date"]::-webkit-calendar-picker-indicator {
@@ -4542,7 +4628,7 @@ function ConnectionsPageContent() {
                     }
                   `}</style>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="space-y-1.5">
+                    <div className="space-y-1.5">
                       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Arrival date</span>
                       <input
                         type="date"
@@ -4550,46 +4636,45 @@ function ConnectionsPageContent() {
                         onChange={(event) => setHostingModal((prev) => ({ ...prev, arrivalDate: event.target.value }))}
                         className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                       />
-                      <label className="mt-1 flex items-center gap-2 text-xs text-white/70">
-                        <input
-                          type="checkbox"
-                          checked={hostingModal.arrivalFlexible}
-                          onChange={(event) =>
-                            setHostingModal((prev) => ({ ...prev, arrivalFlexible: event.target.checked }))
-                          }
-                          className="h-4 w-4 rounded border-white/25 bg-transparent accent-[#00F5FF]"
-                        />
-                        Flexible arrival
-                      </label>
-                    </label>
+                    </div>
 
-                    <label className="space-y-1.5">
+                    <div className="space-y-1.5">
                       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Departure date</span>
                       <input
                         type="date"
                         value={hostingModal.departureDate}
+                        disabled={hostingModal.departureFlexible}
                         onChange={(event) => setHostingModal((prev) => ({ ...prev, departureDate: event.target.value }))}
-                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:cursor-not-allowed disabled:opacity-40"
                       />
-                      <label className="mt-1 flex items-center gap-2 text-xs text-white/70">
+                      <label className="mt-1 flex items-center gap-2 text-xs text-white/70 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={hostingModal.departureFlexible}
+                          disabled={Boolean(hostingModal.departureDate)}
                           onChange={(event) =>
-                            setHostingModal((prev) => ({ ...prev, departureFlexible: event.target.checked }))
+                            setHostingModal((prev) => ({ ...prev, departureFlexible: event.target.checked, departureDate: event.target.checked ? "" : prev.departureDate }))
                           }
-                          className="h-4 w-4 rounded border-white/25 bg-transparent accent-[#00F5FF]"
+                          className="h-4 w-4 rounded border-white/25 bg-transparent accent-[#00F5FF] disabled:cursor-not-allowed disabled:opacity-40"
                         />
                         Flexible departure
                       </label>
-                    </label>
+                    </div>
                   </div>
 
                   <div className="mt-4">
                     <label className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
-                        Number of travellers
-                      </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                          Number of travellers
+                        </span>
+                        {hostingModal.targetMaxGuests ? (
+                          <span className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold text-white/50">
+                            <MSIcon name="group" className="text-[12px] text-[#00F5FF]" />
+                            Max {hostingModal.targetMaxGuests}
+                          </span>
+                        ) : null}
+                      </div>
                       <input
                         type="number"
                         min={1}
@@ -4604,12 +4689,73 @@ function ConnectionsPageContent() {
                         }}
                         className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                       />
-                      {hostingModal.targetMaxGuests && hostingModal.requestType === "request_hosting" ? (
-                        <p className="text-[11px] text-white/45">
-                          This host can accommodate up to {hostingModal.targetMaxGuests} {hostingModal.targetMaxGuests === 1 ? "guest" : "guests"}
-                        </p>
-                      ) : null}
                     </label>
+                  </div>
+
+                  <div className="mt-4">
+                    {hostingModal.linkedMemberUserId ? (
+                      <p className="text-xs text-[#9EFBFF]">
+                        Added: {hostingLinkedMemberOptions.find((option) => option.userId === hostingModal.linkedMemberUserId)?.displayName ?? "Connection"}
+                      </p>
+                    ) : null}
+                    {hostingLinkedPickerOpen ? (
+                      <div className={`${hostingModal.linkedMemberUserId ? "mt-3" : ""} rounded-2xl border border-white/8 bg-white/[0.03] p-3`}>
+                        <input
+                          type="text"
+                          value={hostingLinkedMemberQuery}
+                          onChange={(event) => setHostingLinkedMemberQuery(event.target.value)}
+                          placeholder="Search connection..."
+                          className="mb-3 w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        />
+                        <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                          <button
+                            type="button"
+                            onClick={() => setHostingModal((prev) => ({ ...prev, linkedMemberUserId: "" }))}
+                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                              !hostingModal.linkedMemberUserId
+                                ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                                : "border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white"
+                            }`}
+                          >
+                            <span>No extra member</span>
+                            {!hostingModal.linkedMemberUserId ? (
+                              <span className="material-symbols-outlined text-[16px]">check</span>
+                            ) : null}
+                          </button>
+                          {filteredHostingLinkedMemberOptions.map((option) => {
+                            const subtitle = [option.city, option.country].filter(Boolean).join(", ");
+                            const isSelected = hostingModal.linkedMemberUserId === option.userId;
+                            return (
+                              <button
+                                key={option.userId}
+                                type="button"
+                                onClick={() => {
+                                  setHostingModal((prev) => ({ ...prev, linkedMemberUserId: option.userId }));
+                                  setHostingLinkedPickerOpen(false);
+                                  setHostingLinkedMemberQuery("");
+                                }}
+                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${
+                                  isSelected
+                                    ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                                    : "border-white/10 bg-black/20 text-white/80 hover:border-white/20 hover:text-white"
+                                }`}
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold">{option.displayName}</span>
+                                  {subtitle ? <span className="block truncate text-xs text-white/45">{subtitle}</span> : null}
+                                </span>
+                                {isSelected ? <span className="material-symbols-outlined text-[16px]">check</span> : null}
+                              </button>
+                            );
+                          })}
+                          {filteredHostingLinkedMemberOptions.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-3 text-sm text-white/45">
+                              No matching connections.
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <label className="mt-4 block space-y-1.5">
@@ -4637,8 +4783,7 @@ function ConnectionsPageContent() {
                     ) : null}
                   </label>
                 </>
-              )}
-            </div>
+            )}
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <button
@@ -4650,7 +4795,7 @@ function ConnectionsPageContent() {
               </button>
               <button
                 type="button"
-                disabled={hostingSending || Boolean(hostingMessageValidation)}
+                disabled={hostingSending || Boolean(hostingMessageValidation) || Boolean(hostingModalWarning)}
                 onClick={sendHostingRequest}
                 className="h-11 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
                 style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
@@ -4659,7 +4804,7 @@ function ConnectionsPageContent() {
                   ? "Sending…"
                   : hostingModal.requestType === "offer_to_host"
                   ? "Send host offer"
-                  : "Request Hosting"}
+                  : "Request hosting"}
               </button>
             </div>
           </div>
@@ -4736,7 +4881,7 @@ export default function ConnectionsPage() {
                 {Array.from({ length: 8 }).map((_, index) => (
                   <div
                     key={`discover-card-sk-${index}`}
-                    className="connections-card flex min-h-[360px] animate-pulse flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] md:h-64 md:min-h-0 md:flex-row"
+                    className="connections-card flex min-h-[196px] animate-pulse flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] md:h-64 md:min-h-0 md:flex-row"
                   >
                     <div className="h-44 w-full bg-white/5 md:h-full md:w-1/2" />
                     <div className="flex h-full w-full flex-col justify-between p-4 md:w-1/2">

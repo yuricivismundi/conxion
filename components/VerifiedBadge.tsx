@@ -1,8 +1,8 @@
 "use client";
 
-import { useId } from "react";
+import { memo, useId } from "react";
 
-export default function VerifiedBadge({
+const VerifiedBadge = memo(function VerifiedBadge({
   size = 18,
   className = "",
   label,
@@ -56,4 +56,6 @@ export default function VerifiedBadge({
       ) : null}
     </span>
   );
-}
+});
+
+export default VerifiedBadge;

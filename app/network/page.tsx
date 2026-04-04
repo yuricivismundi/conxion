@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
 import { isSchemaMissingError } from "@/lib/growth/types";
 import { supabase } from "@/lib/supabase/client";
@@ -131,6 +132,11 @@ type AddDraft = {
   tags: string;
   meetingContext: string;
   notes: string;
+};
+
+type InfoTooltipProps = {
+  title: string;
+  body: string;
 };
 
 const NETWORK_PAGE_SIZE = 25;
@@ -259,6 +265,98 @@ function normalizeToken(value: string) {
   return value.trim().toLowerCase();
 }
 
+function InfoTooltip({ title, body }: InfoTooltipProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const [tooltipStyle, setTooltipStyle] = useState<CSSProperties | undefined>(undefined);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      const button = buttonRef.current;
+      if (!button || typeof window === "undefined") return;
+
+      const rect = button.getBoundingClientRect();
+      const viewportPadding = 16;
+      const width = Math.min(288, Math.max(180, window.innerWidth - viewportPadding * 2));
+      const estimatedHeight = tooltipRef.current?.offsetHeight ?? 132;
+      const fitsBelow = rect.bottom + 8 + estimatedHeight <= window.innerHeight - viewportPadding;
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - width),
+        window.innerWidth - width - viewportPadding
+      );
+      const top = fitsBelow
+        ? rect.bottom + 8
+        : Math.max(viewportPadding, rect.top - estimatedHeight - 8);
+
+      setTooltipStyle({ left, top, width });
+    };
+
+    updatePosition();
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (target && !containerRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative inline-flex items-center"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label={title}
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        onFocus={() => setOpen(true)}
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/12 bg-white/[0.04] text-slate-400 transition hover:border-cyan-300/35 hover:text-cyan-100"
+      >
+        <span className="material-symbols-outlined text-[14px]">info</span>
+      </button>
+      <div
+        ref={tooltipRef}
+        style={tooltipStyle}
+        className={[
+          "fixed z-20 rounded-2xl border border-white/12 bg-[#101317] p-3 text-left shadow-[0_16px_40px_rgba(0,0,0,0.35)] transition",
+          open ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-1 opacity-0",
+        ].join(" ")}
+        role="tooltip"
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/80">{title}</p>
+        <p className="mt-2 text-xs leading-relaxed text-slate-300">{body}</p>
+      </div>
+    </div>
+  );
+}
+
 function normalizeCsvList(value: string) {
   return value
     .split(",")
@@ -325,12 +423,6 @@ function formatRelative(value: string | null | undefined) {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
-}
-
-function formatDateLabel(dateValue: string | null | undefined) {
-  const time = toMs(dateValue);
-  if (!time) return "Date TBD";
-  return new Date(time).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function titleCase(value: string) {
@@ -441,6 +533,16 @@ function NetworkPageContent() {
 
   const [busyContactId, setBusyContactId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (activeTab !== "references" || !meId) return;
+    const params = new URLSearchParams();
+    params.set("tab", "references");
+    if (referenceConnectionId) {
+      params.set("connectionId", referenceConnectionId);
+    }
+    router.replace(`/profile/${encodeURIComponent(meId)}?${params.toString()}`);
+  }, [activeTab, meId, referenceConnectionId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -976,7 +1078,6 @@ function NetworkPageContent() {
   );
 
   const recentConnectionCutoff = useMemo(() => Date.now() - 45 * 24 * 60 * 60 * 1000, []);
-  const recentConnections = useMemo(() => connections.slice(0, 6), [connections]);
   const recentConnectionsCount = useMemo(
     () => connections.filter((item) => toMs(item.createdAt) >= recentConnectionCutoff).length,
     [connections, recentConnectionCutoff]
@@ -1066,6 +1167,18 @@ function NetworkPageContent() {
     query.trim().length > 0 || cityFilter !== "all" || styleFilter !== "all" || roleFilter !== "all" || activityFilter !== "all";
   const hasConnectionFilters =
     query.trim().length > 0 || connectionCityFilter !== "all" || connectionStyleFilter !== "all" || connectionRoleFilter !== "all";
+  const activeNotesTooltip =
+    activeTab === "following"
+      ? {
+          title: "Following Notes",
+          body: "Keep private notes on the members you follow. Add tags, meeting context, and personal reminders so you always have reference context for why they matter in your network.",
+        }
+      : activeTab === "contacts"
+      ? {
+          title: "Contact Notes",
+          body: "Keep private notes on the contacts you add, including external contacts. Add tags, context, roles, and notes so you always have reference context for why they matter in your network.",
+        }
+      : null;
 
   const followedFeed = useMemo<FeedItem[]>(() => {
     const items: FeedItem[] = [];
@@ -1378,7 +1491,6 @@ function NetworkPageContent() {
             <div className="no-scrollbar mx-auto flex w-full max-w-[860px] flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:justify-center">
               {[
                 { key: "connections" as const, label: "Connections", icon: "hub", count: connectionCount },
-                { key: "references" as const, label: "References", icon: "verified", count: referencesTotalCount },
                 { key: "following" as const, label: "Following", icon: "person_add", count: followingCount },
                 { key: "contacts" as const, label: "Contacts", icon: "contacts", count: externalContactsCount },
               ].map((tab) => {
@@ -1425,10 +1537,15 @@ function NetworkPageContent() {
               ) : null}
 
               {activeTab === "following" || activeTab === "contacts" ? (
-                <div className="hidden sm:flex justify-start sm:justify-end">
-                  <p className="text-xs text-slate-500">
-                    Showing {filteredContactCards.length} of {scopedContacts.length}
-                  </p>
+                <div className="flex justify-start sm:justify-end">
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <p>
+                      Showing {filteredContactCards.length} of {scopedContacts.length}
+                    </p>
+                    {activeNotesTooltip ? (
+                      <InfoTooltip title={activeNotesTooltip.title} body={activeNotesTooltip.body} />
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
 
@@ -1510,7 +1627,7 @@ function NetworkPageContent() {
                         <option value="all">All dance styles</option>
                         {connectionStyleOptions.map((style) => (
                           <option key={style} value={style}>
-                            {style}
+                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
                           </option>
                         ))}
                       </select>
@@ -1541,24 +1658,7 @@ function NetworkPageContent() {
 
               {activeTab === "following" || activeTab === "contacts" ? (
                 <div className="space-y-3">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    {activeTab === "following" ? (
-                      <div className="max-w-xl rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Following Notes</p>
-                        <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                          Keep private notes on the members you follow. Add tags, meeting context, and personal reminders so you always have reference context for why they matter in your network.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="max-w-xl rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Contact Notes</p>
-                        <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                          Keep private notes on the contacts you add, including external contacts. Add tags, context, roles, and notes so you always have reference context for why they matter in your network.
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:max-w-[620px] xl:justify-end">
+                  <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:justify-end">
                       <div className="group relative w-full min-w-0 sm:flex-1">
                         <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors group-focus-within:text-cyan-300">
                           search
@@ -1591,7 +1691,6 @@ function NetworkPageContent() {
                         <span className="material-symbols-outlined text-[18px]">tune</span>
                         Filters
                       </button>
-                    </div>
                   </div>
 
                   {showContactFilters ? (
@@ -1616,7 +1715,7 @@ function NetworkPageContent() {
                         <option value="all">All dance styles</option>
                         {styleOptions.map((style) => (
                           <option key={style} value={style}>
-                            {style}
+                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
                           </option>
                         ))}
                       </select>
@@ -1663,13 +1762,26 @@ function NetworkPageContent() {
             {activeTab === "connections" ? (
               <>
                 {loading ? (
-                  <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-6 text-sm text-slate-400">Loading connections…</div>
+                  <div className="grid grid-cols-1 justify-items-center gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <div key={`net-sk-conn-${i}`} className="flex w-full max-w-[252px] animate-pulse flex-col items-center rounded-2xl border border-white/10 bg-white/[0.03] px-2 py-3">
+                        <div className="mb-1.5 h-[78px] w-[78px] rounded-2xl bg-white/10" />
+                        <div className="mt-1 h-4 w-28 rounded bg-white/10" />
+                        <div className="mt-1.5 h-3 w-24 rounded bg-white/10" />
+                        <div className="mt-1 h-3 w-20 rounded bg-white/10" />
+                        <div className="mt-3 flex gap-2">
+                          <div className="h-8 w-20 rounded-xl bg-white/10" />
+                          <div className="h-8 w-8 rounded-xl bg-white/10" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : visibleConnections.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-8 text-center text-sm text-slate-500">
                     No connections found for this filter.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 justify-items-center gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  <div className="animate-fade-in-grid grid grid-cols-1 justify-items-center gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                     {paginatedConnections.map((item) => {
                       const profile = item.profile;
                       const cityLabel = [profile?.city, profile?.country].filter(Boolean).join(", ") || "Location not set";
@@ -1680,42 +1792,47 @@ function NetworkPageContent() {
                           key={item.id}
                           className="group flex w-full max-w-[252px] flex-col items-center rounded-2xl border border-white/10 bg-white/[0.03] px-2 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#00F5FF]/35 hover:shadow-[0_0_20px_rgba(0,245,255,0.12)]"
                         >
-                          <div className="mb-1.5 flex justify-center">
+                          <div className="relative mb-2 flex justify-center">
                             <Avatar
                               src={profile?.avatarUrl ?? null}
                               alt={profile?.displayName ?? "Member"}
                               size={78}
                               className="rounded-2xl border border-white/10"
                             />
+                            {isFollowing ? (
+                              <div
+                                className="absolute -right-2 -top-2 z-10 flex items-center justify-center rounded-full"
+                                style={{
+                                  width: 22,
+                                  height: 22,
+                                  background: "linear-gradient(135deg, #00F5FF, #FF00E5)",
+                                  boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                                }}
+                                title="Following"
+                              >
+                                <span className="material-symbols-outlined" style={{ fontSize: 13, color: "#06121a", lineHeight: 1 }}>check</span>
+                              </div>
+                            ) : null}
                           </div>
                           <div className="flex max-w-full items-center justify-center gap-1 text-center">
                             <h3 className="truncate text-[15px] font-bold leading-tight text-white">{profile?.displayName ?? "Member"}</h3>
-                            {profile?.verified ? (
-                              <span className="material-symbols-outlined text-[16px] text-[#00F5FF]">verified</span>
-                            ) : null}
+                            {profile?.verified ? <VerifiedBadge size={18} /> : null}
                           </div>
                           <p className="mt-1 truncate text-center text-[12px] font-medium text-[#7FEFF8]">{cityLabel}</p>
                           <p className="mt-1 truncate text-center text-[10px] text-slate-400">{roleLabel}</p>
-                          {isFollowing ? (
-                            <div className="mt-2.5 flex flex-wrap items-center justify-center gap-1.5">
-                              <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100">
-                                Following
-                              </span>
-                            </div>
-                          ) : null}
-                          <div className="mt-3 inline-flex items-center justify-center gap-2">
+                          <div className="mt-3 grid w-full grid-cols-2 gap-2">
                             <Link
                               href={`/profile/${encodeURIComponent(item.otherUserId)}`}
-                              className="inline-flex h-8 items-center justify-center rounded-xl bg-gradient-to-r from-[#00F5FF] to-[#FF00E5] px-2.5 text-[11px] font-bold text-[#06121a] hover:brightness-110"
+                              className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#00F5FF] to-[#FF00E5] px-2.5 text-[11px] font-bold text-[#06121a] hover:brightness-110"
                             >
                               View Profile
                             </Link>
                             <Link
                               href={`/messages?thread=${encodeURIComponent(`conn:${item.id}`)}`}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-white/[0.05] text-white/90 hover:border-[#00F5FF]/35 hover:text-[#B8FBFF]"
+                              className="inline-flex h-9 w-full items-center justify-center rounded-xl border border-white/20 bg-white/[0.05] px-2.5 text-[11px] font-bold text-white/90 hover:border-[#00F5FF]/35 hover:text-[#B8FBFF]"
                               aria-label={`Message ${profile?.displayName ?? "member"}`}
                             >
-                              <span className="material-symbols-outlined text-[17px]">chat_bubble</span>
+                              Message
                             </Link>
                           </div>
                         </article>
@@ -1740,13 +1857,30 @@ function NetworkPageContent() {
               <>
                 <article className="space-y-6">
                   {loading ? (
-                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-5 text-sm text-slate-400">Loading contacts…</div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={`net-sk-contact-${i}`} className="flex animate-pulse flex-col gap-3 rounded-2xl border border-white/12 bg-[#17191d] p-4">
+                          <div className="flex items-start gap-3">
+                            <div className="h-[46px] w-[46px] shrink-0 rounded-xl bg-white/10" />
+                            <div className="flex-1 space-y-2 pt-1">
+                              <div className="h-4 w-32 rounded bg-white/10" />
+                              <div className="h-3 w-24 rounded bg-white/10" />
+                              <div className="h-3 w-20 rounded bg-white/10" />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="h-4 w-16 rounded bg-white/10" />
+                            <div className="h-4 w-20 rounded bg-white/10" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   ) : filteredContactCards.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-white/15 bg-black/20 px-3 py-8 text-center text-sm text-slate-500">
                       {activeTab === "following" ? "No followed members match the current filters." : "No contacts match the current filters."}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="animate-fade-in-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                       {paginatedContactCards.map((card) => {
                         const cityLabel = [card.city, card.country].filter(Boolean).join(", ") || "Location not set";
                         const cardChips = uniqueValues([...card.statusIndicators, ...card.roles, ...card.tags]);
@@ -1887,9 +2021,6 @@ function NetworkPageContent() {
               </>
             ) : null}
 
-            {activeTab === "references" ? (
-              <ReferencesHubView initialConnectionId={referenceConnectionId} />
-            ) : null}
           </section>
         </div>
       </main>

@@ -3,6 +3,8 @@ export type AppEmailKind =
   | "connection_request_accepted"
   | "connection_request_declined"
   | "trip_request_received"
+  | "trip_request_accepted"
+  | "trip_request_declined"
   | "hosting_request_received"
   | "hosting_request_accepted"
   | "hosting_request_declined"

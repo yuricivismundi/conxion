@@ -64,7 +64,7 @@ export default function OnboardingShell({
               Step {step} of 3
             </span>
             <span className="text-xs font-medium text-white/40">
-              {step === 1 ? "Core Profile" : step === 2 ? "Interests" : "Finalize"}
+              {step === 1 ? "Core profile" : step === 2 ? "Interests" : "Finalize"}
             </span>
           </div>
           <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">

@@ -3,10 +3,16 @@ import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-serve
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
+import {
+  ensureLinkedMemberPairThread,
+  mergeLinkedMemberContextMetadata,
+  resolveLinkedMember,
+} from "@/lib/requests/linked-members";
 
 type CreateTripRequestPayload = {
   tripId?: string;
   note?: string | null;
+  linkedMemberUserId?: string | null;
 };
 
 function shouldFallbackTripRequestRpc(message: string) {
@@ -107,6 +113,7 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => null)) as CreateTripRequestPayload | null;
     const tripId = body?.tripId?.trim() ?? "";
     const note = typeof body?.note === "string" ? body.note.trim() : "";
+    const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
 
     if (!tripId) {
       return NextResponse.json({ ok: false, error: "tripId is required." }, { status: 400 });
@@ -225,6 +232,39 @@ export async function POST(req: Request) {
     const requestRow = (requestRes.data ?? null) as { id?: string } | null;
 
     requestId = requestId || (typeof requestRow?.id === "string" ? requestRow.id : "");
+
+    if (requestId && ownerId && ownerId !== authData.user.id) {
+      const linkedMember = await resolveLinkedMember({
+        serviceClient: service,
+        actorUserId: authData.user.id,
+        recipientUserId: ownerId,
+        linkedMemberUserId,
+      });
+
+      if (linkedMember) {
+        const linkedUpdateRes = await service
+          .from("trip_requests")
+          .update({ linked_member_user_id: linkedMember.userId } as never)
+          .eq("id", requestId);
+        if (linkedUpdateRes.error) {
+          throw new Error(linkedUpdateRes.error.message);
+        }
+
+        await mergeLinkedMemberContextMetadata({
+          serviceClient: service,
+          sourceTable: "trip_requests",
+          sourceId: requestId,
+          linkedMember,
+        });
+
+        await ensureLinkedMemberPairThread({
+          serviceClient: service,
+          actorUserId: authData.user.id,
+          linkedMember,
+          recipientUserId: ownerId,
+        });
+      }
+    }
 
     if (createdRequest && ownerId && ownerId !== authData.user.id) {
       await sendAppEmailBestEffort({

@@ -431,7 +431,7 @@ export default function AccountSettingsPage() {
                     href="/account-settings/data-requests"
                     className="flex items-center justify-between rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white hover:bg-black/40"
                   >
-                    <span>Privacy & data requests</span>
+                    <span>Privacy rights & contact</span>
                     <span className="material-symbols-outlined text-[18px] text-cyan-300">arrow_forward</span>
                   </Link>
                   <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">

@@ -4,10 +4,8 @@
 import { useMemo, useState } from "react";
 import type { ConnectContext, ReasonItem } from "@/lib/connectReasons";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { cx } from "@/lib/cx";
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 type Props = {
   open: boolean;

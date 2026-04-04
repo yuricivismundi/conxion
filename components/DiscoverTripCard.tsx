@@ -3,6 +3,7 @@
 
 import VerifiedBadge from "@/components/VerifiedBadge";
 import Avatar from "@/components/Avatar";
+import { cx } from "@/lib/cx";
 
 type TripPurpose = "Holiday Trip" | "Dance Festival";
 type TripStatus = "active" | "inactive";
@@ -27,9 +28,6 @@ export type TripCardTrip = {
   verified_label: string | null;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function formatDateShort(iso: string) {
   if (!iso) return "—";

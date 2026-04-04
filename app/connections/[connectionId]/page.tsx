@@ -7,6 +7,7 @@ import Nav from "@/components/Nav";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
 import { supabase } from "@/lib/supabase/client";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
+import { cx } from "@/lib/cx";
 
 type SyncStatus = "pending" | "accepted" | "declined" | "cancelled" | "completed";
 type SyncType = "training" | "social_dancing" | "workshop";
@@ -40,9 +41,6 @@ type ProfileRow = {
   roles?: unknown;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -531,7 +529,7 @@ export default function ConnectionDetailPage() {
                             data-testid="sync-action-complete"
                             className="rounded-lg border border-emerald-300/35 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-60"
                           >
-                            {busy ? "Saving..." : "Mark Completed"}
+                            {busy ? "Saving..." : "Mark completed"}
                           </button>
                         ) : null}
                       </div>
@@ -608,7 +606,7 @@ export default function ConnectionDetailPage() {
                 data-testid="sync-propose-submit"
                 className="rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-[#052328] hover:bg-cyan-200 disabled:opacity-60"
               >
-                {proposeBusy ? "Saving..." : "Send Activity"}
+                {proposeBusy ? "Saving..." : "Send activity"}
               </button>
             </div>
           </div>
@@ -624,7 +622,7 @@ export default function ConnectionDetailPage() {
             : "This unlocks the reference flow for both participants."
         }
         confirmVariant={confirmSyncAction.action === "cancel" ? "danger" : "primary"}
-        confirmLabel={confirmSyncAction.action === "cancel" ? "Cancel Activity" : "Mark Completed"}
+        confirmLabel={confirmSyncAction.action === "cancel" ? "Cancel activity" : "Mark completed"}
         onCancel={() => setConfirmSyncAction({ open: false, syncId: "", action: "cancel" })}
         onConfirm={() => {
           const { syncId, action } = confirmSyncAction;

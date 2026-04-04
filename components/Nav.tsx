@@ -8,12 +8,10 @@ import { supabase } from "@/lib/supabase/client";
 import { useAppLanguage } from "@/components/AppLanguageProvider";
 import NotificationsBell from "@/components/NotificationsBell";
 import { fetchUnreadThreadTokens } from "@/lib/messages/unread";
+import { cx } from "@/lib/cx";
 
 type NavProps = { title?: string };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 const LOCAL_MANUAL_UNREAD_STORAGE_KEY = "cx_messages_manual_unread_v1";
 
@@ -172,9 +170,9 @@ export default function Nav({ title }: NavProps) {
 
   const tabs = [
     { href: "/connections", label: t("nav.discover"), icon: "explore" },
-    { href: "/network", label: t("nav.network"), icon: "hub" },
     { href: "/messages", label: t("nav.messages"), icon: "chat" },
     { href: "/events", label: t("nav.events"), icon: "calendar_today" },
+    { href: "/network", label: t("nav.network"), icon: "hub" },
     { href: "/trips", label: t("nav.trips"), icon: "travel_explore" },
   ];
 
@@ -347,7 +345,7 @@ export default function Nav({ title }: NavProps) {
                     href="/pricing"
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
                   >
-                    Upgrade your Plan
+                    Upgrade your plan
                   </Link>
                   <Link
                     href="/notifications"

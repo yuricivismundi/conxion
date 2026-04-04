@@ -17,7 +17,7 @@ type Props = {
 
 export default function GetVerifiedButton({
   className,
-  label = "Get Verified",
+  label = "Get verified",
   children,
   returnTo,
   resumePayload,

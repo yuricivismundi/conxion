@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sendAdminThreadNotice } from "@/lib/admin/communication";
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
 function getSupabaseUserClient(token: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -33,6 +35,39 @@ function mapModerateReportErrorStatus(message: string) {
   return 500;
 }
 
+function buildReportNotice(params: {
+  action: ModerateAction;
+  subject: string;
+  ticketCode: string;
+  note: string;
+}) {
+  const subjectLabel = params.subject || "your report";
+  const ticketLabel = params.ticketCode ? ` (${params.ticketCode})` : "";
+  const noteSuffix = params.note ? `\n\nAdmin note: ${params.note}` : "";
+
+  if (params.action === "resolve") {
+    return {
+      title: "Report resolved",
+      notificationBody: `Admin resolved ${subjectLabel}${ticketLabel}.`,
+      message: `Your report for "${subjectLabel}"${ticketLabel} was resolved by admin.${noteSuffix}`,
+    };
+  }
+
+  if (params.action === "dismiss") {
+    return {
+      title: "Report reviewed",
+      notificationBody: `Admin reviewed ${subjectLabel}${ticketLabel} and dismissed it.`,
+      message: `Your report for "${subjectLabel}"${ticketLabel} was reviewed by admin and dismissed.${noteSuffix}`,
+    };
+  }
+
+  return {
+    title: "Report reopened",
+    notificationBody: `Admin reopened ${subjectLabel}${ticketLabel}.`,
+    message: `Your report for "${subjectLabel}"${ticketLabel} was reopened by admin.${noteSuffix}`,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -56,6 +91,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
     }
 
+    const service = getSupabaseServiceClient();
     const { data, error } = await supabase.rpc("moderate_report", {
       p_report_id: reportId,
       p_action: action,
@@ -67,32 +103,87 @@ export async function POST(req: Request) {
     }
 
     const [{ data: reportRow }, { data: claimRow }] = await Promise.all([
-      supabase.from("reports").select("id,status").eq("id", reportId).maybeSingle(),
-      supabase
+      service.from("reports").select("id,status,reporter_id,reason").eq("id", reportId).maybeSingle(),
+      service
         .from("reference_report_claims")
         .select("id,reporter_id,reporter_email,subject,ticket_code")
         .eq("report_id", reportId)
         .maybeSingle(),
     ]);
 
-    if (claimRow?.reporter_id) {
+    const normalizedReport = (reportRow ?? null) as
+      | {
+          id?: string;
+          status?: string | null;
+          reporter_id?: string | null;
+          reason?: string | null;
+        }
+      | null;
+    const normalizedClaim = (claimRow ?? null) as
+      | {
+          id?: string;
+          reporter_id?: string | null;
+          reporter_email?: string | null;
+          subject?: string | null;
+          ticket_code?: string | null;
+        }
+      | null;
+
+    let threadToken: string | null = null;
+    let notificationWarning: string | null = null;
+    const reporterId = normalizedClaim?.reporter_id ?? normalizedReport?.reporter_id ?? null;
+    if (reporterId && reporterId !== authData.user.id) {
+      const noticeContent = buildReportNotice({
+        action,
+        subject: normalizedClaim?.subject ?? normalizedReport?.reason ?? "your report",
+        ticketCode: normalizedClaim?.ticket_code ?? "",
+        note: note?.trim() ?? "",
+      });
+      try {
+        const notice = await sendAdminThreadNotice({
+          serviceClient: service,
+          actorId: authData.user.id,
+          recipientUserId: reporterId,
+          title: noticeContent.title,
+          message: noticeContent.message,
+          notificationBody: noticeContent.notificationBody,
+          metadata: {
+            source: "report_moderation",
+            report_id: reportId,
+            moderation_action: action,
+            ticket_code: normalizedClaim?.ticket_code ?? null,
+          },
+        });
+        threadToken = notice.threadToken;
+        notificationWarning = notice.notificationError;
+      } catch (noticeError: unknown) {
+        notificationWarning = noticeError instanceof Error ? noticeError.message : "Could not deliver the reporter update.";
+      }
+    }
+
+    if (normalizedClaim?.reporter_id) {
       await sendAppEmailBestEffort({
         kind: "support_case_updated",
-        recipientUserId: claimRow.reporter_id,
+        recipientUserId: normalizedClaim.reporter_id,
         recipientEmailOverride:
-          typeof claimRow.reporter_email === "string" && claimRow.reporter_email.trim().length > 0
-            ? claimRow.reporter_email
+          typeof normalizedClaim.reporter_email === "string" && normalizedClaim.reporter_email.trim().length > 0
+            ? normalizedClaim.reporter_email
             : undefined,
         actorUserId: authData.user.id,
-        ticketCode: typeof claimRow.ticket_code === "string" ? claimRow.ticket_code : null,
-        supportClaimId: typeof claimRow.id === "string" ? claimRow.id : null,
-        supportSubject: typeof claimRow.subject === "string" ? claimRow.subject : "Reference report",
-        supportStatus: typeof reportRow?.status === "string" ? reportRow.status : action,
-        idempotencySeed: `support-case-update:${reportId}:${typeof reportRow?.status === "string" ? reportRow.status : action}`,
+        ticketCode: typeof normalizedClaim.ticket_code === "string" ? normalizedClaim.ticket_code : null,
+        supportClaimId: typeof normalizedClaim.id === "string" ? normalizedClaim.id : null,
+        supportSubject: typeof normalizedClaim.subject === "string" ? normalizedClaim.subject : "Reference report",
+        supportStatus: typeof normalizedReport?.status === "string" ? normalizedReport.status : action,
+        idempotencySeed: `support-case-update:${reportId}:${typeof normalizedReport?.status === "string" ? normalizedReport.status : action}`,
       });
     }
 
-    return NextResponse.json({ ok: true, moderation_log_id: data ?? null });
+    return NextResponse.json({
+      ok: true,
+      moderation_log_id: data ?? null,
+      threadToken,
+      notificationWarning,
+    });
   } catch (e: unknown) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Server error" },

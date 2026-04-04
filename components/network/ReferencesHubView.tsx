@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PaginationControls from "@/components/PaginationControls";
 import { supabase } from "@/lib/supabase/client";
@@ -14,10 +14,16 @@ import {
   referenceContextShortLabel,
   type ReferenceContextTag,
 } from "@/lib/activities/types";
+import { cx } from "@/lib/cx";
 type Sentiment = "positive" | "neutral" | "negative";
-type FeedFilter = "received" | "given" | "pending" | "archived";
+type FeedFilter = "received" | "given" | "pending";
+type FeedSort = "latest" | "oldest";
 type CandidateFilter = "all" | ReferenceContextTag;
-const REFERENCE_FEED_PAGE_SIZE = 25;
+const REFERENCE_FEED_PAGE_SIZE = 10;
+const REFERENCE_WRITE_WINDOW_DAYS = 10;
+const REFERENCE_REVEAL_WINDOW_DAYS = 10;
+const REFERENCE_PROMPT_LOOKBACK_DAYS = REFERENCE_WRITE_WINDOW_DAYS + 1;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type LiteProfile = {
   userId: string;
@@ -37,6 +43,8 @@ type CandidateItem = {
   recipientName: string;
   title: string;
   subtitle: string;
+  dueAt: string;
+  expiresAt: string;
   endedAt: string;
 };
 
@@ -145,11 +153,9 @@ type ReferenceRequestRowDb = {
 
 type ReferencesHubViewProps = {
   initialConnectionId?: string | null;
+  embedded?: boolean;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function parseDate(value: string | null | undefined) {
   if (!value) return null;
@@ -163,11 +169,50 @@ function formatDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
-function within15Days(value: string | null | undefined) {
+function formatLongDate(value: string | null | undefined) {
+  const date = parseDate(value);
+  if (!date) return "-";
+  return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(date);
+}
+
+function addHours(value: string | null | undefined, hours: number) {
+  const date = parseDate(value);
+  if (!date) return "";
+  return new Date(date.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function addDays(value: string | null | undefined, days: number) {
+  const date = parseDate(value);
+  if (!date) return "";
+  return new Date(date.getTime() + days * DAY_MS).toISOString();
+}
+
+function isActiveReferenceWindow(dueAt: string | null | undefined, expiresAt: string | null | undefined) {
+  const due = parseDate(dueAt);
+  const expires = parseDate(expiresAt);
+  const now = Date.now();
+  if (!due || !expires) return false;
+  return due.getTime() <= now && expires.getTime() >= now;
+}
+
+function getDaysRemaining(value: string | null | undefined) {
+  const date = parseDate(value);
+  if (!date) return null;
+  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / DAY_MS));
+}
+
+function formatReferenceDeadline(value: string | null | undefined) {
+  const daysRemaining = getDaysRemaining(value);
+  if (daysRemaining === null) return "";
+  if (daysRemaining <= 0) return "Reference window closes today.";
+  return `You have ${daysRemaining} more ${daysRemaining === 1 ? "day" : "days"} to write a reference.`;
+}
+
+function withinReferenceActionWindow(value: string | null | undefined) {
   const date = parseDate(value);
   if (!date) return false;
   const ms = Date.now() - date.getTime();
-  return ms >= 0 && ms <= 15 * 24 * 60 * 60 * 1000;
+  return ms >= 0 && ms <= REFERENCE_REVEAL_WINDOW_DAYS * DAY_MS;
 }
 
 function initialsFromName(value: string) {
@@ -380,6 +425,7 @@ function ReferencesHubSkeleton() {
 export default function ReferencesHubView({ initialConnectionId = null }: ReferencesHubViewProps) {
   const router = useRouter();
   const initialConnectionIdValue = (initialConnectionId ?? "").trim();
+  const loadRequestIdRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -390,10 +436,10 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
   const [profilesById, setProfilesById] = useState<Record<string, LiteProfile>>({});
   const [candidates, setCandidates] = useState<CandidateItem[]>([]);
   const [selectedCandidateKey, setSelectedCandidateKey] = useState<string>("");
-  const [pendingPromptCount, setPendingPromptCount] = useState(0);
   const [candidateFilter, setCandidateFilter] = useState<CandidateFilter>("all");
   const [feedFilter, setFeedFilter] = useState<FeedFilter>(initialConnectionIdValue ? "pending" : "received");
   const [feedContextFilter, setFeedContextFilter] = useState<"all" | ReferenceContextTag>("all");
+  const [feedSort, setFeedSort] = useState<FeedSort>("latest");
   const [feedPage, setFeedPage] = useState(1);
 
   const [sentiment, setSentiment] = useState<Sentiment>("positive");
@@ -402,14 +448,10 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
 
   const [given, setGiven] = useState<ReferenceItem[]>([]);
   const [received, setReceived] = useState<ReferenceItem[]>([]);
-  const [archivedGiven, setArchivedGiven] = useState<ReferenceItem[]>([]);
-  const [archivedReceived, setArchivedReceived] = useState<ReferenceItem[]>([]);
-
   const [replyDraft, setReplyDraft] = useState<Record<string, string>>({});
   const [editDraft, setEditDraft] = useState<Record<string, { body: string; sentiment: Sentiment }>>({});
   const [busyReferenceId, setBusyReferenceId] = useState<string | null>(null);
   const [openMenuReferenceId, setOpenMenuReferenceId] = useState<string | null>(null);
-  const [archivingReferenceId, setArchivingReferenceId] = useState<string | null>(null);
 
   const selectedCandidate = useMemo(
     () => candidates.find((item) => item.key === selectedCandidateKey) ?? null,
@@ -418,65 +460,36 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
 
   const visibleCandidates = useMemo(() => {
     const rows = candidateFilter === "all" ? candidates : candidates.filter((item) => item.type === candidateFilter);
-    return rows;
-  }, [candidateFilter, candidates]);
+    return [...rows].sort((a, b) =>
+      feedSort === "oldest"
+        ? a.endedAt.localeCompare(b.endedAt)
+        : b.endedAt.localeCompare(a.endedAt)
+    );
+  }, [candidateFilter, candidates, feedSort]);
 
   const selectedPendingCandidate = useMemo(() => {
     if (visibleCandidates.length === 0) return null;
     return visibleCandidates.find((item) => item.key === selectedCandidateKey) ?? visibleCandidates[0];
   }, [selectedCandidateKey, visibleCandidates]);
-  const visibleCandidateGroups = useMemo(() => {
-    const groups = new Map<
-      string,
-      {
-        recipientId: string;
-        recipientName: string;
-        items: CandidateItem[];
-        latestEndedAt: string;
-      }
-    >();
-
-    visibleCandidates.forEach((item) => {
-      const existing = groups.get(item.recipientId);
-      if (existing) {
-        existing.items.push(item);
-        if ((parseDate(item.endedAt)?.getTime() ?? 0) > (parseDate(existing.latestEndedAt)?.getTime() ?? 0)) {
-          existing.latestEndedAt = item.endedAt;
-        }
-      } else {
-        groups.set(item.recipientId, {
-          recipientId: item.recipientId,
-          recipientName: item.recipientName,
-          items: [item],
-          latestEndedAt: item.endedAt,
-        });
-      }
-    });
-
-    return Array.from(groups.values()).sort(
-      (a, b) => (parseDate(b.latestEndedAt)?.getTime() ?? 0) - (parseDate(a.latestEndedAt)?.getTime() ?? 0)
-    );
-  }, [visibleCandidates]);
 
   const feedItems = useMemo(() => {
     let rows = [
       ...received.map((item) => ({ ...item, direction: "received" as const })),
       ...given.map((item) => ({ ...item, direction: "given" as const })),
-    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    ].sort((a, b) =>
+      feedSort === "oldest"
+        ? a.createdAt.localeCompare(b.createdAt)
+        : b.createdAt.localeCompare(a.createdAt)
+    );
 
     if (feedFilter === "received" || feedFilter === "given") {
       rows = rows.filter((item) => (feedFilter === "received" ? item.direction === "received" : item.direction === "given"));
-    } else if (feedFilter === "archived") {
-      rows = [
-        ...archivedReceived.map((item) => ({ ...item, direction: "received" as const })),
-        ...archivedGiven.map((item) => ({ ...item, direction: "given" as const })),
-      ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     if (feedContextFilter !== "all") {
       rows = rows.filter((item) => item.contextTag === feedContextFilter);
     }
     return rows;
-  }, [archivedGiven, archivedReceived, feedContextFilter, feedFilter, given, received]);
+  }, [feedContextFilter, feedFilter, feedSort, given, received]);
   const totalFeedPages = useMemo(() => Math.max(1, Math.ceil(feedItems.length / REFERENCE_FEED_PAGE_SIZE)), [feedItems.length]);
   const currentFeedPage = Math.min(feedPage, totalFeedPages);
   const visibleFeedItems = useMemo(
@@ -487,9 +500,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
   const scopedFeedRows = useMemo(() => {
     if (feedFilter === "received") return received;
     if (feedFilter === "given") return given;
-    if (feedFilter === "archived") return [...archivedReceived, ...archivedGiven];
     return [] as ReferenceItem[];
-  }, [archivedGiven, archivedReceived, feedFilter, given, received]);
+  }, [feedFilter, given, received]);
 
   const scopedContextCounts = useMemo(() => {
     const counts = REFERENCE_CONTEXT_TAGS.reduce(
@@ -505,19 +517,6 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
     return counts;
   }, [scopedFeedRows]);
 
-  const totalReferences = received.length + given.length;
-  const positiveCount = useMemo(
-    () => [...received, ...given].filter((item) => item.sentiment === "positive").length,
-    [given, received]
-  );
-  const neutralCount = useMemo(
-    () => [...received, ...given].filter((item) => item.sentiment === "neutral").length,
-    [given, received]
-  );
-  const negativeCount = useMemo(
-    () => [...received, ...given].filter((item) => item.sentiment === "negative").length,
-    [given, received]
-  );
   const pendingCount = useMemo(() => candidates.length, [candidates.length]);
   const pendingContextCounts = useMemo(() => {
     const counts = REFERENCE_CONTEXT_TAGS.reduce(
@@ -532,216 +531,243 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
     });
     return counts;
   }, [candidates]);
-  const trustPercent = totalReferences > 0 ? Math.round((positiveCount / totalReferences) * 100) : 0;
+  const totalReferences = received.length + given.length;
+  const positiveCount = useMemo(
+    () => [...received, ...given].filter((item) => item.sentiment === "positive").length,
+    [given, received]
+  );
+  const neutralCount = useMemo(
+    () => [...received, ...given].filter((item) => item.sentiment === "neutral").length,
+    [given, received]
+  );
+  const negativeCount = useMemo(
+    () => [...received, ...given].filter((item) => item.sentiment === "negative").length,
+    [given, received]
+  );
+  const positivePercent = totalReferences > 0 ? Math.round((positiveCount / totalReferences) * 100) : 0;
+
+  const directionOptions = useMemo(
+    () =>
+      [
+        { key: "received", label: "Received", count: received.length },
+        { key: "given", label: "Given", count: given.length },
+        { key: "pending", label: "Pending", count: pendingCount },
+      ] as const,
+    [given.length, pendingCount, received.length]
+  );
+  const categoryOptions = useMemo(
+    () =>
+      [
+        {
+          key: "all",
+          label: feedFilter === "pending" ? "All pending" : "All references",
+          count: feedFilter === "pending" ? pendingCount : scopedFeedRows.length,
+        },
+        ...REFERENCE_CONTEXT_TAGS.map((tag) => ({
+          key: tag,
+          label: referenceContextLabel(tag),
+          count: feedFilter === "pending" ? pendingContextCounts[tag] ?? 0 : scopedContextCounts[tag] ?? 0,
+        })),
+      ] as Array<{ key: "all" | ReferenceContextTag; label: string; count: number }>,
+    [feedFilter, pendingContextCounts, pendingCount, scopedContextCounts, scopedFeedRows.length]
+  );
+  const activeCategoryValue = feedFilter === "pending" ? candidateFilter : feedContextFilter;
 
   /* eslint-disable react-hooks/set-state-in-effect -- page-local UI pagination reset on filter updates. */
   useEffect(() => {
     setFeedPage(1);
-  }, [feedFilter, feedContextFilter]);
+  }, [feedFilter, feedContextFilter, feedSort]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const loadAll = useCallback(async () => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+    const isStale = () => loadRequestIdRef.current !== requestId;
+
     setLoading(true);
     setError(null);
     setInfo(null);
-    setPendingPromptCount(0);
-
-    const { data: authData, error: authErr } = await supabase.auth.getUser();
-    if (authErr || !authData.user) {
-      setError("Please sign in first.");
-      setLoading(false);
-      return;
-    }
-
-    const me = authData.user.id;
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    setToken(sessionData.session?.access_token ?? null);
-
-    const visibleConnections = await fetchVisibleConnections(supabase, me);
-    const acceptedConnections = visibleConnections.filter((row) => row.is_accepted_visible);
-    const connectionByOtherUser = new Map<string, string>();
-    acceptedConnections.forEach((row) => {
-      if (row.other_user_id && row.id) connectionByOtherUser.set(row.other_user_id, row.id);
-    });
-
-    const profileIds = Array.from(
-      new Set([me, ...acceptedConnections.map((row) => row.other_user_id).filter(Boolean)])
-    );
-    const profileMap: Record<string, LiteProfile> = {};
-    if (profileIds.length > 0) {
-      const profileRes = await supabase
-        .from("profiles")
-        .select("user_id,display_name,city,country,avatar_url")
-        .in("user_id", profileIds);
-      if (!profileRes.error) {
-        ((profileRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
-          const userId = typeof row.user_id === "string" ? row.user_id : "";
-          if (!userId) return;
-          profileMap[userId] = {
-            userId,
-            displayName:
-              typeof row.display_name === "string" && row.display_name.trim() ? row.display_name : "Member",
-            city: typeof row.city === "string" ? row.city : "",
-            country: typeof row.country === "string" ? row.country : "",
-            avatarUrl: typeof row.avatar_url === "string" ? row.avatar_url : null,
-          };
-        });
+    try {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr || !authData.user) {
+        setError("Please sign in first.");
+        return;
       }
-    }
-    setProfilesById(profileMap);
 
-    const isMissingSchemaError = (message: string) => {
-      const text = message.toLowerCase();
-      return (
-        text.includes("relation") ||
-        text.includes("schema cache") ||
-        text.includes("does not exist") ||
-        text.includes("could not find the table") ||
-        text.includes("column") ||
-        text.includes("function") ||
-        text.includes("record \"r\" has no field")
+      const me = authData.user.id;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (isStale()) return;
+      setToken(sessionData.session?.access_token ?? null);
+
+      const visibleConnections = await fetchVisibleConnections(supabase, me);
+      if (isStale()) return;
+      const acceptedConnections = visibleConnections.filter((row) => row.is_accepted_visible);
+      const connectionByOtherUser = new Map<string, string>();
+      acceptedConnections.forEach((row) => {
+        if (row.other_user_id && row.id) connectionByOtherUser.set(row.other_user_id, row.id);
+      });
+
+      const profileIds = Array.from(
+        new Set([me, ...acceptedConnections.map((row) => row.other_user_id).filter(Boolean)])
       );
-    };
-
-    const nowIso = new Date().toISOString();
-    const cutoffIso = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
-    const cutoffDate = cutoffIso.slice(0, 10);
-    const todayDate = nowIso.slice(0, 10);
-
-    const accessToken = sessionData.session?.access_token ?? "";
-    if (!accessToken) {
-      throw new Error("Missing auth session token");
-    }
-
-    const syncPromptRes = await fetch("/api/references/prompts/sync", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    const syncPromptPayload = (await syncPromptRes.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!syncPromptRes.ok || !syncPromptPayload?.ok) {
-      const errorMessage = syncPromptPayload?.error ?? "Failed to sync reference prompts.";
-      if (!isMissingSchemaError(errorMessage)) {
-        throw new Error(errorMessage);
-      }
-    }
-
-    const promptRes = await supabase
-      .from("reference_requests")
-      .select("id,user_id,peer_user_id,context_tag,source_table,source_id,connection_id,due_at,remind_after,expires_at,status")
-      .eq("user_id", me)
-      .eq("status", "pending")
-      .lte("due_at", nowIso)
-      .gte("expires_at", nowIso)
-      .order("due_at", { ascending: false })
-      .limit(600);
-    if (promptRes.error && !isMissingSchemaError(promptRes.error.message)) {
-      throw new Error(promptRes.error.message);
-    }
-    const promptRows = promptRes.error ? [] : ((promptRes.data ?? []) as ReferenceRequestRowDb[]);
-
-    const fetchReferencesForActor = async (columns: string[]) => {
-      for (const column of columns) {
-        const res = await supabase
-          .from("references")
-          .select("*")
-          .eq(column, me)
-          .order("created_at", { ascending: false })
-          .limit(500);
-        if (!res.error) {
-          return (res.data ?? []) as ReferenceRowDb[];
-        }
-        if (!isMissingSchemaError(res.error.message)) {
-          break;
+      const profileMap: Record<string, LiteProfile> = {};
+      if (profileIds.length > 0) {
+        const profileRes = await supabase
+          .from("profiles")
+          .select("user_id,display_name,city,country,avatar_url")
+          .in("user_id", profileIds);
+        if (isStale()) return;
+        if (!profileRes.error) {
+          ((profileRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+            const userId = typeof row.user_id === "string" ? row.user_id : "";
+            if (!userId) return;
+            profileMap[userId] = {
+              userId,
+              displayName:
+                typeof row.display_name === "string" && row.display_name.trim() ? row.display_name : "Member",
+              city: typeof row.city === "string" ? row.city : "",
+              country: typeof row.country === "string" ? row.country : "",
+              avatarUrl: typeof row.avatar_url === "string" ? row.avatar_url : null,
+            };
+          });
         }
       }
-      return [] as ReferenceRowDb[];
-    };
+      setProfilesById(profileMap);
 
-    const [givenRawRows, receivedRawRows] = await Promise.all([
-      fetchReferencesForActor(["author_id", "from_user_id", "source_id"]),
-      fetchReferencesForActor(["recipient_id", "to_user_id", "target_id"]),
-    ]);
-
-    const givenRows = mapReferenceRows(givenRawRows);
-    const receivedRows = mapReferenceRows(receivedRawRows);
-
-    const archiveRes = await supabase
-      .from("reference_archives")
-      .select("reference_id")
-      .eq("user_id", me)
-      .limit(1000);
-    const archivedReferenceIds = archiveRes.error && !isMissingSchemaError(archiveRes.error.message)
-      ? null
-      : new Set(
-          ((archiveRes.error ? [] : archiveRes.data ?? []) as Array<Record<string, unknown>>)
-            .map((row) => (typeof row.reference_id === "string" ? row.reference_id : ""))
-            .filter(Boolean)
+      const isMissingSchemaError = (message: string) => {
+        const text = message.toLowerCase();
+        return (
+          text.includes("relation") ||
+          text.includes("schema cache") ||
+          text.includes("does not exist") ||
+          text.includes("could not find the table") ||
+          text.includes("column") ||
+          text.includes("function") ||
+          text.includes("record \"r\" has no field")
         );
+      };
 
-    setArchivedGiven(
-      archivedReferenceIds ? givenRows.filter((row) => archivedReferenceIds.has(row.id)) : []
-    );
-    setArchivedReceived(
-      archivedReferenceIds ? receivedRows.filter((row) => archivedReferenceIds.has(row.id)) : []
-    );
-    setGiven(
-      archivedReferenceIds ? givenRows.filter((row) => !archivedReferenceIds.has(row.id)) : givenRows
-    );
-    setReceived(
-      archivedReferenceIds ? receivedRows.filter((row) => !archivedReferenceIds.has(row.id)) : receivedRows
-    );
+      const nowIso = new Date().toISOString();
+      const cutoffIso = new Date(Date.now() - REFERENCE_PROMPT_LOOKBACK_DAYS * DAY_MS).toISOString();
+      const cutoffDate = cutoffIso.slice(0, 10);
+      const todayDate = nowIso.slice(0, 10);
 
-    const resolvedProfileMap: Record<string, LiteProfile> = { ...profileMap };
-    const missingProfileIds = Array.from(
-      new Set(
-        [
-          ...promptRows.map((row) => row.peer_user_id ?? "").filter(Boolean),
-          ...givenRows.flatMap((row) => [row.authorId, row.recipientId]),
-          ...receivedRows.flatMap((row) => [row.authorId, row.recipientId]),
-        ].filter((id) => id && !resolvedProfileMap[id])
-      )
-    );
-
-    if (missingProfileIds.length > 0) {
-      const extraProfilesRes = await supabase
-        .from("profiles")
-        .select("user_id,display_name,city,country,avatar_url")
-        .in("user_id", missingProfileIds);
-      if (!extraProfilesRes.error) {
-        ((extraProfilesRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
-          const userId = typeof row.user_id === "string" ? row.user_id : "";
-          if (!userId) return;
-          resolvedProfileMap[userId] = {
-            userId,
-            displayName:
-              typeof row.display_name === "string" && row.display_name.trim() ? row.display_name : "Member",
-            city: typeof row.city === "string" ? row.city : "",
-            country: typeof row.country === "string" ? row.country : "",
-            avatarUrl: typeof row.avatar_url === "string" ? row.avatar_url : null,
-          };
-        });
+      const accessToken = sessionData.session?.access_token ?? "";
+      if (!accessToken) {
+        throw new Error("Missing auth session token");
       }
-    }
-    setProfilesById(resolvedProfileMap);
 
-    const authoredEntityKeys = new Set<string>();
-    const authoredPairTypeKeys = new Set<string>();
-    givenRows.forEach((row) => {
-      if (row.contextTag && row.entityId) {
-        authoredEntityKeys.add(`${row.contextTag}:${row.entityId}`);
+      const syncPromptRes = await fetch("/api/references/prompts/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      if (isStale()) return;
+      const syncPromptPayload = (await syncPromptRes.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!syncPromptRes.ok || !syncPromptPayload?.ok) {
+        const errorMessage = syncPromptPayload?.error ?? "Failed to sync reference prompts.";
+        if (!isMissingSchemaError(errorMessage)) {
+          throw new Error(errorMessage);
+        }
       }
-      if (row.contextTag && row.recipientId) {
-        authoredPairTypeKeys.add(`${row.contextTag}:${row.recipientId}`);
+
+      const promptRes = await supabase
+        .from("reference_requests")
+        .select("id,user_id,peer_user_id,context_tag,source_table,source_id,connection_id,due_at,remind_after,expires_at,status")
+        .eq("user_id", me)
+        .eq("status", "pending")
+        .lte("due_at", nowIso)
+        .gte("expires_at", nowIso)
+        .order("due_at", { ascending: false })
+        .limit(600);
+      if (isStale()) return;
+      if (promptRes.error && !isMissingSchemaError(promptRes.error.message)) {
+        throw new Error(promptRes.error.message);
       }
-    });
+      const promptRows = promptRes.error ? [] : ((promptRes.data ?? []) as ReferenceRequestRowDb[]);
 
-    const nextCandidates: CandidateItem[] = [];
-    const dedupe = new Set<string>();
+      const fetchReferencesForActor = async (columns: string[]) => {
+        for (const column of columns) {
+          const res = await supabase
+            .from("references")
+            .select("*")
+            .eq(column, me)
+            .order("created_at", { ascending: false })
+            .limit(500);
+          if (!res.error) {
+            return (res.data ?? []) as ReferenceRowDb[];
+          }
+          if (!isMissingSchemaError(res.error.message)) {
+            break;
+          }
+        }
+        return [] as ReferenceRowDb[];
+      };
 
-    promptRows.forEach((row) => {
+      const [givenRawRows, receivedRawRows] = await Promise.all([
+        fetchReferencesForActor(["author_id", "from_user_id", "source_id"]),
+        fetchReferencesForActor(["recipient_id", "to_user_id", "target_id"]),
+      ]);
+
+      if (isStale()) return;
+
+      const givenRows = mapReferenceRows(givenRawRows);
+      const receivedRows = mapReferenceRows(receivedRawRows);
+
+      setGiven(givenRows);
+      setReceived(receivedRows);
+
+      const resolvedProfileMap: Record<string, LiteProfile> = { ...profileMap };
+      const missingProfileIds = Array.from(
+        new Set(
+          [
+            ...promptRows.map((row) => row.peer_user_id ?? "").filter(Boolean),
+            ...givenRows.flatMap((row) => [row.authorId, row.recipientId]),
+            ...receivedRows.flatMap((row) => [row.authorId, row.recipientId]),
+          ].filter((id) => id && !resolvedProfileMap[id])
+        )
+      );
+
+      if (missingProfileIds.length > 0) {
+        const extraProfilesRes = await supabase
+          .from("profiles")
+          .select("user_id,display_name,city,country,avatar_url")
+          .in("user_id", missingProfileIds);
+        if (isStale()) return;
+        if (!extraProfilesRes.error) {
+          ((extraProfilesRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+            const userId = typeof row.user_id === "string" ? row.user_id : "";
+            if (!userId) return;
+            resolvedProfileMap[userId] = {
+              userId,
+              displayName:
+                typeof row.display_name === "string" && row.display_name.trim() ? row.display_name : "Member",
+              city: typeof row.city === "string" ? row.city : "",
+              country: typeof row.country === "string" ? row.country : "",
+              avatarUrl: typeof row.avatar_url === "string" ? row.avatar_url : null,
+            };
+          });
+        }
+      }
+      setProfilesById(resolvedProfileMap);
+
+      const authoredEntityKeys = new Set<string>();
+      const authoredPairTypeKeys = new Set<string>();
+      givenRows.forEach((row) => {
+        if (row.contextTag && row.entityId) {
+          authoredEntityKeys.add(`${row.contextTag}:${row.entityId}`);
+        }
+        if (row.contextTag && row.recipientId) {
+          authoredPairTypeKeys.add(`${row.contextTag}:${row.recipientId}`);
+        }
+      });
+
+      const nextCandidates: CandidateItem[] = [];
+      const dedupe = new Set<string>();
+
+      promptRows.forEach((row) => {
       const promptId = row.id ?? "";
       const peerUserId = row.peer_user_id ?? "";
       const sourceId = row.source_id ?? "";
@@ -758,6 +784,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
       const displayName = profile?.displayName ?? "Member";
       const connectionId = row.connection_id ?? connectionByOtherUser.get(peerUserId) ?? "";
       const dueAt = row.due_at ?? "";
+      const expiresAt = row.expires_at ?? addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
       const title =
         type === "travel_together"
           ? `Trip completed with ${displayName}`
@@ -780,6 +807,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         recipientName: displayName,
         title,
         subtitle,
+        dueAt,
+        expiresAt,
         endedAt: dueAt || row.expires_at || nowIso,
       });
     });
@@ -805,6 +834,10 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         if (!otherUserId || !connectionByOtherUser.has(otherUserId)) return;
         if (authoredPairTypeKeys.has(`practice:${otherUserId}`)) return;
 
+        const dueAt = addHours(completedAt, 24);
+        const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
+        if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
+
         const dedupeKey = `practice:${otherUserId}`;
         if (dedupe.has(dedupeKey)) return;
         dedupe.add(dedupeKey);
@@ -819,6 +852,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           recipientName: profile?.displayName ?? "Member",
           title: `Sync with ${profile?.displayName ?? "member"}`,
           subtitle: `Completed ${formatDate(completedAt)}`,
+          dueAt,
+          expiresAt,
           endedAt: completedAt,
         });
       });
@@ -850,11 +885,16 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           const requesterId = row.requester_id ?? "";
           const tripId = row.trip_id ?? "";
           if (!requestId || !requesterId || !tripId) return;
+          const trip = myTripsById.get(tripId);
+          if (!trip) return;
           const connectionId = connectionByOtherUser.get(requesterId);
           if (!connectionId) return;
           if (authoredPairTypeKeys.has(`travel_together:${requesterId}`)) return;
 
-          const trip = myTripsById.get(tripId);
+          const dueAt = addHours(trip?.end_date ?? "", 24);
+          const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
+          if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
+
           const profile = profileMap[requesterId];
           const dedupeKey = `travel_together:${requesterId}`;
           if (dedupe.has(dedupeKey)) return;
@@ -869,6 +909,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
             recipientName: profile?.displayName ?? "Member",
             title: `${trip?.destination_city ?? "Trip"} trip`,
             subtitle: `${profile?.displayName ?? "Member"} • ended ${formatDate(trip?.end_date ?? null)}`,
+            dueAt,
+            expiresAt,
             endedAt: trip?.end_date ?? "",
           });
         });
@@ -907,6 +949,10 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         if (!connectionId) return;
         if (authoredPairTypeKeys.has(`travel_together:${ownerId}`)) return;
 
+        const dueAt = addHours(trip.end_date ?? "", 24);
+        const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
+        if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
+
         const ownerProfile = resolvedProfileMap[ownerId];
         const dedupeKey = `travel_together:${ownerId}`;
         if (dedupe.has(dedupeKey)) return;
@@ -921,6 +967,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           recipientName: ownerProfile?.displayName ?? "Member",
           title: `${trip.destination_city ?? "Trip"} trip`,
           subtitle: `${ownerProfile?.displayName ?? "Member"} • ended ${formatDate(trip.end_date ?? null)}`,
+          dueAt,
+          expiresAt,
           endedAt: trip.end_date ?? "",
         });
       });
@@ -954,6 +1002,9 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         const type: ReferenceContextTag = iAmHost ? "hosting" : "stay_as_guest";
 
         if (authoredPairTypeKeys.has(`${type}:${otherUserId}`)) return;
+        const dueAt = addHours(departureDate, 24);
+        const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
+        if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
         const dedupeKey = `${type}:${otherUserId}`;
         if (dedupe.has(dedupeKey)) return;
         dedupe.add(dedupeKey);
@@ -970,6 +1021,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
             ? `Hosted ${profile?.displayName ?? "member"}`
             : `Stayed with ${profile?.displayName ?? "member"}`,
           subtitle: `Hosting completed ${formatDate(departureDate)}`,
+          dueAt,
+          expiresAt,
           endedAt: departureDate,
         });
       });
@@ -1035,6 +1088,9 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           const contextTag: ReferenceContextTag =
             event?.title && /festival|congress/i.test(event.title) ? "festival" : "event";
           if (authoredPairTypeKeys.has(`${contextTag}:${otherUserId}`)) return;
+          const dueAt = addHours(event?.ends_at ?? "", 24);
+          const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
+          if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
           const profile = resolvedProfileMap[otherUserId];
           const dedupeKey = `${contextTag}:${otherUserId}`;
           if (dedupe.has(dedupeKey)) return;
@@ -1049,31 +1105,40 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
             recipientName: profile?.displayName ?? "Member",
             title: event?.title ?? "Event",
             subtitle: `${profile?.displayName ?? "Member"} • ended ${formatDate(event?.ends_at ?? null)}`,
+            dueAt,
+            expiresAt,
             endedAt: event?.ends_at ?? "",
           });
         });
       }
     }
 
-    nextCandidates.sort((a, b) => {
-      return (parseDate(b.endedAt)?.getTime() ?? 0) - (parseDate(a.endedAt)?.getTime() ?? 0);
-    });
+      nextCandidates.sort((a, b) => {
+        return (parseDate(b.endedAt)?.getTime() ?? 0) - (parseDate(a.endedAt)?.getTime() ?? 0);
+      });
 
-    setPendingPromptCount(nextCandidates.length);
+      if (isStale()) return;
 
-    setCandidates(nextCandidates);
-    if (nextCandidates.length > 0) {
-      if (initialConnectionIdValue) {
-        const preferred = nextCandidates.find((item) => item.connectionId === initialConnectionIdValue);
-        setSelectedCandidateKey(preferred?.key ?? nextCandidates[0].key);
+      setCandidates(nextCandidates);
+      if (nextCandidates.length > 0) {
+        if (initialConnectionIdValue) {
+          const preferred = nextCandidates.find((item) => item.connectionId === initialConnectionIdValue);
+          setSelectedCandidateKey(preferred?.key ?? nextCandidates[0].key);
+        } else {
+          setSelectedCandidateKey((prev) => prev || nextCandidates[0].key);
+        }
       } else {
-        setSelectedCandidateKey((prev) => prev || nextCandidates[0].key);
+        setSelectedCandidateKey("");
       }
-    } else {
-      setSelectedCandidateKey("");
+    } catch (loadError) {
+      if (!isStale()) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load references.");
+      }
+    } finally {
+      if (!isStale()) {
+        setLoading(false);
+      }
     }
-
-    setLoading(false);
   }, [initialConnectionIdValue]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- async loader updates state from backend responses. */
@@ -1093,39 +1158,44 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
     setError(null);
     setInfo(null);
 
-    const response = await fetch("/api/references", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        connectionId: targetCandidate.connectionId,
-        recipientId: targetCandidate.recipientId,
-        referenceRequestId: targetCandidate.promptId ?? null,
-        sentiment,
-        text: body,
-        contextTag: targetCandidate.type,
-        entityId: targetCandidate.entityId,
-      }),
-    });
-
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setSubmitting(false);
-    if (!response.ok || !json?.ok) {
-      setError(json?.error ?? "Failed to submit reference.");
-      return;
-    }
-
-    setBody("");
     try {
-      await loadAll();
+      const response = await fetch("/api/references", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          connectionId: targetCandidate.connectionId,
+          recipientId: targetCandidate.recipientId,
+          referenceRequestId: targetCandidate.promptId ?? null,
+          sentiment,
+          text: body,
+          contextTag: targetCandidate.type,
+          entityId: targetCandidate.entityId,
+        }),
+      });
+
+      const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      setSubmitting(false);
+      if (!response.ok || !json?.ok) {
+        setError(json?.error ?? "Failed to submit reference.");
+        return;
+      }
+
+      setBody("");
+      try {
+        await loadAll();
+      } catch {
+        // Keep success feedback visible even if refresh fails on mixed legacy schemas.
+      }
+      setFeedContextFilter("all");
+      setFeedFilter("given");
+      setInfo(`Reference submitted. It will publish when both sides submit or on ${formatLongDate(addDays(new Date().toISOString(), REFERENCE_REVEAL_WINDOW_DAYS))}.`);
     } catch {
-      // Keep success feedback visible even if refresh fails on mixed legacy schemas.
+      setSubmitting(false);
+      setError("Could not submit reference. Check your connection and try again.");
     }
-    setFeedContextFilter("all");
-    setFeedFilter("given");
-    setInfo("Reference submitted.");
   }
 
   async function submitReply(referenceId: string) {
@@ -1135,27 +1205,32 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
     setError(null);
     setInfo(null);
 
-    const response = await fetch("/api/references", {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ mode: "reply", referenceId, replyText: text }),
-    });
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setBusyReferenceId(null);
-    if (!response.ok || !json?.ok) {
-      setError(json?.error ?? "Failed to save reply.");
-      return;
-    }
-    setReplyDraft((prev) => ({ ...prev, [referenceId]: "" }));
     try {
-      await loadAll();
+      const response = await fetch("/api/references", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ mode: "reply", referenceId, replyText: text }),
+      });
+      const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      setBusyReferenceId(null);
+      if (!response.ok || !json?.ok) {
+        setError(json?.error ?? "Failed to save reply.");
+        return;
+      }
+      setReplyDraft((prev) => ({ ...prev, [referenceId]: "" }));
+      try {
+        await loadAll();
+      } catch {
+        // Keep success feedback visible even if refresh fails on mixed legacy schemas.
+      }
+      setInfo("Reply posted.");
     } catch {
-      // Keep success feedback visible even if refresh fails on mixed legacy schemas.
+      setBusyReferenceId(null);
+      setError("Could not save reply. Check your connection and try again.");
     }
-    setInfo("Reply posted.");
   }
 
   async function submitEdit(referenceId: string) {
@@ -1165,129 +1240,36 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
     setError(null);
     setInfo(null);
 
-    const response = await fetch("/api/references", {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        mode: "edit",
-        referenceId,
-        body: draft.body,
-        sentiment: draft.sentiment,
-      }),
-    });
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setBusyReferenceId(null);
-    if (!response.ok || !json?.ok) {
-      setError(json?.error ?? "Failed to update reference.");
-      return;
-    }
     try {
-      await loadAll();
+      const response = await fetch("/api/references", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          mode: "edit",
+          referenceId,
+          body: draft.body,
+          sentiment: draft.sentiment,
+        }),
+      });
+      const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      setBusyReferenceId(null);
+      if (!response.ok || !json?.ok) {
+        setError(json?.error ?? "Failed to update reference.");
+        return;
+      }
+      try {
+        await loadAll();
+      } catch {
+        // Keep success feedback visible even if refresh fails on mixed legacy schemas.
+      }
+      setInfo("Reference updated.");
     } catch {
-      // Keep success feedback visible even if refresh fails on mixed legacy schemas.
+      setBusyReferenceId(null);
+      setError("Could not update reference. Check your connection and try again.");
     }
-    setInfo("Reference updated.");
-  }
-
-  async function archiveReference(referenceId: string) {
-    if (!token) {
-      setError("Please sign in again.");
-      return;
-    }
-
-    setArchivingReferenceId(referenceId);
-    setOpenMenuReferenceId(null);
-    setError(null);
-    setInfo(null);
-
-    const moveOut = (rows: ReferenceItem[]) => rows.filter((row) => row.id !== referenceId);
-    const foundGiven = given.find((row) => row.id === referenceId) ?? null;
-    const foundReceived = received.find((row) => row.id === referenceId) ?? null;
-    if (foundGiven) {
-      setGiven((prev) => prev.filter((row) => row.id !== referenceId));
-      setArchivedGiven((prev) => [foundGiven, ...prev.filter((row) => row.id !== referenceId)]);
-    }
-    if (foundReceived) {
-      setReceived((prev) => prev.filter((row) => row.id !== referenceId));
-      setArchivedReceived((prev) => [foundReceived, ...prev.filter((row) => row.id !== referenceId)]);
-    }
-
-    const response = await fetch("/api/references/archive", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ referenceId }),
-    });
-
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setArchivingReferenceId(null);
-    if (!response.ok || !json?.ok) {
-      if (foundGiven) {
-        setGiven((prev) => [foundGiven, ...moveOut(prev)]);
-        setArchivedGiven((prev) => prev.filter((row) => row.id !== referenceId));
-      }
-      if (foundReceived) {
-        setReceived((prev) => [foundReceived, ...moveOut(prev)]);
-        setArchivedReceived((prev) => prev.filter((row) => row.id !== referenceId));
-      }
-      setError(json?.error ?? "Failed to archive reference.");
-      return;
-    }
-    setInfo("Reference archived.");
-  }
-
-  async function unarchiveReference(referenceId: string) {
-    if (!token) {
-      setError("Please sign in again.");
-      return;
-    }
-
-    setArchivingReferenceId(referenceId);
-    setOpenMenuReferenceId(null);
-    setError(null);
-    setInfo(null);
-
-    const foundGiven = archivedGiven.find((row) => row.id === referenceId) ?? null;
-    const foundReceived = archivedReceived.find((row) => row.id === referenceId) ?? null;
-    if (foundGiven) {
-      setArchivedGiven((prev) => prev.filter((row) => row.id !== referenceId));
-      setGiven((prev) => [foundGiven, ...prev.filter((row) => row.id !== referenceId)]);
-    }
-    if (foundReceived) {
-      setArchivedReceived((prev) => prev.filter((row) => row.id !== referenceId));
-      setReceived((prev) => [foundReceived, ...prev.filter((row) => row.id !== referenceId)]);
-    }
-
-    const response = await fetch("/api/references/archive", {
-      method: "DELETE",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ referenceId }),
-    });
-
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setArchivingReferenceId(null);
-    if (!response.ok || !json?.ok) {
-      if (foundGiven) {
-        setGiven((prev) => prev.filter((row) => row.id !== referenceId));
-        setArchivedGiven((prev) => [foundGiven, ...prev.filter((row) => row.id !== referenceId)]);
-      }
-      if (foundReceived) {
-        setReceived((prev) => prev.filter((row) => row.id !== referenceId));
-        setArchivedReceived((prev) => [foundReceived, ...prev.filter((row) => row.id !== referenceId)]);
-      }
-      setError(json?.error ?? "Failed to restore reference.");
-      return;
-    }
-
-    setInfo("Reference restored.");
   }
 
   function openReferenceReport(referenceId: string) {
@@ -1317,280 +1299,194 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
             {info}
           </div>
         ) : null}
-        <section className="overflow-hidden rounded-xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))]">
-          <div className="flex flex-col divide-y divide-white/10 md:flex-row md:divide-x md:divide-y-0">
-            <div className="flex w-full items-center gap-4 px-4 py-5 sm:px-6 md:w-[24%]">
-              <div className="w-full text-center">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">References</p>
-                <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-                  <h3 className="text-3xl font-black tracking-tight text-white sm:text-4xl">{totalReferences}</h3>
-                  {pendingPromptCount > 0 ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300">
-                      <span className="material-symbols-outlined text-[14px]">schedule</span>
-                      {pendingPromptCount} pending
-                    </span>
-                  ) : null}
-                </div>
-              </div>
+        <section className="flex w-full items-end justify-between gap-4">
+          {/* Direction */}
+          <label className="flex-1 min-w-0">
+            <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Direction</span>
+            <select
+              value={feedFilter}
+              onChange={(event) => setFeedFilter(event.target.value as FeedFilter)}
+              className="w-full rounded-xl border border-white/10 bg-[#101317] px-3 py-2 text-sm font-semibold text-white"
+            >
+              {directionOptions.map((option) => (
+                <option key={`direction-select-${option.key}`} value={option.key}>
+                  {option.label} ({option.count})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Category */}
+          <label className="flex-1 min-w-0">
+            <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Category</span>
+            <select
+              value={activeCategoryValue}
+              onChange={(event) => {
+                const value = event.target.value as "all" | ReferenceContextTag;
+                if (feedFilter === "pending") {
+                  setCandidateFilter(value as CandidateFilter);
+                  return;
+                }
+                setFeedContextFilter(value);
+              }}
+              className="w-full rounded-xl border border-white/10 bg-[#101317] px-3 py-2 text-sm font-semibold text-white"
+            >
+              {categoryOptions.map((option) => (
+                <option key={`category-select-${option.key}`} value={option.key}>
+                  {option.label} ({option.count})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Sort */}
+          <label className="flex-1 min-w-0">
+            <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Sort</span>
+            <select
+              value={feedSort}
+              onChange={(event) => setFeedSort(event.target.value as FeedSort)}
+              className="w-full rounded-xl border border-white/10 bg-[#101317] px-3 py-2 text-sm font-semibold text-white"
+            >
+              <option value="latest">Latest</option>
+              <option value="oldest">Oldest</option>
+            </select>
+          </label>
+
+          {/* Distribution */}
+          <div className="hidden min-w-[200px] flex-[2] flex-col gap-1.5 pb-[9px] md:flex">
+            <span className="mb-0.5 block text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Distribution</span>
+            <div className="flex w-full items-center gap-3 text-[11px] font-semibold">
+              <span className="inline-flex items-center gap-1 text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />{positiveCount}</span>
+              <span className="inline-flex items-center gap-1 text-white/50"><span className="h-1.5 w-1.5 rounded-full bg-white/35" />{neutralCount}</span>
+              <span className="inline-flex items-center gap-1 text-rose-300"><span className="h-1.5 w-1.5 rounded-full bg-rose-400" />{negativeCount}</span>
+              {pendingCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setFeedFilter("pending"); setCandidateFilter("all"); }}
+                  className="ml-auto text-[11px] font-semibold text-cyan-300 transition hover:text-cyan-100"
+                >
+                  {pendingCount} pending →
+                </button>
+              )}
             </div>
-            <div className="flex-1 px-4 py-5 sm:px-6">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">Trust Distribution</p>
-                <div className="flex flex-wrap items-center gap-4 text-[11px] font-bold">
-                  <span className="inline-flex items-center gap-1.5 text-emerald-300"><span className="h-2 w-2 rounded-full bg-emerald-400" />{positiveCount} Positive</span>
-                  <span className="inline-flex items-center gap-1.5 text-white/55"><span className="h-2 w-2 rounded-full bg-white/35" />{neutralCount} Neutral</span>
-                  <span className="inline-flex items-center gap-1.5 text-rose-300"><span className="h-2 w-2 rounded-full bg-rose-400" />{negativeCount} Negative</span>
-                </div>
-              </div>
-              <div className="flex h-2 overflow-hidden rounded-full bg-white/6">
-                <div className="bg-emerald-400" style={{ width: `${totalReferences ? (positiveCount / totalReferences) * 100 : 0}%` }} />
-                <div className="bg-white/35" style={{ width: `${totalReferences ? (neutralCount / totalReferences) * 100 : 0}%` }} />
-                <div className="bg-rose-400" style={{ width: `${totalReferences ? (negativeCount / totalReferences) * 100 : 0}%` }} />
-              </div>
-            </div>
-            <div className="flex w-full items-center justify-end bg-cyan-400/[0.03] px-4 py-5 sm:px-6 md:w-[22%]">
-              <div className="w-full text-center">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">Trust Index</p>
-                <h3 className="mt-1 text-4xl font-black tracking-tighter text-cyan-300 sm:text-5xl">{trustPercent}%</h3>
-              </div>
+            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/6">
+              <div className="bg-emerald-400" style={{ width: `${totalReferences ? (positiveCount / totalReferences) * 100 : 0}%` }} />
+              <div className="bg-white/35" style={{ width: `${totalReferences ? (neutralCount / totalReferences) * 100 : 0}%` }} />
+              <div className="bg-rose-400" style={{ width: `${totalReferences ? (negativeCount / totalReferences) * 100 : 0}%` }} />
             </div>
           </div>
         </section>
 
-        <section className="flex flex-col gap-6 lg:flex-row lg:gap-8">
-          <aside className="w-full shrink-0 lg:w-64">
-            <div className="space-y-8">
-              <div>
-                <p className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Direction</p>
-                <div className="rounded-xl border border-white/10 bg-[#101317] p-1">
-                  {([
-                    { key: "received", label: "Received", count: received.length },
-                    { key: "given", label: "Given", count: given.length },
-                    { key: "pending", label: "Pending", count: pendingCount },
-                    { key: "archived", label: "Archived", count: archivedReceived.length + archivedGiven.length },
-                  ] as const).map((option) => {
-                    const selected = feedFilter === option.key;
-                    return (
-                      <button
-                        key={option.key}
-                        type="button"
-                        onClick={() => setFeedFilter(option.key)}
-                        data-testid={`references-feed-filter-${option.key}`}
-                        className={cx(
-                          "flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-left text-xs font-bold transition",
-                          selected
-                            ? option.key === "archived"
-                              ? "bg-white/12 text-white"
-                              : "bg-cyan-400 text-slate-950"
-                            : "text-white/60 hover:bg-white/[0.04] hover:text-white"
-                        )}
-                      >
-                        <span>{option.label}</span>
-                        <span
-                          className={cx(
-                            "rounded-full px-2 py-0.5 text-[10px] font-black",
-                            selected
-                              ? option.key === "archived"
-                                ? "bg-black/25 text-white"
-                                : "bg-slate-950/15 text-slate-950"
-                              : "border border-white/15 bg-white/[0.03] text-white/75"
-                          )}
-                        >
-                          {option.count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Category</p>
-                <div className="flex flex-wrap gap-2 lg:flex-col">
-                  {(
-                    [
-                      {
-                        key: "all",
-                        label: feedFilter === "pending" ? "All Pending" : "All References",
-                        count: feedFilter === "pending" ? pendingCount : scopedFeedRows.length,
-                      },
-                      ...REFERENCE_CONTEXT_TAGS.map((tag) => ({
-                        key: tag,
-                        label: referenceContextLabel(tag),
-                        count: feedFilter === "pending" ? pendingContextCounts[tag] ?? 0 : scopedContextCounts[tag] ?? 0,
-                      })),
-                    ] as Array<{ key: "all" | ReferenceContextTag; label: string; count: number }>
-                  ).map((option) => {
-                    const selected = feedFilter === "pending" ? candidateFilter === option.key : feedContextFilter === option.key;
-                    return (
-                      <button
-                        key={`category-${option.key}`}
-                        type="button"
-                        onClick={() =>
-                          feedFilter === "pending"
-                            ? setCandidateFilter(option.key as CandidateFilter)
-                            : setFeedContextFilter(option.key as "all" | ReferenceContextTag)
-                        }
-                        className={cx(
-                          "flex items-center justify-between rounded-lg border px-4 py-2.5 text-left text-xs font-bold transition lg:w-full",
-                          selected
-                            ? "border-cyan-400 bg-cyan-400 text-slate-950"
-                            : "border-white/10 bg-[#101317] text-white/65 hover:border-white/20 hover:text-white"
-                        )}
-                      >
-                        <span>{option.label}</span>
-                        <span className={cx("rounded-full px-1.5 py-0.5 text-[10px] font-black", selected ? "bg-slate-950/15 text-slate-950" : "border border-white/10 bg-black/20 text-white/70")}>
-                          {option.count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="border-t border-white/10 pt-6">
-                <p className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/35">Resources</p>
-                <nav className="space-y-1">
-                  <Link href="/support" className="flex items-center gap-3 px-3 py-2 text-xs text-white/45 transition hover:text-cyan-300">
-                    <span className="material-symbols-outlined text-sm">help</span>
-                    Help Center
-                  </Link>
-                  <Link
-                    href="/safety-center#references-trust"
-                    className="flex items-center gap-3 px-3 py-2 text-xs text-white/45 transition hover:text-cyan-300"
-                  >
-                    <span className="material-symbols-outlined text-sm">policy</span>
-                    Trust Guidelines
-                  </Link>
-                </nav>
-              </div>
-            </div>
-          </aside>
-
-          <div className="min-w-0 flex-1 space-y-4">
+        <section className="min-w-0 space-y-4">
+          <div className="min-w-0 space-y-4">
             {feedFilter === "pending" ? (
-              <div className="grid gap-5 2xl:grid-cols-[340px_minmax(0,1fr)]">
+              <div className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
                 <article className="rounded-xl border border-white/10 bg-[#121212] p-6">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex items-start justify-between gap-3">
                     <h3 className="text-sm font-black uppercase tracking-[0.14em] text-white/85">Pending References</h3>
-                    <p className="mt-1 text-sm text-white/55">Completed activities waiting for your feedback.</p>
+                    <span className="rounded-full border border-white/15 bg-white/[0.03] px-2.5 py-1 text-xs font-semibold text-white/65">
+                      {visibleCandidates.length}
+                    </span>
                   </div>
-                  <span className="rounded-full border border-white/15 bg-white/[0.03] px-2.5 py-1 text-xs font-semibold text-white/65">
-                    {visibleCandidates.length}
-                  </span>
-                </div>
 
-                {visibleCandidateGroups.length > 0 ? (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {visibleCandidateGroups.map((group) => (
-                      <button
-                        key={`pending-summary-${group.recipientId}`}
-                        type="button"
-                        onClick={() => setSelectedCandidateKey(group.items[0]?.key ?? "")}
-                        className="rounded-full border border-white/15 bg-black/20 px-3 py-1.5 text-xs font-semibold text-white/75 hover:border-[#00F5FF]/25 hover:text-white"
-                      >
-                        {group.recipientName} · {group.items.length}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 max-h-[336px] space-y-4 overflow-y-auto pr-0 sm:pr-1">
-                  {visibleCandidateGroups.length === 0 ? (
+                  <div className="mt-4 max-h-[336px] space-y-3 overflow-y-auto pr-0 sm:pr-1">
+                  {visibleCandidates.length === 0 ? (
                     <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
                       No pending references to leave.
                     </div>
                   ) : (
-                    visibleCandidateGroups.map((group) => (
-                      <div key={`group-${group.recipientId}`} className="space-y-2.5">
-                        <div className="flex items-center justify-between gap-3 px-1">
-                          <div>
-                            <p className="text-sm font-semibold text-white">{group.recipientName}</p>
-                            <p className="mt-0.5 text-xs text-white/45">
-                              {group.items.length} pending {group.items.length === 1 ? "reference" : "references"}
-                            </p>
-                          </div>
-                          <span className="rounded-full border border-white/15 bg-black/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white/65">
-                            {formatDate(group.latestEndedAt)}
-                          </span>
-                        </div>
-
-                        {group.items.map((item) => {
-                          const selected = selectedPendingCandidate?.key === item.key;
-                          return (
-                            <button
-                              key={item.key}
-                              type="button"
-                              onClick={() => setSelectedCandidateKey(item.key)}
-                              className={cx(
-                                "w-full rounded-2xl border px-4 py-3 text-left transition",
-                                selected
-                                  ? "border-[#00F5FF]/40 bg-[linear-gradient(120deg,rgba(0,245,255,0.12),rgba(255,0,255,0.09))]"
-                                  : "border-white/10 bg-black/20 hover:border-[#00F5FF]/25 hover:bg-black/30"
-                              )}
-                              data-testid="reference-candidate"
-                              data-candidate-key={item.key}
-                              data-entity-type={candidateEntityType(item.type)}
-                              data-entity-id={item.entityId}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate text-base font-semibold text-white">{item.title}</p>
-                                  <p className="mt-1 text-sm text-white/65">{item.subtitle}</p>
-                                </div>
-                                <span
-                                  className={cx(
-                                    "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]",
-                                    contextTagBadge(item.type)
-                                  )}
-                                >
-                                  {referenceContextShortLabel(item.type)}
-                                </span>
+                    visibleCandidates.map((item) => {
+                      const selected = selectedPendingCandidate?.key === item.key;
+                      const pendingCopy = formatReferenceDeadline(item.expiresAt);
+                      return (
+                        <article
+                          key={item.key}
+                          className={cx(
+                            "rounded-2xl border px-4 py-3 transition",
+                            selected
+                              ? "border-[#00F5FF]/40 bg-[linear-gradient(120deg,rgba(0,245,255,0.12),rgba(255,0,255,0.09))]"
+                              : "border-white/10 bg-black/20 hover:border-[#00F5FF]/25 hover:bg-black/30"
+                          )}
+                          data-testid="reference-candidate"
+                          data-candidate-key={item.key}
+                          data-entity-type={candidateEntityType(item.type)}
+                          data-entity-id={item.entityId}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCandidateKey(item.key)}
+                            className="w-full text-left"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-base font-semibold text-white">{item.recipientName}</p>
+                                <p className="mt-1 text-xs text-white/45">{formatDate(item.endedAt)}</p>
                               </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))
+                              <span
+                                className={cx(
+                                  "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]",
+                                  contextTagBadge(item.type)
+                                )}
+                              >
+                                {referenceContextShortLabel(item.type)}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-xs text-white/58">{pendingCopy}</p>
+                          </button>
+                          {item.connectionId ? (
+                            <div className="mt-3">
+                              <Link
+                                href={`/messages?thread=${encodeURIComponent(`conn:${item.connectionId}`)}`}
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 transition hover:text-cyan-100"
+                              >
+                                <span className="material-symbols-outlined text-sm">chat</span>
+                                Open chat
+                              </Link>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })
                   )}
-                </div>
-              </article>
+                  </div>
+                </article>
 
                 <article className="rounded-xl border border-white/10 bg-[#121212] p-6">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-2xl font-bold text-white">Write Reference</h3>
-                    <p className="mt-1 text-sm text-white/60">Reference each finalized activity once. Keep it factual and specific.</p>
                     </div>
                   </div>
 
                 {selectedPendingCandidate ? (
                   <>
-                    <div className="rounded-xl border border-[#00F5FF]/20 bg-[linear-gradient(135deg,rgba(0,245,255,0.08),rgba(255,255,255,0.02))] px-4 py-4">
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-[#00F5FF]/25 bg-[#00F5FF]/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#B8FBFF]">
-                          Ready to write
-                        </span>
-                        <span
-                          className={cx(
-                            "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]",
-                            contextTagBadge(selectedPendingCandidate.type)
-                          )}
-                        >
-                          {referenceContextLabel(selectedPendingCandidate.type)}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-lg font-semibold text-white">{selectedPendingCandidate.recipientName}</p>
-                          <p className="mt-1 text-sm text-white/65">{selectedPendingCandidate.subtitle}</p>
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-base font-semibold text-white">{selectedPendingCandidate.recipientName}</p>
+                          <p className="mt-1 text-xs text-white/45">
+                            {referenceContextShortLabel(selectedPendingCandidate.type)} • ended {formatDate(selectedPendingCandidate.endedAt)}
+                          </p>
                         </div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-white/45">Finalized activity</p>
+                        {selectedPendingCandidate.connectionId ? (
+                          <Link
+                            href={`/messages?thread=${encodeURIComponent(`conn:${selectedPendingCandidate.connectionId}`)}`}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-cyan-300 transition hover:border-cyan-300/35 hover:text-cyan-100"
+                          >
+                            <span className="material-symbols-outlined text-sm">chat</span>
+                            Open chat
+                          </Link>
+                        ) : null}
                       </div>
+                      <p className="mt-3 text-sm font-semibold text-cyan-100">
+                        {formatReferenceDeadline(selectedPendingCandidate.expiresAt)}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-white/60">
+                        Once you've both submitted references, they'll be posted to your profiles at the same time. If only one of you submits a reference, it will be posted on {formatLongDate(addDays(new Date().toISOString(), REFERENCE_REVEAL_WINDOW_DAYS))}.
+                      </p>
                     </div>
 
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-1 flex flex-wrap gap-2">
                       {(["positive", "neutral", "negative"] as const).map((option) => (
                         <button
                           key={`sentiment-${option}`}
@@ -1607,7 +1503,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                               : "border-white/15 bg-black/25 text-white/70 hover:text-white"
                           )}
                           data-testid={`reference-sentiment-${option}`}
-                          >
+                        >
                           {option[0]!.toUpperCase() + option.slice(1)}
                         </button>
                       ))}
@@ -1619,7 +1515,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                       maxLength={1200}
                       onChange={(event) => setBody(event.target.value)}
                       className="mt-4 w-full rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#00F5FF]/35"
-                      placeholder="Describe the experience, reliability, communication, respect, and overall quality."
+                      placeholder={`Write your reference for ${selectedPendingCandidate.recipientName}.`}
                       data-testid="reference-body-input"
                     />
                     <div className="mt-2 flex justify-end">
@@ -1636,7 +1532,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                       )}
                       data-testid="reference-submit"
                     >
-                      {submitting ? "Submitting..." : "Submit Reference"}
+                      {submitting ? "Submitting..." : "Submit reference"}
                     </button>
                   </>
                 ) : (
@@ -1664,8 +1560,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                     const partner = profilesById[partnerId];
                     const partnerName = partner?.displayName ?? "Member";
                     const replyProfile = profilesById[item.recipientId];
-                    const canEdit = item.direction === "given" && item.editCount < 1 && within15Days(item.createdAt);
-                    const canReply = item.direction === "received" && !item.replyText && within15Days(item.createdAt);
+                    const canEdit = item.direction === "given" && item.editCount < 1 && withinReferenceActionWindow(item.createdAt);
+                    const canReply = item.direction === "received" && !item.replyText && withinReferenceActionWindow(item.createdAt);
                     const draft = editDraft[item.id] ?? { body: item.body, sentiment: item.sentiment };
                     const reply = replyDraft[item.id] ?? "";
                     const busy = busyReferenceId === item.id;
@@ -1747,27 +1643,6 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                               </button>
                               {openMenuReferenceId === item.id ? (
                                 <div className="absolute right-0 top-8 z-20 min-w-[180px] rounded-xl border border-white/10 bg-[#101317] p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
-                                  {feedFilter === "archived" ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => void unarchiveReference(item.id)}
-                                      disabled={archivingReferenceId === item.id}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/75 transition hover:bg-white/[0.04] hover:text-white disabled:opacity-60"
-                                    >
-                                      <span className="material-symbols-outlined text-[18px]">unarchive</span>
-                                      {archivingReferenceId === item.id ? "Restoring..." : "Restore"}
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => void archiveReference(item.id)}
-                                      disabled={archivingReferenceId === item.id}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/75 transition hover:bg-white/[0.04] hover:text-white disabled:opacity-60"
-                                    >
-                                      <span className="material-symbols-outlined text-[18px]">inventory_2</span>
-                                      {archivingReferenceId === item.id ? "Archiving..." : "Archive"}
-                                    </button>
-                                  )}
                                   <button
                                     type="button"
                                     onClick={() => openReferenceReport(item.id)}
@@ -1831,7 +1706,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                                 data-reference-id={item.id}
                                 className="rounded-full border border-[#00F5FF]/35 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#B8FBFF] hover:bg-[#00F5FF]/18 disabled:opacity-60"
                               >
-                                {busy ? "Saving..." : "Save Edit"}
+                                {busy ? "Saving..." : "Save edit"}
                               </button>
                             </div>
                           ) : (
@@ -1907,7 +1782,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                                     data-reference-id={item.id}
                                     className="rounded-full border border-[#00F5FF]/35 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#B8FBFF] hover:bg-[#00F5FF]/18 disabled:opacity-60"
                                   >
-                                    {busy ? "Saving..." : "Post Reply"}
+                                    {busy ? "Saving..." : "Post reply"}
                                   </button>
                                 </div>
                               ) : null}

@@ -2,6 +2,7 @@
 
 import { getPlanLimits } from "@/lib/billing/limits";
 import type { PlanDefinition, PlanId } from "@/lib/billing/plans";
+import { cx } from "@/lib/cx";
 
 type Props = {
   plans: PlanDefinition[];
@@ -156,9 +157,6 @@ const COMPARISON_SECTIONS: ComparisonSection[] = [
   },
 ];
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export default function PlanComparison({ plans, currentPlanId }: Props) {
   return (

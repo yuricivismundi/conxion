@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Nav from "@/components/Nav";
 import { supabase } from "@/lib/supabase/client";
 import { fetchTeacherInfoBlocks, fetchTeacherInfoProfile } from "@/lib/teacher-info/read-model";
@@ -11,16 +11,26 @@ import {
   getTeacherInfoTemplateText,
   serializeTeacherInfoContent,
   type TeacherInfoBlock,
+  type TeacherInfoBlockKind,
   type TeacherInfoContent,
   type TeacherInfoProfileConfig,
+  TEACHER_INFO_BLOCK_KINDS,
+  TEACHER_INFO_KIND_LABELS,
 } from "@/lib/teacher-info/types";
-import { TEACHER_INFO_ATTACHMENT_MAX_BYTES } from "@/lib/teacher-info/storage";
 
 type EditableBlock = TeacherInfoBlock;
 
 type NewBlockDraft = {
+  kind: TeacherInfoBlockKind;
   title: string;
   body: string;
+  priceText: string;
+  packageText: string;
+  availabilityText: string;
+  travelText: string;
+  conditionsText: string;
+  ctaText: string;
+  referencesText: string;
   attachmentName: string | null;
   attachmentUrl: string | null;
   attachmentMimeType: string | null;
@@ -43,8 +53,16 @@ function defaultProfileConfig(userId: string): TeacherInfoProfileConfig {
 
 function emptyNewBlock(): NewBlockDraft {
   return {
+    kind: "private_class",
     title: "",
     body: "",
+    priceText: "",
+    packageText: "",
+    availabilityText: "",
+    travelText: "",
+    conditionsText: "",
+    ctaText: "",
+    referencesText: "",
     attachmentName: null,
     attachmentUrl: null,
     attachmentMimeType: null,
@@ -67,6 +85,11 @@ function formatAttachmentSize(sizeBytes: number | null) {
   return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
 }
 
+function optionalText(value: string) {
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
 type TeacherInfoManagerProps = {
   embedded?: boolean;
 };
@@ -87,9 +110,10 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
   const [creatingBlock, setCreatingBlock] = useState(false);
   const [deleteConfirmBlockId, setDeleteConfirmBlockId] = useState<string | null>(null);
   const [uploadingTarget, setUploadingTarget] = useState<"new" | string | null>(null);
+  const [expandedBlockId, setExpandedBlockId] = useState<string | null>(null);
+  const [showNewForm, setShowNewForm] = useState(false);
 
   const eligible = canManageTeacherInfo(roles);
-  const usageSummary = useMemo(() => `${blocks.length}/${MAX_TEMPLATE_COUNT} templates`, [blocks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,6 +322,40 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
     }
   }
 
+  async function toggleEnabled() {
+    if (!userId || !profileConfig) return;
+    const next = !profileConfig.isEnabled;
+    setProfileConfig((c) => (c ? { ...c, isEnabled: next } : c));
+    setSavingProfile(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const { data, error: saveError } = await supabase
+        .from("teacher_info_profiles")
+        .upsert(
+          { user_id: userId, headline: profileConfig.headline?.trim() || null, intro_text: profileConfig.introText?.trim() || null, is_enabled: next },
+          { onConflict: "user_id" }
+        )
+        .select("user_id,headline,intro_text,is_enabled,created_at,updated_at")
+        .single();
+      if (saveError) throw saveError;
+      setProfileConfig({
+        userId,
+        headline: (data as { headline?: string | null }).headline ?? null,
+        introText: (data as { intro_text?: string | null }).intro_text ?? null,
+        isEnabled: Boolean((data as { is_enabled?: boolean }).is_enabled),
+        createdAt: (data as { created_at?: string }).created_at ?? profileConfig.createdAt,
+        updatedAt: (data as { updated_at?: string }).updated_at ?? new Date().toISOString(),
+      });
+      setInfo(next ? "Teaching services enabled." : "Teaching services disabled.");
+    } catch (e) {
+      setProfileConfig((c) => (c ? { ...c, isEnabled: !next } : c));
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
   async function createBlock() {
     if (!userId) return;
     if (blocks.length >= MAX_TEMPLATE_COUNT) {
@@ -308,11 +366,6 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
       setError("Template title is required.");
       return;
     }
-    if (!newBlock.body.trim()) {
-      setError("Template text is required.");
-      return;
-    }
-
     setCreatingBlock(true);
     setError(null);
     setInfo(null);
@@ -322,11 +375,18 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
         .from("teacher_info_blocks")
         .insert({
           user_id: userId,
-          kind: "other",
+          kind: newBlock.kind,
           title: newBlock.title.trim(),
           short_summary: null,
           content_json: serializeTeacherInfoContent({
-            notesText: newBlock.body.trim(),
+            notesText: optionalText(newBlock.body),
+            priceText: optionalText(newBlock.priceText),
+            packageText: optionalText(newBlock.packageText),
+            availabilityText: optionalText(newBlock.availabilityText),
+            travelText: optionalText(newBlock.travelText),
+            conditionsText: optionalText(newBlock.conditionsText),
+            ctaText: optionalText(newBlock.ctaText),
+            referencesText: optionalText(newBlock.referencesText),
             attachmentName: newBlock.attachmentName,
             attachmentUrl: newBlock.attachmentUrl,
             attachmentMimeType: newBlock.attachmentMimeType,
@@ -345,6 +405,7 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
         setBlocks((current) => [...current, created].sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt)));
       }
       setNewBlock(emptyNewBlock());
+      setShowNewForm(false);
       setInfo("Template created.");
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Could not create the template.");
@@ -359,11 +420,18 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
     setInfo(null);
     try {
       const payload = {
-        kind: "other",
+        kind: block.kind,
         title: block.title.trim(),
         short_summary: null,
         content_json: serializeTeacherInfoContent({
-          notesText: getTeacherInfoTemplateText(block) || null,
+          notesText: block.contentJson.notesText ?? null,
+          priceText: block.contentJson.priceText ?? null,
+          packageText: block.contentJson.packageText ?? null,
+          availabilityText: block.contentJson.availabilityText ?? null,
+          travelText: block.contentJson.travelText ?? null,
+          conditionsText: block.contentJson.conditionsText ?? null,
+          ctaText: block.contentJson.ctaText ?? null,
+          referencesText: block.contentJson.referencesText ?? null,
           attachmentName: block.contentJson.attachmentName,
           attachmentUrl: block.contentJson.attachmentUrl,
           attachmentMimeType: block.contentJson.attachmentMimeType,
@@ -475,321 +543,457 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
   }
 
   const content = (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {!embedded ? (
-        <section className="rounded-3xl border border-white/10 bg-[#0b1a1d]/70 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <Link href="/account-settings" className="inline-flex items-center gap-1 text-sm text-cyan-200/80 hover:text-cyan-100">
-                <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                Back
-              </Link>
-              <h1 className="mt-3 text-3xl font-black text-white">Teacher services</h1>
-              <p className="mt-2 text-sm text-slate-300">Keep a few professional info packs ready to share.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-slate-200">{usageSummary}</div>
-          </div>
-        </section>
+        <div className="pb-2">
+          <Link href="/account-settings" className="inline-flex items-center gap-1 text-sm text-cyan-200/80 hover:text-cyan-100">
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            Back
+          </Link>
+          <h1 className="mt-3 text-3xl font-black text-white">Teacher services</h1>
+          <p className="mt-1 text-sm text-slate-400">Keep info packs ready to share when someone asks about your services.</p>
+        </div>
       ) : null}
 
       {error ? <div className="rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div> : null}
       {info ? <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">{info}</div> : null}
 
       {loading ? (
-        <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="h-40 animate-pulse rounded-3xl border border-white/10 bg-white/[0.03]" />
+        <div className="space-y-3">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="h-16 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]" />
           ))}
         </div>
       ) : !eligible ? (
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-          <h2 className="text-xl font-bold text-white">Teacher info is not available for this profile yet.</h2>
-          <p className="mt-2 text-sm text-slate-400">Add a teacher, artist, instructor, or organizer role in your profile to unlock this section.</p>
+          <h2 className="text-xl font-bold text-white">Not available yet</h2>
+          <p className="mt-2 text-sm text-slate-400">Add a teacher, artist, instructor, or organizer role to unlock teacher services.</p>
           <div className="mt-4">
-            <Link
-              href="/me/edit"
-              className="inline-flex rounded-2xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-[#06121a]"
-            >
+            <Link href="/me/edit" className="inline-flex rounded-2xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-[#06121a]">
               Edit profile roles
             </Link>
           </div>
         </section>
       ) : (
-        <>
-          <section>
-            <article className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Request Teaching Info</h2>
-                  <p className="mt-1 text-sm text-slate-400">Let people request your teaching details before connecting.</p>
-                </div>
+        <div className="space-y-4">
+          {/* Enable/disable toggle */}
+          <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
+            <div>
+              <p className="font-semibold text-white">Teaching services</p>
+              <p className="mt-0.5 text-sm text-slate-400">
+                {profileConfig?.isEnabled
+                  ? "Visible on your profile — people can request your info."
+                  : "Hidden — no one can see or request your teaching info."}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={Boolean(profileConfig?.isEnabled)}
+              onClick={() => void toggleEnabled()}
+              disabled={savingProfile}
+              className={[
+                "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-60",
+                profileConfig?.isEnabled ? "bg-cyan-400" : "bg-white/20",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform",
+                  profileConfig?.isEnabled ? "translate-x-5" : "translate-x-0",
+                ].join(" ")}
+              />
+            </button>
+          </div>
+
+          {/* Templates */}
+          <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03]">
+            <div className="flex items-center justify-between gap-3 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-white">Templates</h2>
+                <span className="rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-xs font-semibold text-slate-400">
+                  {blocks.length}/{MAX_TEMPLATE_COUNT}
+                </span>
+              </div>
+              {blocks.length < MAX_TEMPLATE_COUNT && !showNewForm ? (
                 <button
                   type="button"
-                  onClick={() => void saveProfileConfig()}
-                  disabled={savingProfile}
-                  className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] disabled:opacity-60"
+                  onClick={() => { setShowNewForm(true); setExpandedBlockId(null); }}
+                  className="inline-flex items-center gap-1 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/20"
                 >
-                  {savingProfile ? "Saving..." : "Save"}
+                  <span className="material-symbols-outlined text-[16px]">add</span>
+                  Add template
                 </button>
-              </div>
-              <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Enable teaching info requests</p>
-                    <p className="mt-1 text-sm text-slate-400">People can ask for professional details and you can reply with a note or a quick template.</p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={Boolean(profileConfig?.isEnabled)}
-                    onClick={() => setProfileConfig((current) => (current ? { ...current, isEnabled: !current.isEnabled } : current))}
-                    className={[
-                      "inline-flex min-h-11 items-center gap-3 rounded-full border px-3 py-2 text-sm font-semibold transition",
-                      profileConfig?.isEnabled ? "border-cyan-300/45 bg-cyan-300/15 text-cyan-100" : "border-white/15 bg-white/[0.04] text-slate-300",
-                    ].join(" ")}
-                  >
-                    <span className={["relative inline-flex h-6 w-11 rounded-full transition", profileConfig?.isEnabled ? "bg-cyan-300/65" : "bg-white/15"].join(" ")}>
-                      <span className={["absolute top-0.5 h-5 w-5 rounded-full bg-white transition", profileConfig?.isEnabled ? "left-[22px]" : "left-0.5"].join(" ")} />
-                    </span>
-                    {profileConfig?.isEnabled ? "On" : "Off"}
-                  </button>
-                </div>
-              </div>
+              ) : null}
+            </div>
 
-              <div className="mt-6 border-t border-white/10 pt-6">
-                <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Quick templates</h2>
-                  <p className="mt-1 text-sm text-slate-400">Keep up to {MAX_TEMPLATE_COUNT} info packs ready to send.</p>
-                </div>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold text-slate-300">{usageSummary}</span>
-                </div>
-              <div className="mt-4 grid gap-4">
-                <label className="block">
-                  <span className="text-sm font-semibold text-white">Template title</span>
-                  <input
-                    value={newBlock.title}
-                    onChange={(event) => setNewBlock((current) => ({ ...current, title: event.target.value }))}
-                    placeholder="Single private class"
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-semibold text-white">Template text</span>
-                  <textarea
-                    value={newBlock.body}
-                    onChange={(event) => setNewBlock((current) => ({ ...current, body: event.target.value }))}
-                    rows={5}
-                    placeholder="It costs 50 EUR, lasts 1 hour, and studio rental is not included."
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm leading-6 text-white placeholder:text-slate-500 outline-none"
-                  />
-                </label>
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Attachment</p>
-                      <p className="mt-1 text-xs text-slate-400">Add one PDF or image up to {Math.round(TEACHER_INFO_ATTACHMENT_MAX_BYTES / (1024 * 1024))} MB.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => newAttachmentInputRef.current?.click()}
-                      disabled={uploadingTarget === "new"}
-                      className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-60"
-                    >
-                      {uploadingTarget === "new" ? "Uploading..." : newBlock.attachmentUrl ? "Replace attachment" : "Add attachment"}
-                    </button>
-                    <input
-                      ref={newAttachmentInputRef}
-                      type="file"
-                      accept="application/pdf,image/jpeg,image/png,image/webp"
-                      className="hidden"
-                      onChange={(event) => void uploadAttachmentFile(event.target.files?.[0] ?? null, "new")}
-                    />
-                  </div>
-                  {newBlock.attachmentUrl && newBlock.attachmentName ? (
-                    <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-white">{newBlock.attachmentName}</p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          {[newBlock.attachmentMimeType, formatAttachmentSize(newBlock.attachmentSizeBytes)].filter(Boolean).join(" • ")}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <a
-                          href={newBlock.attachmentUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm font-medium text-white/85 hover:bg-white/[0.08]"
-                        >
-                          Open
-                        </a>
+            {blocks.length === 0 && !showNewForm ? (
+              <div className="border-t border-white/10 px-5 py-8 text-center">
+                <p className="text-sm text-slate-400">No templates yet. Add one to get started.</p>
+              </div>
+            ) : null}
+
+            {/* Existing blocks */}
+            {blocks.length > 0 ? (
+              <div className="divide-y divide-white/[0.06] border-t border-white/10">
+                {blocks.map((block, index) => {
+                  const isExpanded = expandedBlockId === block.id;
+                  const attachment = getTeacherInfoAttachment(block);
+                  return (
+                    <div key={block.id}>
+                      {/* Row header */}
+                      <div className="flex w-full items-center gap-3 px-5 py-3.5 hover:bg-white/[0.03]">
                         <button
                           type="button"
-                          onClick={clearDraftAttachment}
-                          className="rounded-xl border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-sm font-medium text-rose-100"
+                          onClick={() => setExpandedBlockId(isExpanded ? null : block.id)}
+                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
                         >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void createBlock()}
-                  disabled={creatingBlock || blocks.length >= MAX_TEMPLATE_COUNT}
-                  className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-60"
-                >
-                  {creatingBlock ? "Creating..." : blocks.length >= MAX_TEMPLATE_COUNT ? "Template limit reached" : "Add template"}
-                </button>
-                {blocks.length > 0 ? (
-                  <div className="mt-5 space-y-4 border-t border-white/10 pt-5">
-                    {blocks.map((block, index) => (
-                      <article key={block.id} className="rounded-3xl border border-white/10 bg-black/20 p-5">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void moveBlock(block.id, -1)}
-                              disabled={busyBlockId === block.id || index === 0}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-black/20 text-slate-100 disabled:opacity-40"
-                              aria-label="Move up"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void moveBlock(block.id, 1)}
-                              disabled={busyBlockId === block.id || index === blocks.length - 1}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-black/20 text-slate-100 disabled:opacity-40"
-                              aria-label="Move down"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                            </button>
+                          <span className="material-symbols-outlined text-[18px] text-slate-500">
+                            {isExpanded ? "expand_less" : "expand_more"}
+                          </span>
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span className="shrink-0 rounded-full border border-white/10 bg-black/25 px-2 py-0.5 text-xs font-medium text-slate-300">
+                              {TEACHER_INFO_KIND_LABELS[block.kind]}
+                            </span>
+                            <span className="truncate text-sm font-medium text-white">{block.title}</span>
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                        </button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void moveBlock(block.id, -1)}
+                            disabled={busyBlockId === block.id || index === 0}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 hover:bg-white/[0.08] disabled:opacity-30"
+                            aria-label="Move up"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">arrow_upward</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void moveBlock(block.id, 1)}
+                            disabled={busyBlockId === block.id || index === blocks.length - 1}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 hover:bg-white/[0.08] disabled:opacity-30"
+                            aria-label="Move down"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setDeleteConfirmBlockId(block.id); setExpandedBlockId(null); }}
+                            disabled={busyBlockId === block.id}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-rose-400/70 hover:bg-rose-500/10 disabled:opacity-30"
+                            aria-label="Delete"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">delete</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Delete confirm */}
+                      {deleteConfirmBlockId === block.id ? (
+                        <div className="border-t border-rose-300/20 bg-rose-500/10 px-5 py-4">
+                          <p className="text-sm font-medium text-rose-100">Delete this template?</p>
+                          <p className="mt-0.5 text-xs text-rose-100/70">This cannot be undone.</p>
+                          <div className="mt-3 flex gap-2">
                             <button
                               type="button"
-                              onClick={() => void saveBlock(block)}
-                              disabled={busyBlockId === block.id}
-                              className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-60"
+                              onClick={() => setDeleteConfirmBlockId(null)}
+                              className="rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2 text-sm text-white/80 hover:bg-white/[0.08]"
                             >
-                              {busyBlockId === block.id ? "Saving..." : "Save"}
+                              Cancel
                             </button>
                             <button
                               type="button"
-                              onClick={() => setDeleteConfirmBlockId((current) => (current === block.id ? null : block.id))}
+                              onClick={() => void deleteBlock(block.id)}
                               disabled={busyBlockId === block.id}
-                              className="rounded-xl border border-rose-300/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-100 disabled:opacity-60"
+                              className="rounded-xl border border-rose-300/30 bg-rose-400/10 px-3 py-2 text-sm font-semibold text-rose-100 disabled:opacity-60"
                             >
-                              Delete
+                              {busyBlockId === block.id ? "Deleting..." : "Delete"}
                             </button>
                           </div>
                         </div>
+                      ) : null}
 
-                        <div className="mt-4 grid gap-4">
+                      {/* Expanded edit form */}
+                      {isExpanded ? (
+                        <div className="space-y-4 border-t border-white/[0.06] bg-black/20 px-5 pb-5 pt-4">
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Type</span>
+                              <select
+                                value={block.kind}
+                                onChange={(e) => updateBlock(block.id, { kind: e.target.value as TeacherInfoBlockKind })}
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none"
+                              >
+                                {TEACHER_INFO_BLOCK_KINDS.map((kind) => (
+                                  <option key={kind} value={kind}>{TEACHER_INFO_KIND_LABELS[kind]}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Title</span>
+                              <input
+                                value={block.title}
+                                onChange={(e) => updateBlock(block.id, { title: e.target.value })}
+                                placeholder="e.g. Private class package"
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Price per class</span>
+                              <input
+                                value={block.contentJson.priceText ?? ""}
+                                onChange={(e) => updateBlockContent(block.id, "priceText", e.target.value)}
+                                placeholder="€50 / hour"
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Package deal</span>
+                              <input
+                                value={block.contentJson.packageText ?? ""}
+                                onChange={(e) => updateBlockContent(block.id, "packageText", e.target.value)}
+                                placeholder="5 classes for €200"
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Duration</span>
+                              <input
+                                value={block.contentJson.availabilityText ?? ""}
+                                onChange={(e) => updateBlockContent(block.id, "availabilityText", e.target.value)}
+                                placeholder="60 min"
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Location</span>
+                              <input
+                                value={block.contentJson.travelText ?? ""}
+                                onChange={(e) => updateBlockContent(block.id, "travelText", e.target.value)}
+                                placeholder="My studio or yours"
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                              />
+                            </label>
+                            <label className="block sm:col-span-2">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Studio / rental extras</span>
+                              <input
+                                value={block.contentJson.conditionsText ?? ""}
+                                onChange={(e) => updateBlockContent(block.id, "conditionsText", e.target.value)}
+                                placeholder="Studio rental not included"
+                                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                              />
+                            </label>
+                          </div>
                           <label className="block">
-                            <span className="text-sm font-semibold text-white">Title</span>
-                            <input
-                              value={block.title}
-                              onChange={(event) => updateBlock(block.id, { title: event.target.value })}
-                              className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none"
-                            />
-                          </label>
-                          <label className="block">
-                            <span className="text-sm font-semibold text-white">Text</span>
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">{"What's included"}</span>
                             <textarea
-                              value={getTeacherInfoTemplateText(block)}
-                              onChange={(event) => updateBlockBody(block.id, event.target.value)}
-                              rows={5}
-                              className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm leading-6 text-white outline-none"
+                              value={block.contentJson.notesText ?? ""}
+                              onChange={(e) => updateBlockBody(block.id, e.target.value)}
+                              rows={3}
+                              placeholder="Describe what's included in this service..."
+                              className="mt-1.5 w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm leading-6 text-white placeholder:text-slate-600 outline-none"
                             />
                           </label>
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                              <div>
-                                <p className="text-sm font-semibold text-white">Attachment</p>
-                                <p className="mt-1 text-xs text-slate-400">Optional PDF or image. It will be included when this template is shared.</p>
+                          <label className="block">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Extra note</span>
+                            <input
+                              value={block.contentJson.ctaText ?? ""}
+                              onChange={(e) => updateBlockContent(block.id, "ctaText", e.target.value)}
+                              placeholder="e.g. Message me with your availability"
+                              className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                            />
+                          </label>
+                          <div>
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Attachment</span>
+                            {attachment ? (
+                              <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                                <span className="material-symbols-outlined text-[16px] text-slate-400">attach_file</span>
+                                <span className="min-w-0 flex-1 truncate text-sm text-white">{attachment.name}</span>
+                                <a href={attachment.url} target="_blank" rel="noreferrer" className="text-xs text-cyan-300 hover:underline">Open</a>
+                                <button type="button" onClick={() => clearBlockAttachment(block.id)} className="text-xs text-rose-300 hover:underline">Remove</button>
                               </div>
+                            ) : (
                               <button
                                 type="button"
                                 onClick={() => existingAttachmentInputRefs.current[block.id]?.click()}
                                 disabled={uploadingTarget === block.id}
-                                className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-60"
+                                className="mt-1.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.06] disabled:opacity-60"
                               >
-                                {uploadingTarget === block.id ? "Uploading..." : getTeacherInfoAttachment(block) ? "Replace attachment" : "Add attachment"}
+                                <span className="material-symbols-outlined text-[16px]">attach_file</span>
+                                {uploadingTarget === block.id ? "Uploading..." : "Add attachment"}
                               </button>
-                              <input
-                                ref={(node) => {
-                                  existingAttachmentInputRefs.current[block.id] = node;
-                                }}
-                                type="file"
-                                accept="application/pdf,image/jpeg,image/png,image/webp"
-                                className="hidden"
-                                onChange={(event) => void uploadAttachmentFile(event.target.files?.[0] ?? null, block.id)}
-                              />
-                            </div>
-                            {getTeacherInfoAttachment(block) ? (
-                              <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-white">{getTeacherInfoAttachment(block)?.name}</p>
-                                  <p className="mt-1 text-xs text-slate-400">
-                                    {[getTeacherInfoAttachment(block)?.mimeType, formatAttachmentSize(getTeacherInfoAttachment(block)?.sizeBytes ?? null)].filter(Boolean).join(" • ")}
-                                  </p>
-                                </div>
-                                <div className="flex gap-2">
-                                  <a
-                                    href={getTeacherInfoAttachment(block)?.url ?? "#"}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm font-medium text-white/85 hover:bg-white/[0.08]"
-                                  >
-                                    Open
-                                  </a>
-                                  <button
-                                    type="button"
-                                    onClick={() => clearBlockAttachment(block.id)}
-                                    className="rounded-xl border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-sm font-medium text-rose-100"
-                                  >
-                                    Remove
-                                  </button>
-                                </div>
-                              </div>
-                            ) : null}
+                            )}
+                            <input
+                              ref={(node) => { existingAttachmentInputRefs.current[block.id] = node; }}
+                              type="file"
+                              accept="application/pdf,image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              onChange={(e) => void uploadAttachmentFile(e.target.files?.[0] ?? null, block.id)}
+                            />
                           </div>
-                          {deleteConfirmBlockId === block.id ? (
-                            <div className="rounded-2xl border border-rose-300/30 bg-rose-500/10 p-4">
-                              <p className="text-sm font-medium text-rose-100">Delete this template?</p>
-                              <p className="mt-1 text-sm text-rose-100/75">This removes the template from your quick replies.</p>
-                              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteConfirmBlockId(null)}
-                                  className="rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white/85 hover:bg-white/[0.08]"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void deleteBlock(block.id)}
-                                  disabled={busyBlockId === block.id}
-                                  className="rounded-xl border border-rose-300/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-100 disabled:opacity-60"
-                                >
-                                  {busyBlockId === block.id ? "Deleting..." : "Delete template"}
-                                </button>
-                              </div>
-                            </div>
-                          ) : null}
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={() => void saveBlock(block)}
+                              disabled={busyBlockId === block.id}
+                              className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-[#06121a] disabled:opacity-60"
+                            >
+                              {busyBlockId === block.id ? "Saving..." : "Save"}
+                            </button>
+                          </div>
                         </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
+            ) : null}
+
+            {/* New template form */}
+            {showNewForm ? (
+              <div className={["space-y-4 bg-black/20 px-5 pb-5 pt-4", blocks.length > 0 ? "border-t border-white/10" : ""].join(" ")}>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-white">New template</p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNewForm(false); setNewBlock(emptyNewBlock()); }}
+                    className="text-sm text-slate-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Type</span>
+                    <select
+                      value={newBlock.kind}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, kind: e.target.value as TeacherInfoBlockKind }))}
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none"
+                    >
+                      {TEACHER_INFO_BLOCK_KINDS.map((kind) => (
+                        <option key={kind} value={kind}>{TEACHER_INFO_KIND_LABELS[kind]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Title <span className="text-rose-300">*</span>
+                    </span>
+                    <input
+                      value={newBlock.title}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, title: e.target.value }))}
+                      placeholder="e.g. Private class package"
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Price per class</span>
+                    <input
+                      value={newBlock.priceText}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, priceText: e.target.value }))}
+                      placeholder="€50 / hour"
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Package deal</span>
+                    <input
+                      value={newBlock.packageText}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, packageText: e.target.value }))}
+                      placeholder="5 classes for €200"
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Duration</span>
+                    <input
+                      value={newBlock.availabilityText}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, availabilityText: e.target.value }))}
+                      placeholder="60 min"
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Location</span>
+                    <input
+                      value={newBlock.travelText}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, travelText: e.target.value }))}
+                      placeholder="My studio or yours"
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Studio / rental extras</span>
+                    <input
+                      value={newBlock.conditionsText}
+                      onChange={(e) => setNewBlock((c) => ({ ...c, conditionsText: e.target.value }))}
+                      placeholder="Studio rental not included"
+                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                    />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">{"What's included"}</span>
+                  <textarea
+                    value={newBlock.body}
+                    onChange={(e) => setNewBlock((c) => ({ ...c, body: e.target.value }))}
+                    rows={3}
+                    placeholder="Describe what's included in this service..."
+                    className="mt-1.5 w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm leading-6 text-white placeholder:text-slate-600 outline-none"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Extra note</span>
+                  <input
+                    value={newBlock.ctaText}
+                    onChange={(e) => setNewBlock((c) => ({ ...c, ctaText: e.target.value }))}
+                    placeholder="e.g. Message me with your availability"
+                    className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none"
+                  />
+                </label>
+                <div>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Attachment</span>
+                  {newBlock.attachmentUrl && newBlock.attachmentName ? (
+                    <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                      <span className="material-symbols-outlined text-[16px] text-slate-400">attach_file</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-white">{newBlock.attachmentName}</span>
+                      <a href={newBlock.attachmentUrl} target="_blank" rel="noreferrer" className="text-xs text-cyan-300 hover:underline">Open</a>
+                      <button type="button" onClick={clearDraftAttachment} className="text-xs text-rose-300 hover:underline">Remove</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => newAttachmentInputRef.current?.click()}
+                      disabled={uploadingTarget === "new"}
+                      className="mt-1.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.06] disabled:opacity-60"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">attach_file</span>
+                      {uploadingTarget === "new" ? "Uploading..." : "Add attachment"}
+                    </button>
+                  )}
+                  <input
+                    ref={newAttachmentInputRef}
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(e) => void uploadAttachmentFile(e.target.files?.[0] ?? null, "new")}
+                  />
+                </div>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void createBlock()}
+                    disabled={creatingBlock}
+                    className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-[#06121a] disabled:opacity-60"
+                  >
+                    {creatingBlock ? "Creating..." : "Create template"}
+                  </button>
+                </div>
               </div>
-            </article>
-          </section>
-        </>
+            ) : null}
+          </div>
+        </div>
       )}
     </div>
   );

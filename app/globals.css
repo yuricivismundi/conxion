@@ -73,8 +73,8 @@ body {
   font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
 }
 
-.connections-card .material-symbols-outlined.icon-xs{ font-size: 12px !important; }
-.connections-card .material-symbols-outlined.icon-sm{ font-size: 14px !important; }
+.connections-card .material-symbols-outlined.icon-xs{ font-size: 18px !important; }
+.connections-card .material-symbols-outlined.icon-sm{ font-size: 21px !important; }
 
 .connections-card .pill-tight{
   padding: 2px 8px;  /* same for roles & styles */
@@ -97,6 +97,28 @@ body {
   justify-content: center;
   vertical-align: middle;
 }
+/* Page content fade-in */
+@keyframes cx-fade-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: cx-fade-in 180ms ease-out both;
+}
+/* Staggered card grid fade-in */
+.animate-fade-in-grid > * {
+  animation: cx-fade-in 220ms ease-out both;
+}
+.animate-fade-in-grid > *:nth-child(1)  { animation-delay:   0ms; }
+.animate-fade-in-grid > *:nth-child(2)  { animation-delay:  30ms; }
+.animate-fade-in-grid > *:nth-child(3)  { animation-delay:  60ms; }
+.animate-fade-in-grid > *:nth-child(4)  { animation-delay:  90ms; }
+.animate-fade-in-grid > *:nth-child(5)  { animation-delay: 110ms; }
+.animate-fade-in-grid > *:nth-child(6)  { animation-delay: 130ms; }
+.animate-fade-in-grid > *:nth-child(7)  { animation-delay: 150ms; }
+.animate-fade-in-grid > *:nth-child(8)  { animation-delay: 170ms; }
+.animate-fade-in-grid > *:nth-child(n+9){ animation-delay: 190ms; }
+
 /* Hide scrollbars but keep scroll behavior */
 .no-scrollbar::-webkit-scrollbar {
   width: 0;

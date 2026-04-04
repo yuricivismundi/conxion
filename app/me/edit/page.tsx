@@ -10,13 +10,14 @@ import {
   type CountryEntry,
 } from "@/lib/country-city-client";
 import { getAvatarStorageUrl, resolveAvatarUrl } from "@/lib/avatar-storage";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Nav from "@/components/Nav";
 import VerifiedBadge from "@/components/VerifiedBadge";
 import GetVerifiedButton from "@/components/verification/GetVerifiedButton";
 import ProfileMediaManager from "@/components/profile/ProfileMediaManager";
 import TeacherInfoManager from "@/components/teacher/TeacherInfoManager";
+import TeacherProfilePage from "@/app/me/edit/teacher-profile/page";
 import {
   HOSTING_GUEST_GENDER_OPTIONS,
   HOSTING_SLEEPING_ARRANGEMENT_OPTIONS,
@@ -28,10 +29,19 @@ import {
 import {
   normalizeProfileUsernameInput,
   suggestProfileUsername,
-  validateProfileUsername,
 } from "@/lib/profile-username";
+import { INTEREST_OPTIONS, normalizeInterests } from "@/lib/interests";
+import { requestUsernameCheck } from "@/lib/username/client";
+import {
+  canChangeUsername,
+  getUsernameChangeCooldownMessage,
+} from "@/lib/username/cooldown";
+import { USERNAME_MAX_LENGTH } from "@/lib/username/normalize";
+import { mapUsernameServerError, validateUsernameFormat } from "@/lib/username/validate";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
-import { VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
+import { VERIFIED_VIA_PAYMENT_LABEL } from "@/lib/verification";
+import { DismissibleBanner } from "@/components/DismissibleBanner";
+import { cx } from "@/lib/cx";
 
 const LEVELS = [
   "Beginner (0–3 months)",
@@ -44,7 +54,8 @@ const LEVELS = [
 const CORE_STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
 
 const ROLE_OPTIONS = [
-  "Social dancer / Student",
+  "Social Dancer",
+  "Student",
   "Organizer",
   "Studio Owner",
   "Promoter",
@@ -53,22 +64,12 @@ const ROLE_OPTIONS = [
   "Teacher",
 ] as const;
 
-const INTEREST_OPTIONS = [
-  "Dance at local socials and events",
-  "Find practice partners",
-  "Get tips on the local dance scene",
-  "Collaborate on video projects",
-  "Find buddies for workshops, socials, accommodations, or rides",
-  "Private Lessons",
-  "Group lessons",
-] as const;
-
 const AVAILABILITY_OPTIONS = [
-  "Week Days",
+  "Weekdays",
   "Weekends",
-  "Day Time",
+  "Daytime",
   "Evenings",
-  "Travel for Events",
+  "Travel for events",
   "Rather not say",
 ] as const;
 
@@ -87,9 +88,6 @@ const LANGUAGE_OPTIONS = [
   "Finnish",
 ] as const;
 
-const USERNAME_CHANGE_COOLDOWN_DAYS = 90;
-const USERNAME_CHANGE_COOLDOWN_MS = USERNAME_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
-
 type DanceSkill = {
   level?: string;
   verified?: boolean;
@@ -99,6 +97,7 @@ type Profile = {
   user_id: string;
   display_name: string;
   username?: string | null;
+  username_updated_at?: string | null;
   username_changed_at?: string | null;
   city: string;
   country: string | null;
@@ -193,7 +192,7 @@ type SnapshotValues = {
   avatarUrl: string | null;
 };
 
-type EditProfileTab = "profile" | "media" | "hosting" | "teacher_services";
+type EditProfileTab = "profile" | "media" | "hosting" | "teacher_services" | "teacher_profile";
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -272,7 +271,7 @@ function serializeDraft(values: SnapshotValues) {
     danceSkills: sortedSkills,
     roles: [...values.roles].sort((a, b) => a.localeCompare(b)),
     languages: [...values.languages].sort((a, b) => a.localeCompare(b)),
-    interests: [...values.interests].sort((a, b) => a.localeCompare(b)),
+    interests: normalizeInterests(values.interests),
     availability: [...values.availability].sort((a, b) => a.localeCompare(b)),
     instagramHandle: normalizeHandle(values.instagramHandle),
     whatsappHandle: values.whatsappHandle.trim(),
@@ -349,17 +348,15 @@ async function makePreviewMatchedCroppedBlob(params: {
   if (!blob) throw new Error("Could not create cropped image.");
   return blob;
 }
+const VALID_TABS: EditProfileTab[] = ["profile", "media", "hosting", "teacher_services", "teacher_profile"];
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
-
-function formatLongDate(value: Date) {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(value);
+function isValidTab(t: string | null): t is EditProfileTab {
+  return VALID_TABS.includes(t as EditProfileTab);
 }
 
 export default function EditMePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
   const [availableCities, setAvailableCities] = useState<string[]>([]);
@@ -375,7 +372,18 @@ export default function EditMePage() {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [initialUsername, setInitialUsername] = useState("");
-  const [usernameChangedAt, setUsernameChangedAt] = useState<string | null>(null);
+  const [usernameUpdatedAt, setUsernameUpdatedAt] = useState<string | null>(null);
+  const [usernameAvailability, setUsernameAvailability] = useState<{
+    checking: boolean;
+    available: boolean;
+    error: string | null;
+    suggestion: string | null;
+  }>({
+    checking: false,
+    available: true,
+    error: null,
+    suggestion: null,
+  });
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
   const [nationality, setNationality] = useState("");
@@ -383,8 +391,6 @@ export default function EditMePage() {
   const [danceSkills, setDanceSkills] = useState<Record<string, DanceSkill>>({});
   const [customStyleDraft, setCustomStyleDraft] = useState("");
   const [otherStyleEnabled, setOtherStyleEnabled] = useState(false);
-  const [pendingVerificationStyles, setPendingVerificationStyles] = useState<Set<string>>(new Set());
-  const [verificationBusyStyle, setVerificationBusyStyle] = useState<string | null>(null);
   const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [verificationFeatureAvailable, setVerificationFeatureAvailable] = useState(true);
 
@@ -412,7 +418,8 @@ export default function EditMePage() {
   const [hostingNotes, setHostingNotes] = useState("");
   const [houseRules, setHouseRules] = useState("");
   const [paymentVerified, setPaymentVerified] = useState(false);
-  const [activeTab, setActiveTab] = useState<EditProfileTab>("profile");
+  const rawTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<EditProfileTab>(isValidTab(rawTab) ? rawTab : "profile");
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -509,22 +516,17 @@ export default function EditMePage() {
   const suggestedUsername = useMemo(() => suggestProfileUsername(displayName), [displayName]);
   const normalizedUsername = useMemo(() => normalizeProfileUsernameInput(username), [username]);
   const normalizedInitialUsername = useMemo(() => normalizeProfileUsernameInput(initialUsername), [initialUsername]);
-  const usernameError = useMemo(() => validateProfileUsername(normalizedUsername), [normalizedUsername]);
+  const usernameFormat = useMemo(() => validateUsernameFormat(normalizedUsername), [normalizedUsername]);
+  const usernameError = usernameFormat.valid ? null : usernameFormat.error ?? "Username must be between 3 and 20 characters.";
   const usernameChanged = normalizedUsername !== normalizedInitialUsername;
-  const usernameLockedUntil = useMemo(() => {
-    if (!usernameChangedAt) return null;
-    const changedAt = new Date(usernameChangedAt);
-    if (Number.isNaN(changedAt.getTime())) return null;
-    return new Date(changedAt.getTime() + USERNAME_CHANGE_COOLDOWN_MS);
-  }, [usernameChangedAt]);
   const usernameChangeLocked = useMemo(
-    () => Boolean(usernameLockedUntil && usernameLockedUntil.getTime() > Date.now()),
-    [usernameLockedUntil]
+    () => usernameChanged && !canChangeUsername(usernameUpdatedAt),
+    [usernameChanged, usernameUpdatedAt]
   );
-  const usernameCooldownMessage = useMemo(() => {
-    if (!usernameChangeLocked || !usernameLockedUntil) return null;
-    return `Username changes are limited to once every ${USERNAME_CHANGE_COOLDOWN_DAYS} days. Next change: ${formatLongDate(usernameLockedUntil)}.`;
-  }, [usernameChangeLocked, usernameLockedUntil]);
+  const usernameCooldownMessage = useMemo(
+    () => (usernameChanged ? getUsernameChangeCooldownMessage(usernameUpdatedAt) : null),
+    [usernameChanged, usernameUpdatedAt]
+  );
   const normalizedNationality = useMemo(() => nationality.trim().slice(0, MAX_NATIONALITY_LENGTH), [nationality]);
   const normalizedCountry = useMemo(() => country.trim(), [country]);
   const normalizedCity = useMemo(() => city.trim(), [city]);
@@ -536,6 +538,72 @@ export default function EditMePage() {
   const sectionDanceComplete = selectedStyles.length > 0 && stylesMissingLevel.length === 0;
   const sectionRolesComplete = roles.length > 0;
   const sectionContactsComplete = languages.length > 0;
+
+  useEffect(() => {
+    if (!meId) return;
+    if (!normalizedUsername) {
+      setUsernameAvailability({
+        checking: false,
+        available: false,
+        error: "Username must be between 3 and 20 characters.",
+        suggestion: suggestedUsername || null,
+      });
+      return;
+    }
+
+    if (!usernameFormat.valid) {
+      setUsernameAvailability({
+        checking: false,
+        available: false,
+        error: usernameFormat.error ?? "Username must be between 3 and 20 characters.",
+        suggestion: suggestedUsername || null,
+      });
+      return;
+    }
+
+    if (!usernameChanged) {
+      setUsernameAvailability({
+        checking: false,
+        available: true,
+        error: null,
+        suggestion: normalizedInitialUsername || null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setUsernameAvailability((prev) => ({ ...prev, checking: true, error: null }));
+
+    const timeoutId = window.setTimeout(() => {
+      void requestUsernameCheck({
+        username: normalizedUsername,
+        seed: normalizedDisplayName || suggestedUsername,
+        currentUserId: meId,
+      }).then((result) => {
+        if (cancelled) return;
+        setUsernameAvailability({
+          checking: false,
+          available: result.available,
+          error: result.available ? null : result.error,
+          suggestion: result.suggestion,
+        });
+      });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    meId,
+    normalizedDisplayName,
+    normalizedInitialUsername,
+    normalizedUsername,
+    suggestedUsername,
+    usernameChanged,
+    usernameFormat.error,
+    usernameFormat.valid,
+  ]);
   const sectionCompletion = useMemo(
     () => [
       { id: "basics", label: "Basics", done: sectionBasicsComplete },
@@ -576,6 +644,7 @@ export default function EditMePage() {
     { id: "media", label: "Media" },
     { id: "hosting", label: "Hosting" },
     { id: "teacher_services", label: "Teacher services" },
+    { id: "teacher_profile", label: "Teacher profile" },
   ];
 
   const countryIso = useMemo(() => countriesAll.find((entry) => entry.name === country)?.isoCode ?? "", [countriesAll, country]);
@@ -670,180 +739,180 @@ export default function EditMePage() {
     let cancelled = false;
 
     (async () => {
-      setLoading(true);
-      setError(null);
+      try {
+        setLoading(true);
+        setError(null);
 
-      const authRes = await supabase.auth.getUser();
-      const user = authRes.data.user;
-      if (!user) {
-        router.replace("/auth");
-        return;
-      }
-      if (cancelled) return;
-
-      setMeId(user.id);
-
-      const profileRes = await supabase.from("profiles").select("*").eq("user_id", user.id).maybeSingle();
-      if (cancelled) return;
-
-      if (profileRes.error) {
-        setError(profileRes.error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (!profileRes.data) {
-        router.replace("/onboarding");
-        return;
-      }
-
-      const profile = profileRes.data as Profile;
-
-      const nextDisplayName = (profile.display_name ?? "").slice(0, MAX_DISPLAY_NAME_LENGTH);
-      const nextUsername = normalizeProfileUsernameInput(profile.username ?? suggestProfileUsername(nextDisplayName));
-      const nextCountry = profile.country ?? "";
-      const nextCity = profile.city ?? "";
-      const nextNationality = (profile.nationality ?? "").slice(0, MAX_NATIONALITY_LENGTH);
-      const nextRoles = toStringArray(profile.roles);
-      const nextInterests = toStringArray(profile.interests);
-      const nextAvailability = toStringArray(profile.availability);
-      const nextLanguages = toStringArray(profile.languages);
-      const nextInstagram = profile.instagram_handle ?? "";
-      const nextWhatsapp = profile.whatsapp_handle ?? "";
-      const nextYoutube = profile.youtube_url ?? "";
-      const nextAcceptingHosting = profile.can_host === true;
-      const nextHostingStatus = (profile.hosting_status ?? "inactive").trim() || "inactive";
-      const nextMaxGuests =
-        typeof profile.max_guests === "number" && Number.isFinite(profile.max_guests) ? String(profile.max_guests) : "";
-      const nextHostingLastMinuteOk = profile.hosting_last_minute_ok === true;
-      const nextHostingPreferredGuestGender = normalizeHostingPreferredGuestGender(profile.hosting_preferred_guest_gender);
-      const nextHostingKidFriendly = profile.hosting_kid_friendly === true;
-      const nextHostingPetFriendly = profile.hosting_pet_friendly === true;
-      const nextHostingSmokingAllowed = profile.hosting_smoking_allowed === true;
-      const nextHostingSleepingArrangement = normalizeHostingSleepingArrangement(profile.hosting_sleeping_arrangement);
-      const nextHostingGuestShare = profile.hosting_guest_share ?? "";
-      const nextHostingTransitAccess = profile.hosting_transit_access ?? "";
-      const nextHostingNotes = profile.hosting_notes ?? "";
-      const nextHouseRules = profile.house_rules ?? "";
-      const nextAvatarUrl = resolveAvatarUrl({
-        avatarUrl: profile.avatar_url,
-        avatarPath: profile.avatar_path,
-      });
-
-      const dbSkills =
-        profile.dance_skills && typeof profile.dance_skills === "object"
-          ? (profile.dance_skills as Record<string, DanceSkill>)
-          : {};
-
-      let nextDanceSkills: Record<string, DanceSkill>;
-      if (Object.keys(dbSkills).length > 0) {
-        nextDanceSkills = dbSkills;
-      } else {
-        const fallback: Record<string, DanceSkill> = {};
-        toStringArray(profile.dance_styles).forEach((style) => {
-          const key = normalizeStyleKey(style);
-          if (!key) return;
-          fallback[key] = { level: "" };
-        });
-        nextDanceSkills = fallback;
-      }
-
-      setDisplayName(nextDisplayName);
-      setUsername(nextUsername);
-      setInitialUsername(nextUsername);
-      setUsernameChangedAt(typeof profile.username_changed_at === "string" ? profile.username_changed_at : null);
-      setCountry(nextCountry);
-      setCity(nextCity);
-      setNationality(nextNationality);
-      setDanceSkills(nextDanceSkills);
-      const existingOtherStyle =
-        Object.keys(nextDanceSkills).find((style) => !CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) ?? "";
-      setOtherStyleEnabled(Boolean(existingOtherStyle));
-      setCustomStyleDraft(existingOtherStyle);
-      setRoles(nextRoles);
-      setInterests(nextInterests);
-      setAvailability(nextAvailability);
-      setLanguages(nextLanguages);
-      setInstagramHandle(nextInstagram);
-      setWhatsappHandle(nextWhatsapp);
-      setYoutubeUrl(nextYoutube);
-      setAcceptingHosting(nextAcceptingHosting);
-      setHostingStatus(nextHostingStatus);
-      setMaxGuests(nextMaxGuests);
-      setHostingLastMinuteOk(nextHostingLastMinuteOk);
-      setHostingPreferredGuestGender(nextHostingPreferredGuestGender);
-      setHostingKidFriendly(nextHostingKidFriendly);
-      setHostingPetFriendly(nextHostingPetFriendly);
-      setHostingSmokingAllowed(nextHostingSmokingAllowed);
-      setHostingSleepingArrangement(nextHostingSleepingArrangement);
-      setHostingGuestShare(nextHostingGuestShare);
-      setHostingTransitAccess(nextHostingTransitAccess);
-      setHostingNotes(nextHostingNotes);
-      setHouseRules(nextHouseRules);
-      setPaymentVerified(profile?.verified === true);
-      setAvatarUrl(nextAvatarUrl);
-
-      const pendingRes = await supabase
-        .from("style_verification_requests")
-        .select("style,status")
-        .eq("user_id", user.id)
-        .eq("status", "pending");
-
-      if (!cancelled) {
-        if (pendingRes.error) {
-          if (isMissingSchemaError(pendingRes.error.message)) {
-            setVerificationFeatureAvailable(false);
-            setPendingVerificationStyles(new Set());
-          } else {
-            setError(pendingRes.error.message);
-          }
-        } else {
-          const pendingStyles = new Set(
-            (pendingRes.data ?? [])
-              .map((row) => {
-                const style = (row as { style?: unknown }).style;
-                return typeof style === "string" ? normalizeStyleKey(style) : "";
-              })
-              .filter(Boolean)
-          );
-          setPendingVerificationStyles(pendingStyles);
-          setVerificationFeatureAvailable(true);
+        const authRes = await supabase.auth.getUser();
+        const user = authRes.data.user;
+        if (!user) {
+          router.replace("/auth");
+          return;
         }
+        if (cancelled) return;
+
+        setMeId(user.id);
+
+        const profileRes = await supabase.from("profiles").select("*").eq("user_id", user.id).maybeSingle();
+        if (cancelled) return;
+
+        if (profileRes.error) {
+          setError(profileRes.error.message);
+          return;
+        }
+
+        if (!profileRes.data) {
+          router.replace("/onboarding");
+          return;
+        }
+
+        const profile = profileRes.data as Profile;
+
+        const nextDisplayName = (profile.display_name ?? "").slice(0, MAX_DISPLAY_NAME_LENGTH);
+        const nextUsername = normalizeProfileUsernameInput(profile.username ?? suggestProfileUsername(nextDisplayName));
+        const nextCountry = profile.country ?? "";
+        const nextCity = profile.city ?? "";
+        const nextNationality = (profile.nationality ?? "").slice(0, MAX_NATIONALITY_LENGTH);
+        const nextRoles = toStringArray(profile.roles);
+        const nextInterests = normalizeInterests(toStringArray(profile.interests));
+        const nextAvailability = toStringArray(profile.availability);
+        const nextLanguages = toStringArray(profile.languages);
+        const nextInstagram = profile.instagram_handle ?? "";
+        const nextWhatsapp = profile.whatsapp_handle ?? "";
+        const nextYoutube = profile.youtube_url ?? "";
+        const nextAcceptingHosting = profile.can_host === true;
+        const nextHostingStatus = (profile.hosting_status ?? "inactive").trim() || "inactive";
+        const nextMaxGuests =
+          typeof profile.max_guests === "number" && Number.isFinite(profile.max_guests) ? String(profile.max_guests) : "";
+        const nextHostingLastMinuteOk = profile.hosting_last_minute_ok === true;
+        const nextHostingPreferredGuestGender = normalizeHostingPreferredGuestGender(profile.hosting_preferred_guest_gender);
+        const nextHostingKidFriendly = profile.hosting_kid_friendly === true;
+        const nextHostingPetFriendly = profile.hosting_pet_friendly === true;
+        const nextHostingSmokingAllowed = profile.hosting_smoking_allowed === true;
+        const nextHostingSleepingArrangement = normalizeHostingSleepingArrangement(profile.hosting_sleeping_arrangement);
+        const nextHostingGuestShare = profile.hosting_guest_share ?? "";
+        const nextHostingTransitAccess = profile.hosting_transit_access ?? "";
+        const nextHostingNotes = profile.hosting_notes ?? "";
+        const nextHouseRules = profile.house_rules ?? "";
+        const nextAvatarUrl = resolveAvatarUrl({
+          avatarUrl: profile.avatar_url,
+          avatarPath: profile.avatar_path,
+        });
+
+        const dbSkills =
+          profile.dance_skills && typeof profile.dance_skills === "object"
+            ? (profile.dance_skills as Record<string, DanceSkill>)
+            : {};
+
+        let nextDanceSkills: Record<string, DanceSkill>;
+        if (Object.keys(dbSkills).length > 0) {
+          nextDanceSkills = dbSkills;
+        } else {
+          const fallback: Record<string, DanceSkill> = {};
+          toStringArray(profile.dance_styles).forEach((style) => {
+            const key = normalizeStyleKey(style);
+            if (!key) return;
+            fallback[key] = { level: "" };
+          });
+          nextDanceSkills = fallback;
+        }
+
+        setDisplayName(nextDisplayName);
+        setUsername(nextUsername);
+        setInitialUsername(nextUsername);
+        setUsernameUpdatedAt(
+          typeof profile.username_updated_at === "string"
+            ? profile.username_updated_at
+            : typeof profile.username_changed_at === "string"
+              ? profile.username_changed_at
+              : null
+        );
+        setCountry(nextCountry);
+        setCity(nextCity);
+        setNationality(nextNationality);
+        setDanceSkills(nextDanceSkills);
+        const existingOtherStyle =
+          Object.keys(nextDanceSkills).find((style) => !CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) ?? "";
+        setOtherStyleEnabled(Boolean(existingOtherStyle));
+        setCustomStyleDraft(existingOtherStyle);
+        setRoles(nextRoles);
+        setInterests(nextInterests);
+        setAvailability(nextAvailability);
+        setLanguages(nextLanguages);
+        setInstagramHandle(nextInstagram);
+        setWhatsappHandle(nextWhatsapp);
+        setYoutubeUrl(nextYoutube);
+        setAcceptingHosting(nextAcceptingHosting);
+        setHostingStatus(nextHostingStatus);
+        setMaxGuests(nextMaxGuests);
+        setHostingLastMinuteOk(nextHostingLastMinuteOk);
+        setHostingPreferredGuestGender(nextHostingPreferredGuestGender);
+        setHostingKidFriendly(nextHostingKidFriendly);
+        setHostingPetFriendly(nextHostingPetFriendly);
+        setHostingSmokingAllowed(nextHostingSmokingAllowed);
+        setHostingSleepingArrangement(nextHostingSleepingArrangement);
+        setHostingGuestShare(nextHostingGuestShare);
+        setHostingTransitAccess(nextHostingTransitAccess);
+        setHostingNotes(nextHostingNotes);
+        setHouseRules(nextHouseRules);
+        setPaymentVerified(profile?.verified === true);
+        setAvatarUrl(nextAvatarUrl);
+
+        const pendingRes = await supabase
+          .from("style_verification_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .eq("status", "pending");
+
+        if (!cancelled) {
+          if (pendingRes.error) {
+            if (isMissingSchemaError(pendingRes.error.message)) {
+              setVerificationFeatureAvailable(false);
+            } else {
+              setError(pendingRes.error.message);
+            }
+          } else {
+            setVerificationFeatureAvailable(true);
+          }
+        }
+
+        setInitialSnapshot(
+          serializeDraft({
+            displayName: nextDisplayName,
+            username: nextUsername,
+            country: nextCountry,
+            city: nextCity,
+            nationality: nextNationality,
+            danceSkills: nextDanceSkills,
+            roles: nextRoles,
+            languages: nextLanguages,
+            interests: nextInterests,
+            availability: nextAvailability,
+            instagramHandle: nextInstagram,
+            whatsappHandle: nextWhatsapp,
+            youtubeUrl: nextYoutube,
+            acceptingHosting: nextAcceptingHosting,
+            hostingStatus: nextHostingStatus,
+            maxGuests: nextMaxGuests,
+            hostingLastMinuteOk: nextHostingLastMinuteOk,
+            hostingPreferredGuestGender: nextHostingPreferredGuestGender,
+            hostingKidFriendly: nextHostingKidFriendly,
+            hostingPetFriendly: nextHostingPetFriendly,
+            hostingSmokingAllowed: nextHostingSmokingAllowed,
+            hostingSleepingArrangement: nextHostingSleepingArrangement,
+            hostingGuestShare: nextHostingGuestShare,
+            hostingTransitAccess: nextHostingTransitAccess,
+            hostingNotes: nextHostingNotes,
+            houseRules: nextHouseRules,
+            avatarUrl: nextAvatarUrl,
+          })
+        );
+      } catch (err: unknown) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Could not load your profile.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      setInitialSnapshot(
-        serializeDraft({
-          displayName: nextDisplayName,
-          username: nextUsername,
-          country: nextCountry,
-          city: nextCity,
-          nationality: nextNationality,
-          danceSkills: nextDanceSkills,
-          roles: nextRoles,
-          languages: nextLanguages,
-          interests: nextInterests,
-          availability: nextAvailability,
-          instagramHandle: nextInstagram,
-          whatsappHandle: nextWhatsapp,
-          youtubeUrl: nextYoutube,
-          acceptingHosting: nextAcceptingHosting,
-          hostingStatus: nextHostingStatus,
-          maxGuests: nextMaxGuests,
-          hostingLastMinuteOk: nextHostingLastMinuteOk,
-          hostingPreferredGuestGender: nextHostingPreferredGuestGender,
-          hostingKidFriendly: nextHostingKidFriendly,
-          hostingPetFriendly: nextHostingPetFriendly,
-          hostingSmokingAllowed: nextHostingSmokingAllowed,
-          hostingSleepingArrangement: nextHostingSleepingArrangement,
-          hostingGuestShare: nextHostingGuestShare,
-          hostingTransitAccess: nextHostingTransitAccess,
-          hostingNotes: nextHostingNotes,
-          houseRules: nextHouseRules,
-          avatarUrl: nextAvatarUrl,
-        })
-      );
-
-      setLoading(false);
     })();
 
     return () => {
@@ -911,12 +980,6 @@ export default function EditMePage() {
       return next;
     });
 
-    setPendingVerificationStyles((prev) => {
-      if (!prev.has(style)) return prev;
-      const next = new Set(prev);
-      next.delete(style);
-      return next;
-    });
   }
 
   function setStyleLevel(style: string, level: string) {
@@ -944,7 +1007,6 @@ export default function EditMePage() {
       return;
     }
 
-    setVerificationBusyStyle(style);
     setVerificationNotice(null);
     setError(null);
 
@@ -955,14 +1017,11 @@ export default function EditMePage() {
       status: "pending",
     });
 
-    setVerificationBusyStyle(null);
-
     if (insertRes.error) {
       const message = insertRes.error.message ?? "Could not request verification.";
       const duplicate = insertRes.error.code === "23505" || message.toLowerCase().includes("duplicate");
 
       if (duplicate) {
-        setPendingVerificationStyles((prev) => new Set(prev).add(style));
         setVerificationNotice(`${titleCase(style)} is already in verification queue.`);
         return;
       }
@@ -977,7 +1036,6 @@ export default function EditMePage() {
       return;
     }
 
-    setPendingVerificationStyles((prev) => new Set(prev).add(style));
     setVerificationNotice(`${titleCase(style)} verification request submitted.`);
   }
 
@@ -992,13 +1050,6 @@ export default function EditMePage() {
             if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) {
               next[style] = skill;
             }
-          }
-          return next;
-        });
-        setPendingVerificationStyles((prev) => {
-          const next = new Set<string>();
-          for (const style of prev) {
-            if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) next.add(style);
           }
           return next;
         });
@@ -1031,14 +1082,6 @@ export default function EditMePage() {
       return next;
     });
 
-    setPendingVerificationStyles((prev) => {
-      const next = new Set<string>();
-      for (const style of prev) {
-        if (CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) next.add(style);
-      }
-      if (normalized && prev.has(normalized)) next.add(normalized);
-      return next;
-    });
   }
 
   function addLanguage() {
@@ -1181,7 +1224,17 @@ export default function EditMePage() {
     }
 
     if (usernameChanged && usernameChangeLocked) {
-      setError(usernameCooldownMessage ?? `Username changes are limited to once every ${USERNAME_CHANGE_COOLDOWN_DAYS} days.`);
+      setError(usernameCooldownMessage ?? "You can change your username once every 30 days.");
+      return;
+    }
+
+    if (usernameChanged && usernameAvailability.checking) {
+      setError("Checking username...");
+      return;
+    }
+
+    if (usernameChanged && !usernameAvailability.available) {
+      setError(usernameAvailability.error ?? "This username is already taken.");
       return;
     }
 
@@ -1225,7 +1278,7 @@ export default function EditMePage() {
       dance_skills: sanitizedDanceSkills,
       roles,
       languages,
-      interests,
+      interests: normalizeInterests(interests),
       availability,
       instagram_handle: normalizedIg || null,
       whatsapp_handle: normalizedWa || null,
@@ -1245,25 +1298,28 @@ export default function EditMePage() {
       house_rules: houseRules.trim() || null,
     };
 
-    const updateRes = await supabase.from("profiles").update(payload).eq("user_id", meId);
+    try {
+      const updateRes = await supabase.from("profiles").update(payload).eq("user_id", meId);
 
-    if (updateRes.error) {
-      setSaving(false);
+      if (updateRes.error) {
+        setError(mapUsernameServerError(updateRes.error.message ?? "Could not save profile."));
+        return;
+      }
+
+      setSaveStage("redirecting");
+      if (usernameChanged) {
+        setInitialUsername(normalizedUsername);
+        setUsernameUpdatedAt(new Date().toISOString());
+      }
+      setInitialSnapshot(currentSnapshot);
+      await new Promise((resolve) => window.setTimeout(resolve, 650));
+      router.replace("/account-settings");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save profile.");
       setSaveStage("idle");
-      const message = updateRes.error.message ?? "Could not save profile.";
-      const duplicate = updateRes.error.code === "23505" || message.toLowerCase().includes("username");
-      setError(duplicate ? "That username is already taken." : message);
+      setSaving(false);
       return;
     }
-
-    setSaveStage("redirecting");
-    if (usernameChanged) {
-      setInitialUsername(normalizedUsername);
-      setUsernameChangedAt(new Date().toISOString());
-    }
-    setInitialSnapshot(currentSnapshot);
-    await new Promise((resolve) => window.setTimeout(resolve, 650));
-    router.replace("/account-settings");
   }
 
   function handleLeaveToAccountSettings() {
@@ -1480,7 +1536,12 @@ export default function EditMePage() {
                       <button
                         key={tab.id}
                         type="button"
-                        onClick={() => setActiveTab(tab.id)}
+                        onClick={() => {
+                          setActiveTab(tab.id);
+                          const url = new URL(window.location.href);
+                          url.searchParams.set("tab", tab.id);
+                          router.replace(url.pathname + url.search, { scroll: false });
+                        }}
                         className={cx(
                           "rounded-full border px-4 py-2 text-sm font-semibold transition",
                           active
@@ -1504,20 +1565,10 @@ export default function EditMePage() {
                 )}
               >
 
-              {error ? (
-                <p
-                  className="rounded-xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
-                  data-testid="profile-edit-error"
-                >
-                  {error}
-                </p>
-              ) : null}
-
-              {verificationNotice ? (
-                <p className={cx("rounded-xl border border-cyan-300/35 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100", error ? "mt-3" : "")}>
-                  {verificationNotice}
-                </p>
-              ) : null}
+              <div className="space-y-2" data-testid="profile-edit-error">
+                <DismissibleBanner message={error} tone="error" onDismiss={() => setError(null)} />
+                <DismissibleBanner message={verificationNotice} tone="info" onDismiss={() => setVerificationNotice(null)} />
+              </div>
 
               {activeTab === "profile" ? (
               <div className={cx("grid gap-4 lg:grid-cols-2", error || verificationNotice ? "mt-6" : "")}>
@@ -1547,19 +1598,49 @@ export default function EditMePage() {
                     <span className="mr-2 text-slate-500">@</span>
                     <input
                       value={username}
-                      onChange={(event) => setUsername(normalizeProfileUsernameInput(event.target.value))}
+                      onChange={(event) => setUsername(normalizeProfileUsernameInput(event.target.value).slice(0, USERNAME_MAX_LENGTH))}
                       className="w-full bg-transparent text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
                       placeholder={suggestedUsername || "your.name"}
                       autoCapitalize="none"
                       autoCorrect="off"
                       spellCheck={false}
+                      maxLength={USERNAME_MAX_LENGTH}
                       disabled={usernameChangeLocked}
                     />
                   </div>
-                  <div className={cx("mt-1 text-xs", usernameError ? "text-rose-300" : usernameCooldownMessage ? "text-amber-200" : "text-slate-500")}>
-                    {usernameError ??
-                      usernameCooldownMessage ??
-                      `Share link: conxion.social/u/${normalizedUsername || suggestedUsername || "your.name"}`}
+                  <div className="mt-1 space-y-1 text-xs">
+                    <p className="text-slate-500">Your username is part of your public profile link.</p>
+                    <p className="text-cyan-200/85">conxion.social/u/{normalizedUsername || suggestedUsername || "your.name"}</p>
+                    <p className="text-slate-500">You can change your username once every 30 days.</p>
+                    {usernameAvailability.checking ? <p className="text-slate-400">Checking username...</p> : null}
+                    {!usernameAvailability.checking && usernameError ? <p className="text-rose-300">{usernameError}</p> : null}
+                    {!usernameAvailability.checking && !usernameError && usernameCooldownMessage ? (
+                      <p className="text-amber-200">{usernameCooldownMessage}</p>
+                    ) : null}
+                    {!usernameAvailability.checking && !usernameError && !usernameCooldownMessage && usernameChanged && usernameAvailability.available ? (
+                      <p className="text-emerald-300">Username available.</p>
+                    ) : null}
+                    {!usernameAvailability.checking &&
+                    !usernameError &&
+                    !usernameCooldownMessage &&
+                    usernameChanged &&
+                    !usernameAvailability.available &&
+                    usernameAvailability.error ? (
+                      <p className="text-rose-300">{usernameAvailability.error}</p>
+                    ) : null}
+                    {!usernameAvailability.checking &&
+                    !usernameError &&
+                    !usernameCooldownMessage &&
+                    usernameAvailability.suggestion &&
+                    usernameAvailability.suggestion !== normalizedUsername ? (
+                      <button
+                        type="button"
+                        onClick={() => setUsername(usernameAvailability.suggestion ?? "")}
+                        className="text-left text-cyan-200 hover:text-cyan-100"
+                      >
+                        Try @{usernameAvailability.suggestion}
+                      </button>
+                    ) : null}
                   </div>
                 </label>
 
@@ -2131,6 +2212,8 @@ export default function EditMePage() {
             ) : null}
 
             {activeTab === "teacher_services" ? <TeacherInfoManager embedded /> : null}
+
+            {activeTab === "teacher_profile" ? <TeacherProfilePage embedded /> : null}
 
             {activeTab === "profile" ? (
             <div className="mt-2 rounded-2xl border border-white/10 bg-[#0d161b]/95 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.45)] backdrop-blur-md">

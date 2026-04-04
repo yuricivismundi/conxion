@@ -11,7 +11,7 @@ type SubprocessorEntry = {
   website: string;
 };
 
-const LAST_UPDATED = "March 28, 2026";
+const LAST_UPDATED = "April 3, 2026";
 const APP_NAME = LEGAL_PROFILE.brandName;
 const PRIVACY_EMAIL = LEGAL_PROFILE.privacyEmail;
 
@@ -107,7 +107,7 @@ export default function SubprocessorsPage() {
               href="/account-settings/data-requests"
               className="inline-flex min-h-10 items-center justify-center rounded-full border border-cyan-200/25 bg-black/20 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-black/30"
             >
-              Privacy Requests
+              Privacy Rights
             </Link>
           </div>
         </div>
@@ -122,7 +122,7 @@ export default function SubprocessorsPage() {
           </p>
           <p>
             If {APP_NAME} materially changes this list, the page should be updated. You can request more detail about transfers,
-            safeguards, or a vendor&apos;s current role through the privacy request flow or by contacting {PRIVACY_EMAIL}.
+            safeguards, or a vendor&apos;s current role by contacting {PRIVACY_EMAIL}.
           </p>
         </div>
       </article>

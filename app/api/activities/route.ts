@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
+import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
-import { ACTIVITY_TYPES, activityTypeLabel, isActivityType } from "@/lib/activities/types";
+import { ACTIVITY_TYPES, activityTypeLabel, activityUsesDateRange, isActivityType } from "@/lib/activities/types";
+import {
+  buildLinkedMemberMetadata,
+  ensureLinkedMemberPairThread,
+  resolveLinkedMember,
+} from "@/lib/requests/linked-members";
 
 type CreateActivityPayload = {
   threadId?: string;
@@ -11,7 +17,16 @@ type CreateActivityPayload = {
   note?: string | null;
   startAt?: string | null;
   endAt?: string | null;
+  linkedMemberUserId?: string | null;
 };
+
+const LINKED_MEMBER_ELIGIBLE_ACTIVITY_TYPES = new Set([
+  "practice",
+  "social_dance",
+  "event",
+  "festival",
+  "travel_together",
+]);
 
 function parseIsoOrNull(value: unknown) {
   if (typeof value !== "string") return null;
@@ -266,9 +281,8 @@ export async function POST(req: Request) {
     const connectionId = body?.connectionId?.trim() ?? "";
     const recipientUserId = body?.recipientUserId?.trim() ?? "";
     const note = typeof body?.note === "string" ? body.note.trim() : "";
-    const startAt = parseIsoOrNull(body?.startAt);
-    const endAt = parseIsoOrNull(body?.endAt);
     const activityType = typeof body?.activityType === "string" ? body.activityType.trim() : "";
+    const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
 
     if ((!requestedThreadId && !connectionId) || !recipientUserId || !activityType) {
       return NextResponse.json(
@@ -281,6 +295,13 @@ export async function POST(req: Request) {
         { ok: false, error: `Invalid activityType. Allowed: ${ACTIVITY_TYPES.join(", ")}` },
         { status: 400 }
       );
+    }
+    const hasDateRange = activityUsesDateRange(activityType);
+    const startAt = parseIsoOrNull(body?.startAt);
+    const endAtRaw = parseIsoOrNull(body?.endAt);
+    const endAt = hasDateRange ? endAtRaw : null;
+    if (endAt && !startAt) {
+      return NextResponse.json({ ok: false, error: "Start date is required when an end date is set." }, { status: 400 });
     }
     if (startAt && endAt && new Date(endAt).getTime() < new Date(startAt).getTime()) {
       return NextResponse.json({ ok: false, error: "End date must be after start date." }, { status: 400 });
@@ -297,6 +318,14 @@ export async function POST(req: Request) {
 
     if (authData.user.id === recipientUserId) {
       return NextResponse.json({ ok: false, error: "You cannot create an activity with yourself." }, { status: 400 });
+    }
+
+    const pendingConflict = await findPendingPairRequestConflict(service, {
+      actorUserId: authData.user.id,
+      otherUserId: recipientUserId,
+    });
+    if (pendingConflict) {
+      return NextResponse.json({ ok: false, error: pendingConflict.message }, { status: 409 });
     }
 
     let threadId = requestedThreadId;
@@ -394,12 +423,21 @@ export async function POST(req: Request) {
     }
 
     const title = activityTypeLabel(activityType);
+    const linkedMember = LINKED_MEMBER_ELIGIBLE_ACTIVITY_TYPES.has(activityType)
+      ? await resolveLinkedMember({
+          serviceClient: service,
+          actorUserId: authData.user.id,
+          recipientUserId,
+          linkedMemberUserId,
+        })
+      : null;
     const metadata = {
       activity_type: activityType,
       title,
       note: note || null,
       start_at: startAt,
       end_at: endAt,
+      ...buildLinkedMemberMetadata(linkedMember),
     };
 
     const insertRes = await service
@@ -414,6 +452,7 @@ export async function POST(req: Request) {
         note: note || null,
         start_at: startAt,
         end_at: endAt,
+        linked_member_user_id: linkedMember?.userId ?? null,
         metadata,
       } as never)
       .select("id")
@@ -432,7 +471,7 @@ export async function POST(req: Request) {
     }
 
     const startDate = startAt ? startAt.slice(0, 10) : null;
-    const endDate = (endAt ?? startAt) ? (endAt ?? startAt)!.slice(0, 10) : null;
+    const endDate = endAt ? endAt.slice(0, 10) : null;
 
     const contextRes = await userRpc("cx_upsert_thread_context", {
       p_thread_id: threadId,
@@ -452,6 +491,13 @@ export async function POST(req: Request) {
     if (contextRes.error) {
       return NextResponse.json({ ok: false, error: contextRes.error.message }, { status: 400 });
     }
+
+    await ensureLinkedMemberPairThread({
+      serviceClient: service,
+      actorUserId: authData.user.id,
+      linkedMember,
+      recipientUserId,
+    });
 
     void createActivityNotificationBestEffort({
       service,

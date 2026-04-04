@@ -8,13 +8,15 @@ import {
   getCountriesAll,
   type CountryEntry,
 } from "@/lib/country-city-client";
+import { INTEREST_OPTIONS, normalizeInterestLabel, type ProfileInterest } from "@/lib/interests";
 import { readOnboardingDraft } from "@/lib/onboardingDraft";
 
 const ROLE_PREFS = ["Leader", "Follower", "Switch"] as const;
 type RolePref = (typeof ROLE_PREFS)[number];
 
 const ROLES = [
-  "Social dancer / Student",
+  "Social Dancer",
+  "Student",
   "Organizer",
   "Studio Owner",
   "Promoter",
@@ -25,39 +27,7 @@ const ROLES = [
 
 type Role = (typeof ROLES)[number];
 
-const INTERESTS = [
-  "Dance at local socials and events",
-  "Find practice partners",
-  "Get tips on the local dance scene",
-  "Collaborate on video projects",
-  "Find buddies for workshops, socials, accommodations, or rides",
-  "Collaborate with artists/teachers for events/festivals",
-  "Organize recurring local events",
-  "Secure sponsorships and org collabs",
-  "Offer volunteer roles for events",
-  "Recruit guest dancers",
-  "Promote special workshops and events",
-  "Organize classes and schedules",
-  "Collaborate with other studio owners",
-  "Secure sponsorships and hire talent",
-  "Partner to promote festivals",
-  "Refer artists, DJs, and teachers",
-  "Co-promote local parties/socials",
-  "Exchange guest lists and shoutouts",
-  "Share promo materials and audiences",
-  "Produce new songs and tracks",
-  "Collaborate on tracks or live sets",
-  "Network for festival gigs",
-  "DJ international and local events",
-  "Feature in promo videos/socials",
-  "Offer private/group lessons",
-  "Teach regular classes",
-  "Lead festival workshops",
-  "Co-teach sessions",
-  "Exchange tips, curricula, and student referrals",
-] as const;
-
-type Interest = (typeof INTERESTS)[number];
+type Interest = ProfileInterest;
 
 const AVAILABILITY = [
   "Weekdays",
@@ -175,6 +145,7 @@ function normalizeStyleEntry(style: Style, entry: unknown): ConnectionsFilters["
 }
 
 function normalizeFilters(v: Partial<ConnectionsFilters>): ConnectionsFilters {
+  const normalizedInterest = isString(v.interest) ? normalizeInterestLabel(v.interest) : null;
   // Merge with defaults to avoid runtime errors if parent passes older shape.
   // Also: migrate old `level` field (if it exists) into `levels`.
   const merged = {
@@ -183,6 +154,10 @@ function normalizeFilters(v: Partial<ConnectionsFilters>): ConnectionsFilters {
     roles: Array.isArray(v.roles) ? v.roles.filter(isRole) : [],
     languages: Array.isArray(v.languages) ? v.languages.filter(isLanguage) : [],
     availability: Array.isArray(v.availability) ? v.availability.filter(isAvailability) : [],
+    interest:
+      normalizedInterest && INTEREST_OPTIONS.includes(normalizedInterest as ProfileInterest)
+        ? (normalizedInterest as Interest)
+        : undefined,
     styles: { ...DEFAULT_STYLES, ...(v.styles ?? {}) } as ConnectionsFilters["styles"],
   };
 
@@ -672,7 +647,7 @@ export default function ConnectionsFiltersDrawer({
                 className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
               >
                 <option value="">Any interest</option>
-                {INTERESTS.map((i) => (
+                {INTEREST_OPTIONS.map((i) => (
                   <option key={i} value={i}>
                     {i}
                   </option>

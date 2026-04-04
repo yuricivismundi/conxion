@@ -316,6 +316,8 @@ const EMPTY_COMPETITION_FORM: CompetitionFormState = {
   note: "",
 };
 
+const MAX_COMPETITIONS_PER_MONTH = 4;
+
 function normalizeCompetitionResult(value: string): CompetitionOutcome {
   const normalized = value.trim().toLowerCase();
   if (normalized === "winner") return "Winner";
@@ -325,6 +327,20 @@ function normalizeCompetitionResult(value: string): CompetitionOutcome {
     return "Quarterfinalist";
   }
   return "Participated";
+}
+
+function competitionFormFromResult(item: CompetitionResult): CompetitionFormState {
+  return {
+    eventName: item.eventName,
+    city: item.city,
+    country: item.country,
+    style: item.style,
+    division: item.division,
+    role: item.role as CompetitionFormState["role"],
+    result: item.result,
+    year: String(item.year),
+    note: item.note ?? "",
+  };
 }
 
 function asRecord(value: unknown) {
@@ -631,7 +647,7 @@ function statusToLabel(status: DanceMoveStatus) {
 }
 
 function moveTypeLabel(value: DanceMoveType) {
-  if (value === "turn-pattern") return "Turn Pattern";
+  if (value === "turn-pattern") return "Turn pattern";
   return titleCase(value);
 }
 
@@ -800,6 +816,7 @@ function DashboardPageContent({
 
   const [showAddCompetition, setShowAddCompetition] = useState(false);
   const [competitionForm, setCompetitionForm] = useState<CompetitionFormState>(EMPTY_COMPETITION_FORM);
+  const [editingCompetitionId, setEditingCompetitionId] = useState<string | null>(null);
   const [addingCompetition, setAddingCompetition] = useState(false);
   const [showAllCompetitionHistory, setShowAllCompetitionHistory] = useState(false);
   const [showAddContact, setShowAddContact] = useState(false);
@@ -832,13 +849,6 @@ function DashboardPageContent({
     () => moves.filter((move) => move.status === "practicing").length,
     [moves]
   );
-  const growthTotals = useMemo(() => {
-    const planned = moves.filter((move) => move.status === "planned").length;
-    const practicing = moves.filter((move) => move.status === "practicing").length;
-    const learned = moves.filter((move) => move.status === "learned").length;
-    const stylesTracked = new Set(moves.map((move) => move.style.toLowerCase())).size;
-    return { planned, practicing, learned, stylesTracked };
-  }, [moves]);
   const growthStyles = useMemo(() => {
     const merged = new Set<string>(CORE_STYLES);
     for (const move of moves) merged.add(move.style.toLowerCase());
@@ -919,6 +929,15 @@ function DashboardPageContent({
     const follower = competitions.filter((item) => item.role === "Follower").length;
     return { total, winners, completed, leader, follower };
   }, [competitions]);
+  const competitionEntriesThisMonth = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    return competitions.filter((item) => {
+      const createdAt = new Date(item.createdAt);
+      return !Number.isNaN(createdAt.getTime()) && createdAt.getFullYear() === year && createdAt.getMonth() === month;
+    }).length;
+  }, [competitions]);
 
   const activeGoals = useMemo(() => goals.filter((goal) => goal.status === "active"), [goals]);
   const completedGoals = useMemo(() => goals.filter((goal) => goal.status === "completed"), [goals]);
@@ -928,10 +947,6 @@ function DashboardPageContent({
   );
   const hiddenCompletedGoalsCount = Math.max(0, completedGoals.length - visibleCompletedGoals.length);
   const activeGoalsLimitReached = activeGoals.length >= MAX_ACTIVE_GOALS;
-  const needsAttentionGoalsCount = useMemo(
-    () => activeGoals.filter((goal) => goalNeedsAttention(goal)).length,
-    [activeGoals]
-  );
   const minGoalTargetDate = useMemo(() => toDateInputValue(new Date()), []);
   const maxGoalTargetDate = useMemo(() => {
     const date = new Date();
@@ -1707,9 +1722,14 @@ function DashboardPageContent({
     if (!meId) return;
     const eventName = competitionForm.eventName.trim();
     const style = competitionForm.style.trim().toLowerCase();
+    const division = competitionForm.division.trim();
     const year = Number(competitionForm.year);
-    if (!eventName || !style || !Number.isInteger(year) || year < 1990 || year > new Date().getFullYear() + 1) {
-      setError("Complete event name, style, and a valid year.");
+    if (!eventName || !style || !division || !Number.isInteger(year) || year < 1990 || year > new Date().getFullYear() + 1) {
+      setError("Complete event name, style, division, and a valid year.");
+      return;
+    }
+    if (!editingCompetitionId && competitionEntriesThisMonth >= MAX_COMPETITIONS_PER_MONTH) {
+      setError(`You can add up to ${MAX_COMPETITIONS_PER_MONTH} competition results per month.`);
       return;
     }
 
@@ -1723,24 +1743,51 @@ function DashboardPageContent({
       city: competitionForm.city.trim() || null,
       country: competitionForm.country.trim() || null,
       style,
-      division: competitionForm.division.trim(),
+      division,
       role: competitionForm.role,
       result: competitionForm.result,
       year,
       note: competitionForm.note.trim() || null,
     };
 
-    const res = await supabaseCompat.from(COMPETITION_TABLE).insert(payload).select("id").single();
+    const query = editingCompetitionId
+      ? supabaseCompat.from(COMPETITION_TABLE).update(payload).eq("id", editingCompetitionId).eq("user_id", meId).select("id").single()
+      : supabaseCompat.from(COMPETITION_TABLE).insert(payload).select("id").single();
+    const res = await query;
     if (res.error) {
       setAddingCompetition(false);
-      setError(res.error.message);
+      setError(
+        res.error.message.includes("competition_monthly_limit_reached")
+          ? `You can add up to ${MAX_COMPETITIONS_PER_MONTH} competition results per month.`
+          : res.error.message
+      );
       return;
     }
 
     setCompetitionForm(EMPTY_COMPETITION_FORM);
+    setEditingCompetitionId(null);
     setShowAddCompetition(false);
     setAddingCompetition(false);
-    await refreshDashboard("Competition result added.");
+    await refreshDashboard(editingCompetitionId ? "Competition result updated." : "Competition result added.");
+  }
+
+  function startEditingCompetition(item: CompetitionResult) {
+    setCompetitionForm(competitionFormFromResult(item));
+    setEditingCompetitionId(item.id);
+    setShowAddCompetition(true);
+    setError(null);
+    setInfo(null);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("competitions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
+  function resetCompetitionEditor() {
+    setCompetitionForm(EMPTY_COMPETITION_FORM);
+    setEditingCompetitionId(null);
+    setShowAddCompetition(false);
   }
 
   async function addGoal() {
@@ -2028,10 +2075,32 @@ function DashboardPageContent({
         ) : null}
 
         {loading ? (
-          <section className={showOnlyGrowth ? "rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center" : "rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center"}>
-            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
-            <p className="text-sm text-slate-300">Loading Dance Tools…</p>
-          </section>
+          <div className="space-y-5">
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+              <div className="mb-4 h-5 w-32 animate-pulse rounded-md bg-white/[0.08]" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="h-20 animate-pulse rounded-2xl bg-white/[0.06]" />
+                ))}
+              </div>
+            </section>
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+              <div className="mb-4 h-5 w-40 animate-pulse rounded-md bg-white/[0.08]" />
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-14 animate-pulse rounded-xl bg-white/[0.06]" />
+                ))}
+              </div>
+            </section>
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+              <div className="mb-4 h-5 w-36 animate-pulse rounded-md bg-white/[0.08]" />
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-24 animate-pulse rounded-2xl bg-white/[0.06]" />
+                ))}
+              </div>
+            </section>
+          </div>
         ) : (
           <div className={showOnlyGrowth ? "space-y-6" : "flex flex-col gap-7"}>
             {!showOnlyGrowth ? (
@@ -2150,7 +2219,7 @@ function DashboardPageContent({
                   </button>
                 </div>
 
-                <div className="mt-5 hidden gap-3 rounded-[22px] border border-white/10 bg-black/30 p-3 sm:grid sm:p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.62fr)_minmax(180px,0.58fr)_minmax(150px,0.5fr)_auto_auto]">
+                <div className="mt-5 hidden gap-3 sm:grid xl:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.62fr)_minmax(180px,0.58fr)_minmax(150px,0.5fr)_auto_auto]">
                   <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                     Search
                     <div className="relative">
@@ -2814,11 +2883,19 @@ function DashboardPageContent({
                 </h2>
                 <button
                   type="button"
-                  onClick={() => setShowAddCompetition((prev) => !prev)}
+                  onClick={() => {
+                    if (showAddCompetition) {
+                      resetCompetitionEditor();
+                      return;
+                    }
+                    setCompetitionForm(EMPTY_COMPETITION_FORM);
+                    setEditingCompetitionId(null);
+                    setShowAddCompetition(true);
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-fuchsia-300/35 bg-fuchsia-300/10 px-3 py-1.5 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-300/20"
                 >
-                  <span className="material-symbols-outlined text-[16px]">add</span>
-                  Add result
+                  <span className="material-symbols-outlined text-[16px]">{showAddCompetition ? "close" : "add"}</span>
+                  {showAddCompetition ? "Close" : "Add result"}
                 </button>
               </div>
 
@@ -2830,6 +2907,11 @@ function DashboardPageContent({
                 <>
                   {showAddCompetition ? (
                     <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="sm:col-span-2 lg:col-span-4 rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
+                        {editingCompetitionId
+                          ? "Edit competition result."
+                          : `You can add up to ${MAX_COMPETITIONS_PER_MONTH} competition results per month.`}
+                      </div>
                       <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-slate-400 sm:col-span-2">
                         Event
                         <input
@@ -2918,14 +3000,21 @@ function DashboardPageContent({
                           className="rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-sm text-white placeholder:text-slate-500"
                         />
                       </label>
-                      <div className="sm:col-span-2 lg:col-span-4 flex justify-end">
+                      <div className="sm:col-span-2 lg:col-span-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                        <button
+                          type="button"
+                          onClick={resetCompetitionEditor}
+                          className="rounded-lg border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/[0.08]"
+                        >
+                          Cancel
+                        </button>
                         <button
                           type="button"
                           onClick={() => void addCompetitionResult()}
                           disabled={addingCompetition}
                           className="rounded-lg bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] disabled:opacity-60"
                         >
-                          {addingCompetition ? "Saving..." : "Save result"}
+                          {addingCompetition ? "Saving..." : editingCompetitionId ? "Save changes" : "Save result"}
                         </button>
                       </div>
                     </div>
@@ -3009,6 +3098,15 @@ function DashboardPageContent({
                             <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-wide text-slate-500">
                               {titleCase(item.style)} • {item.division}
                             </p>
+                            <div className="mt-3">
+                              <button
+                                type="button"
+                                onClick={() => startEditingCompetition(item)}
+                                className="rounded-lg border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/[0.08]"
+                              >
+                                Edit
+                              </button>
+                            </div>
                           </article>
                         );
                       })}
@@ -3030,6 +3128,15 @@ function DashboardPageContent({
                                 {[place, String(item.year), item.role].filter(Boolean).join(" • ")}
                               </p>
                               <p className="mt-1 text-[11px] font-semibold text-cyan-200">{item.result}</p>
+                              <div className="mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => startEditingCompetition(item)}
+                                  className="rounded-lg border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/[0.08]"
+                                >
+                                  Edit
+                                </button>
+                              </div>
                             </article>
                           );
                         })}
@@ -3738,8 +3845,23 @@ export default function DashboardPage() {
     return (
       <Suspense
         fallback={
-          <div className="rounded-2xl border border-cyan-300/20 bg-[#121212] p-6 text-sm text-slate-300">
-            Loading Dance Tools...
+          <div className="space-y-5">
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+              <div className="mb-4 h-5 w-32 animate-pulse rounded-md bg-white/[0.08]" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="h-20 animate-pulse rounded-2xl bg-white/[0.06]" />
+                ))}
+              </div>
+            </section>
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+              <div className="mb-4 h-5 w-40 animate-pulse rounded-md bg-white/[0.08]" />
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-14 animate-pulse rounded-xl bg-white/[0.06]" />
+                ))}
+              </div>
+            </section>
           </div>
         }
       >

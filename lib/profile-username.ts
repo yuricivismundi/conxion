@@ -1,92 +1,26 @@
-export const PROFILE_USERNAME_MIN_LENGTH = 3;
-export const PROFILE_USERNAME_MAX_LENGTH = 30;
-export const PROFILE_USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9._]{1,28}[a-z0-9])?$/;
+import { buildUsernameSuggestionBase, normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, USERNAME_PATTERN } from "@/lib/username/normalize";
+import { isReservedUsername } from "@/lib/username/reserved";
+import { validateUsernameFormat } from "@/lib/username/validate";
 
-const RESERVED_PROFILE_USERNAMES = new Set([
-  "about",
-  "account",
-  "account-settings",
-  "admin",
-  "api",
-  "app",
-  "auth",
-  "blog",
-  "careers",
-  "connections",
-  "contact",
-  "dashboard",
-  "discover",
-  "edit",
-  "events",
-  "explore",
-  "feed",
-  "help",
-  "home",
-  "inbox",
-  "login",
-  "me",
-  "messages",
-  "network",
-  "notifications",
-  "onboarding",
-  "pricing",
-  "privacy",
-  "profile",
-  "references",
-  "register",
-  "search",
-  "settings",
-  "signin",
-  "signup",
-  "support",
-  "terms",
-  "travel",
-  "trips",
-  "u",
-  "users",
-]);
+export const PROFILE_USERNAME_MIN_LENGTH = USERNAME_MIN_LENGTH;
+export const PROFILE_USERNAME_MAX_LENGTH = USERNAME_MAX_LENGTH;
+export const PROFILE_USERNAME_PATTERN = USERNAME_PATTERN;
 
 export function normalizeProfileUsernameInput(value: string) {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9._]+/g, "")
-    .slice(0, PROFILE_USERNAME_MAX_LENGTH);
+  return normalizeUsername(value);
 }
 
 export function suggestProfileUsername(value: string) {
-  const normalized = normalizeProfileUsernameInput(
-    value
-      .trim()
-      .replace(/\s+/g, ".")
-      .replace(/-+/g, ".")
-  )
-    .replace(/^[._]+/, "")
-    .replace(/[._]+$/, "")
-    .replace(/[._]{2,}/g, ".");
-
-  if (!normalized) return "";
-  return normalized.slice(0, PROFILE_USERNAME_MAX_LENGTH);
+  return buildUsernameSuggestionBase(value);
 }
 
 export function isReservedProfileUsername(value: string) {
-  return RESERVED_PROFILE_USERNAMES.has(value.trim().toLowerCase());
+  return isReservedUsername(value);
 }
 
 export function validateProfileUsername(value: string) {
-  const normalized = normalizeProfileUsernameInput(value).replace(/^[._]+|[._]+$/g, "");
-  if (!normalized) return "Choose a username.";
-  if (normalized.length < PROFILE_USERNAME_MIN_LENGTH) {
-    return `Username must be at least ${PROFILE_USERNAME_MIN_LENGTH} characters.`;
-  }
-  if (!PROFILE_USERNAME_PATTERN.test(normalized)) {
-    return "Use letters, numbers, dots, or underscores.";
-  }
-  if (isReservedProfileUsername(normalized)) {
-    return "That username is reserved.";
-  }
-  return null;
+  const result = validateUsernameFormat(value);
+  return result.valid ? null : result.error ?? "Username must be between 3 and 20 characters.";
 }
 
 export function isUuidLike(value: string) {

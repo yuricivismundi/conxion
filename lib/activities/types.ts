@@ -14,6 +14,13 @@ export const ACTIVITY_TYPES = [
   "competition",
 ] as const;
 
+export const RANGE_ACTIVITY_TYPES = [
+  "festival",
+  "travel_together",
+  "hosting",
+  "stay_as_guest",
+] as const;
+
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const REFERENCE_CONTEXT_TAGS = ACTIVITY_TYPES;
@@ -22,6 +29,10 @@ export type ReferenceContextTag = (typeof REFERENCE_CONTEXT_TAGS)[number];
 
 export function isActivityType(value: unknown): value is ActivityType {
   return typeof value === "string" && (ACTIVITY_TYPES as readonly string[]).includes(value);
+}
+
+export function activityUsesDateRange(value: ActivityType | string) {
+  return (RANGE_ACTIVITY_TYPES as readonly string[]).includes(String(value).trim());
 }
 
 export function activityTypeLabel(value: ActivityType | string) {
@@ -37,9 +48,9 @@ export function activityTypeLabel(value: ActivityType | string) {
     case "travel_together":
       return "Travel Together";
     case "hosting":
-      return "Hosting";
+      return "Offer Hosting";
     case "stay_as_guest":
-      return "Stay as Guest";
+      return "Request Hosting";
     case "private_class":
       return "Private Class";
     case "group_class":

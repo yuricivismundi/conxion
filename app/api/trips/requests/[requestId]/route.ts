@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 
 type TripRequestAction = "accept" | "decline" | "cancel";
 
@@ -354,6 +355,13 @@ export async function POST(
         requestId,
       });
     }
+
+    await sendAppEmailBestEffort({
+      kind: action === "accept" ? "trip_request_accepted" : "trip_request_declined",
+      recipientUserId: requestRow.requester_id,
+      actorUserId: authData.user.id,
+      tripId: requestRow.trip_id,
+    });
 
     return NextResponse.json({ ok: true, trip_id: requestRow.trip_id });
   } catch (error: unknown) {

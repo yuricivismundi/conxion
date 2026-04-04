@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getTeacherInfoAttachment, getTeacherInfoTemplateText, type TeacherInfoBlock } from "@/lib/teacher-info/types";
 
@@ -50,9 +51,8 @@ export default function ShareInquiryInfoModal({
       <div className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-white/12 bg-[#071017] shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200/80">Teacher inquiry</p>
-            <h2 className="mt-1 text-xl font-bold text-white">Answer teaching info request</h2>
-            <p className="mt-1 text-sm text-slate-300">Choose exactly what to share for {inquiryLabel.toLowerCase()}.</p>
+            <h2 className="text-xl font-bold text-white">Share teaching info</h2>
+            <p className="mt-1 text-sm text-slate-300">Choose the templates to share for this {inquiryLabel.toLowerCase()} request.</p>
           </div>
           <button
             type="button"
@@ -67,7 +67,7 @@ export default function ShareInquiryInfoModal({
         <div className="space-y-5 px-5 py-5">
           {blocks.length === 0 ? (
             <div className="rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-4 text-sm text-amber-100">
-              Add at least one active teacher info block first in <a href="/me/edit/teacher-info" className="font-semibold underline">Teacher info</a>.
+              Add at least one active teacher info block first in <Link href="/me/edit/teacher-info" className="font-semibold underline">Teacher info</Link>.
             </div>
           ) : (
             <div className="grid gap-2">
@@ -139,7 +139,7 @@ export default function ShareInquiryInfoModal({
             disabled={busy || selectedBlockIds.length < 1 || blocks.length === 0}
             className="rounded-2xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? "Answering..." : "Answer Teaching Info Request"}
+            {busy ? "Sharing..." : "Share information"}
           </button>
         </div>
       </div>

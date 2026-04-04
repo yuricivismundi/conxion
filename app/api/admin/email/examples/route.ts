@@ -30,6 +30,8 @@ const DEFAULT_KINDS: AppEmailKind[] = [
   "connection_request_accepted",
   "connection_request_declined",
   "trip_request_received",
+  "trip_request_accepted",
+  "trip_request_declined",
   "travel_plan_upcoming",
   "hosting_request_received",
   "hosting_request_accepted",

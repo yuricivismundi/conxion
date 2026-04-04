@@ -1,443 +1,114 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import Nav from "@/components/Nav";
-import { supabase } from "@/lib/supabase/client";
-import {
-  PRIVACY_REQUEST_SCOPE_OPTIONS,
-  PRIVACY_REQUEST_TYPE_OPTIONS,
-  formatPrivacyRequestScopeTags,
-  formatPrivacyRequestStatusLabel,
-  formatPrivacyRequestTypeLabel,
-  privacyRequestStatusChipClass,
-  type PrivacyRequestScopeTag,
-  type PrivacyRequestType,
-} from "@/lib/privacy-requests";
+import InfoPageShell from "@/components/InfoPageShell";
+import { LEGAL_PROFILE, formatPublishedPostalAddress, hasPublishedPostalAddress } from "@/lib/legal-profile";
 
-type PrivacyRequestRow = {
-  id: string;
-  ticketCode: string | null;
-  requestType: string;
-  status: string;
-  subject: string;
-  description: string;
-  scopeTags: string[];
-  adminNote: string | null;
-  dueAt: string | null;
-  resolvedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
+const LAST_UPDATED = "April 3, 2026";
+const APP_NAME = LEGAL_PROFILE.brandName;
+const PRIVACY_EMAIL = LEGAL_PROFILE.privacyEmail;
+const REQUEST_MAILTO = `mailto:${PRIVACY_EMAIL}?subject=Privacy%20rights%20request`;
 
-type MeSummary = {
-  email: string | null;
-  displayName: string;
-};
+const WHAT_TO_INCLUDE = [
+  "Send the request from the email address linked to your account whenever possible.",
+  "State clearly whether you want access, deletion, rectification, restriction, objection, portability, or another privacy action.",
+  "Describe the account, feature, message thread, payment, or time period involved so the request can be located accurately.",
+  "If you are asking for deletion, say whether you want account erasure or only removal of specific content.",
+] as const;
 
-function asRecord(value: unknown) {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
+const WHAT_HAPPENS_NEXT = [
+  "ConXion reviews requests manually instead of offering instant in-app approval.",
+  "If there are reasonable doubts about identity, additional verification can be required before data is released, exported, corrected, or erased.",
+  "A response is normally sent without undue delay and within 30 days. If the request is unusually complex, the response period may be extended by up to two additional months where the GDPR allows it, with notice during the first month.",
+  "Manifestly unfounded, excessive, or repetitive requests may be refused or charged where the law allows.",
+] as const;
 
-function pickString(row: Record<string, unknown>, key: string, fallback = "") {
-  const value = row[key];
-  return typeof value === "string" && value.trim().length > 0 ? value : fallback;
-}
-
-function pickNullableString(row: Record<string, unknown>, key: string) {
-  const value = row[key];
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(parsed);
-}
-
-function formatRelative(value: string | null | undefined) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  const diff = Date.now() - parsed.getTime();
-  if (diff < 60_000) return "Just now";
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function mapPrivacyRequestRow(raw: unknown) {
-  const row = asRecord(raw);
-  const id = pickString(row, "id");
-  const requestType = pickString(row, "request_type");
-  const status = pickString(row, "status", "open");
-  const subject = pickString(row, "subject");
-  const description = pickString(row, "description");
-  const createdAt = pickString(row, "created_at");
-  const updatedAt = pickString(row, "updated_at", createdAt);
-  if (!id || !requestType || !subject || !description || !createdAt) return null;
-  return {
-    id,
-    ticketCode: pickNullableString(row, "ticket_code"),
-    requestType,
-    status,
-    subject,
-    description,
-    scopeTags: Array.isArray(row.scope_tags) ? row.scope_tags.filter((value): value is string => typeof value === "string") : [],
-    adminNote: pickNullableString(row, "admin_note"),
-    dueAt: pickNullableString(row, "due_at"),
-    resolvedAt: pickNullableString(row, "resolved_at"),
-    createdAt,
-    updatedAt,
-  } satisfies PrivacyRequestRow;
-}
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
+const SELF_SERVICE_OPTIONS = [
+  "Profile details and many visibility choices can already be updated from your account.",
+  "Deactivation is reversible and is not the same as deletion.",
+  "Cookie and similar-technology choices can be managed from Cookie Settings and through your browser settings.",
+] as const;
 
 export default function DataRequestsPage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [me, setMe] = useState<MeSummary | null>(null);
-  const [requests, setRequests] = useState<PrivacyRequestRow[]>([]);
-  const [requestType, setRequestType] = useState<PrivacyRequestType>("access");
-  const [subject, setSubject] = useState("");
-  const [description, setDescription] = useState("");
-  const [scopeTags, setScopeTags] = useState<PrivacyRequestScopeTag[]>(["all_data"]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      setLoading(true);
-      setError(null);
-
-      const [{ data: sessionData }, { data: userData, error: authErr }] = await Promise.all([
-        supabase.auth.getSession(),
-        supabase.auth.getUser(),
-      ]);
-
-      const user = sessionData.session?.user ?? userData.user;
-      if (authErr || !user) {
-        router.replace("/auth?next=/account-settings/data-requests");
-        return;
-      }
-
-      const [profileRes, requestsRes] = await Promise.all([
-        supabase.from("profiles").select("display_name").eq("user_id", user.id).maybeSingle(),
-        supabase
-          .from("privacy_requests")
-          .select("id,ticket_code,request_type,status,subject,description,scope_tags,admin_note,due_at,resolved_at,created_at,updated_at")
-          .eq("requester_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(50),
-      ]);
-
-      if (cancelled) return;
-
-      if (requestsRes.error) {
-        setError(requestsRes.error.message);
-        setLoading(false);
-        return;
-      }
-
-      setMe({
-        email: user.email ?? null,
-        displayName: pickString(asRecord(profileRes.data ?? {}), "display_name", "Member"),
-      });
-      setRequests(((requestsRes.data ?? []) as unknown[]).map(mapPrivacyRequestRow).filter((row): row is PrivacyRequestRow => Boolean(row)));
-      setLoading(false);
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
-
-  const activeCount = useMemo(() => requests.filter((item) => item.status !== "resolved" && item.status !== "dismissed").length, [requests]);
-
-  function toggleScopeTag(tag: PrivacyRequestScopeTag) {
-    setScopeTags((current) => {
-      if (tag === "all_data") return current.includes("all_data") ? [] : ["all_data"];
-      const withoutAll = current.filter((item) => item !== "all_data");
-      if (withoutAll.includes(tag)) return withoutAll.filter((item) => item !== tag);
-      return [...withoutAll, tag];
-    });
-  }
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token ?? "";
-      if (!accessToken) throw new Error("Missing auth session token.");
-
-      const response = await fetch("/api/privacy/requests", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          requestType,
-          subject,
-          description,
-          scopeTags,
-        }),
-      });
-
-      const result = (await response.json().catch(() => null)) as
-        | { ok?: boolean; error?: string; request?: Record<string, unknown> | null }
-        | null;
-
-      if (!response.ok || !result?.ok || !result.request) {
-        throw new Error(result?.error ?? "Could not create privacy request.");
-      }
-
-      const inserted = mapPrivacyRequestRow(result.request);
-      if (!inserted) throw new Error("Privacy request was created but the response was incomplete.");
-
-      setRequests((current) => [inserted, ...current]);
-      setSuccess(`Request submitted${inserted.ticketCode ? ` as ${inserted.ticketCode}` : ""}.`);
-      setRequestType("access");
-      setSubject("");
-      setDescription("");
-      setScopeTags(["all_data"]);
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not create privacy request.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   return (
-    <div className="min-h-screen bg-[#06070b] text-slate-100">
-      <Nav />
-      <main className="mx-auto w-full max-w-[1240px] px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap gap-2">
+    <InfoPageShell
+      title="Privacy Rights Requests"
+      description={`Formal privacy requests for ${APP_NAME} are handled by email so identity, scope, and legal limits can be reviewed carefully before any action is taken.`}
+    >
+      <section className="grid gap-5 lg:grid-cols-2">
+        <article className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+          <h2 className="text-xl font-bold text-white">What to include</h2>
+          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-300">
+            {WHAT_TO_INCLUDE.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </article>
+
+        <article className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+          <h2 className="text-xl font-bold text-white">What happens next</h2>
+          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-300">
+            {WHAT_HAPPENS_NEXT.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </article>
+      </section>
+
+      <article className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+        <h2 className="text-xl font-bold text-white">Before sending a formal request</h2>
+        <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-300">
+          {SELF_SERVICE_OPTIONS.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+        <div className="mt-5 flex flex-wrap gap-2">
           <Link
             href="/account-settings"
-            className="inline-flex rounded-lg border border-white/20 bg-black/25 px-3 py-1.5 text-xs font-semibold text-white/85 hover:border-white/35 hover:text-white"
+            className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-black/20 px-4 py-2 text-sm font-semibold text-white/85 hover:bg-black/30"
           >
-            Back to Account Settings
+            Account Settings
           </Link>
           <Link
-            href="/privacy"
-            className="inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
+            href="/cookie-settings"
+            className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-black/20 px-4 py-2 text-sm font-semibold text-white/85 hover:bg-black/30"
           >
-            Privacy Policy
+            Cookie Settings
           </Link>
         </div>
+      </article>
 
-        <section className="mt-4 rounded-3xl border border-white/10 bg-[#0b1a1d]/70 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur sm:p-6">
-          <p className="text-xs uppercase tracking-[0.2em] text-cyan-200/90">Privacy & Data Rights</p>
-          <h1 className="mt-2 text-3xl font-black text-white">Privacy Requests</h1>
-          <p className="mt-3 max-w-[72ch] text-sm leading-relaxed text-slate-200/90">
-            Submit access, portability, erasure, rectification, objection, or restriction requests from inside your account.
-            Deactivation is reversible and is not the same as deletion.
-          </p>
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Signed in as</p>
-              <p className="mt-2 text-sm font-semibold text-white">{me?.displayName ?? "Member"}</p>
-              <p className="mt-1 text-xs text-slate-400">{me?.email ?? "No email found"}</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Open requests</p>
-              <p className="mt-2 text-2xl font-bold text-white">{activeCount}</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Handling target</p>
-              <p className="mt-2 text-sm text-white">Generally within 30 days</p>
-              <p className="mt-1 text-xs text-slate-400">Complex requests can take longer where law allows.</p>
-            </div>
-          </div>
-        </section>
-
-        {error ? (
-          <div className="mt-4 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
-        ) : null}
-        {success ? (
-          <div className="mt-4 rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-100">{success}</div>
-        ) : null}
-
-        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)] sm:p-6">
-            <h2 className="text-lg font-bold text-white">Submit a request</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Use this flow for formal privacy requests. For urgent safety issues, use reporting and support flows instead.
+      <article className="rounded-3xl border border-cyan-300/20 bg-cyan-300/10 p-5 sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-[72ch]">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/80">Last Updated</p>
+            <p className="mt-2 text-lg font-bold text-white">{LAST_UPDATED}</p>
+            <p className="mt-3 text-sm leading-relaxed text-cyan-50/90">
+              If you want to exercise your GDPR rights, email{" "}
+              <a href={REQUEST_MAILTO} className="font-semibold text-white underline decoration-cyan-200/60 underline-offset-4">
+                {PRIVACY_EMAIL}
+              </a>
+              . This page explains what to include and what happens next.
             </p>
-
-            <form className="mt-5 space-y-5" onSubmit={handleSubmit}>
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Request type</span>
-                <select
-                  value={requestType}
-                  onChange={(event) => setRequestType(event.target.value as PrivacyRequestType)}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#11161c] px-4 py-3 text-sm text-white outline-none focus:border-cyan-300/50"
-                >
-                  {PRIVACY_REQUEST_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Scope</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {PRIVACY_REQUEST_SCOPE_OPTIONS.map((option) => {
-                    const active = scopeTags.includes(option.value);
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => toggleScopeTag(option.value)}
-                        className={cx(
-                          "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                          active
-                            ? "border-cyan-300/35 bg-cyan-300/10 text-cyan-100"
-                            : "border-white/15 bg-white/[0.04] text-white/75 hover:border-white/30 hover:text-white"
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Subject</span>
-                <input
-                  value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
-                  maxLength={160}
-                  placeholder="Example: Access request for profile, messages, and billing records"
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#11161c] px-4 py-3 text-sm text-white outline-none focus:border-cyan-300/50"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Description</span>
-                <textarea
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  rows={7}
-                  maxLength={5000}
-                  placeholder="Describe what you want, the data or area involved, and anything that helps locate it."
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#11161c] px-4 py-3 text-sm leading-relaxed text-white outline-none focus:border-cyan-300/50"
-                />
-                <p className="mt-2 text-xs text-slate-500">{description.length}/5000</p>
-              </label>
-
-              <button
-                type="submit"
-                disabled={submitting || loading}
-                className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-5 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submitting ? "Submitting..." : "Submit privacy request"}
-              </button>
-            </form>
-          </section>
-
-          <aside className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)] sm:p-6">
-            <h2 className="text-lg font-bold text-white">What this covers</h2>
-            <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-300">
-              <li>Access, portability, deletion, rectification, restriction, objection, and consent-withdrawal requests.</li>
-              <li>Signed-in requests are linked to your account so identity review is faster.</li>
-              <li>Some data may still be retained for legal claims, security, tax, billing, or safety obligations.</li>
-              <li>If ConXion needs more information, the request can move to <span className="font-semibold text-white">Needs info</span>.</li>
-            </ul>
-          </aside>
-        </div>
-
-        <section className="mt-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)] sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-white">Request history</h2>
-              <p className="mt-1 text-sm text-slate-400">Track the ticket code, status, scope, and the latest internal note.</p>
-            </div>
+            <p className="mt-3 text-xs leading-relaxed text-cyan-50/80">
+              Controller: {LEGAL_PROFILE.operatorName}, private individual based in Tallinn, Estonia
+              {hasPublishedPostalAddress() ? ` • ${formatPublishedPostalAddress()}` : ""}
+            </p>
           </div>
-
-          {loading ? (
-            <div className="mt-4 space-y-3">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div key={index} className="h-24 animate-pulse rounded-2xl border border-white/10 bg-black/20" />
-              ))}
-            </div>
-          ) : requests.length === 0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-8 text-center text-sm text-slate-500">
-              No privacy requests submitted yet.
-            </div>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {requests.map((item) => (
-                <article key={item.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {item.ticketCode ? (
-                          <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-bold tracking-[0.16em] text-cyan-100">
-                            {item.ticketCode}
-                          </span>
-                        ) : null}
-                        <h3 className="truncate text-base font-semibold text-white">{item.subject}</h3>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-300">{formatPrivacyRequestTypeLabel(item.requestType)}</p>
-                      <p className="mt-1 text-xs text-slate-500">{formatPrivacyRequestScopeTags(item.scopeTags)}</p>
-                    </div>
-                    <span className={cx("rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.14em]", privacyRequestStatusChipClass(item.status))}>
-                      {formatPrivacyRequestStatusLabel(item.status)}
-                    </span>
-                  </div>
-
-                  <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{item.description}</p>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-white/10 bg-[#0c1016] px-3 py-2">
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Created</p>
-                      <p className="mt-1 text-sm text-white">{formatDate(item.createdAt)}</p>
-                      <p className="mt-1 text-xs text-slate-500">{formatRelative(item.createdAt)}</p>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-[#0c1016] px-3 py-2">
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Target date</p>
-                      <p className="mt-1 text-sm text-white">{formatDate(item.dueAt)}</p>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-[#0c1016] px-3 py-2">
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Last updated</p>
-                      <p className="mt-1 text-sm text-white">{formatDate(item.updatedAt)}</p>
-                      <p className="mt-1 text-xs text-slate-500">{formatRelative(item.updatedAt)}</p>
-                    </div>
-                  </div>
-
-                  {item.adminNote ? (
-                    <div className="mt-4 rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-4 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-cyan-100/75">Latest note</p>
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-cyan-50">{item.adminNote}</p>
-                    </div>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
-    </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={REQUEST_MAILTO}
+              className="inline-flex min-h-10 items-center justify-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#071018] hover:bg-cyan-50"
+            >
+              Email privacy contact
+            </a>
+            <Link
+              href="/privacy"
+              className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-white/[0.05] px-4 py-2 text-sm font-semibold text-white/90 hover:bg-white/[0.08]"
+            >
+              Privacy Policy
+            </Link>
+          </div>
+        </div>
+      </article>
+    </InfoPageShell>
   );
 }

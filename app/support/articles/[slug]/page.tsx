@@ -89,7 +89,7 @@ export default async function HelpArticlePage({ params }: PageProps) {
                 Back to Help Center
               </Link>
               <Link
-                href="/network?tab=references"
+                href="/references"
                 className="rounded-lg border border-white/20 bg-black/25 px-3 py-1.5 text-xs font-semibold text-white/85 hover:border-white/35 hover:text-white"
               >
                 Open references

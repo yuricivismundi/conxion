@@ -9,6 +9,8 @@ import { resolveAvatarUrl } from "@/lib/avatar-storage";
 import DashboardPage from "@/app/dashboard/page";
 import Nav from "@/components/Nav";
 import Avatar from "@/components/Avatar";
+import EventHeroImage from "@/components/events/EventHeroImage";
+import ReferencesHubView from "@/components/network/ReferencesHubView";
 import ProfileMediaShowcase from "@/components/profile/ProfileMediaShowcase";
 import TeacherBadge from "@/components/profile/TeacherBadge";
 import RequestInfoModal from "@/components/teacher/RequestInfoModal";
@@ -32,7 +34,15 @@ import {
   getTripHeroStorageFolderUrl,
   getTripHeroStorageUrl,
 } from "@/lib/city-hero-images";
-import { mapEventMemberRows, mapEventRows, type EventMemberRecord, type EventRecord } from "@/lib/events/model";
+import {
+  formatEventRange,
+  mapEventMemberRows,
+  mapEventRows,
+  pickEventFallbackHeroUrl,
+  pickEventHeroUrl,
+  type EventMemberRecord,
+  type EventRecord,
+} from "@/lib/events/model";
 import {
   REFERENCE_CONTEXT_TAGS,
   normalizeReferenceContextTag,
@@ -55,6 +65,7 @@ import { clearVerificationResume, loadVerificationResume } from "@/lib/verificat
 import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
 import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-username";
 import DarkConnectModal from "@/components/DarkConnectModal";
+import { cx } from "@/lib/cx";
 
 type DanceSkill = { level?: string; verified?: boolean };
 type DanceSkills = Record<string, DanceSkill>;
@@ -180,21 +191,17 @@ const EMPTY_PROFILE_REQUEST_RESPONSE_STATS: ProfileRequestResponseStats = {
   responseRate: 0,
 };
 
-const EMPTY_LAST_SYNCED_BY_TAB: Record<TabKey, string | null> = {
-  overview: null,
-  references: null,
-  "dance-tools": null,
-  trips: null,
-  events: null,
-};
-
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "Overview",
   references: "References",
   trips: "Trips",
   events: "Events",
-  "dance-tools": "Dance Tools",
+  "dance-tools": "Dance tools",
 };
+
+function isTabKey(value: string | null): value is TabKey {
+  return Boolean(value) && TAB_ORDER.includes(value as TabKey);
+}
 
 type ConnectionState =
   | { status: "none" }
@@ -204,9 +211,6 @@ type ConnectionState =
 
 const STYLE_ORDER = ["bachata", "salsa", "kizomba", "zouk", "tango", "other"] as const;
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function asRecord(value: unknown) {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -316,6 +320,187 @@ function normalizeContext(value: string) {
 function titleCase(value: string) {
   if (!value) return value;
   return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function summarizeEventText(text: string | null | undefined, max = 78) {
+  const value = (text ?? "").trim();
+  if (!value) return "No description provided yet.";
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trimEnd()}...`;
+}
+
+function profileEventTypeBadge(eventType: string) {
+  const normalized = eventType.toLowerCase();
+  if (normalized.includes("festival")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
+  if (normalized.includes("workshop") || normalized.includes("class") || normalized.includes("masterclass")) {
+    return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
+  }
+  if (normalized.includes("social")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
+  return "border-slate-300/30 bg-slate-400/15 text-slate-100";
+}
+
+function profileEventDateBadgeParts(value: string) {
+  const parsed = parseDate(value);
+  if (!parsed) return { weekday: "--", month: "--", day: "--" };
+  return {
+    weekday: new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(parsed),
+    month: new Intl.DateTimeFormat("en-US", { month: "short" }).format(parsed).toUpperCase(),
+    day: new Intl.DateTimeFormat("en-US", { day: "2-digit" }).format(parsed),
+  };
+}
+
+function getProfileEventTimelineStatus(event: EventRecord) {
+  if (event.status === "cancelled") {
+    return {
+      label: "Cancelled",
+      textClass: "text-rose-300/90",
+    };
+  }
+
+  const now = Date.now();
+  const start = parseDate(event.startsAt)?.getTime() ?? null;
+  const end = parseDate(event.endsAt)?.getTime() ?? null;
+  if (start !== null && end !== null) {
+    if (start <= now && now <= end) {
+      return {
+        label: "Happening now",
+        textClass: "text-red-400",
+      };
+    }
+    if (end < now) {
+      return {
+        label: "Ended",
+        textClass: "text-slate-400",
+      };
+    }
+  }
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
+  if ((event.startsAt ?? "").slice(0, 10) === tomorrowIso) {
+    return {
+      label: "Tomorrow",
+      textClass: "text-cyan-200/90",
+    };
+  }
+
+  return {
+    label: "Upcoming",
+    textClass: "text-emerald-300/90",
+  };
+}
+
+function profileEventRelationLabel(item: EventTimelineItem) {
+  if (item.relation === "hosted") return "Hosted";
+  if (item.relation === "waitlist") return "Waitlist";
+  const endAt = parseDate(item.event.endsAt)?.getTime() ?? null;
+  return endAt !== null && endAt < Date.now() ? "Joined" : "Joining";
+}
+
+function profileEventRelationTone(item: EventTimelineItem) {
+  if (item.relation === "hosted") return "border-fuchsia-300/35 bg-fuchsia-400/14 text-fuchsia-100";
+  if (item.relation === "waitlist") return "border-amber-300/35 bg-amber-400/14 text-amber-100";
+  return "border-emerald-300/35 bg-emerald-400/14 text-emerald-100";
+}
+
+function profileEventRelationIcon(item: EventTimelineItem) {
+  if (item.relation === "hosted") return "event_available";
+  if (item.relation === "waitlist") return "schedule";
+  return "check_circle";
+}
+
+function ProfileEventCard({ item }: { item: EventTimelineItem }) {
+  const hero = pickEventHeroUrl(item.event);
+  const fallbackHero = pickEventFallbackHeroUrl(item.event);
+  const dateBadge = profileEventDateBadgeParts(item.event.startsAt);
+  const timeline = getProfileEventTimelineStatus(item.event);
+  const relationLabel = profileEventRelationLabel(item);
+  const locationLabel = [item.event.venueName, item.event.city, item.event.country].filter(Boolean).join(", ") || "Location not set";
+
+  return (
+    <article className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30">
+      <Link href={`/events/${item.event.id}`} className="block">
+        <div className="relative h-[108px]">
+          <EventHeroImage
+            key={`${hero ?? ""}|${fallbackHero ?? ""}`}
+            primarySrc={hero}
+            fallbackSrc={fallbackHero}
+            alt={item.event.title}
+            className="h-full w-full object-cover transition duration-700 hover:scale-105"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
+
+          <div className="absolute left-2 top-2 flex items-center gap-1.5">
+            <span className={cx("rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase", profileEventTypeBadge(item.event.eventType))}>
+              {item.event.eventType}
+            </span>
+          </div>
+
+          <div className="absolute right-2 top-2">
+            <span className="rounded-full border border-white/20 bg-black/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-slate-100">
+              {item.event.visibility}
+            </span>
+          </div>
+        </div>
+      </Link>
+
+      <div className="relative flex flex-1 flex-col p-2">
+        <div className="pointer-events-none absolute right-2 top-1 z-10">
+          <div className="rounded-xl border border-cyan-300/30 bg-cyan-300/14 px-2 py-1 text-center shadow-[0_8px_20px_rgba(34,211,238,0.12)]">
+            <p className="text-[10px] font-semibold tracking-wide text-cyan-100">{dateBadge.weekday}</p>
+            <p className="text-[10px] font-semibold tracking-wide text-cyan-100">{dateBadge.month}</p>
+            <p className="text-[22px] font-extrabold leading-none text-white">{dateBadge.day}</p>
+          </div>
+        </div>
+
+        <div className="mb-0.5">
+          <p className={cx("mb-0.5 text-[10px] font-semibold uppercase tracking-wide", timeline.textClass)}>{timeline.label}</p>
+          <Link href={`/events/${item.event.id}`} className="block min-w-0 pr-[98px]">
+            <h3 className="line-clamp-2 min-h-[34px] text-[15px] font-bold leading-tight text-white">{item.event.title}</h3>
+          </Link>
+          <p className="mt-0.5 truncate text-[11px] font-semibold text-cyan-200/90">
+            {formatEventRange(item.event.startsAt, item.event.endsAt)}
+          </p>
+        </div>
+
+        <div>
+          <p className="mt-0.5 flex items-center gap-1 text-[13px] text-slate-300">
+            <span className="material-symbols-outlined text-[16px] text-cyan-200">location_on</span>
+            <span className="truncate">{locationLabel}</span>
+            {item.event.styles.length ? (
+              <>
+                <span className="text-white/40">,</span>
+                <span className="truncate text-cyan-100/85">{item.event.styles.slice(0, 2).map(titleCase).join(", ")}</span>
+              </>
+            ) : null}
+          </p>
+
+          <p className="mt-0.5 line-clamp-2 min-h-[30px] text-[13px] leading-[1.25] text-slate-400">
+            {summarizeEventText(item.event.description)}
+          </p>
+        </div>
+
+        <div className="mt-auto flex items-center gap-1.5 border-t border-white/10 pt-1">
+          <div
+            className={cx(
+              "inline-flex h-[33px] flex-1 items-center justify-center gap-1 rounded-xl border text-[12px] font-semibold",
+              profileEventRelationTone(item)
+            )}
+          >
+            <span className="material-symbols-outlined text-[16px]">{profileEventRelationIcon(item)}</span>
+            {relationLabel}
+          </div>
+          <Link
+            href={`/events/${item.event.id}`}
+            className="inline-flex h-[33px] items-center justify-center rounded-xl border border-white/15 bg-white/[0.05] px-3 text-[12px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
+          >
+            Open
+          </Link>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function formatDanceLevelLabel(value: string) {
@@ -700,14 +885,14 @@ function MemberProfilePage() {
   const [referenceDirectionFilter, setReferenceDirectionFilter] = useState<ReferenceDirectionFilter>("all");
   const [referenceSortFilter, setReferenceSortFilter] = useState<ReferenceSortFilter>("latest");
   const [referenceAuthors, setReferenceAuthors] = useState<Record<string, string>>({});
-  const [authoredReferenceTypes, setAuthoredReferenceTypes] = useState<Set<ReferenceContextTag>>(new Set());
-  const [pendingReferenceTypes, setPendingReferenceTypes] = useState<Set<ReferenceContextTag>>(new Set());
+  const [, setPendingReferenceTypes] = useState<Set<ReferenceContextTag>>(new Set());
 
   const [trips, setTrips] = useState<TripItem[]>([]);
   const [eventsTimeline, setEventsTimeline] = useState<EventTimelineItem[]>([]);
   const [syncs, setSyncs] = useState<SyncItem[]>([]);
   const [danceGoalsCount, setDanceGoalsCount] = useState(0);
   const [danceCompetitionsCount, setDanceCompetitionsCount] = useState(0);
+  const [danceMovesCount, setDanceMovesCount] = useState(0);
   const [requestResponseStats, setRequestResponseStats] = useState<ProfileRequestResponseStats>(EMPTY_PROFILE_REQUEST_RESPONSE_STATS);
   const [acceptedConnections, setAcceptedConnections] = useState<ConnectionLite[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, ProfileListItem>>({});
@@ -729,9 +914,9 @@ function MemberProfilePage() {
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [teacherInquiryEnabled, setTeacherInquiryEnabled] = useState(false);
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
-  const [lastSyncedByTab, setLastSyncedByTab] = useState<Record<TabKey, string | null>>(EMPTY_LAST_SYNCED_BY_TAB);
   const panelSwitchTimerRef = useRef<number | null>(null);
   const toastCounterRef = useRef(0);
+  const profileLoadRequestIdRef = useRef(0);
 
   const profileUserId = profile?.userId ?? (routeProfileKey && isUuidLike(routeProfileKey) ? routeProfileKey : null);
   const isSelf = meId !== null && profileUserId === meId;
@@ -739,6 +924,13 @@ function MemberProfilePage() {
   const canRequestInfo = !isSelf && isTeacherProfile && teacherInquiryEnabled;
   const canRevealContacts = isSelf || state.status === "accepted";
   const panelLoading = tabTransitionLoading || (supportingPanelsLoading && !(tab === "dance-tools" && isSelf));
+  const requestedReferenceConnectionId = searchParams.get("connectionId");
+  const requestedTab = useMemo(() => {
+    const raw = searchParams.get("tab");
+    if (!raw) return null;
+    const normalized = raw.toLowerCase();
+    return isTabKey(normalized) ? normalized : null;
+  }, [searchParams]);
   const hostingAvailable = useMemo(() => isHostingListingOpen(profile?.canHost === true, profile?.hostingStatus), [profile?.canHost, profile?.hostingStatus]);
   const showHostingDetails = useMemo(
     () =>
@@ -754,6 +946,26 @@ function MemberProfilePage() {
       ),
     [profile]
   );
+
+  // Redirect to teacher profile if the teacher has set that as their default view
+  useEffect(() => {
+    if (!isTeacherProfile || !profileUserId || isSelf) return;
+    void supabase
+      .from("teacher_profiles")
+      .select("default_public_view,teacher_profile_enabled,is_public")
+      .eq("user_id", profileUserId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (
+          data?.default_public_view === "teacher" &&
+          data?.teacher_profile_enabled &&
+          data?.is_public
+        ) {
+          router.replace(`/profile/${profileUserId}/teacher`);
+        }
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileUserId, isTeacherProfile, isSelf]);
 
   const mobileSettingsLinks = useMemo(
     () =>
@@ -840,8 +1052,6 @@ function MemberProfilePage() {
     [syncs]
   );
 
-  const hasReferenceFilters = referenceDirectionFilter !== "all" || referenceContextFilter !== "all";
-
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const activeTrips = useMemo(
@@ -863,23 +1073,19 @@ function MemberProfilePage() {
   const upcomingEvents = useMemo(() => {
     const now = Date.now();
     return eventsTimeline.filter((item) => {
-      const startsAt = parseDate(item.event.startsAt);
-      return startsAt ? startsAt.getTime() >= now : false;
+      const endsAt = parseDate(item.event.endsAt);
+      return endsAt ? endsAt.getTime() >= now : false;
     });
   }, [eventsTimeline]);
   const pastEvents = useMemo(() => {
     const now = Date.now();
     return eventsTimeline.filter((item) => {
-      const startsAt = parseDate(item.event.startsAt);
-      return startsAt ? startsAt.getTime() < now : true;
+      const endsAt = parseDate(item.event.endsAt);
+      return endsAt ? endsAt.getTime() < now : true;
     });
   }, [eventsTimeline]);
 
   const completedSyncs = useMemo(() => syncs.filter((item) => Boolean(item.completedAt)), [syncs]);
-  const pendingSyncReferenceCount = useMemo(
-    () => completedSyncs.filter((item) => pendingReferenceTypes.has(normalizeContext(item.type))).length,
-    [completedSyncs, pendingReferenceTypes]
-  );
   const respondedRequestCount = requestResponseStats.respondedRequests;
   const responseRate = requestResponseStats.responseRate;
   const primaryInterest = useMemo(() => profile?.interests?.[0] ?? null, [profile?.interests]);
@@ -899,6 +1105,14 @@ function MemberProfilePage() {
     return encodedName ? `${appBase}/profile/${profileUserId}?name=${encodedName}` : `${appBase}/profile/${profileUserId}`;
   }, [profile?.displayName, profile?.username, profileUserId]);
   const shareDisplayUrl = useMemo(() => shareUrl.replace(/^https?:\/\//, ""), [shareUrl]);
+  const teacherShareUrl = useMemo(() => {
+    if (!isTeacherProfile || !profileUserId) return "";
+    const appBase =
+      (typeof window !== "undefined" ? normalizePublicAppUrl(window.location.origin) : "") ||
+      normalizePublicAppUrl(process.env.NEXT_PUBLIC_APP_URL) ||
+      "";
+    return `${appBase}/profile/${profileUserId}/teacher`;
+  }, [isTeacherProfile, profileUserId]);
 
   const mutualConnectionUserIds = useMemo(() => {
     if (!profileUserId || !meId || meId === profileUserId) return [] as string[];
@@ -913,8 +1127,10 @@ function MemberProfilePage() {
     [mutualConnectionUserIds, profilesById]
   );
 
+  const refPositivePercent = referenceStats.total > 0 ? Math.round((referenceStats.positive / referenceStats.total) * 100) : 0;
   const metricReferences = useCountUp(referenceStats.total, animateMetrics);
   const metricPositiveRefs = useCountUp(referenceStats.positive, animateMetrics);
+  const metricRefPositivePercent = useCountUp(refPositivePercent, animateMetrics);
   const metricResponseRate = useCountUp(responseRate, animateMetrics);
   const metricRespondedRequests = useCountUp(respondedRequestCount, animateMetrics);
   const metricActiveTrips = useCountUp(activeTrips.length, animateMetrics);
@@ -923,6 +1139,7 @@ function MemberProfilePage() {
   const metricEvents = useCountUp(eventsTimeline.length, animateMetrics);
   const metricDanceGoals = useCountUp(danceGoalsCount, animateMetrics);
   const metricDanceCompetitions = useCountUp(danceCompetitionsCount, animateMetrics);
+  const metricDanceMoves = useCountUp(danceMovesCount, animateMetrics);
   const metricCompletedSyncs = useCountUp(completedSyncs.length, animateMetrics);
   const metricTotalSyncs = useCountUp(syncs.length, animateMetrics);
   const visibleTabs = useMemo(
@@ -942,7 +1159,7 @@ function MemberProfilePage() {
           icon: "rate_review",
           title: "References",
           value: `${metricReferences}`,
-          sub: `+ ${metricPositiveRefs} positive`,
+          sub: `+ ${metricPositiveRefs} positive · ${metricRefPositivePercent}%`,
         },
         {
           key: "overview",
@@ -973,9 +1190,9 @@ function MemberProfilePage() {
               {
                 key: "dance-tools" as TabKey,
                 icon: "sports_gymnastics",
-                title: "Dance Tools",
-                value: `${metricDanceGoals} goals`,
-                sub: `${metricDanceCompetitions} competitions done`,
+                title: "Dance tools",
+                value: "",
+                sub: `${metricDanceMoves} moves learned|${metricDanceGoals} active goals|${metricDanceCompetitions} competitions`,
               },
             ]
           : [])
@@ -986,11 +1203,13 @@ function MemberProfilePage() {
     [
       metricReferences,
       metricPositiveRefs,
+      metricRefPositivePercent,
       metricResponseRate,
       metricRespondedRequests,
       requestResponseStats.totalRequests,
       metricDanceGoals,
       metricDanceCompetitions,
+      metricDanceMoves,
       isSelf,
       metricActiveTrips,
       metricPastTrips,
@@ -1003,6 +1222,12 @@ function MemberProfilePage() {
     if (visibleTabs.some(([key]) => key === tab)) return;
     setTab("overview");
   }, [tab, visibleTabs]);
+
+  useEffect(() => {
+    if (!requestedTab) return;
+    if (!visibleTabs.some(([key]) => key === requestedTab)) return;
+    setTab((current) => (current === requestedTab ? current : requestedTab));
+  }, [requestedTab, visibleTabs]);
 
   useEffect(() => {
     if (!shareDialogOpen) return;
@@ -1245,17 +1470,6 @@ function MemberProfilePage() {
     };
   }, [actionMenu]);
 
-  function markPanelsSynced() {
-    const syncedAt = new Date().toISOString();
-    setLastSyncedByTab({
-      overview: syncedAt,
-      references: syncedAt,
-      "dance-tools": syncedAt,
-      trips: syncedAt,
-      events: syncedAt,
-    });
-  }
-
   function handleTabChange(nextTab: TabKey) {
     if (nextTab === tab) return;
     if (panelSwitchTimerRef.current) {
@@ -1264,8 +1478,15 @@ function MemberProfilePage() {
     }
     setTabTransitionLoading(true);
     setTab(nextTab);
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (nextTab === "overview") {
+      nextParams.delete("tab");
+    } else {
+      nextParams.set("tab", nextTab);
+    }
+    const nextQuery = nextParams.toString();
+    router.replace(`${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`, { scroll: false });
     panelSwitchTimerRef.current = window.setTimeout(() => {
-      setLastSyncedByTab((prev) => ({ ...prev, [nextTab]: new Date().toISOString() }));
       setTabTransitionLoading(false);
       panelSwitchTimerRef.current = null;
     }, 220);
@@ -1410,7 +1631,10 @@ function MemberProfilePage() {
     }
     const resolvedRouteProfileKey = routeProfileKey;
 
+    const requestId = profileLoadRequestIdRef.current + 1;
+    profileLoadRequestIdRef.current = requestId;
     let cancelled = false;
+    const canCommit = () => !cancelled && profileLoadRequestIdRef.current === requestId;
 
     async function load() {
       let initialReady = false;
@@ -1438,9 +1662,7 @@ function MemberProfilePage() {
       setAcceptedConnections([]);
       setProfilesById({});
       setReferenceAuthors({});
-      setAuthoredReferenceTypes(new Set());
       setPendingReferenceTypes(new Set());
-      setLastSyncedByTab(EMPTY_LAST_SYNCED_BY_TAB);
 
       try {
         const { data: auth } = await supabase.auth.getUser();
@@ -1504,7 +1726,7 @@ function MemberProfilePage() {
           visibleConnectionsPromise,
         ]);
 
-        if (cancelled) return;
+        if (!canCommit()) return;
 
         setViewerAcceptedUserIds(
           Array.from(
@@ -1663,6 +1885,10 @@ function MemberProfilePage() {
               myUserId === resolvedProfileId
                 ? supabaseCompat.from("dance_goals_user").select("id", { head: true, count: "exact" }).eq("user_id", resolvedProfileId)
                 : Promise.resolve({ count: 0, error: null });
+            const danceMovesCountPromise =
+              myUserId === resolvedProfileId
+                ? supabaseCompat.from("dance_moves_user").select("id", { head: true, count: "exact" }).eq("user_id", resolvedProfileId)
+                : Promise.resolve({ count: 0, error: null });
 
             const [
               profileReferenceRows,
@@ -1674,6 +1900,7 @@ function MemberProfilePage() {
               teacherInquiryAvailable,
               danceCompetitionsCountRes,
               danceGoalsCountRes,
+              danceMovesCountRes,
               acceptedConnectionsDirect,
               connectionSyncsByMemberRes,
             ] = await Promise.all([
@@ -1695,6 +1922,7 @@ function MemberProfilePage() {
               teacherInquiryAvailabilityPromise,
               danceCompetitionsCountPromise,
               danceGoalsCountPromise,
+              danceMovesCountPromise,
               supabase
                 .from("connections")
                 .select("id,requester_id,target_id,status")
@@ -1709,7 +1937,7 @@ function MemberProfilePage() {
                 .limit(500),
             ]);
 
-            if (cancelled) return;
+            if (!canCommit()) return;
 
             setTeacherInquiryEnabled(teacherInquiryAvailable);
             setProfileMedia(profileMediaRows);
@@ -1732,41 +1960,30 @@ function MemberProfilePage() {
             } else {
               setDanceGoalsCount(Math.max(0, danceGoalsCountRes?.count ?? 0));
             }
+            if (danceMovesCountRes?.error) {
+              if (!isSchemaMissingMessage(danceMovesCountRes.error.message)) {
+                console.warn("[profile] dance moves count query failed", danceMovesCountRes.error.message);
+              }
+              setDanceMovesCount(0);
+            } else {
+              setDanceMovesCount(Math.max(0, danceMovesCountRes?.count ?? 0));
+            }
 
             const nowIso = new Date().toISOString();
-            const [authoredRefsForPairRes, pendingPromptsRes] =
+            const pendingPromptsRes =
               resolvedProfileId && myUserId !== resolvedProfileId
-                ? await Promise.all([
-                    supabase
-                      .from("references")
-                      .select("id,context_tag,context,entity_type")
-                      .eq("author_id", myUserId)
-                      .eq("recipient_id", resolvedProfileId)
-                      .limit(200),
-                    supabase
-                      .from("reference_requests")
-                      .select("id,context_tag,due_at,expires_at,status")
-                      .eq("user_id", myUserId)
-                      .eq("peer_user_id", resolvedProfileId)
-                      .eq("status", "pending")
-                      .lte("due_at", nowIso)
-                      .gte("expires_at", nowIso)
-                      .limit(200),
-                  ])
-                : [{ data: [], error: null }, { data: [], error: null }];
+                ? await supabase
+                    .from("reference_requests")
+                    .select("id,context_tag,due_at,expires_at,status")
+                    .eq("user_id", myUserId)
+                    .eq("peer_user_id", resolvedProfileId)
+                    .eq("status", "pending")
+                    .lte("due_at", nowIso)
+                    .gte("expires_at", nowIso)
+                    .limit(200)
+                : { data: [], error: null };
 
-            if (cancelled) return;
-
-            const authoredTypes = new Set<ReferenceContextTag>();
-            if (!authoredRefsForPairRes.error) {
-              for (const raw of ((authoredRefsForPairRes.data ?? []) as unknown[])) {
-                const row = asRecord(raw);
-                authoredTypes.add(normalizeContext(pickString(row, ["context_tag", "context", "entity_type"], "collaboration")));
-              }
-            } else if (!isSchemaMissingMessage(authoredRefsForPairRes.error.message)) {
-              markSupportingDataIssue();
-            }
-            setAuthoredReferenceTypes(authoredTypes);
+            if (!canCommit()) return;
 
             const pendingTypes = new Set<ReferenceContextTag>();
             if (!pendingPromptsRes.error) {
@@ -1803,7 +2020,7 @@ function MemberProfilePage() {
               }
             }
 
-            if (cancelled) return;
+            if (!canCommit()) return;
 
             const eventsById: Record<string, EventRecord> = {};
             [...hostedEvents, ...relatedEvents].forEach((event) => {
@@ -1822,7 +2039,7 @@ function MemberProfilePage() {
               timeline.push({
                 event,
                 relation: row.status,
-                label: row.status === "going" ? "Going" : "Waitlist",
+                label: row.status === "going" ? "Joining" : "Waitlist",
               });
             });
 
@@ -1886,7 +2103,7 @@ function MemberProfilePage() {
               }
             }
 
-            if (cancelled) return;
+            if (!canCommit()) return;
 
             setSyncs(syncRows);
 
@@ -1935,27 +2152,26 @@ function MemberProfilePage() {
               setReferenceAuthors({});
             }
 
-            if (cancelled) return;
-            markPanelsSynced();
+            if (!canCommit()) return;
             setSupportingDataError(
               hasSupportingDataIssue ? "Some profile sections could not be loaded completely. Refresh to try again." : null
             );
           } catch (supportingError) {
-            if (cancelled) return;
+            if (!canCommit()) return;
             console.warn(
               "[profile] supporting data query failed",
               supportingError instanceof Error ? supportingError.message : String(supportingError)
             );
             setSupportingDataError("Some profile sections could not be loaded completely. Refresh to try again.");
           } finally {
-            if (!cancelled) setSupportingPanelsLoading(false);
+            if (canCommit()) setSupportingPanelsLoading(false);
           }
         })();
       } catch (err: unknown) {
-        if (cancelled) return;
+        if (!canCommit()) return;
         setError(err instanceof Error ? err.message : "Could not load this profile right now.");
       } finally {
-        if (!cancelled && !initialReady) setLoading(false);
+        if (canCommit() && !initialReady) setLoading(false);
       }
     }
 
@@ -2227,6 +2443,16 @@ function MemberProfilePage() {
                     {[profile.city, profile.country].filter(Boolean).join(", ") || "Location not set"}
                   </p>
 
+                  {isTeacherProfile && profileUserId ? (
+                    <Link
+                      href={`/profile/${profileUserId}/teacher`}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-cyan-300/80 hover:text-cyan-200"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">school</span>
+                      View teacher profile
+                    </Link>
+                  ) : null}
+
                   {!isSelf && (acceptedConnections.length > 0 || mutualProfiles.length > 0) ? (
                     <div className="mt-3">
                       <p className="text-sm font-medium text-slate-200">
@@ -2258,6 +2484,40 @@ function MemberProfilePage() {
                       ) : null}
                     </div>
                   ) : null}
+
+                  {isSelf ? (
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2 sm:hidden">
+                      <button
+                        type="button"
+                        onClick={() => void shareProfile()}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
+                        aria-label="Share profile"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">share</span>
+                      </button>
+                      <Link
+                        href="/notifications"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
+                        aria-label="Open notifications"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">notifications</span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => setMobileSettingsOpen(true)}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
+                        aria-label="Open settings menu"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">settings</span>
+                      </button>
+                      <Link
+                        href="/me/edit"
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                      >
+                        Edit profile
+                      </Link>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -2265,13 +2525,15 @@ function MemberProfilePage() {
                 <div className="flex flex-col items-start gap-2 sm:items-end">
                   <div className="flex flex-wrap items-center gap-2">
                   {state.status === "none" ? (
-                    <button
-                      type="button"
-                      onClick={() => setConnectModalOpen(true)}
-                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
-                    >
-                      Connect
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setConnectModalOpen(true)}
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                      >
+                        Connect
+                      </button>
+                    </>
                   ) : null}
 
                   {state.status === "pending" && state.role === "requester" ? (
@@ -2325,6 +2587,16 @@ function MemberProfilePage() {
                     </>
                   ) : null}
 
+                  {isTeacherProfile && profileUserId ? (
+                    <Link
+                      href={`/profile/${profileUserId}/teacher`}
+                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/[0.08]"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">school</span>
+                      Teacher page
+                    </Link>
+                  ) : null}
+
                   <button
                     type="button"
                     onClick={(event) => openActionMenu(event, "desktop", "below")}
@@ -2337,37 +2609,23 @@ function MemberProfilePage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="hidden items-center gap-2 sm:flex">
                   <button
                     type="button"
                     onClick={() => void shareProfile()}
-                    className="hidden rounded-xl border border-white/20 bg-black/30 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-black/45 sm:inline-flex"
+                    className="rounded-xl border border-white/20 bg-black/30 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-black/45"
                   >
                     Share profile
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void shareProfile()}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45 sm:hidden"
-                    aria-label="Share profile"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">share</span>
-                  </button>
-                  <Link
-                    href="/notifications"
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45 sm:hidden"
-                    aria-label="Open notifications"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">notifications</span>
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => setMobileSettingsOpen(true)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45 sm:hidden"
-                    aria-label="Open settings menu"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">settings</span>
-                  </button>
+                  {isTeacherProfile && profileUserId ? (
+                    <Link
+                      href={`/profile/${profileUserId}/teacher`}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/[0.08]"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">school</span>
+                      Teacher page
+                    </Link>
+                  ) : null}
                   <Link
                     href="/me/edit"
                     className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
@@ -2390,6 +2648,7 @@ function MemberProfilePage() {
               style={{ animationDelay: `${index * 70}ms` }}
               className={cx(
                 "metric-card flex min-h-[108px] min-w-[148px] shrink-0 flex-col items-center justify-center rounded-2xl border px-4 py-4 text-center shadow-[0_10px_30px_rgba(0,0,0,0.22)] transition sm:min-w-0",
+                (card.key === "overview" || card.key === "dance-tools") && "hidden sm:flex",
                 tab === card.key
                   ? "border-cyan-300/35 bg-[linear-gradient(170deg,rgba(34,211,238,0.18),rgba(232,121,249,0.08))]"
                   : "border-white/10 bg-[linear-gradient(170deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01))]",
@@ -2397,8 +2656,21 @@ function MemberProfilePage() {
               )}
             >
               <p className={cx("mb-1 text-xs uppercase tracking-wide", tab === card.key ? "text-cyan-100" : "text-slate-400")}>{card.title}</p>
-              <p className="text-2xl font-bold text-white">{card.value}</p>
-              <p className={cx("mt-1 text-[11px]", tab === card.key ? "text-cyan-100/80" : "text-slate-400")}>{card.sub}</p>
+              {card.key === "dance-tools" ? (
+                <ul className={cx("mt-0.5 space-y-0.5 text-left text-[11px]", tab === card.key ? "text-cyan-100/80" : "text-slate-400")}>
+                  {card.sub.split("|").map((item) => (
+                    <li key={item} className="flex items-center gap-1">
+                      <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-50" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-white">{card.value}</p>
+                  <p className={cx("mt-1 text-[11px]", tab === card.key ? "text-cyan-100/80" : "text-slate-400")}>{card.sub}</p>
+                </>
+              )}
             </button>
           ))}
         </section>
@@ -2591,92 +2863,33 @@ function MemberProfilePage() {
               </>
             ) : null}
 
-            {tab === "references" ? (
+            {tab === "references" ? isSelf ? (
+              <ReferencesHubView embedded initialConnectionId={requestedReferenceConnectionId} />
+            ) : (
               <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
-                <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <div className="flex items-center rounded-full border border-white/10 bg-black/25 p-1">
-                    {([
-                      { key: "all", label: "All" },
-                      { key: "received", label: "Received" },
-                      { key: "given", label: "Given" },
-                    ] as const).map((option) => {
-                      const selected = referenceDirectionFilter === option.key;
-                      return (
-                        <button
-                          key={`reference-direction-${option.key}`}
-                          type="button"
-                          onClick={() => setReferenceDirectionFilter(option.key)}
-                          className={cx(
-                            "rounded-full px-3 py-1 text-xs font-semibold",
-                            selected ? "bg-cyan-300/15 text-cyan-100" : "text-slate-300 hover:text-white"
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Direction
+                      <select
+                        value={referenceDirectionFilter}
+                        onChange={(event) => setReferenceDirectionFilter(event.target.value as ReferenceDirectionFilter)}
+                        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
+                      >
+                        <option value="all">All ({referenceStats.total})</option>
+                        <option value="received">Received ({referenceStats.received})</option>
+                        <option value="given">Given ({referenceStats.given})</option>
+                      </select>
+                    </label>
 
-                <section className="mb-5 rounded-xl bg-[linear-gradient(135deg,rgba(255,255,255,0.015),rgba(255,255,255,0.01))]">
-                  <div className="flex flex-col md:flex-row">
-                    <div className="flex w-full items-center gap-4 px-6 py-5 md:w-[24%]">
-                      <div className="w-full text-center">
-                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">References</p>
-                        <div className="mt-1 flex items-baseline justify-center gap-2">
-                          <h3 className="text-4xl font-black tracking-tight text-white">{referenceStats.total}</h3>
-                          {pendingSyncReferenceCount > 0 ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300">
-                              <span className="material-symbols-outlined text-[14px]">schedule</span>
-                              {pendingSyncReferenceCount} pending
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex-1 px-6 py-5">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">Trust Distribution</p>
-                        <div className="flex flex-wrap items-center gap-4 text-[11px] font-bold">
-                          <span className="inline-flex items-center gap-1.5 text-emerald-300">
-                            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                            {referenceStats.positive} Positive
-                          </span>
-                          <span className="inline-flex items-center gap-1.5 text-white/55">
-                            <span className="h-2 w-2 rounded-full bg-white/35" />
-                            {referenceStats.neutral} Neutral
-                          </span>
-                          <span className="inline-flex items-center gap-1.5 text-rose-300">
-                            <span className="h-2 w-2 rounded-full bg-rose-400" />
-                            {referenceStats.negative} Negative
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex h-2 overflow-hidden rounded-full bg-white/6">
-                        <div className="bg-emerald-400" style={{ width: `${referenceStats.total ? (referenceStats.positive / referenceStats.total) * 100 : 0}%` }} />
-                        <div className="bg-white/35" style={{ width: `${referenceStats.total ? (referenceStats.neutral / referenceStats.total) * 100 : 0}%` }} />
-                        <div className="bg-rose-400" style={{ width: `${referenceStats.total ? (referenceStats.negative / referenceStats.total) * 100 : 0}%` }} />
-                      </div>
-                    </div>
-                    <div className="flex w-full items-center justify-end bg-transparent px-6 py-5 md:w-[22%]">
-                      <div className="w-full text-center">
-                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/45">Positive</p>
-                        <h3 className="mt-1 text-5xl font-black tracking-tighter text-cyan-300">{referenceStats.trustScore}%</h3>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="grid gap-3 sm:grid-cols-2 lg:flex lg:flex-1 lg:items-center">
-                    <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      Context
+                    <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Category
                       <select
                         value={referenceContextFilter}
                         onChange={(event) => setReferenceContextFilter(event.target.value as ReferenceContextFilter)}
-                        className="min-w-[220px] rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
+                        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
                       >
-                        <option value="all">All reference types</option>
+                        <option value="all">All categories</option>
                         {REFERENCE_CONTEXT_TAGS.map((tag) => (
                           <option key={tag} value={tag}>
                             {referenceContextLabel(tag)}
@@ -2690,27 +2903,13 @@ function MemberProfilePage() {
                       <select
                         value={referenceSortFilter}
                         onChange={(event) => setReferenceSortFilter(event.target.value as ReferenceSortFilter)}
-                        className="min-w-[180px] rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
+                        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium normal-case text-white outline-none transition focus:border-cyan-300/35"
                       >
                         <option value="latest">Latest</option>
                         <option value="oldest">Oldest</option>
                       </select>
                     </label>
                   </div>
-
-                  {hasReferenceFilters ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReferenceDirectionFilter("all");
-                        setReferenceContextFilter("all");
-                        setReferenceSortFilter("latest");
-                      }}
-                      className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100"
-                    >
-                      Reset filters
-                    </button>
-                  ) : null}
                 </div>
 
                 <div className="space-y-3">
@@ -2718,17 +2917,7 @@ function MemberProfilePage() {
                     <EmptyPanel
                       icon="forum"
                       title="No references for this filter"
-                      detail="Try another direction or context filter to explore this member's feedback."
-                      ctaLabel={hasReferenceFilters ? "Reset filters" : undefined}
-                      onCta={
-                        hasReferenceFilters
-                          ? () => {
-                              setReferenceDirectionFilter("all");
-                              setReferenceContextFilter("all");
-                              setReferenceSortFilter("latest");
-                            }
-                          : undefined
-                      }
+                      detail="Try another direction, category, or sort to explore this member's feedback."
                     />
                   ) : (
                     filteredReferences.map((item) => {
@@ -2817,7 +3006,6 @@ function MemberProfilePage() {
 
             {tab === "trips" ? (
               <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
-                <h2 className="mb-4 text-lg font-bold text-white">Trips</h2>
 
                 <div className="space-y-4">
                   <section>
@@ -2926,14 +3114,13 @@ function MemberProfilePage() {
 
             {tab === "events" ? (
               <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
-                <h2 className="mb-4 text-lg font-bold text-white">Events</h2>
 
                 <div className="space-y-4">
                   {eventsTimeline.length === 0 ? (
                     <EmptyPanel
                       icon="event_busy"
                       title="No event activity yet"
-                      detail="Hosted and attended events will appear here when this member starts joining events."
+                      detail="Hosted and joined events will appear here when this member starts taking part in events."
                       ctaLabel="Back to overview"
                       onCta={() => handleTabChange("overview")}
                     />
@@ -2945,44 +3132,12 @@ function MemberProfilePage() {
                           <EmptyPanel
                             icon="event_available"
                             title="No upcoming events"
-                            detail="Future attended or hosted events will appear here."
+                            detail="Future joined or hosted events will appear here."
                           />
                         ) : (
                           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {upcomingEvents.map((item) => (
-                              <div key={`${item.relation}-${item.event.id}`} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                <div className="flex h-full flex-col justify-between gap-4">
-                                  <div>
-                                    <div className="flex flex-wrap items-start justify-between gap-2">
-                                      <p className="text-base font-semibold text-white">{item.event.title}</p>
-                                      <span
-                                        className={cx(
-                                          "rounded-full border px-3 py-1 text-xs font-semibold",
-                                          item.relation === "hosted"
-                                            ? "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100"
-                                            : item.relation === "going"
-                                              ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
-                                              : "border-amber-300/30 bg-amber-300/10 text-amber-100"
-                                        )}
-                                      >
-                                        {item.label}
-                                      </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-400">
-                                      {[item.event.city, item.event.country].filter(Boolean).join(", ")} • {formatDate(item.event.startsAt)}
-                                    </p>
-                                  </div>
-
-                                  <div>
-                                    <Link
-                                      href={`/events/${item.event.id}`}
-                                      className="inline-flex rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]"
-                                    >
-                                      View event
-                                    </Link>
-                                  </div>
-                                </div>
-                              </div>
+                              <ProfileEventCard key={`${item.relation}-${item.event.id}`} item={item} />
                             ))}
                           </div>
                         )}
@@ -2994,41 +3149,12 @@ function MemberProfilePage() {
                           <EmptyPanel
                             icon="history"
                             title="No past events"
-                            detail="Completed attended or hosted events will appear here."
+                            detail="Completed joined or hosted events will appear here."
                           />
                         ) : (
-                          <div className="space-y-2">
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {pastEvents.map((item) => (
-                              <div key={`${item.relation}-${item.event.id}`} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className="text-sm font-semibold text-white">{item.event.title}</p>
-                                      <span
-                                        className={cx(
-                                          "rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                                          item.relation === "hosted"
-                                            ? "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100"
-                                            : item.relation === "going"
-                                              ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
-                                              : "border-amber-300/30 bg-amber-300/10 text-amber-100"
-                                        )}
-                                      >
-                                        {item.label}
-                                      </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-400">
-                                      {[item.event.city, item.event.country].filter(Boolean).join(", ")} • {formatDate(item.event.startsAt)}
-                                    </p>
-                                  </div>
-                                  <Link
-                                    href={`/events/${item.event.id}`}
-                                    className="inline-flex rounded-full border border-white/15 bg-white/[0.05] px-3 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/[0.1]"
-                                  >
-                                    Open
-                                  </Link>
-                                </div>
-                              </div>
+                              <ProfileEventCard key={`${item.relation}-${item.event.id}`} item={item} />
                             ))}
                           </div>
                         )}
@@ -3181,26 +3307,63 @@ function MemberProfilePage() {
                   className="w-full max-w-sm rounded-2xl border border-white/12 bg-[#0f1419] p-4 shadow-2xl"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="min-w-0 flex-1 truncate rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/80">
-                      {shareDisplayUrl}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void copyShareLink()}
-                      className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">content_copy</span>
-                      Copy
-                    </button>
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-white/70">Share profile</p>
                     <button
                       type="button"
                       onClick={() => setShareDialogOpen(false)}
-                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 text-white/50 hover:text-white"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/40 hover:text-white"
                       aria-label="Close"
                     >
                       <span className="material-symbols-outlined text-[18px]">close</span>
                     </button>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {/* Social profile */}
+                    <div>
+                      {isTeacherProfile && (
+                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-white/40">Social Profile</p>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1 truncate rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/80">
+                          {shareDisplayUrl}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void copyShareLink()}
+                          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">content_copy</span>
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                    {/* Teacher profile — only for teachers */}
+                    {isTeacherProfile && teacherShareUrl && (
+                      <div>
+                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-white/40">Teacher Profile</p>
+                        <div className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1 truncate rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/80">
+                            {teacherShareUrl.replace(/^https?:\/\//, "")}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(teacherShareUrl);
+                                pushToast("success", "Teacher profile link copied");
+                              } catch {
+                                pushToast("error", "Could not copy link");
+                              }
+                            }}
+                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">content_copy</span>
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>,

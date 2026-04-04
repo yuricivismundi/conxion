@@ -12,7 +12,7 @@ type Section = {
 const SECTIONS: Section[] = [
   {
     id: "community-guidelines",
-    title: "Community Guidelines",
+    title: "Community guidelines",
     icon: "groups",
     body: "ConXion is a trust-first network. Every interaction should protect consent, respect, and inclusion.",
     bullets: [
@@ -24,7 +24,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "hosting-safety",
-    title: "Hosting Safety",
+    title: "Hosting safety",
     icon: "home_work",
     body: "Hosting and staying are real-world trust flows. Use clear expectations and confirm details inside ConXion.",
     bullets: [
@@ -60,7 +60,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "account-security",
-    title: "Account Security",
+    title: "Account security",
     icon: "lock",
     body: "Protect your account access and personal data with strong operational hygiene.",
     bullets: [
@@ -72,7 +72,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "platform-responsibility-disclaimer",
-    title: "Platform Responsibility Disclaimer",
+    title: "Platform responsibility disclaimer",
     icon: "verified_user",
     body: "ConXion provides trust tooling, moderation, and structured request workflows, but cannot guarantee real-world outcomes.",
     bullets: [

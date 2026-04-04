@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import InfoPageShell from "@/components/InfoPageShell";
 import { supabase } from "@/lib/supabase/client";
+import { cx } from "@/lib/cx";
 
 type SupportClaimRow = {
   id: string;
@@ -34,9 +35,6 @@ type ProfileRow = {
   displayName: string;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function asRecord(value: unknown) {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};

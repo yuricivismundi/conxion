@@ -2,11 +2,23 @@ import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import {
+  ensureLinkedMemberPairThread,
+  mergeLinkedMemberContextMetadata,
+  resolveLinkedMember,
+} from "@/lib/requests/linked-members";
 
-type JoinAction = "join" | "request" | "leave" | "cancel_request";
+type JoinAction = "join" | "request" | "leave" | "cancel_request" | "interested" | "not_interested";
 
 function isJoinAction(value: unknown): value is JoinAction {
-  return value === "join" || value === "request" || value === "leave" || value === "cancel_request";
+  return (
+    value === "join" ||
+    value === "request" ||
+    value === "leave" ||
+    value === "cancel_request" ||
+    value === "interested" ||
+    value === "not_interested"
+  );
 }
 
 function mapActionErrorStatus(message: string) {
@@ -20,6 +32,7 @@ function mapActionErrorStatus(message: string) {
     message.includes("event_not_open") ||
     message.includes("event_hidden") ||
     message.includes("already_joined_or_waitlisted") ||
+    message.includes("invalid_response") ||
     message.includes("request_not_found_or_not_pending") ||
     message.includes("host_cannot_leave_own_event")
   ) {
@@ -41,6 +54,7 @@ export async function POST(
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     const actionRaw = body?.action;
     const note = typeof body?.note === "string" ? body.note : null;
+    const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
 
     if (!isJoinAction(actionRaw)) {
       return NextResponse.json({ ok: false, error: "Invalid action." }, { status: 400 });
@@ -97,6 +111,39 @@ export async function POST(
         const message = error.message ?? "Failed to request access.";
         return NextResponse.json({ ok: false, error: message }, { status: mapActionErrorStatus(message) });
       }
+      const requestId = typeof data === "string" ? data : "";
+      if (requestId && hostUserId && hostUserId !== authData.user.id) {
+        const linkedMember = await resolveLinkedMember({
+          serviceClient: service,
+          actorUserId: authData.user.id,
+          recipientUserId: hostUserId,
+          linkedMemberUserId,
+        });
+
+        if (linkedMember) {
+          const linkedUpdateRes = await service
+            .from("event_requests")
+            .update({ linked_member_user_id: linkedMember.userId } as never)
+            .eq("id", requestId);
+          if (linkedUpdateRes.error) {
+            throw new Error(linkedUpdateRes.error.message);
+          }
+
+          await mergeLinkedMemberContextMetadata({
+            serviceClient: service,
+            sourceTable: "event_requests",
+            sourceId: requestId,
+            linkedMember,
+          });
+
+          await ensureLinkedMemberPairThread({
+            serviceClient: service,
+            actorUserId: authData.user.id,
+            linkedMember,
+            recipientUserId: hostUserId,
+          });
+        }
+      }
       if (hostUserId && hostUserId !== authData.user.id) {
         await sendAppEmailBestEffort({
           kind: "event_request_received",
@@ -106,6 +153,18 @@ export async function POST(
         });
       }
       return NextResponse.json({ ok: true, request_id: data ?? null });
+    }
+
+    if (action === "interested" || action === "not_interested") {
+      const { data, error } = await supabase.rpc("set_event_response", {
+        p_event_id: eventId,
+        p_response: action,
+      });
+      if (error) {
+        const message = error.message ?? "Failed to save response.";
+        return NextResponse.json({ ok: false, error: message }, { status: mapActionErrorStatus(message) });
+      }
+      return NextResponse.json({ ok: true, status: data ?? null });
     }
 
     if (action === "cancel_request") {

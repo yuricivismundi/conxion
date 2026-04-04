@@ -1,10 +1,12 @@
+import { activityTypeLabel } from "@/lib/activities/types";
 import type { SupabaseServiceClient } from "@/lib/supabase/service-role";
 
 export type PendingPairRequestKind =
   | "connection"
   | "trip_request"
   | "hosting_request"
-  | "service_inquiry";
+  | "service_inquiry"
+  | "activity";
 
 export type PendingPairRequestConflict = {
   kind: PendingPairRequestKind;
@@ -86,6 +88,27 @@ async function findPendingServiceInquiryConflict(
   return createConflict("service_inquiry", "teaching inquiry", row.id);
 }
 
+async function findPendingActivityConflict(
+  serviceClient: SupabaseServiceClient,
+  actorUserId: string,
+  otherUserId: string
+) {
+  const pendingRes = await serviceClient
+    .from("activities")
+    .select("id,activity_type")
+    .eq("status", "pending")
+    .or(pairOrClause("requester_id", "recipient_id", actorUserId, otherUserId))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (pendingRes.error) throw pendingRes.error;
+  const row = (pendingRes.data ?? null) as { id?: string | null; activity_type?: string | null } | null;
+  if (!row?.id) return null;
+  const activityLabel = row.activity_type ? `${activityTypeLabel(row.activity_type)} activity request` : "activity request";
+  return createConflict("activity", activityLabel.toLowerCase(), row.id);
+}
+
 async function findPendingTripRequestConflictForDirection(
   serviceClient: SupabaseServiceClient,
   requesterId: string,
@@ -137,14 +160,15 @@ export async function findPendingPairRequestConflict(
   const { actorUserId, otherUserId } = params;
   if (!actorUserId || !otherUserId || actorUserId === otherUserId) return null;
 
-  const [connectionConflict, hostingConflict, outgoingTripConflict, incomingTripConflict, serviceInquiryConflict] =
+  const [connectionConflict, hostingConflict, outgoingTripConflict, incomingTripConflict, serviceInquiryConflict, activityConflict] =
     await Promise.all([
       findPendingConnectionConflict(serviceClient, actorUserId, otherUserId),
       findPendingHostingConflict(serviceClient, actorUserId, otherUserId),
       findPendingTripRequestConflictForDirection(serviceClient, actorUserId, otherUserId),
       findPendingTripRequestConflictForDirection(serviceClient, otherUserId, actorUserId),
       findPendingServiceInquiryConflict(serviceClient, actorUserId, otherUserId),
+      findPendingActivityConflict(serviceClient, actorUserId, otherUserId),
     ]);
 
-  return connectionConflict ?? hostingConflict ?? outgoingTripConflict ?? incomingTripConflict ?? serviceInquiryConflict ?? null;
+  return connectionConflict ?? hostingConflict ?? outgoingTripConflict ?? incomingTripConflict ?? serviceInquiryConflict ?? activityConflict ?? null;
 }

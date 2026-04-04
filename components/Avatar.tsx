@@ -1,4 +1,7 @@
+"use client";
+
 import Image from "next/image";
+import { memo } from "react";
 
 type AvatarProps = {
   src?: string | null;
@@ -10,7 +13,7 @@ type AvatarProps = {
   userId?: string;
 };
 
-export default function Avatar({
+const Avatar = memo(function Avatar({
   src,
   alt = "Avatar",
   size = 64,
@@ -46,4 +49,6 @@ export default function Avatar({
       </svg>
     </div>
   );
-}
+});
+
+export default Avatar;

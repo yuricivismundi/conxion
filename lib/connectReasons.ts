@@ -106,9 +106,3 @@ export function getReasonsForRoles(roles: string[], context: ConnectContext): Re
   });
 }
 
-/**
- * For Discover filter list: all possible reasons (union across all roles).
- */
-export function getAllReasons(context: ConnectContext): ReasonItem[] {
-  return ALL_REASONS.filter((r) => r.context === context);
-}

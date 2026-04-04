@@ -1,13 +1,7 @@
-import {
-  getTripHeroFallbackUrl,
-  getTripHeroStorageFolderUrl,
-  getTripHeroStorageUrl,
-} from "@/lib/city-hero-images";
-
 export type EventVisibility = "public" | "private";
 export type EventStatus = "draft" | "published" | "cancelled";
 export type EventCoverStatus = "pending" | "approved" | "rejected";
-export type EventMemberStatus = "host" | "going" | "waitlist" | "left";
+export type EventMemberStatus = "host" | "interested" | "going" | "waitlist" | "not_interested" | "left";
 export type EventRequestStatus = "pending" | "accepted" | "declined" | "cancelled";
 
 export type EventLink = {
@@ -74,6 +68,23 @@ export type LiteProfile = {
   country: string;
   avatarUrl: string | null;
 };
+
+const EVENT_SAMPLE_HEROES = [
+  "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=1200&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=1200&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?q=80&w=1200&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1200&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1571266028243-d220c9c3b8f5?q=80&w=1200&auto=format&fit=crop",
+] as const;
+
+function stableSampleHeroIndex(seed: string) {
+  if (!seed) return 0;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return hash % EVENT_SAMPLE_HEROES.length;
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -155,7 +166,16 @@ function normalizeCoverStatus(raw: string): EventCoverStatus {
 }
 
 function normalizeMemberStatus(raw: string): EventMemberStatus {
-  if (raw === "host" || raw === "going" || raw === "waitlist" || raw === "left") return raw;
+  if (
+    raw === "host" ||
+    raw === "interested" ||
+    raw === "going" ||
+    raw === "waitlist" ||
+    raw === "not_interested" ||
+    raw === "left"
+  ) {
+    return raw;
+  }
   return "going";
 }
 
@@ -276,13 +296,14 @@ export function mapProfileRows(rows: unknown[]): Record<string, LiteProfile> {
   return map;
 }
 
-export function pickEventHeroUrl(event: EventRecord) {
+export function pickEventFallbackHeroUrl(event: Pick<EventRecord, "city" | "country">) {
+  const sampleSeed = [event.city, event.country].filter(Boolean).join("|").toLowerCase();
+  return EVENT_SAMPLE_HEROES[stableSampleHeroIndex(sampleSeed)];
+}
+
+export function pickEventHeroUrl(event: Pick<EventRecord, "coverUrl" | "coverStatus" | "city" | "country">) {
   if (event.coverUrl && event.coverStatus === "approved") return event.coverUrl;
-  return (
-    getTripHeroStorageFolderUrl(event.country) ||
-    getTripHeroStorageUrl(event.country) ||
-    getTripHeroFallbackUrl(event.city, event.country)
-  );
+  return pickEventFallbackHeroUrl(event);
 }
 
 function parseDate(value: string | null | undefined) {

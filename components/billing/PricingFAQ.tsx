@@ -2,14 +2,12 @@
 
 import { useState } from "react";
 import type { PricingFaqItem } from "@/lib/billing/faq";
+import { cx } from "@/lib/cx";
 
 type Props = {
   items: PricingFaqItem[];
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export default function PricingFAQ({ items }: Props) {
   const [openId, setOpenId] = useState<string | null>(items[0]?.id ?? null);

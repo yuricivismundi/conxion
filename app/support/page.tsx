@@ -9,6 +9,7 @@ import {
   type HelpCategoryKey,
 } from "@/lib/help-center/content";
 import { supabase } from "@/lib/supabase/client";
+import { cx } from "@/lib/cx";
 
 type SupportClaimRow = {
   id: string;
@@ -35,9 +36,6 @@ type ProfileRow = {
   displayName: string;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function asRecord(value: unknown) {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -290,14 +288,12 @@ export default function SupportPage() {
               >
                 Trust &amp; Safety Guidelines
               </Link>
-              {signedIn ? (
-                <Link
-                  href="/account-settings/data-requests"
-                  className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white/85 hover:border-white/30 hover:text-white"
-                >
-                  Privacy &amp; Data Requests
-                </Link>
-              ) : null}
+              <Link
+                href="/account-settings/data-requests"
+                className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white/85 hover:border-white/30 hover:text-white"
+              >
+                Privacy Rights &amp; Contact
+              </Link>
               {signedIn ? (
                 <Link
                   href="#my-support-cases"

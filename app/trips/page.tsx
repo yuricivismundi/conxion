@@ -37,6 +37,7 @@ type TripItem = {
   status: string;
   note: string;
   createdAt: string | null;
+  activeRequestCount: number;
 };
 
 type TripFormState = {
@@ -82,6 +83,7 @@ function mapTripRows(rows: TripRow[]): TripItem[] {
         status: row.status ?? "active",
         note: row.note ?? "",
         createdAt: row.created_at ?? null,
+        activeRequestCount: 0,
       } satisfies TripItem;
     })
     .filter((trip): trip is TripItem => Boolean(trip))
@@ -114,6 +116,8 @@ export default function TripsPage() {
   const [createBusy, setCreateBusy] = useState(false);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [editingTripId, setEditingTripId] = useState<string | null>(null);
+  const [editingTripRequestCount, setEditingTripRequestCount] = useState(0);
   const [activeTripsPage, setActiveTripsPage] = useState(1);
   const [pastTripsPage, setPastTripsPage] = useState(1);
   const [tripForm, setTripForm] = useState<TripFormState>(EMPTY_TRIP_FORM);
@@ -154,7 +158,29 @@ export default function TripsPage() {
       return;
     }
 
-    setTrips(mapTripRows((result.data ?? []) as TripRow[]));
+    const mapped = mapTripRows((result.data ?? []) as TripRow[]);
+
+    // Fetch active request counts for all trips
+    const tripIds = mapped.map((t) => t.id);
+    if (tripIds.length > 0) {
+      const countsRes = await supabase
+        .from("trip_requests")
+        .select("trip_id")
+        .in("trip_id", tripIds)
+        .in("status", ["pending", "accepted"]);
+
+      if (!countsRes.error) {
+        const countMap: Record<string, number> = {};
+        for (const row of (countsRes.data ?? []) as { trip_id: string }[]) {
+          countMap[row.trip_id] = (countMap[row.trip_id] ?? 0) + 1;
+        }
+        for (const trip of mapped) {
+          trip.activeRequestCount = countMap[trip.id] ?? 0;
+        }
+      }
+    }
+
+    setTrips(mapped);
     setActiveTripsPage(1);
     setPastTripsPage(1);
     setLoading(false);
@@ -266,6 +292,7 @@ export default function TripsPage() {
   }, [citiesByCountryIso, selectedCountryIso]);
 
   function openCreateModal(prefill?: Partial<TripFormState>) {
+    setEditingTripId(null);
     setTripForm({
       destinationCity: prefill?.destinationCity ?? "",
       destinationCountry: prefill?.destinationCountry ?? "",
@@ -276,6 +303,76 @@ export default function TripsPage() {
     });
     setCreateError(null);
     setCreateOpen(true);
+  }
+
+  function openEditModal(trip: TripItem) {
+    setEditingTripId(trip.id);
+    setEditingTripRequestCount(trip.activeRequestCount);
+    setTripForm({
+      destinationCity: trip.destinationCity,
+      destinationCountry: trip.destinationCountry,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      purpose: trip.purpose,
+      note: trip.note,
+    });
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  async function updateTrip() {
+    const cleaned = trimForm(tripForm);
+    if (!userId || !editingTripId) return;
+    if (!cleaned.destinationCity || !cleaned.destinationCountry) {
+      setCreateError("Destination city and country are required.");
+      return;
+    }
+    if (!cleaned.startDate || !cleaned.endDate) {
+      setCreateError("Arrival and departure dates are required.");
+      return;
+    }
+    if (cleaned.endDate < cleaned.startDate) {
+      setCreateError("Departure date must be after arrival date.");
+      return;
+    }
+
+    setCreateBusy(true);
+    setCreateError(null);
+
+    const baseUpdate = {
+      destination_city: cleaned.destinationCity,
+      destination_country: cleaned.destinationCountry,
+      start_date: cleaned.startDate,
+      end_date: cleaned.endDate,
+      purpose: cleaned.purpose,
+    };
+
+    let updateRes = await supabase
+      .from("trips")
+      .update({ ...baseUpdate, note: cleaned.note || null })
+      .eq("id", editingTripId)
+      .eq("user_id", userId);
+
+    if (updateRes.error && isCompatColumnError(updateRes.error.message)) {
+      updateRes = await supabase
+        .from("trips")
+        .update(baseUpdate)
+        .eq("id", editingTripId)
+        .eq("user_id", userId);
+    }
+
+    if (updateRes.error) {
+      setCreateError(updateRes.error.message);
+      setCreateBusy(false);
+      return;
+    }
+
+    setCreateBusy(false);
+    setCreateOpen(false);
+    setEditingTripId(null);
+    setEditingTripRequestCount(0);
+    setTripForm(EMPTY_TRIP_FORM);
+    await loadTrips();
   }
 
   async function createTrip() {
@@ -436,6 +533,15 @@ export default function TripsPage() {
             </div>
 
             <div className="mt-auto flex flex-wrap gap-2">
+              {!archived ? (
+                <button
+                  type="button"
+                  onClick={() => openEditModal(trip)}
+                  className="min-h-[38px] rounded-full border border-[#00F5FF]/25 bg-[#00F5FF]/8 px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#b8fbff] transition hover:border-[#00F5FF]/45 hover:bg-[#00F5FF]/14 hover:text-white"
+                >
+                  Edit
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() =>
@@ -477,32 +583,51 @@ export default function TripsPage() {
         ) : null}
 
         {loading ? (
-          <div className="space-y-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-2">
-                <div className="h-6 w-28 animate-pulse rounded bg-white/10" />
-                <div className="h-4 w-20 animate-pulse rounded bg-white/10" />
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <div className="h-10 w-full animate-pulse rounded-full border border-white/10 bg-white/5 sm:w-36" />
+          <div className="space-y-8">
+            {/* Active Trips skeleton */}
+            <div>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-6 w-28 animate-pulse rounded bg-white/10" />
+                  <div className="h-5 w-12 animate-pulse rounded-full border border-white/10 bg-white/[0.04]" />
+                </div>
                 <div className="h-10 w-full animate-pulse rounded-full bg-[#00F5FF]/80 sm:w-32" />
               </div>
-            </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div key={`trip-sk-${index}`} className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04]">
-                  <div className="h-40 animate-pulse bg-white/5" />
-                  <div className="space-y-3 p-5">
-                    <div className="h-5 w-3/4 animate-pulse rounded bg-white/10" />
-                    <div className="h-4 w-1/2 animate-pulse rounded bg-white/10" />
-                    <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={`trip-sk-active-${index}`} className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04]">
+                    <div className="h-40 animate-pulse bg-white/5" />
+                    <div className="space-y-3 p-5">
+                      <div className="h-5 w-3/4 animate-pulse rounded bg-white/10" />
+                      <div className="h-4 w-1/2 animate-pulse rounded bg-white/10" />
+                      <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            </div>
+            {/* Past Trips skeleton */}
+            <div>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="h-6 w-24 animate-pulse rounded bg-white/10" />
+                <div className="h-4 w-20 animate-pulse rounded bg-white/10" />
+              </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 2 }).map((_, index) => (
+                  <div key={`trip-sk-past-${index}`} className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04]">
+                    <div className="h-40 animate-pulse bg-white/5" />
+                    <div className="space-y-3 p-5">
+                      <div className="h-5 w-3/4 animate-pulse rounded bg-white/10" />
+                      <div className="h-4 w-1/2 animate-pulse rounded bg-white/10" />
+                      <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
-          <section className="space-y-8">
+          <section className="animate-fade-in space-y-8">
             <div>
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
@@ -520,7 +645,7 @@ export default function TripsPage() {
                     style={canCreate ? { backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" } : undefined}
                     title={canCreate ? "Create trip" : "You reached the max 5 active trips limit"}
                   >
-                    Create Trip
+                    Create trip
                   </button>
                 </div>
               </div>
@@ -532,7 +657,7 @@ export default function TripsPage() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <div className="animate-fade-in-grid grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
                   {paginatedActiveTrips.map((trip) => (
                     <TripCard key={trip.id} trip={trip} />
                   ))}
@@ -561,7 +686,7 @@ export default function TripsPage() {
                   No archived trips yet.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <div className="animate-fade-in-grid grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
                   {paginatedPastTrips.map((trip) => (
                     <TripCard key={trip.id} trip={trip} archived />
                   ))}
@@ -591,9 +716,11 @@ export default function TripsPage() {
               onClick={() => {
                 setCreateOpen(false);
                 setCreateError(null);
+                setEditingTripId(null);
+                setEditingTripRequestCount(0);
               }}
               className="absolute right-4 top-4 z-20 rounded-full border border-white/10 bg-white/[0.04] p-2 text-white/55 transition hover:border-white/20 hover:text-white"
-              aria-label="Close create trip modal"
+              aria-label="Close trip modal"
             >
               <span className="material-symbols-outlined text-[20px]">close</span>
             </button>
@@ -602,15 +729,19 @@ export default function TripsPage() {
               <div className="flex items-start justify-between gap-4 pr-10">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#00F5FF]">Trips</p>
-                  <h2 className="mt-2 text-[28px] font-black tracking-tight text-white">Create Trip</h2>
-                  <p className="mt-2 max-w-md text-sm leading-6 text-white/68">
-                    Compact publish flow with the same trip-purpose values already used in traveller discovery.
-                  </p>
+                  <h2 className="mt-2 text-[28px] font-black tracking-tight text-white">{editingTripId ? "Edit trip" : "Create trip"}</h2>
+                  {!editingTripId ? (
+                    <p className="mt-2 max-w-md text-sm leading-6 text-white/68">
+                      Compact publish flow with the same trip-purpose values already used in traveller discovery.
+                    </p>
+                  ) : null}
                 </div>
-                <div className="hidden rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-right sm:block">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Active</div>
-                  <div className="mt-1 text-2xl font-black text-white">{activeTrips.length}/5</div>
-                </div>
+                {!editingTripId ? (
+                  <div className="hidden rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-right sm:block">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Active</div>
+                    <div className="mt-1 text-2xl font-black text-white">{activeTrips.length}/5</div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -619,9 +750,27 @@ export default function TripsPage() {
                 <div className="mb-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{createError}</div>
               ) : null}
 
+              {editingTripId && editingTripRequestCount > 0 ? (
+                <div className="mb-5 overflow-hidden rounded-2xl border border-[#00F5FF]/25 bg-[#00F5FF]/[0.05]">
+                  <div className="flex items-start gap-3 px-4 py-4">
+                    <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#00F5FF]/30 bg-[#00F5FF]/10">
+                      <span className="material-symbols-outlined text-[18px] text-[#00F5FF]">lock</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-[#b8fbff]">
+                        Trip locked — {editingTripRequestCount === 1 ? "1 active request" : `${editingTripRequestCount} active requests`}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-[#b8fbff]/60">
+                        This trip cannot be edited while there are pending or accepted requests. Resolve all requests first, then you can make changes.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Destination Country *</span>
+                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Destination country *</span>
                   <div className="relative">
                     <select
                       value={tripForm.destinationCountry}
@@ -632,7 +781,8 @@ export default function TripsPage() {
                           destinationCity: "",
                         }))
                       }
-                      className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12"
+                      disabled={editingTripRequestCount > 0}
+                      className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <option value="">Select country</option>
                       {countriesAll.map((country) => (
@@ -648,13 +798,13 @@ export default function TripsPage() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Destination City *</span>
+                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Destination city *</span>
                   <div className="relative">
                     <select
                       value={tripForm.destinationCity}
                       onChange={(event) => setTripForm((prev) => ({ ...prev, destinationCity: event.target.value }))}
-                      disabled={!tripForm.destinationCountry}
-                      className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!tripForm.destinationCountry || editingTripRequestCount > 0}
+                      className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <option value="">{tripForm.destinationCountry ? "Select city" : "Select country first"}</option>
                       {availableCities.map((city) => (
@@ -670,22 +820,24 @@ export default function TripsPage() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Arrival Date *</span>
+                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Arrival date *</span>
                   <input
                     type="date"
                     value={tripForm.startDate}
                     onChange={(event) => setTripForm((prev) => ({ ...prev, startDate: event.target.value }))}
-                    className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12"
+                    disabled={editingTripRequestCount > 0}
+                    className="dark-calendar-input w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Departure Date *</span>
+                  <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Departure date *</span>
                   <input
                     type="date"
                     value={tripForm.endDate}
                     onChange={(event) => setTripForm((prev) => ({ ...prev, endDate: event.target.value }))}
-                    className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12"
+                    disabled={editingTripRequestCount > 0}
+                    className="dark-calendar-input w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                 </label>
               </div>
@@ -696,7 +848,8 @@ export default function TripsPage() {
                   <select
                     value={tripForm.purpose}
                     onChange={(event) => setTripForm((prev) => ({ ...prev, purpose: event.target.value }))}
-                    className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12"
+                    disabled={editingTripRequestCount > 0}
+                    className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {tripPurposeOptions.map((purpose) => (
                       <option key={purpose} value={purpose}>
@@ -716,7 +869,8 @@ export default function TripsPage() {
                     rows={4}
                     maxLength={600}
                     placeholder="Add what this trip is for and what kind of coordination is useful."
-                    className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12"
+                    disabled={editingTripRequestCount > 0}
+                    className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                   <div className="mt-2 text-right text-[11px] text-white/40">{tripForm.note.length}/600</div>
                 </label>
@@ -729,20 +883,24 @@ export default function TripsPage() {
                 onClick={() => {
                   setCreateOpen(false);
                   setCreateError(null);
+                  setEditingTripId(null);
+                  setEditingTripRequestCount(0);
                 }}
                 className="min-h-[44px] rounded-2xl border border-white/12 bg-white/[0.04] px-5 text-sm font-semibold text-white/75 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={createTrip}
-                disabled={createBusy || !canCreate}
-                className="min-h-[44px] rounded-2xl px-6 text-sm font-black uppercase tracking-[0.12em] text-[#0A0A0A] transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/35"
-                style={createBusy || !canCreate ? undefined : { backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
-              >
-                {createBusy ? "Creating..." : "Create"}
-              </button>
+              {editingTripId && editingTripRequestCount > 0 ? null : (
+                <button
+                  type="button"
+                  onClick={editingTripId ? updateTrip : createTrip}
+                  disabled={createBusy || (!editingTripId && !canCreate)}
+                  className="min-h-[44px] rounded-2xl px-6 text-sm font-black uppercase tracking-[0.12em] text-[#0A0A0A] transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/35"
+                  style={createBusy || (!editingTripId && !canCreate) ? undefined : { backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+                >
+                  {createBusy ? (editingTripId ? "Saving..." : "Creating...") : (editingTripId ? "Save changes" : "Create")}
+                </button>
+              )}
             </div>
           </div>
         </div>

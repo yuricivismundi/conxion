@@ -12,15 +12,15 @@ export const metadata: Metadata = {
   title: "ConXion",
   description: "Conecta, practica, viaja, mejora.",
   icons: {
-    icon: "/branding/CONXION-3-tight.png?v=14",
-    shortcut: "/branding/CONXION-3-tight.png?v=14",
-    apple: "/branding/CONXION-3-tight.png?v=14",
+    icon: "/branding/CONXION-2-favicon.png?v=17",
+    shortcut: "/branding/CONXION-2-favicon.png?v=17",
+    apple: "/branding/CONXION-2-favicon.png?v=17",
   },
   openGraph: {
     siteName: "ConXion",
     images: [
       {
-        url: "/branding/CONXION-2-tight.png?v=14",
+        url: "/branding/CONXION-2-favicon.png?v=17",
         width: 1200,
         height: 600,
         alt: "ConXion logo",
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    images: ["/branding/CONXION-2-tight.png?v=14"],
+    images: ["/branding/CONXION-2-favicon.png?v=17"],
   },
 };
 

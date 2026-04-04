@@ -11,12 +11,11 @@ import {
   markNotificationRead,
   notificationCategory,
   notificationCategoryLabel,
+  notificationIcon,
   type NotificationRow,
 } from "@/lib/notifications/client";
+import { cx } from "@/lib/cx";
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export default function NotificationsBell() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -27,11 +26,17 @@ export default function NotificationsBell() {
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const refreshRequestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestIdRef.current;
     setLoading(true);
     setError(null);
     const [listRes, countRes] = await Promise.all([fetchNotifications({ limit: 10 }), fetchNotificationsUnreadCount()]);
+
+    if (refreshRequestIdRef.current !== requestId) {
+      return;
+    }
 
     if (listRes.error) {
       setError(listRes.error);
@@ -118,7 +123,7 @@ export default function NotificationsBell() {
   useEffect(() => {
     if (!open) return;
 
-    const onPointer = (event: MouseEvent) => {
+    const onPointer = (event: PointerEvent) => {
       if (!panelRef.current) return;
       if (!panelRef.current.contains(event.target as Node)) setOpen(false);
     };
@@ -127,10 +132,10 @@ export default function NotificationsBell() {
       if (event.key === "Escape") setOpen(false);
     };
 
-    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -168,9 +173,9 @@ export default function NotificationsBell() {
       const res = await markNotificationRead(item.id);
       if (res.error) {
         setError(res.error);
-        return;
+      } else {
+        await refresh();
       }
-      await refresh();
     }
 
     setOpen(false);
@@ -193,7 +198,7 @@ export default function NotificationsBell() {
       >
         <span className="material-symbols-outlined text-[22px] group-hover:text-[#22d3ee]">notifications</span>
         {unreadCount > 0 ? (
-          <span className="absolute right-0.5 top-0.5 inline-flex min-w-4 items-center justify-center rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-1 text-[10px] font-black text-black shadow-[0_0_10px_rgba(0,245,255,0.45)]">
+          <span className="absolute right-0.5 top-0.5 text-[11px] font-black text-[#0df2f2] [text-shadow:0_0_8px_rgba(13,242,242,0.7)]">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         ) : null}
@@ -238,6 +243,7 @@ export default function NotificationsBell() {
             {!loading
               ? visibleItems.map((item) => {
                   const category = notificationCategory(item.kind);
+                  const { icon, colorClass, bgClass } = notificationIcon(item.kind);
                   return (
                     <button
                       key={item.id}
@@ -248,16 +254,23 @@ export default function NotificationsBell() {
                         item.is_read ? "bg-transparent hover:bg-white/[0.03]" : "bg-cyan-400/[0.06] hover:bg-cyan-400/[0.10]"
                       )}
                     >
-                      <div className="mb-1 flex items-start justify-between gap-2">
-                        <p className={cx("text-sm font-semibold", item.is_read ? "text-slate-200" : "text-white")}>{item.title}</p>
-                        <span className="text-[11px] text-slate-500">{formatNotificationRelativeTime(item.created_at)}</span>
-                      </div>
-                      {item.body ? <p className="line-clamp-2 text-xs text-slate-400">{item.body}</p> : null}
-                      <div className="mt-2 flex items-center justify-between">
-                        <span className="rounded-full border border-white/12 bg-white/[0.02] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          {notificationCategoryLabel(category)}
-                        </span>
-                        {!item.is_read ? <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.85)]" /> : null}
+                      <div className="flex gap-3">
+                        <div className={cx("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", bgClass)}>
+                          <span className={cx("material-symbols-outlined text-[16px]", colorClass)}>{icon}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex items-start justify-between gap-2">
+                            <p className={cx("text-sm font-semibold leading-snug", item.is_read ? "text-slate-200" : "text-white")}>{item.title}</p>
+                            <span className="shrink-0 text-[11px] text-slate-500">{formatNotificationRelativeTime(item.created_at)}</span>
+                          </div>
+                          {item.body ? <p className="line-clamp-2 text-xs text-slate-400">{item.body}</p> : null}
+                          <div className="mt-1.5 flex items-center justify-between">
+                            <span className="rounded-full border border-white/12 bg-white/[0.02] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                              {notificationCategoryLabel(category)}
+                            </span>
+                            {!item.is_read ? <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.85)]" /> : null}
+                          </div>
+                        </div>
                       </div>
                     </button>
                   );

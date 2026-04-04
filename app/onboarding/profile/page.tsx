@@ -11,11 +11,15 @@ import {
   type CountryEntry,
 } from "@/lib/country-city-client";
 import { getAvatarStorageUrl } from "@/lib/avatar-storage";
+import { requestUsernameCheck } from "@/lib/username/client";
+import { buildUsernameSuggestionBase, normalizeUsername, USERNAME_MAX_LENGTH } from "@/lib/username/normalize";
+import { validateUsernameFormat } from "@/lib/username/validate";
 import { readOnboardingDraft, writeOnboardingDraft } from "@/lib/onboardingDraft";
 import { supabase } from "@/lib/supabase/client";
 
 const ROLES = [
-  "Social dancer / Student",
+  "Social Dancer",
+  "Student",
   "Organizer",
   "Studio Owner",
   "Promoter",
@@ -39,9 +43,22 @@ export default function OnboardingProfilePage() {
   const [error, setError] = useState<string | null>(null);
 
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
   const [roles, setRoles] = useState<Role[]>([]);
+  const [usernameDirty, setUsernameDirty] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState<{
+    checking: boolean;
+    available: boolean;
+    error: string | null;
+    suggestion: string | null;
+  }>({
+    checking: false,
+    available: false,
+    error: null,
+    suggestion: null,
+  });
 
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | undefined>(undefined);
   const [avatarStatus, setAvatarStatus] = useState<"pending" | "approved" | "rejected" | undefined>(undefined);
@@ -98,6 +115,10 @@ export default function OnboardingProfilePage() {
 
       const d = readOnboardingDraft();
       if (typeof d.displayName === "string") setDisplayName(d.displayName.slice(0, MAX_DISPLAY_NAME_LENGTH));
+      if (typeof d.username === "string") {
+        setUsername(normalizeUsername(d.username).slice(0, USERNAME_MAX_LENGTH));
+        setUsernameDirty(d.username.trim().length > 0);
+      }
       if (typeof d.country === "string") setCountry(d.country);
       if (typeof d.city === "string") setCity(d.city);
       if (Array.isArray(d.roles)) setRoles(d.roles.filter(Boolean) as Role[]);
@@ -146,6 +167,7 @@ export default function OnboardingProfilePage() {
     if (!hydrated) return;
     writeOnboardingDraft({
       displayName,
+      username,
       country,
       city,
       roles,
@@ -153,7 +175,70 @@ export default function OnboardingProfilePage() {
       avatarPath,
       avatarStatus,
     });
-  }, [hydrated, displayName, country, city, roles, avatarPreviewUrl, avatarPath, avatarStatus]);
+  }, [hydrated, displayName, username, country, city, roles, avatarPreviewUrl, avatarPath, avatarStatus]);
+
+  const suggestedUsernameBase = useMemo(() => buildUsernameSuggestionBase(displayName), [displayName]);
+  const normalizedUsername = useMemo(() => normalizeUsername(username).slice(0, USERNAME_MAX_LENGTH), [username]);
+  const usernameFormat = useMemo(() => validateUsernameFormat(normalizedUsername), [normalizedUsername]);
+
+  useEffect(() => {
+    if (!hydrated || usernameDirty) return;
+    if (!suggestedUsernameBase) {
+      setUsername("");
+      return;
+    }
+    setUsername((prev) => (prev === suggestedUsernameBase ? prev : suggestedUsernameBase));
+  }, [hydrated, suggestedUsernameBase, usernameDirty]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!normalizedUsername) {
+      setUsernameStatus({
+        checking: false,
+        available: false,
+        error: suggestedUsernameBase ? "Username must be between 3 and 20 characters." : null,
+        suggestion: suggestedUsernameBase || null,
+      });
+      return;
+    }
+
+    if (!usernameFormat.valid) {
+      setUsernameStatus({
+        checking: false,
+        available: false,
+        error: usernameFormat.error ?? "Username must be between 3 and 20 characters.",
+        suggestion: suggestedUsernameBase || null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setUsernameStatus((prev) => ({ ...prev, checking: true, error: null }));
+
+    const timeoutId = window.setTimeout(() => {
+      void requestUsernameCheck({
+        username: normalizedUsername,
+        seed: suggestedUsernameBase || displayName,
+        currentUserId: meId,
+      }).then((result) => {
+        if (cancelled) return;
+        setUsernameStatus({
+          checking: false,
+          available: result.available,
+          error: result.available ? null : result.error,
+          suggestion: result.suggestion,
+        });
+        if (!usernameDirty && result.suggestion && result.suggestion !== normalizedUsername) {
+          setUsername(result.suggestion);
+        }
+      });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [displayName, hydrated, meId, normalizedUsername, suggestedUsernameBase, usernameDirty, usernameFormat]);
 
   // Keep arrow buttons accurate on resize/content changes
   useEffect(() => {
@@ -252,7 +337,12 @@ export default function OnboardingProfilePage() {
   }, [iso]);
 
   const canContinue =
-    displayName.trim().length >= 2 && country.trim().length >= 2 && city.trim().length >= 1 && roles.length > 0;
+    displayName.trim().length >= 2 &&
+    country.trim().length >= 2 &&
+    city.trim().length >= 1 &&
+    roles.length > 0 &&
+    usernameStatus.available &&
+    !usernameStatus.checking;
 
   return (
     <OnboardingShell step={1} title="Setup your profile" subtitle={""}>
@@ -298,7 +388,7 @@ export default function OnboardingProfilePage() {
                     <span className="text-3xl">+</span>
                   </div>
                   <span className="mt-1 text-[10px] font-bold text-white/60 group-hover:text-white/80">
-                    {uploading ? "UPLOADING…" : "ADD PHOTO"}
+                    {uploading ? "Uploading…" : "Add photo"}
                   </span>
                 </>
               )}
@@ -316,6 +406,50 @@ export default function OnboardingProfilePage() {
             />
             <div className="mt-1 text-right text-xs text-white/45">
               {displayName.length}/{MAX_DISPLAY_NAME_LENGTH}
+            </div>
+
+            <div className="mt-5">
+              <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">Username</label>
+              <div className="mt-2 flex items-center rounded-xl border border-white/10 bg-[#121212] px-4 py-3 focus-within:border-[#00F5FF]/60 focus-within:ring-1 focus-within:ring-[#00F5FF]/30">
+                <span className="mr-2 text-white/40">@</span>
+                <input
+                  value={username}
+                  onChange={(e) => {
+                    setUsernameDirty(true);
+                    setUsername(normalizeUsername(e.target.value).slice(0, USERNAME_MAX_LENGTH));
+                  }}
+                  maxLength={USERNAME_MAX_LENGTH}
+                  placeholder={suggestedUsernameBase || "your.name"}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full bg-transparent text-[#E0E0E0] outline-none placeholder:text-white/25"
+                />
+              </div>
+              <div className="mt-2 space-y-1 text-xs">
+                <p className="text-white/55">Your username is part of your public profile link.</p>
+                <p className="text-cyan-200/85">conxion.social/u/{normalizedUsername || suggestedUsernameBase || "your.name"}</p>
+                {usernameStatus.checking ? <p className="text-white/45">Checking username...</p> : null}
+                {!usernameStatus.checking && usernameStatus.error ? <p className="text-rose-300">{usernameStatus.error}</p> : null}
+                {!usernameStatus.checking && !usernameStatus.error && usernameStatus.available ? (
+                  <p className="text-emerald-300">Username available.</p>
+                ) : null}
+                {!usernameStatus.checking &&
+                !usernameStatus.available &&
+                usernameStatus.suggestion &&
+                usernameStatus.suggestion !== normalizedUsername ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsernameDirty(true);
+                      setUsername(usernameStatus.suggestion ?? "");
+                    }}
+                    className="text-left text-cyan-200 hover:text-cyan-100"
+                  >
+                    Try @{usernameStatus.suggestion}
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {/* Country + City */}
@@ -445,7 +579,7 @@ export default function OnboardingProfilePage() {
           type="button"
           disabled={!canContinue || uploading}
           onClick={() => {
-            writeOnboardingDraft({ displayName, country, city, roles, avatarDataUrl: avatarPreviewUrl, avatarPath, avatarStatus });
+            writeOnboardingDraft({ displayName, username: normalizedUsername, country, city, roles, avatarDataUrl: avatarPreviewUrl, avatarPath, avatarStatus });
             router.push("/onboarding/interests");
           }}
           className={[
@@ -458,7 +592,7 @@ export default function OnboardingProfilePage() {
             canContinue && !uploading ? { backgroundImage: "linear-gradient(90deg, #00F5FF 0%, #FF00FF 100%)" } : undefined
           }
         >
-          Continue to Step 2
+          Continue to step 2
         </button>
       </div>
     </OnboardingShell>

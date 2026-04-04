@@ -22,5 +22,5 @@ export default async function MessageThreadRedirectPage({ params }: PageProps) {
   }
 
   const token = encodeURIComponent(safeDecode(raw));
-  redirect(`/messages?thread=${token}&mobile=1`);
+  redirect(`/messages?thread=${token}`);
 }

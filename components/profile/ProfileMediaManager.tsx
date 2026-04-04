@@ -23,10 +23,8 @@ import { fetchProfileMedia } from "@/lib/profile-media/read-model";
 import { supabase } from "@/lib/supabase/client";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { cx } from "@/lib/cx";
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function mediaPoster(item: ProfileMediaItem) {
   return item.kind === "photo" ? item.publicUrl : item.thumbnailUrl;
@@ -216,6 +214,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
   const trimVideoRef = useRef<HTMLVideoElement | null>(null);
   const clipTrackRef = useRef<HTMLDivElement | null>(null);
   const clipPointerDragRef = useRef<{ pointerId: number; grabOffsetSec: number } | null>(null);
+  const mediaLoadRequestIdRef = useRef(0);
 
   const [meId, setMeId] = useState<string | null>(null);
   const [billingPlanId, setBillingPlanId] = useState<PlanId>("starter");
@@ -246,30 +245,44 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
   const clipStartPercent = videoDraft && videoDraft.durationSec > 0 ? (videoDraft.clipStartSec / videoDraft.durationSec) * 100 : 0;
   const needsVideoTrim = Boolean(videoDraft && videoDraft.durationSec > PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC);
 
+  // Auto-dismiss info messages after 3 seconds
+  useEffect(() => {
+    if (!info) return;
+    const timer = window.setTimeout(() => setInfo(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [info]);
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadUser() {
-      const { data } = await supabase.auth.getUser();
-      const userId = data.user?.id ?? null;
-      if (!userId) {
-        router.replace("/auth");
-        return;
-      }
-      const profileRes = await supabase.from("profiles").select("avatar_url").eq("user_id", userId).maybeSingle();
-      const hasAvatarPhoto =
-        !profileRes.error &&
-        typeof (profileRes.data as { avatar_url?: unknown } | null)?.avatar_url === "string" &&
-        Boolean(((profileRes.data as { avatar_url?: string | null }).avatar_url ?? "").trim());
-      if (!cancelled) {
-        setMeId(userId);
-        setAvatarPhotoCount(hasAvatarPhoto ? 1 : 0);
-        setBillingPlanId(
-          getBillingAccountState({
-            userMetadata: data.user?.user_metadata,
-            isVerified: false,
-          }).currentPlanId
-        );
+      try {
+        const { data } = await supabase.auth.getUser();
+        const userId = data.user?.id ?? null;
+        if (!userId) {
+          router.replace("/auth");
+          return;
+        }
+        const profileRes = await supabase.from("profiles").select("avatar_url").eq("user_id", userId).maybeSingle();
+        const hasAvatarPhoto =
+          !profileRes.error &&
+          typeof (profileRes.data as { avatar_url?: unknown } | null)?.avatar_url === "string" &&
+          Boolean(((profileRes.data as { avatar_url?: string | null }).avatar_url ?? "").trim());
+        if (!cancelled) {
+          setMeId(userId);
+          setAvatarPhotoCount(hasAvatarPhoto ? 1 : 0);
+          setBillingPlanId(
+            getBillingAccountState({
+              userMetadata: data.user?.user_metadata,
+              isVerified: false,
+            }).currentPlanId
+          );
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Could not load media settings.");
+          setLoading(false);
+        }
       }
     }
 
@@ -285,6 +298,10 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
     let cancelled = false;
 
     async function loadMedia() {
+      const requestId = mediaLoadRequestIdRef.current + 1;
+      mediaLoadRequestIdRef.current = requestId;
+      const isStale = () => mediaLoadRequestIdRef.current !== requestId;
+
       setLoading(true);
       try {
         const nextMedia = await fetchProfileMedia(supabase, {
@@ -292,16 +309,16 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
           viewerUserId: ownerId,
           includeAllOwn: true,
         });
-        if (!cancelled) {
+        if (!cancelled && !isStale()) {
           setMedia(nextMedia);
           setError(null);
         }
       } catch (loadError) {
-        if (!cancelled) {
+        if (!cancelled && !isStale()) {
           setError(loadError instanceof Error ? loadError.message : "Could not load showcase media.");
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !isStale()) setLoading(false);
       }
     }
 
@@ -809,56 +826,97 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
         {error ? <p className={cx("rounded-2xl border border-rose-300/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100", embedded ? "" : "mt-4")}>{error}</p> : null}
         {info ? <p className={cx("rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100", embedded || error ? "mt-3" : "mt-4")}>{info}</p> : null}
 
-        <div
-          className={cx(
-            embedded || error || info ? "mt-3" : "mt-5",
-            embedded ? "grid gap-3" : "grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]"
-          )}
-        >
-          <div className={cx("rounded-[24px] border border-white/10 bg-black/25", embedded ? "flex flex-col gap-3 px-4 py-4" : "p-4")}>
-            {embedded ? (
-              <>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Showcase videos</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-300">
-                      MP4 or QuickTime. Every upload opens the mobile clip editor before it sends.
-                    </p>
+        {embedded ? (
+          <div className={cx("grid grid-cols-2 gap-3", error || info ? "mt-3" : "mt-4")}>
+            {/* Video slot */}
+            <div className="rounded-[20px] border border-white/10 bg-black/25 p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-white">Videos</p>
+                <span className="text-xs font-semibold text-slate-400">{counts.videos}/{counts.videoLimit ?? "∞"}</span>
+              </div>
+              <div className="mt-2 h-1 w-full rounded-full bg-white/[0.06]">
+                <div
+                  className="h-1 rounded-full bg-cyan-400 transition-all"
+                  style={{ width: counts.videoLimit ? `${Math.min(100, (counts.videos / counts.videoLimit) * 100)}%` : "0%" }}
+                />
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-500">
+                {billingPlanId === "pro" ? "Plus plan" : "Starter plan"} · MP4 / MOV · max 15s
+              </p>
+              <div className="mt-3">
+                {counts.videoLimit === null || counts.videos < counts.videoLimit ? (
+                  <button
+                    type="button"
+                    onClick={() => videoInputRef.current?.click()}
+                    disabled={uploadingVideo}
+                    className="inline-flex w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white hover:bg-white/[0.1] disabled:opacity-60"
+                  >
+                    {uploadingVideo ? "Uploading…" : "Upload video"}
+                  </button>
+                ) : billingPlanId !== "pro" ? (
+                  <button
+                    type="button"
+                    onClick={() => openForReason("media_limit_reached")}
+                    className="inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-2 text-xs font-semibold text-[#06121a] hover:brightness-110"
+                  >
+                    Upgrade to Plus
+                  </button>
+                ) : (
+                  <span className="block text-center text-xs text-slate-500">Limit reached</span>
+                )}
+              </div>
+            </div>
+
+            {/* Photo slot — showcase photos are Plus-only (3 slots); avatar is separate */}
+            {(() => {
+              const isPlus = billingPlanId === "pro";
+              const showcaseLimit = isPlus ? 3 : 0;
+              const showcaseUsed = counts.uploadedPhotos; // media photos only, avatar excluded
+              const canUploadShowcase = isPlus && showcaseUsed < showcaseLimit;
+              return (
+                <div className="rounded-[20px] border border-white/10 bg-black/25 p-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white">Photos</p>
+                    <span className="text-xs font-semibold text-slate-400">
+                      {isPlus ? `${showcaseUsed}/3` : "Plus only"}
+                    </span>
                   </div>
-                  <span className="inline-flex items-center rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
-                    {counts.videos}/{counts.videoLimit} videos
-                  </span>
+                  <div className="mt-2 h-1 w-full rounded-full bg-white/[0.06]">
+                    <div
+                      className="h-1 rounded-full bg-fuchsia-400 transition-all"
+                      style={{ width: isPlus ? `${Math.min(100, (showcaseUsed / showcaseLimit) * 100)}%` : "0%" }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-slate-500">
+                    {isPlus ? "Plus plan · 3 showcase slots" : "Upgrade for 3 showcase photos"} · JPEG / PNG / WebP
+                  </p>
+                  <div className="mt-3">
+                    {canUploadShowcase ? (
+                      <button
+                        type="button"
+                        onClick={() => photoInputRef.current?.click()}
+                        disabled={uploadingPhoto}
+                        className="inline-flex w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white hover:bg-white/[0.1] disabled:opacity-60"
+                      >
+                        {uploadingPhoto ? "Uploading…" : "Upload photo"}
+                      </button>
+                    ) : isPlus ? (
+                      <span className="block text-center text-xs text-slate-500">Limit reached</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openForReason("media_limit_reached")}
+                        className="inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-2 text-xs font-semibold text-[#06121a] hover:brightness-110"
+                      >
+                        Upgrade to Plus
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </>
-            ) : (
-              <>
-            <p className="text-sm font-semibold text-white">Upload video</p>
-            <p className="mt-1 text-sm leading-5 text-slate-300">MP4 or QuickTime. Every upload opens a mobile-friendly clip editor before it sends.</p>
-              </>
-            )}
-            {!embedded ? (
-            <button
-              type="button"
-              onClick={() => videoInputRef.current?.click()}
-              disabled={!counts.canAddVideo || uploadingVideo}
-              className={cx(
-                "inline-flex min-h-11 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60",
-                embedded ? "" : "mt-4"
-              )}
-            >
-              {uploadingVideo ? "Uploading video..." : counts.canAddVideo ? "Upload video" : "Video limit reached"}
-            </button>
-            ) : null}
-            {embedded ? (
-              <button
-                type="button"
-                onClick={() => videoInputRef.current?.click()}
-                disabled={!counts.canAddVideo || uploadingVideo}
-                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:opacity-60"
-              >
-                {uploadingVideo ? "Uploading video..." : counts.canAddVideo ? "Upload video" : "Video limit reached"}
-              </button>
-            ) : null}
+              );
+            })()}
+
+            {/* Hidden inputs */}
             <input
               ref={videoInputRef}
               type="file"
@@ -869,53 +927,6 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                 void handleVideoPicked(file);
               }}
             />
-          </div>
-
-          <div className={cx("rounded-[24px] border border-white/10 bg-black/25", embedded ? "flex flex-col gap-3 px-4 py-4" : "p-4")}>
-            {embedded ? (
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">Profile photos</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-300">
-                    JPEG, PNG, or WebP. Your avatar already uses the included photo slot on Starter and Verified.
-                  </p>
-                </div>
-                <span className="inline-flex items-center rounded-full border border-fuchsia-300/25 bg-fuchsia-300/10 px-3 py-1.5 text-xs font-semibold text-fuchsia-100">
-                  {counts.photos}/{counts.photoLimit} photos
-                </span>
-              </div>
-            ) : (
-              <>
-            <p className="text-sm font-semibold text-white">Upload photo</p>
-            <p className="mt-1 text-sm leading-5 text-slate-300">
-              JPEG, PNG, or WebP. Starter and Verified already count your main profile photo, so extra showcase photos need Plus.
-            </p>
-              </>
-            )}
-            <div className={cx("flex flex-wrap items-center gap-2", embedded ? "" : "mt-4")}>
-              <button
-                type="button"
-                onClick={() => photoInputRef.current?.click()}
-                disabled={!counts.canAddPhoto || uploadingPhoto}
-                className={cx(
-                  "inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60",
-                  embedded
-                    ? "border border-white/15 bg-white/[0.06] text-white hover:bg-white/[0.1]"
-                    : "border border-white/15 bg-white/[0.06] text-white hover:bg-white/[0.1]"
-                )}
-              >
-                {uploadingPhoto ? "Uploading photo..." : counts.canAddPhoto ? "Upload photo" : "Photo limit reached"}
-              </button>
-              {!counts.canAddPhoto && billingPlanId !== "pro" ? (
-                <button
-                  type="button"
-                  onClick={() => openForReason("media_limit_reached")}
-                  className="inline-flex min-h-11 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
-                >
-                  Upgrade to Plus
-                </button>
-              ) : null}
-            </div>
             <input
               ref={photoInputRef}
               type="file"
@@ -927,8 +938,67 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
               }}
             />
           </div>
+        ) : (
+          <div className={cx(error || info ? "mt-3" : "mt-5", "grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]")}>
+            <div className="rounded-[24px] border border-white/10 bg-black/25 p-4">
+              <p className="text-sm font-semibold text-white">Upload video</p>
+              <p className="mt-1 text-sm leading-5 text-slate-300">MP4 or QuickTime. Every upload opens a mobile-friendly clip editor before it sends.</p>
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                disabled={!counts.canAddVideo || uploadingVideo}
+                className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {uploadingVideo ? "Uploading video..." : counts.canAddVideo ? "Upload video" : "Video limit reached"}
+              </button>
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept={PROFILE_MEDIA_ACCEPTED_VIDEO_MIME_TYPES.join(",")}
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  void handleVideoPicked(file);
+                }}
+              />
+            </div>
 
-          {!embedded ? (
+            <div className="rounded-[24px] border border-white/10 bg-black/25 p-4">
+              <p className="text-sm font-semibold text-white">Upload photo</p>
+              <p className="mt-1 text-sm leading-5 text-slate-300">
+                JPEG, PNG, or WebP. Starter and Verified already count your main profile photo, so extra showcase photos need Plus.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={!counts.canAddPhoto || uploadingPhoto}
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {uploadingPhoto ? "Uploading photo..." : counts.canAddPhoto ? "Upload photo" : "Photo limit reached"}
+                </button>
+                {!counts.canAddPhoto && billingPlanId !== "pro" ? (
+                  <button
+                    type="button"
+                    onClick={() => openForReason("media_limit_reached")}
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                  >
+                    Upgrade to Plus
+                  </button>
+                ) : null}
+              </div>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  void handlePhotoPicked(file);
+                }}
+              />
+            </div>
+
             <div className="rounded-[24px] border border-white/10 bg-black/25 p-4 text-sm text-slate-200 md:col-span-2 xl:col-span-1">
               <p className="font-semibold text-white">Current media plan</p>
               <p className="mt-2 text-sm text-slate-200">{billingPlanId === "pro" ? "Plus" : "Starter / Verified"}</p>
@@ -941,10 +1011,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                 </p>
               ) : null}
             </div>
-          ) : null}
-        </div>
-
-        {embedded ? <p className="mt-3 text-xs text-slate-400">Photos and videos stay separate below. Drag ready items to reorder.</p> : null}
+          </div>
+        )}
 
         {!embedded ? (
         <div className="mt-4 grid gap-3">
@@ -967,10 +1035,11 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
       </section>
 
       <section className={cx("min-w-0 border border-white/10 bg-[linear-gradient(145deg,rgba(8,14,18,0.94),rgba(7,18,24,0.78))] shadow-[0_28px_80px_rgba(0,0,0,0.34)]", embedded ? "rounded-[24px] p-4" : "rounded-[26px] p-4 sm:rounded-[30px] sm:p-6")}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className={cx("font-bold text-white", embedded ? "text-lg" : "mt-2 text-xl")}>{embedded ? "Your media" : "Arrange Order"}</h2>
-          </div>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <h2 className={cx("font-bold text-white", embedded ? "text-base" : "mt-2 text-xl")}>{embedded ? "Your media" : "Arrange Order"}</h2>
+          {embedded && media.length > 1 ? (
+            <span className="text-[11px] text-slate-500">Drag to reorder</span>
+          ) : null}
         </div>
 
         {media.length === 0 ? (
@@ -980,9 +1049,9 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
         ) : (
           <div
             className={cx(
-              "mt-5",
+              "mt-4",
               embedded
-                ? "grid grid-cols-1 gap-3 sm:grid-cols-2"
+                ? "grid grid-cols-3 gap-2"
                 : "-mx-1 flex gap-3 overflow-x-auto overflow-y-visible px-1 pb-3"
             )}
           >
@@ -990,13 +1059,15 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
               const poster = mediaPoster(item);
               const statusBusy = busyId?.endsWith(item.id);
               const menuOpen = activeMenuId === item.id;
-              const canSetProfilePicture = item.kind === "photo" && item.status === "ready" && Boolean(item.publicUrl);
-              const canSetMain = item.status === "ready" && !item.isPrimary;
+              // Photos are locked (showcase is Plus-only) when user is not on Plus plan
+              const photoLocked = embedded && item.kind === "photo" && billingPlanId !== "pro";
+              const canSetProfilePicture = item.kind === "photo" && item.status === "ready" && Boolean(item.publicUrl) && !photoLocked;
+              const canSetMain = item.status === "ready" && !item.isPrimary && !photoLocked;
               return (
                 <div
                   key={item.id}
                   data-media-menu-root={item.id}
-                  draggable={media.length > 1 && !Boolean(statusBusy)}
+                  draggable={media.length > 1 && !Boolean(statusBusy) && !photoLocked}
                   onDragStart={(event) => {
                     if (statusBusy) {
                       event.preventDefault();
@@ -1037,21 +1108,25 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                       event.stopPropagation();
                       setActiveMenuId((current) => (current === item.id ? null : item.id));
                     }}
-                    className="absolute right-3 top-3 z-[4] inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/90 backdrop-blur hover:bg-black/70"
+                    className={cx(
+                      "absolute z-[4] inline-flex items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/90 backdrop-blur hover:bg-black/70",
+                      embedded ? "right-1.5 top-1.5 h-7 w-7" : "right-3 top-3 h-10 w-10"
+                    )}
                     aria-label="Open media options"
                   >
-                    <span className="material-symbols-outlined text-[18px]">edit</span>
+                    <span className={cx("material-symbols-outlined", embedded ? "text-[14px]" : "text-[18px]")}>edit</span>
                   </button>
 
                   <div
                     className={cx(
-                      "overflow-hidden rounded-[24px] border bg-[linear-gradient(150deg,rgba(255,255,255,0.04),rgba(6,10,16,0.94))] shadow-[0_16px_38px_rgba(0,0,0,0.24)] transition",
+                      "overflow-hidden border bg-[linear-gradient(150deg,rgba(255,255,255,0.04),rgba(6,10,16,0.94))] shadow-[0_8px_20px_rgba(0,0,0,0.24)] transition",
+                      embedded ? "rounded-[16px]" : "rounded-[24px] shadow-[0_16px_38px_rgba(0,0,0,0.24)]",
                       item.isPrimary ? "border-cyan-300/35" : "border-white/10",
                       dragOverId === item.id && draggingId !== item.id ? "border-cyan-300/45" : "",
                       draggingId === item.id ? "opacity-60" : ""
                     )}
                   >
-                    <div className="relative aspect-[4/5] overflow-hidden bg-[#071018]">
+                    <div className={cx("relative overflow-hidden bg-[#071018]", embedded ? "aspect-square" : "aspect-[4/5]")}>
                       {poster ? <img src={poster} alt="" className="h-full w-full object-cover" loading="lazy" /> : null}
                       {!poster ? (
                         <div className="flex h-full items-center justify-center text-slate-500">
@@ -1059,16 +1134,32 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                         </div>
                       ) : null}
 
-                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+
+                      {/* Locked overlay for non-Plus showcase photos */}
+                      {photoLocked ? (
+                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 backdrop-blur-[2px]">
+                          <span className="material-symbols-outlined text-[20px] text-white/70">lock</span>
+                          <span className="text-[9px] font-semibold uppercase tracking-wider text-white/60">Locked</span>
+                        </div>
+                      ) : null}
+
+                      {/* Position watermark */}
+                      <div className={cx(
+                        "pointer-events-none absolute left-1.5 top-1.5 flex items-center justify-center rounded-full bg-black/60 font-bold text-white/90 backdrop-blur-sm",
+                        embedded ? "h-5 w-5 text-[10px]" : "h-7 w-7 text-xs"
+                      )}>
+                        {index + 1}
+                      </div>
 
                       {item.kind === "video" ? (
-                        <div className="pointer-events-none absolute left-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-[0_10px_24px_rgba(0,0,0,0.3)]">
-                          <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+                        <div className={cx("pointer-events-none absolute inline-flex items-center justify-center rounded-full bg-black/55 text-white", embedded ? "bottom-1.5 left-1.5 h-5 w-5" : "left-3 top-3 h-10 w-10 shadow-[0_10px_24px_rgba(0,0,0,0.3)]")}>
+                          <span className={cx("material-symbols-outlined", embedded ? "text-[12px]" : "text-[18px]")}>play_arrow</span>
                         </div>
                       ) : null}
 
                       {item.isPrimary ? (
-                        <div className="absolute bottom-3 left-3 rounded-full bg-cyan-300/18 px-2.5 py-1 text-[11px] font-semibold text-cyan-50">
+                        <div className={cx("absolute left-1.5 rounded-full bg-cyan-300/18 font-semibold text-cyan-50", embedded ? "bottom-1.5 px-1.5 py-0.5 text-[9px]" : "bottom-3 left-3 px-2.5 py-1 text-[11px]")}>
                           Main
                         </div>
                       ) : null}
@@ -1076,19 +1167,21 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                       {item.status !== "ready" ? (
                         <div
                           className={cx(
-                            "absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                            "absolute rounded-full font-semibold",
+                            embedded ? "bottom-1 right-1 px-1.5 py-0.5 text-[9px]" : "bottom-3 right-3 px-2.5 py-1 text-[11px]",
                             item.status === "failed" ? "bg-rose-500/20 text-rose-100" : "bg-cyan-300/15 text-cyan-100"
                           )}
                         >
-                          {describeStatus(item)}
+                          {embedded ? (item.status === "failed" ? "Failed" : "…") : describeStatus(item)}
                         </div>
                       ) : item.kind === "video" && item.durationSec ? (
-                        <div className="absolute bottom-3 right-3 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-white/95">
+                        <div className={cx("absolute right-1.5 rounded-full bg-black/60 font-semibold text-white/95", embedded ? "bottom-1.5 px-1.5 py-0.5 text-[9px]" : "bottom-3 px-2.5 py-1 text-[11px]")}>
                           {item.durationSec}s
                         </div>
                       ) : null}
                     </div>
 
+                    {!embedded ? (
                     <div className="flex items-center justify-between gap-3 border-t border-white/8 px-3 py-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-white">{item.kind === "video" ? "Video" : "Photo"}</p>
@@ -1118,11 +1211,26 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                         </button>
                       </div>
                     </div>
+                    ) : null}
                   </div>
 
                   {menuOpen ? (
                     <div className="absolute right-2 top-14 z-[5] w-[min(15rem,calc(100vw-2.5rem))] rounded-[22px] border border-white/12 bg-[#10171d]/96 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.4)] backdrop-blur">
-                      <div className="space-y-1">
+                      {photoLocked ? (
+                        <div className="space-y-1">
+                          <p className="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-slate-500">Locked · upgrade to unlock</p>
+                          <button
+                            type="button"
+                            onClick={() => void deleteItem(item)}
+                            disabled={Boolean(statusBusy)}
+                            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-rose-300 hover:bg-white/[0.06] disabled:opacity-50"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                            Delete photo
+                          </button>
+                        </div>
+                      ) : null}
+                      <div className={cx("space-y-1", photoLocked ? "hidden" : "")}>
                         {canSetMain ? (
                           <button
                             type="button"

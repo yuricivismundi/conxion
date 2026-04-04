@@ -60,6 +60,13 @@ export function getPlanLimits(planId: PlanId) {
   return PLAN_LIMITS[planId];
 }
 
+export function getPlanIdFromMeta(meta: Record<string, unknown>, isVerified = false): PlanId {
+  // Pro status is stored as billing_pro_status in user_metadata
+  const proStatus = typeof meta.billing_pro_status === "string" ? meta.billing_pro_status : null;
+  if (proStatus === "active" || proStatus === "trialing" || proStatus === "past_due") return "pro";
+  return isVerified ? "verified" : "starter";
+}
+
 export function isLimitReached(current: number, limit: number | null) {
   if (limit === null) return false;
   return current >= limit;

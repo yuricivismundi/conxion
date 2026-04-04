@@ -6,6 +6,7 @@ const ALLOWED_NOTIFICATION_KINDS = new Set([
   "trip_request_received",
   "trip_request_accepted",
   "trip_request_declined",
+  "trip_details_updated",
   "reference_received",
 ]);
 
@@ -66,6 +67,13 @@ function notificationContentForKind(kind: string, params: {
       linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips/explore",
     };
   }
+  if (kind === "trip_details_updated") {
+    return {
+      title: "Trip details updated",
+      body: "A trip you requested has updated its destination or dates. Review if it still works for you.",
+      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips",
+    };
+  }
   return {
     title: "New reference received",
     body: "You received a new reference.",
@@ -101,9 +109,29 @@ async function authorizeNotificationRequest(params: {
     return actorMatches && recipientMatches;
   }
 
-  const requestId = readTextField(params.metadata.request_id);
   const tripId = readTextField(params.metadata.trip_id);
-  if (!requestId || !tripId) return false;
+  if (!tripId) return false;
+
+  // trip_details_updated: actor is trip owner, recipient has an active request
+  if (params.kind === "trip_details_updated") {
+    const [tripRes, requestRes] = await Promise.all([
+      params.service.from("trips").select("id,user_id").eq("id", tripId).maybeSingle(),
+      params.service
+        .from("trip_requests")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("requester_id", params.userId)
+        .in("status", ["pending", "accepted"])
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (tripRes.error || !tripRes.data) return false;
+    const tripRow = tripRes.data as Record<string, unknown>;
+    return tripRow.user_id === params.actorId && Boolean(requestRes.data);
+  }
+
+  const requestId = readTextField(params.metadata.request_id);
+  if (!requestId) return false;
 
   const [requestRes, tripRes] = await Promise.all([
     params.service
@@ -244,6 +272,7 @@ async function insertNotificationCompat(params: {
     {
       user_id: params.userId,
       actor_id: params.actorId,
+      type: params.kind,
       kind: params.kind,
       title: params.title,
       body: params.body || null,
@@ -252,6 +281,7 @@ async function insertNotificationCompat(params: {
     },
     {
       user_id: params.userId,
+      type: params.kind,
       kind: params.kind,
       title: params.title,
       body: params.body || null,
@@ -259,12 +289,14 @@ async function insertNotificationCompat(params: {
     },
     {
       user_id: params.userId,
+      type: params.kind,
       kind: params.kind,
       title: params.title,
       metadata: params.metadata,
     },
     {
       user_id: params.userId,
+      type: params.kind,
       kind: params.kind,
       message: params.title,
       data: params.metadata,

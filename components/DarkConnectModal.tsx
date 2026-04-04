@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
 import { supabase } from "@/lib/supabase/client";
-import { getPlanLimits } from "@/lib/billing/limits";
+import { getPlanLimits, getPlanIdFromMeta } from "@/lib/billing/limits";
+import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
+import { isPaymentVerified } from "@/lib/verification";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
 type ConnectReason = {
@@ -55,25 +58,7 @@ export default function DarkConnectModal({
 
     (async () => {
       try {
-        const { data: authUser } = await supabase.auth.getUser();
-        const userId = authUser?.user?.id;
-        if (!userId) return;
-
-        const { data: existing } = await supabase
-          .from("connections")
-          .select("id,status,requester_id")
-          .or(
-            `and(requester_id.eq.${userId},target_id.eq.${targetUserId}),and(requester_id.eq.${targetUserId},target_id.eq.${userId})`
-          )
-          .limit(1)
-          .maybeSingle();
-
-        if (existing?.status === "pending") {
-          const direction = existing.requester_id === userId ? "You already sent" : "You received";
-          setPendingWarning(`${direction} a pending connection request with this member.`);
-        } else if (existing?.status === "accepted") {
-          setPendingWarning("You are already connected with this member.");
-        }
+        setPendingWarning(await fetchPendingPairConflict(targetUserId));
       } catch {}
     })();
   }, [open, targetUserId]);
@@ -89,15 +74,20 @@ export default function DarkConnectModal({
       try {
         const contexts =
           connectContext === "traveller"
-            ? ["traveller", "trip", "member"]
-            : ["member"];
+            ? ["traveller", "trip", "member", "general"]
+            : ["member", "general"];
         const { data, error: err } = await supabase
           .from("connect_reasons")
           .select("id,label,role,sort_order")
           .eq("active", true)
           .in("context", contexts)
           .order("sort_order");
-        if (!err) setReasons(data ?? []);
+        if (!err) {
+          const loaded = data ?? [];
+          setReasons(loaded);
+          const defaultReason = loaded.find((r) => r.id === "default_start_conxion");
+          if (defaultReason) setSelectedReason(defaultReason.id);
+        }
       } catch {
         setReasons([]);
       }
@@ -115,8 +105,13 @@ export default function DarkConnectModal({
         if (!user) return;
 
         const meta = user.user_metadata ?? {};
-        const isPro = meta.billing_plan === "pro" || meta.subscription_status === "active";
-        const planId = isPro ? "pro" : "starter";
+        const { data: profileRow } = await supabase
+          .from("profiles")
+          .select("verified,verified_label")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        const isVerified = isPaymentVerified((profileRow ?? null) as Record<string, unknown> | null);
+        const planId = getPlanIdFromMeta(meta, isVerified);
         const limits = getPlanLimits(planId);
         setRequestsLimit(limits.connectionRequestsPerMonth);
 
@@ -185,7 +180,7 @@ export default function DarkConnectModal({
       if (existing?.status === "accepted" || existing?.status === "pending") {
         if (existing.status === "accepted" && existing.id) {
           handleClose();
-          router.push(`/messages/${existing.id}`);
+          router.push(`/messages?thread=${encodeURIComponent(`conn:${existing.id}`)}`);
           return;
         }
         throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
@@ -267,12 +262,8 @@ export default function DarkConnectModal({
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {/* Pending request warning */}
           {pendingWarning && (
-            <div className="flex items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
-              <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">warning</span>
-              <span>{pendingWarning}</span>
-            </div>
+            <PendingRequestBanner message={pendingWarning} />
           )}
 
           {/* Usage counter */}
@@ -325,7 +316,9 @@ export default function DarkConnectModal({
                     }`}
                   >
                     <span>{r.label}</span>
-                    <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
+                    {r.role && r.role !== "General" ? (
+                      <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
+                    ) : null}
                   </button>
                 ))
               )}
@@ -342,12 +335,12 @@ export default function DarkConnectModal({
         <div className="flex flex-col gap-2 border-t border-white/8 px-6 py-5">
           <button
             type="button"
-            disabled={!selectedReason || sending}
+            disabled={!selectedReason || sending || Boolean(pendingWarning)}
             onClick={() => void handleSend()}
             className="w-full h-13 rounded-2xl font-bold text-sm text-[#040a0f] disabled:opacity-40 transition hover:brightness-110"
             style={{ backgroundImage: "linear-gradient(90deg,#0df2f2 0%, #ff00ff 100%)" }}
           >
-            {sending ? "Sending..." : "Send Request"}
+            {sending ? "Sending..." : "Send request"}
           </button>
 
           <button

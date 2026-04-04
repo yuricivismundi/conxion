@@ -136,6 +136,8 @@ export function buildCtaPath(params: AppEmailParams) {
     case "connection_request_accepted":
       return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
     case "trip_request_received":
+    case "trip_request_accepted":
+    case "trip_request_declined":
     case "travel_plan_upcoming":
       return params.tripId ? `/trips/${params.tripId}` : params.hostingRequestId ? "/trips/hosting" : "/trips";
     case "hosting_request_received":
@@ -251,6 +253,46 @@ export function buildEmailCopy(params: {
         ctaLabel: "Review trip request",
         footerNote: "",
         ctaHint: "Open the trip request and respond.",
+        logoWidthPx: 168,
+        showGreeting: false,
+        showFooterNote: false,
+        showFallbackLink: false,
+      };
+    case "trip_request_accepted":
+      return {
+        eyebrow: "Trip Request",
+        subject: `Your trip request to ${tripLabel} was accepted`,
+        title: tripLabel,
+        intro: "",
+        details: [],
+        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
+        heroTitle: formatTripCity(params.trip),
+        heroSubtitle: formatTripCountry(params.trip) || undefined,
+        heroBody: `${params.actorName} accepted your request. Your trip to ${tripLabel} is confirmed.`,
+        heroTheme: "trip",
+        ctaLabel: "View trip",
+        footerNote: "",
+        ctaHint: "Open the trip to see details and connect with the host.",
+        logoWidthPx: 168,
+        showGreeting: false,
+        showFooterNote: false,
+        showFallbackLink: false,
+      };
+    case "trip_request_declined":
+      return {
+        eyebrow: "Trip Request",
+        subject: `Your trip request to ${tripLabel} was declined`,
+        title: tripLabel,
+        intro: "",
+        details: [],
+        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
+        heroTitle: formatTripCity(params.trip),
+        heroSubtitle: formatTripCountry(params.trip) || undefined,
+        heroBody: `${params.actorName} couldn't accommodate your request this time. You can explore other trips.`,
+        heroTheme: "trip",
+        ctaLabel: "Explore trips",
+        footerNote: "",
+        ctaHint: "Browse available trips and send a new request.",
         logoWidthPx: 168,
         showGreeting: false,
         showFooterNote: false,

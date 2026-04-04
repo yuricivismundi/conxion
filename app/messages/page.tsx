@@ -7,6 +7,7 @@ import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
 import TeacherInquiryCard from "@/components/messages/TeacherInquiryCard";
 import Nav from "@/components/Nav";
+import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
 import ShareInquiryInfoModal from "@/components/teacher/ShareInquiryInfoModal";
 import { supabase } from "@/lib/supabase/client";
 import { getBillingAccountState } from "@/lib/billing/account-state";
@@ -18,6 +19,7 @@ import {
   ACTIVITY_TYPES,
   REFERENCE_CONTEXT_TAGS,
   activityTypeLabel,
+  activityUsesDateRange,
   normalizeReferenceContextTag,
   referenceContextLabel,
   type ActivityType,
@@ -34,6 +36,9 @@ import {
   type ServiceInquiryKind,
   type TeacherInquiryShareSnapshot,
 } from "@/lib/service-inquiries/types";
+import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
+import { fetchLinkedConnectionOptions, type LinkedMemberOption } from "@/lib/requests/linked-members";
+import { DismissibleBanner } from "@/components/DismissibleBanner";
 
 type ThreadKind = "connection" | "trip" | "direct" | "event";
 type FilterTab = "all" | "active" | "pending" | "archived";
@@ -329,8 +334,10 @@ type VisibleConnectionLite = {
 type ActivityDraft = {
   activityType: ActivityType;
   note: string;
+  dateMode: "none" | "set";
   startAt: string;
   endAt: string;
+  linkedMemberUserId: string;
 };
 
 const ContactSidebarPanel = dynamic(() => import("@/components/messages/ContactSidebarPanel"), {
@@ -367,20 +374,25 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👏", "😮", "😢
 const DEFAULT_ACTIVITY_DRAFT: ActivityDraft = {
   activityType: "practice",
   note: "",
+  dateMode: "none",
   startAt: "",
   endAt: "",
+  linkedMemberUserId: "",
 };
-const PRIMARY_ACTIVITY_QUICK_FILTERS: ActivityType[] = [
+const LINKABLE_ACTIVITY_TYPES = new Set<ActivityType>([
   "practice",
   "social_dance",
+  "event",
+  "festival",
   "travel_together",
-  "hosting",
+  "stay_as_guest",
   "private_class",
+  "group_class",
+  "workshop",
   "collaboration",
-];
-const SECONDARY_ACTIVITY_QUICK_FILTERS: ActivityType[] = ACTIVITY_TYPES.filter(
-  (item) => !PRIMARY_ACTIVITY_QUICK_FILTERS.includes(item)
-);
+  "content_video",
+  "competition",
+]);
 const LOCAL_REACTIONS_STORAGE_KEY = "cx_messages_reactions_local_v1";
 const LOCAL_MANUAL_UNREAD_STORAGE_KEY = "cx_messages_manual_unread_v1";
 const LOCAL_THREAD_DRAFTS_STORAGE_KEY = "cx_messages_thread_drafts_v1";
@@ -548,7 +560,7 @@ const CONTEXT_LABELS: Record<ThreadContextTag, string> = {
   trip_join_request: "Trip join request",
   event_chat: "Event chat",
   activity: "Activity",
-  service_inquiry: "Service inquiry",
+  service_inquiry: "Teaching services",
   regular_chat: "Chat",
 };
 
@@ -567,9 +579,9 @@ const STATUS_LABELS: Record<ThreadStatusTag, string> = {
 function contextGroupLabel(tag: ThreadContextTag) {
   if (tag === "connection_request") return "Connections";
   if (tag === "trip_join_request") return "Trips";
-  if (tag === "hosting_request") return "Hosting";
+  if (tag === "hosting_request") return "Request hosting";
   if (tag === "event_chat") return "Events";
-  if (tag === "service_inquiry") return "Service inquiries";
+  if (tag === "service_inquiry") return "Teaching services";
   if (tag === "activity") return "Connections";
   return "Connections";
 }
@@ -840,17 +852,6 @@ function contextHistoryTitle(context: ThreadContextItem) {
   return CONTEXT_LABELS[context.contextTag];
 }
 
-function contextHistoryIcon(context: ThreadContextItem) {
-  const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
-  if (context.contextTag === "activity") return activityTypeIcon(activityType);
-  if (context.contextTag === "connection_request") return "person_add";
-  if (context.contextTag === "trip_join_request") return "flight_takeoff";
-  if (context.contextTag === "hosting_request") return "home";
-  if (context.contextTag === "event_chat") return "event";
-  if (context.contextTag === "service_inquiry") return "school";
-  return "bolt";
-}
-
 function contextHistorySummary(context: ThreadContextItem) {
   const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
   const contextLabel =
@@ -861,7 +862,7 @@ function contextHistorySummary(context: ThreadContextItem) {
   if (context.statusTag === "accepted" || context.statusTag === "active") {
     if (context.contextTag === "connection_request") return "Connection accepted. Chat unlocked.";
     if (context.contextTag === "activity") return `${contextLabel} accepted.`;
-    if (context.contextTag === "service_inquiry") return "Professional inquiry converted into a normal chat.";
+    if (context.contextTag === "service_inquiry") return "Teaching services — chat unlocked.";
     return `${contextLabel} accepted.`;
   }
   if (context.statusTag === "info_shared") {
@@ -1092,6 +1093,13 @@ function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[
   };
 }
 
+function shouldIncludeInboxThread(thread: ThreadRow) {
+  if (thread.kind === "event") {
+    return Boolean(thread.hasAcceptedInteraction);
+  }
+  return true;
+}
+
 function threadContextPriority(context: ThreadContextItem) {
   const pendingBoost = isPendingLikeStatus(context.statusTag) ? 100 : 0;
   const statusWeight =
@@ -1247,54 +1255,12 @@ function deriveThreadPreviewFromState(params: {
   return latestTextPreview(params.messages, defaultThreadPreview(params.thread.kind));
 }
 
-function messageMirrorsRenderedContext(
-  message: MessageItem,
-  renderedContexts: ThreadContextItem[],
-  allContexts: ThreadContextItem[]
-) {
-  const messageType = message.messageType ?? "text";
-  if (messageType === "text") return false;
-
-  const contextTag = message.contextTag ?? "regular_chat";
-  const statusTag = message.statusTag ?? "active";
-  if (contextTag === "regular_chat") return false;
-
-  if (
-    contextTag === "connection_request" &&
-    allContexts.some(
-      (context) =>
-        context.contextTag === "connection_request" &&
-        (context.statusTag === "accepted" || context.statusTag === "active")
-    )
-  ) {
-    return true;
-  }
-
-  if (contextTag === "activity") {
-    const activityId = asString(message.metadata?.activity_id);
-    const activityType = asString(message.metadata?.activity_type);
-    return renderedContexts.some((context) => {
-      if (context.contextTag !== "activity") return false;
-      if (statusTag !== "pending" && context.statusTag !== statusTag) return false;
-      if (statusTag === "pending" && context.statusTag !== "pending") return false;
-      if (activityId && context.sourceTable === "activities" && context.sourceId === activityId) return true;
-      return Boolean(activityType) && asString(context.metadata.activity_type) === activityType;
-    });
-  }
-
-  if (isPendingLikeStatus(statusTag)) {
-    return renderedContexts.some((context) => context.contextTag === contextTag && isPendingLikeStatus(context.statusTag));
-  }
-
-  return renderedContexts.some((context) => context.contextTag === contextTag && context.statusTag === statusTag);
-}
-
 const remoteImageLoader = ({ src }: ImageLoaderProps) => src;
 
 function MessagesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const forceMobileThread = searchParams.get("mobile") === "1";
+  const requestedThreadToken = searchParams.get("thread")?.trim() || null;
   const initialTab = parseFilterTab(searchParams.get("tab")) ?? "all";
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1325,11 +1291,26 @@ function MessagesPageContent() {
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(null);
-  const [messagingSummaryLoading, setMessagingSummaryLoading] = useState(false);
   const [activityComposerOpen, setActivityComposerOpen] = useState(false);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(DEFAULT_ACTIVITY_DRAFT);
   const [activityBusy, setActivityBusy] = useState(false);
-  const [activityMoreFiltersOpen, setActivityMoreFiltersOpen] = useState(false);
+  const [activityPendingWarning, setActivityPendingWarning] = useState<string | null>(null);
+  const [activityRequestsUsed, setActivityRequestsUsed] = useState<number | null>(null);
+  const [activityRequestsLimit, setActivityRequestsLimit] = useState<number | null>(null);
+  const [activityLinkedConnectionOptions, setActivityLinkedConnectionOptions] = useState<LinkedMemberOption[]>([]);
+  const [activityLinkedPickerOpen, setActivityLinkedPickerOpen] = useState(false);
+  const [activityLinkedMemberQuery, setActivityLinkedMemberQuery] = useState("");
+  const activityDraftUsesDateRange = useMemo(
+    () => activityUsesDateRange(activityDraft.activityType),
+    [activityDraft.activityType]
+  );
+  const activitySupportsLinkedMember = LINKABLE_ACTIVITY_TYPES.has(activityDraft.activityType);
+  const filteredActivityLinkedConnectionOptions = useMemo(() => {
+    const query = activityLinkedMemberQuery.trim().toLowerCase();
+    const options = activityLinkedConnectionOptions.filter((option) => option.userId !== activeMeta?.otherUserId);
+    if (!query) return options;
+    return options.filter((option) => [option.displayName, option.city, option.country].join(" ").toLowerCase().includes(query));
+  }, [activeMeta?.otherUserId, activityLinkedConnectionOptions, activityLinkedMemberQuery]);
   const [threadDbSupported, setThreadDbSupported] = useState(true);
   const [threadBody, setThreadBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -1359,6 +1340,73 @@ function MessagesPageContent() {
   const [shareInquiryBlocks, setShareInquiryBlocks] = useState<TeacherInfoBlock[]>([]);
   const [shareInquiryBusy, setShareInquiryBusy] = useState(false);
   const [shareInquiryError, setShareInquiryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activityDraft.dateMode === "none" && (activityDraft.startAt || activityDraft.endAt)) {
+      setActivityDraft((prev) => ({ ...prev, startAt: "", endAt: "" }));
+      return;
+    }
+    if (!activityDraftUsesDateRange && activityDraft.endAt) {
+      setActivityDraft((prev) => ({ ...prev, endAt: "" }));
+    }
+  }, [activityDraft.dateMode, activityDraft.endAt, activityDraft.startAt, activityDraftUsesDateRange]);
+  useEffect(() => {
+    if (activitySupportsLinkedMember) return;
+    if (!activityDraft.linkedMemberUserId && !activityLinkedPickerOpen && !activityLinkedMemberQuery) return;
+    setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: "" }));
+    setActivityLinkedPickerOpen(false);
+    setActivityLinkedMemberQuery("");
+  }, [activityDraft.linkedMemberUserId, activityLinkedMemberQuery, activityLinkedPickerOpen, activitySupportsLinkedMember]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkPendingPairConflict() {
+      if (!activityComposerOpen || !activeMeta?.otherUserId) {
+        if (!cancelled) setActivityPendingWarning(null);
+        return;
+      }
+
+      try {
+        const warning = await fetchPendingPairConflict(activeMeta.otherUserId);
+        if (cancelled) return;
+        setActivityPendingWarning(warning);
+      } catch {
+        if (!cancelled) setActivityPendingWarning(null);
+      }
+    }
+
+    void checkPendingPairConflict();
+    return () => {
+      cancelled = true;
+    };
+  }, [activityComposerOpen, activeMeta?.otherUserId]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLinkedConnections() {
+      if (!activityComposerOpen || !meId) {
+        if (!cancelled) {
+          setActivityLinkedConnectionOptions([]);
+          setActivityLinkedPickerOpen(false);
+          setActivityLinkedMemberQuery("");
+        }
+        return;
+      }
+
+      try {
+        const options = await fetchLinkedConnectionOptions(supabase, meId);
+        if (!cancelled) setActivityLinkedConnectionOptions(options);
+      } catch {
+        if (!cancelled) setActivityLinkedConnectionOptions([]);
+      }
+    }
+
+    void loadLinkedConnections();
+    return () => {
+      cancelled = true;
+    };
+  }, [activityComposerOpen, meId]);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [manualUnreadByThread, setManualUnreadByThread] = useState<Record<string, true>>({});
@@ -1380,6 +1428,8 @@ function MessagesPageContent() {
     (options?: { tab?: FilterTab | null; threadToken?: string | null }) => {
       const nextParams = new URLSearchParams(searchParams.toString());
       const nextTab = options && "tab" in options ? options.tab ?? "all" : activeTab;
+
+      nextParams.delete("mobile");
 
       if (!nextTab || nextTab === "all") nextParams.delete("tab");
       else nextParams.set("tab", nextTab);
@@ -1403,6 +1453,7 @@ function MessagesPageContent() {
   const threadDraftsRef = useRef<Record<string, string>>({});
   const previousThreadsRef = useRef<Record<string, { updatedAt: string; unreadCount: number }>>({});
   const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const threadLoadRequestIdRef = useRef(0);
   const typingLastSentAtRef = useRef(0);
   const typingTimeoutRef = useRef<number | null>(null);
   const composerLockReasonRef = useRef<string | null>(null);
@@ -1441,7 +1492,6 @@ function MessagesPageContent() {
   }, [meId]);
 
   const refreshMessagingSummary = useCallback(async () => {
-    setMessagingSummaryLoading(true);
     try {
       const [rpc, authData] = await Promise.all([
         supabase.rpc("cx_sync_user_messaging_state"),
@@ -1472,8 +1522,6 @@ function MessagesPageContent() {
     } catch {
       setMessagingSummary((prev) => prev);
       return null;
-    } finally {
-      setMessagingSummaryLoading(false);
     }
   }, []);
 
@@ -1774,6 +1822,8 @@ function MessagesPageContent() {
   );
 
   const loadThreadByToken = useCallback(async (token: string, userId: string) => {
+    const requestId = ++threadLoadRequestIdRef.current;
+    const isStale = () => threadLoadRequestIdRef.current !== requestId;
     let parsed = parseThreadToken(token);
     if (!parsed) return;
     let canonicalToken = token;
@@ -1786,23 +1836,7 @@ function MessagesPageContent() {
     setActiveFallbackContext(null);
 
     try {
-      if (parsed.kind === "connection") {
-        const contextRes = await supabase
-          .from("thread_contexts")
-          .select("thread_id")
-          .eq("source_table", "connections")
-          .eq("source_id", parsed.id)
-          .order("updated_at", { ascending: false })
-          .maybeSingle();
-        const contextThreadId =
-          !contextRes.error && contextRes.data && typeof (contextRes.data as { thread_id?: unknown }).thread_id === "string"
-            ? ((contextRes.data as { thread_id?: string }).thread_id ?? null)
-            : null;
-        if (contextThreadId) {
-          parsed = { kind: "direct", id: contextThreadId };
-          canonicalToken = `direct:${contextThreadId}`;
-        }
-      } else if (parsed.kind === "trip") {
+      if (parsed.kind === "trip") {
         const contextRes = await supabase
           .from("thread_contexts")
           .select("thread_id")
@@ -1815,12 +1849,14 @@ function MessagesPageContent() {
           !contextRes.error && contextRes.data && typeof (contextRes.data as { thread_id?: unknown }).thread_id === "string"
             ? ((contextRes.data as { thread_id?: string }).thread_id ?? null)
             : null;
+        if (isStale()) return;
         if (contextThreadId) {
           parsed = { kind: "direct", id: contextThreadId };
           canonicalToken = `direct:${contextThreadId}`;
         }
       }
 
+      if (isStale()) return;
       if (canonicalToken !== token) {
         setActiveThreadToken(canonicalToken);
         router.replace(buildInboxUrl({ threadToken: canonicalToken }));
@@ -1836,6 +1872,7 @@ function MessagesPageContent() {
           .order("updated_at", { ascending: false })
           .limit(80);
         if (res.error) return [] as ThreadContextItem[];
+        if (isStale()) return [] as ThreadContextItem[];
         const normalized = ((res.data ?? []) as ThreadContextRow[])
           .map((row) => normalizeThreadContextRow(row))
           .filter((row): row is ThreadContextItem => row !== null);
@@ -1846,6 +1883,7 @@ function MessagesPageContent() {
       if (parsed && parsed.kind === "connection") {
         const parsedConnectionId = parsed.id;
         const visibleRows = await fetchVisibleConnections(supabase, userId);
+        if (isStale()) return;
         const row = visibleRows.find(
           (item) =>
             item.id === parsedConnectionId &&
@@ -1867,6 +1905,7 @@ function MessagesPageContent() {
           .order("created_at", { ascending: true })
           .limit(1000);
         if (messagesRes.error) throw new Error(messagesRes.error.message);
+        if (isStale()) return;
 
         let threadId: string | null = null;
         let previousLastReadAt: string | null = null;
@@ -1893,14 +1932,6 @@ function MessagesPageContent() {
         let contexts: ThreadContextItem[] = [];
         let participantState: ThreadParticipantDbRow | null = null;
         if (threadId) {
-          await supabase.from("thread_participants").upsert(
-            [
-              { thread_id: threadId, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
-              { thread_id: threadId, user_id: row.other_user_id, role: "member" },
-            ],
-            { onConflict: "thread_id,user_id" }
-          );
-
           const participantRes = await supabase
             .from("thread_participants")
             .select("last_read_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end,archived_at")
@@ -1930,6 +1961,7 @@ function MessagesPageContent() {
         } else {
           setActivePeerLastReadAt(null);
         }
+        if (isStale()) return;
         setActiveLastReadAt(previousLastReadAt);
 
         const fallbackStatusTag: ThreadStatusTag =
@@ -1966,6 +1998,7 @@ function MessagesPageContent() {
             createdAt: row.created_at ?? new Date().toISOString(),
           });
         }
+        if (isStale()) return;
 
         setActiveMeta({
           kind: "connection",
@@ -2003,6 +2036,16 @@ function MessagesPageContent() {
             status: "sent",
           }))
         );
+        if (threadId) {
+          await supabase.from("thread_participants").upsert(
+            [
+              { thread_id: threadId, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+              { thread_id: threadId, user_id: row.other_user_id, role: "member" },
+            ],
+            { onConflict: "thread_id,user_id" }
+          );
+        }
+        if (isStale()) return;
         await loadThreadReactions({
           kind: "connection",
           threadScopeId: row.id,
@@ -2019,6 +2062,7 @@ function MessagesPageContent() {
           .eq("id", parsed.id)
           .maybeSingle();
         if (tripRes.error) throw new Error(tripRes.error.message);
+        if (isStale()) return;
         const trip = (tripRes.data ?? null) as TripRow & { user_id?: string } | null;
         if (!trip?.id) throw new Error("Trip thread not found.");
 
@@ -2065,6 +2109,7 @@ function MessagesPageContent() {
           return;
         }
         if (existingThreadRes.error) throw new Error(existingThreadRes.error.message);
+        if (isStale()) return;
 
         let threadId = (existingThreadRes.data as { id?: string } | null)?.id ?? null;
         let previousLastReadAt: string | null = null;
@@ -2097,15 +2142,9 @@ function MessagesPageContent() {
             previousLastReadAt = participantRow?.last_read_at ?? null;
             participantState = participantRow;
           }
-
-          await supabase.from("thread_participants").upsert(
-            { thread_id: threadId, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
-            { onConflict: "thread_id,user_id" }
-          );
           contexts = await hydrateContextState(threadId);
         }
-        setActivePeerLastReadAt(null);
-        setActiveLastReadAt(previousLastReadAt);
+        if (isStale()) return;
 
         const tripMsgRes = threadId
           ? await supabase
@@ -2116,8 +2155,11 @@ function MessagesPageContent() {
               .limit(1000)
           : { data: [], error: null };
         if (tripMsgRes.error) throw new Error(tripMsgRes.error.message);
+        if (isStale()) return;
 
         const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        setActivePeerLastReadAt(null);
+        setActiveLastReadAt(previousLastReadAt);
         setActiveMeta({
           kind: "trip",
           contextTag: primaryContext?.contextTag ?? "trip_join_request",
@@ -2157,6 +2199,11 @@ function MessagesPageContent() {
           }))
         );
         if (threadId) {
+          await supabase.from("thread_participants").upsert(
+            { thread_id: threadId, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+            { onConflict: "thread_id,user_id" }
+          );
+          if (isStale()) return;
           await loadThreadReactions({
             kind: "trip",
             threadScopeId: threadId,
@@ -2174,6 +2221,7 @@ function MessagesPageContent() {
           .eq("id", parsed.id)
           .maybeSingle();
         if (threadRes.error) throw new Error(threadRes.error.message);
+        if (isStale()) return;
         const thread = (threadRes.data ?? null) as ThreadDbRow | null;
         if (!thread?.id || thread.thread_type !== "direct") throw new Error("Direct chat not found.");
 
@@ -2185,19 +2233,13 @@ function MessagesPageContent() {
           .in("user_id", [userId, otherUserId].filter(Boolean) as string[]);
 
         if (memberRes.error) throw new Error(memberRes.error.message);
+        if (isStale()) return;
         const participantRows = (memberRes.data ?? []) as ThreadParticipantDbRow[];
         const meParticipant = participantRows.find((row) => row.user_id === userId);
         if (!meParticipant) throw new Error("You do not have access to this chat.");
         if (!otherUserId) {
           otherUserId = participantRows.find((row) => row.user_id && row.user_id !== userId)?.user_id ?? null;
         }
-        setActiveLastReadAt(meParticipant.last_read_at ?? null);
-        setActivePeerLastReadAt(participantRows.find((row) => row.user_id === otherUserId)?.last_read_at ?? null);
-
-        await supabase.from("thread_participants").upsert(
-          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
-          { onConflict: "thread_id,user_id" }
-        );
 
         const [profileRes, messagesRes] = await Promise.all([
           otherUserId
@@ -2215,8 +2257,10 @@ function MessagesPageContent() {
             .limit(1000),
         ]);
         if (messagesRes.error) throw new Error(messagesRes.error.message);
+        if (isStale()) return;
         const profile = (profileRes.data ?? null) as ProfileRow | null;
         const contexts = await hydrateContextState(thread.id);
+        if (isStale()) return;
         const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
         const connectionContext = contexts.find((ctx) => ctx.sourceTable === "connections");
         const tripContext = contexts.find((ctx) => ctx.contextTag === "trip_join_request");
@@ -2226,6 +2270,8 @@ function MessagesPageContent() {
           typeof tripContext?.metadata?.trip_id === "string" && tripContext.metadata.trip_id.length > 0
             ? tripContext.metadata.trip_id
             : null;
+        setActiveLastReadAt(meParticipant.last_read_at ?? null);
+        setActivePeerLastReadAt(participantRows.find((row) => row.user_id === otherUserId)?.last_read_at ?? null);
 
         setActiveMeta({
           kind: "direct",
@@ -2263,6 +2309,11 @@ function MessagesPageContent() {
             status: "sent",
           }))
         );
+        await supabase.from("thread_participants").upsert(
+          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+          { onConflict: "thread_id,user_id" }
+        );
+        if (isStale()) return;
         await loadThreadReactions({
           kind: "direct",
           threadScopeId: thread.id,
@@ -2279,6 +2330,7 @@ function MessagesPageContent() {
           .eq("event_id", parsed.id)
           .maybeSingle();
         if (threadRes.error) throw new Error(threadRes.error.message);
+        if (isStale()) return;
         const thread = (threadRes.data ?? null) as ThreadDbRow | null;
         if (!thread?.id || thread.thread_type !== "event") throw new Error("Event chat not found.");
 
@@ -2291,14 +2343,8 @@ function MessagesPageContent() {
         if (memberRes.error || !memberRes.data) {
           throw new Error("You do not have access to this event chat.");
         }
+        if (isStale()) return;
         const meParticipant = memberRes.data as ThreadParticipantDbRow;
-        setActiveLastReadAt(meParticipant.last_read_at ?? null);
-        setActivePeerLastReadAt(null);
-
-        await supabase.from("thread_participants").upsert(
-          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
-          { onConflict: "thread_id,user_id" }
-        );
 
         const [eventRes, messagesRes] = await Promise.all([
           supabase.from("events").select("id,title,city,country,starts_at").eq("id", parsed.id).maybeSingle(),
@@ -2310,6 +2356,7 @@ function MessagesPageContent() {
             .limit(1200),
         ]);
         if (messagesRes.error) throw new Error(messagesRes.error.message);
+        if (isStale()) return;
         const eventRow = (eventRes.data ?? null) as Record<string, unknown> | null;
         const title = typeof eventRow?.title === "string" ? eventRow.title : "Event chat";
         const location = [typeof eventRow?.city === "string" ? eventRow.city : "", typeof eventRow?.country === "string" ? eventRow.country : ""]
@@ -2317,8 +2364,11 @@ function MessagesPageContent() {
           .join(", ");
         const date = typeof eventRow?.starts_at === "string" ? formatDateShort(eventRow.starts_at) : "";
         const contexts = await hydrateContextState(thread.id);
+        if (isStale()) return;
         const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
         const hasAcceptedInteraction = contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag));
+        setActiveLastReadAt(meParticipant.last_read_at ?? null);
+        setActivePeerLastReadAt(null);
 
         setActiveMeta({
           kind: "event",
@@ -2356,6 +2406,11 @@ function MessagesPageContent() {
             status: "sent",
           }))
         );
+        await supabase.from("thread_participants").upsert(
+          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+          { onConflict: "thread_id,user_id" }
+        );
+        if (isStale()) return;
         await loadThreadReactions({
           kind: "event",
           threadScopeId: thread.id,
@@ -2365,13 +2420,16 @@ function MessagesPageContent() {
         return;
       }
     } catch (e: unknown) {
+      if (isStale()) return;
       setThreadError(e instanceof Error ? e.message : "Failed to load thread.");
       setActiveMeta(null);
       setActiveMessages([]);
       setActiveLastReadAt(null);
       setActivePeerLastReadAt(null);
     } finally {
-      setThreadLoading(false);
+      if (!isStale()) {
+        setThreadLoading(false);
+      }
     }
   }, [buildInboxUrl, loadThreadReactions, router]);
 
@@ -2856,11 +2914,13 @@ function MessagesPageContent() {
           const mappedFromThreads: ThreadRow[] = mappedFromThreadsUnfiltered
             .filter((row): row is ThreadRow => row !== null)
             .map((row) => enrichThreadWithContext(row, contextsByThread[row.dbThreadId ?? ""] ?? []))
+            .filter(shouldIncludeInboxThread)
             .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt));
 
           mergedThreads = collapseDuplicateInboxThreads(
             mappedFromThreads
             .map((thread) => enrichThreadWithContext(thread, thread.dbThreadId ? localContextsByThreadId[thread.dbThreadId] ?? [] : []))
+            .filter(shouldIncludeInboxThread)
             .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
           );
         } else if (threadsRes.error && !threadsRelationMissing) {
@@ -3044,11 +3104,12 @@ function MessagesPageContent() {
   }, [reloadTick, router]);
 
   useEffect(() => {
-    const requested = searchParams.get("thread");
-    if (!requested) return;
-    if (!threads.some((thread) => thread.threadId === requested)) return;
-    setActiveThreadToken((prev) => (prev === requested ? prev : requested));
-  }, [searchParams, threads]);
+    if (!requestedThreadToken) return;
+    const parsed = parseThreadToken(requestedThreadToken);
+    const knownThread = threads.some((thread) => thread.threadId === requestedThreadToken);
+    if (!knownThread && !parsed) return;
+    setActiveThreadToken((prev) => (prev === requestedThreadToken ? prev : requestedThreadToken));
+  }, [requestedThreadToken, threads]);
 
   useEffect(() => {
     const requestedTab = parseFilterTab(searchParams.get("tab"));
@@ -3064,7 +3125,7 @@ function MessagesPageContent() {
     [buildInboxUrl, router]
   );
 
-  const mobileThreadOpen = forceMobileThread && Boolean(activeThreadToken);
+  const mobileThreadOpen = Boolean(requestedThreadToken);
 
   useEffect(() => {
     if (!meId || !activeThreadToken) {
@@ -3499,7 +3560,6 @@ function MessagesPageContent() {
     setActivityComposerOpen(false);
     setActivityDraft(DEFAULT_ACTIVITY_DRAFT);
     setActivityBusy(false);
-    setActivityMoreFiltersOpen(false);
   }, [activeThreadToken]);
 
   const sendActiveMessage = useCallback(async () => {
@@ -3682,6 +3742,16 @@ function MessagesPageContent() {
     setThreadError(null);
     setThreadInfo(null);
     try {
+      const usesDateRange = activityUsesDateRange(activityDraft.activityType);
+      const startAt = activityDraft.dateMode === "set" ? activityDraft.startAt || null : null;
+      const endAt = activityDraft.dateMode === "set" && usesDateRange ? activityDraft.endAt || null : null;
+      if (activityDraft.dateMode === "set" && !startAt) {
+        throw new Error(usesDateRange ? "Choose a start date." : "Choose a date.");
+      }
+      if (activityDraft.dateMode === "set" && usesDateRange && !endAt) {
+        throw new Error("Choose an end date.");
+      }
+
       const accessToken = await resolveAccessToken();
 
       const response = await fetch("/api/activities", {
@@ -3696,8 +3766,9 @@ function MessagesPageContent() {
           recipientUserId: activeMeta.otherUserId,
           activityType: activityDraft.activityType,
           note: activityDraft.note || null,
-          startAt: activityDraft.startAt || null,
-          endAt: activityDraft.endAt || null,
+          startAt,
+          endAt,
+          linkedMemberUserId: activitySupportsLinkedMember ? activityDraft.linkedMemberUserId || null : null,
         }),
       });
       const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; id?: string; threadId?: string | null } | null;
@@ -3710,6 +3781,8 @@ function MessagesPageContent() {
 
       setActivityComposerOpen(false);
       setActivityDraft(DEFAULT_ACTIVITY_DRAFT);
+      setActivityLinkedPickerOpen(false);
+      setActivityLinkedMemberQuery("");
       setActiveMeta((prev) => (prev ? { ...prev, threadId: resolvedThreadId } : prev));
       const nowIso = new Date().toISOString();
       const optimisticContextId = typeof result?.id === "string" && result.id ? `activity:${result.id}` : `activity:optimistic:${Date.now()}`;
@@ -3722,16 +3795,16 @@ function MessagesPageContent() {
         statusTag: "pending",
         title: activityTypeLabel(activityDraft.activityType),
         city: null,
-        startDate: activityDraft.startAt ? activityDraft.startAt.slice(0, 10) : null,
-        endDate: (activityDraft.endAt || activityDraft.startAt) ? (activityDraft.endAt || activityDraft.startAt).slice(0, 10) : null,
+        startDate: startAt ? startAt.slice(0, 10) : null,
+        endDate: endAt ? endAt.slice(0, 10) : null,
         requesterId: meId,
         recipientId: activeMeta.otherUserId,
         metadata: {
           activity_type: activityDraft.activityType,
           title: activityTypeLabel(activityDraft.activityType),
           note: activityDraft.note || null,
-          start_at: activityDraft.startAt || null,
-          end_at: activityDraft.endAt || null,
+          start_at: startAt,
+          end_at: endAt,
           activity_id: typeof result?.id === "string" ? result.id : null,
         },
         updatedAt: nowIso,
@@ -3764,7 +3837,7 @@ function MessagesPageContent() {
     } finally {
       setActivityBusy(false);
     }
-  }, [activeMeta, activityDraft, activeThreadToken, meId, resolveAccessToken]);
+  }, [activeMeta, activityDraft, activeThreadToken, activitySupportsLinkedMember, meId, resolveAccessToken]);
 
   const submitReport = useCallback(async () => {
     if (!activeMeta?.connectionId) return;
@@ -4076,10 +4149,6 @@ function MessagesPageContent() {
     () => activeThreadContexts.find((context) => isPendingLikeStatus(context.statusTag)) ?? null,
     [activeThreadContexts]
   );
-  const activePendingContexts = useMemo(
-    () => activeThreadContexts.filter((context) => isPendingLikeStatus(context.statusTag)),
-    [activeThreadContexts]
-  );
   const pinnedPendingContexts = useMemo(
     () => (activePendingContext ? [activePendingContext] : []),
     [activePendingContext]
@@ -4091,10 +4160,6 @@ function MessagesPageContent() {
         .filter((context) => context.contextTag !== "regular_chat" && !isPendingLikeStatus(context.statusTag))
         .sort((a, b) => toTime(a.updatedAt) - toTime(b.updatedAt)),
     [activeThreadContexts]
-  );
-  const renderedContextItems = useMemo(
-    () => [...pinnedPendingContexts, ...historicalThreadContexts],
-    [historicalThreadContexts, pinnedPendingContexts]
   );
   const latestCompletedActivityReferenceTag = useMemo(() => {
     const completedActivities = [...historicalThreadContexts]
@@ -4852,6 +4917,29 @@ function MessagesPageContent() {
     router.replace(nextQuery ? `/messages?${nextQuery}` : "/messages", { scroll: false });
   }, [activityComposerOpen, canCreateActivity, router, searchParams]);
 
+  useEffect(() => {
+    if (!activityComposerOpen || !meId) return;
+    (async () => {
+      try {
+        const [authData, countRes] = await Promise.all([
+          supabase.auth.getUser(),
+          supabase
+            .from("activities")
+            .select("id", { count: "exact", head: true })
+            .eq("requester_id", meId)
+            .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+        ]);
+        setActivityRequestsUsed(countRes.count ?? 0);
+        const meta = authData.data.user?.user_metadata ?? {};
+        const profileRes = await supabase.from("profiles").select("verified").eq("user_id", meId).maybeSingle();
+        const isVerified = (profileRes.data as { verified?: boolean } | null)?.verified === true;
+        const { getPlanIdFromMeta, getPlanLimits } = await import("@/lib/billing/limits");
+        const planId = getPlanIdFromMeta(meta, isVerified);
+        setActivityRequestsLimit(getPlanLimits(planId).initiatedChatsPerMonth);
+      } catch {}
+    })();
+  }, [activityComposerOpen, meId]);
+
   const filteredComposeConnections = useMemo(() => {
     const needle = composeQuery.trim().toLowerCase();
     if (!needle) return composeConnectionTargets;
@@ -4872,6 +4960,7 @@ function MessagesPageContent() {
     tone: string;
     title: string;
     body: string;
+    discrete?: boolean;
     ctaLabel?: string;
     ctaHref?: string;
     ctaAction?: () => void;
@@ -4879,12 +4968,18 @@ function MessagesPageContent() {
     if (!activeMeta) return null;
 
     if (activeServiceInquiryContext?.statusTag === "info_shared") {
+      const followupBody = viewerIsServiceInquiryRequester
+        ? canSendFreeServiceInquiryFollowup
+          ? "You have 1 free follow-up available before this becomes a normal chat."
+          : "Your free follow-up has already been used."
+        : serviceInquiryFollowupUsed
+        ? "The requester already used the free follow-up."
+        : "The requester can still send 1 free follow-up message.";
       return {
-        tone: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
+        tone: "",
+        discrete: true,
         title: "Details shared",
-        body: viewerIsServiceInquiryRequester
-          ? "You can send one follow-up message after receiving details."
-          : "The requester can send one follow-up message after receiving details.",
+        body: followupBody,
       };
     }
 
@@ -4900,9 +4995,10 @@ function MessagesPageContent() {
       }
 
       return {
-        tone: "border-amber-300/25 bg-amber-400/10 text-amber-50",
+        tone: "",
+        discrete: true,
         title: "Waiting for teacher approval",
-        body: "Your follow-up has been sent. The teacher can now accept the conversation.",
+        body: "Your free follow-up has been sent. The teacher can now accept the conversation.",
       };
     }
 
@@ -4912,7 +5008,8 @@ function MessagesPageContent() {
       }
       const expiresInDays = daysUntilPendingExpiry(activePendingContext);
       return {
-        tone: "border-amber-300/25 bg-amber-500/10 text-amber-50",
+        tone: "",
+        discrete: true,
         title: "Pending request",
         body:
           expiresInDays !== null
@@ -4945,7 +5042,8 @@ function MessagesPageContent() {
 
     if (activeMessagingState === "archived") {
       return {
-        tone: "border-white/15 bg-white/[0.04] text-slate-100",
+        tone: "",
+        discrete: true,
         title: "Archived conversation",
         body: activationCoveredThisCycle
           ? "Send a message to reactivate. No new activation will be used this cycle."
@@ -4955,7 +5053,8 @@ function MessagesPageContent() {
 
     if (activeMessagingState === "active") {
       return {
-        tone: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+        tone: "",
+        discrete: true,
         title: "Active conversation",
         body: "Unlimited replies are available in this active conversation.",
       };
@@ -4973,7 +5072,6 @@ function MessagesPageContent() {
     concurrentLimitReachedForComposer,
     messagingSummary?.activeLimit,
     messagingSummary?.monthlyLimit,
-    monthlyActivationRemaining,
     monthlyLimitReachedForComposer,
     activeServiceInquiryContext,
     convertServiceInquiryConversation,
@@ -5539,7 +5637,8 @@ function MessagesPageContent() {
             ) : filtered.length === 0 ? (
               <div className="p-3 text-sm text-[#90cbcb]">No threads found for this filter.</div>
             ) : (
-              filtered.map((thread) => {
+              <div className="animate-fade-in space-y-1.5">
+              {filtered.map((thread) => {
                 const mutedUntil = mutedUntilByThread[thread.threadId];
                 const isMuted = Boolean(mutedUntil && toTime(mutedUntil) > clockMs);
                 const isPinned = Boolean(pinnedThreads[thread.threadId]);
@@ -5561,11 +5660,11 @@ function MessagesPageContent() {
                   });
                   setThreads((prev) => prev.map((row) => (row.threadId === thread.threadId ? { ...row, unreadCount: 0 } : row)));
                   if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-                    router.push(`/messages/${encodeURIComponent(thread.threadId)}`);
+                    router.push(buildInboxUrl({ threadToken: thread.threadId }), { scroll: false });
                     return;
                   }
                   setActiveThreadToken(thread.threadId);
-                  router.replace(buildInboxUrl({ threadToken: thread.threadId }));
+                  router.replace(buildInboxUrl({ threadToken: thread.threadId }), { scroll: false });
                 };
                 return (
                   <div
@@ -5758,7 +5857,8 @@ function MessagesPageContent() {
                     ) : null}
                   </div>
                 );
-              })
+              })}
+              </div>
             )}
 	          </div>
         </aside>
@@ -5794,7 +5894,7 @@ function MessagesPageContent() {
                   className="flex items-center gap-2 rounded-full bg-[#0df2f2] px-6 py-3 font-bold text-[#052328] transition-all hover:bg-[#0be0e0]"
                 >
                   <span className="material-symbols-outlined">add_comment</span>
-                  <span>Start New Thread</span>
+                  <span>Start new thread</span>
                 </button>
               </div>
             </div>
@@ -6077,7 +6177,9 @@ function MessagesPageContent() {
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">Pending Request</p>
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">
+                                  {pendingContext.contextTag === "service_inquiry" ? "Teaching services request" : "Pending Request"}
+                                </p>
                                 <p className="mt-1 text-sm font-semibold text-white">
                                   {pendingContext.title || CONTEXT_LABELS[pendingContext.contextTag]}
                                 </p>
@@ -6285,13 +6387,14 @@ function MessagesPageContent() {
                       </div>
                     </div>
                   ) : null}
-                  {threadInfo ? (
-                    <div className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 p-3 text-sm text-cyan-100">{threadInfo}</div>
-                  ) : null}
-                  {threadError ? (
-                    <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-100">{threadError}</div>
-                  ) : null}
+                  <DismissibleBanner message={threadInfo} tone="info" onDismiss={() => setThreadInfo(null)} />
+                  <DismissibleBanner message={threadError} tone="error" onDismiss={() => setThreadError(null)} />
                   {threadStateBanner ? (
+                    threadStateBanner.discrete ? (
+                      <div className="px-1 py-0.5">
+                        <p className="text-xs font-semibold text-white/40">{threadStateBanner.title} <span className="font-normal">— {threadStateBanner.body}</span></p>
+                      </div>
+                    ) : (
                     <div className={`rounded-xl border p-3 ${threadStateBanner.tone}`}>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -6316,6 +6419,7 @@ function MessagesPageContent() {
                         ) : null}
                       </div>
                     </div>
+                    )
                   ) : null}
                   {activeServiceInquiryContext &&
                   viewerIsServiceInquiryRecipient &&
@@ -7128,11 +7232,11 @@ function MessagesPageContent() {
                 setComposeOpen(false);
                 setComposeQuery("");
                 if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-                  router.push(`/messages/${encodeURIComponent(token)}`);
+                  router.push(buildInboxUrl({ threadToken: token }), { scroll: false });
                   return;
                 }
                 setActiveThreadToken(token);
-                router.replace(buildInboxUrl({ threadToken: token }));
+                router.replace(buildInboxUrl({ threadToken: token }), { scroll: false });
               } catch (error) {
                 setThreadError(error instanceof Error ? error.message : "Failed to open thread.");
               }
@@ -7143,124 +7247,241 @@ function MessagesPageContent() {
             setComposeOpen(false);
             setComposeQuery("");
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-              router.push(`/messages/${encodeURIComponent(token)}`);
+              router.push(buildInboxUrl({ threadToken: token }), { scroll: false });
               return;
             }
             setActiveThreadToken(token);
-            router.replace(buildInboxUrl({ threadToken: token }));
+            router.replace(buildInboxUrl({ threadToken: token }), { scroll: false });
           }}
         />
       ) : null}
 
       {activityComposerOpen && activeMeta?.otherUserId ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-0 sm:items-center sm:px-4" onClick={() => !activityBusy && setActivityComposerOpen(false)}>
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
           <div
             data-testid="activity-composer-modal"
-            className="flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-[1.75rem] border border-white/10 bg-[#0e1317] shadow-[0_24px_90px_rgba(0,0,0,0.55)] sm:rounded-3xl"
-            onClick={(event) => event.stopPropagation()}
+            className="relative flex w-full max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] shadow-2xl"
+            style={{ maxHeight: "calc(100dvh - 1.5rem)" }}
           >
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-4 py-4 sm:px-6 sm:py-5">
-              <div>
-                <h3 className="text-xl font-bold text-white">Invite to activity</h3>
-                <p className="mt-1 text-sm text-slate-300">Create a shared activity with {activeMeta.title} in this thread.</p>
-              </div>
-              <button
-                type="button"
-                disabled={activityBusy}
-                onClick={() => setActivityComposerOpen(false)}
-                className="rounded-full border border-white/15 bg-white/[0.03] p-2 text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100 disabled:opacity-60"
-                aria-label="Close activity composer"
-              >
-                <span className="material-symbols-outlined text-base">close</span>
-              </button>
-            </div>
+            {/* Close */}
+            <button
+              type="button"
+              disabled={activityBusy}
+              onClick={() => setActivityComposerOpen(false)}
+              className="absolute right-5 top-5 z-10 text-white/50 transition hover:text-white disabled:opacity-40"
+              aria-label="Close activity composer"
+            >
+              <span className="material-symbols-outlined text-[22px]">close</span>
+            </button>
 
-            <div className="space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-              <div className="block">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Activity type</span>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
+              {/* Header */}
+              <div className="mb-6 flex items-start gap-4">
+                <div
+                  className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
+                  style={{
+                    backgroundImage: activeMeta.avatarUrl
+                      ? `url(${activeMeta.avatarUrl})`
+                      : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Invite to Activity</p>
+                  <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">{activeMeta.title}</h3>
+                </div>
+                <div className="mr-12 shrink-0 flex flex-col items-end gap-2 sm:mr-14">
+                  {activitySupportsLinkedMember ? (
+                    <button
+                      type="button"
+                      onClick={() => setActivityLinkedPickerOpen((prev) => !prev)}
+                      className="inline-flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3.5 text-xs font-semibold text-white transition hover:border-[#00F5FF]/40 hover:text-[#9EFBFF]"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">group_add</span>
+                      Add Member
+                    </button>
+                  ) : null}
+                  {activityRequestsLimit !== null && activityRequestsUsed !== null && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
+                      <span className={`text-[13px] font-black tabular-nums leading-tight ${
+                        activityRequestsUsed >= activityRequestsLimit
+                          ? "text-rose-400"
+                          : activityRequestsUsed >= activityRequestsLimit * 0.8
+                            ? "text-amber-400"
+                            : "text-[#00F5FF]"
+                      }`}>
+                        {activityRequestsUsed}<span className="text-white/25 font-normal"> / {activityRequestsLimit}</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {activityPendingWarning ? (
+                <PendingRequestBanner
+                  message={activityPendingWarning}
+                  className="mb-5"
+                />
+              ) : null}
+
+              {/* Activity Type — dropdown */}
+              <div className="mb-5">
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">Activity Type</span>
+                  <div className="relative">
+                    <select
+                      data-testid="activity-type-select"
+                      value={activityDraft.activityType}
+                      onChange={(event) => setActivityDraft((prev) => ({ ...prev, activityType: event.target.value as ActivityType }))}
+                      className="w-full appearance-none rounded-xl border border-white/15 bg-black/35 px-3 py-3 pr-10 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    >
+                      {ACTIVITY_TYPES.map((type) => (
+                        <option key={type} value={type}>{activityTypeLabel(type)}</option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-white/50">expand_more</span>
+                  </div>
+                </label>
+              </div>
+
+              {activitySupportsLinkedMember ? (
+                <div className="mb-5">
+                  {activityDraft.linkedMemberUserId ? (
+                    <p className="text-xs text-[#9EFBFF]">
+                      Added: {activityLinkedConnectionOptions.find((option) => option.userId === activityDraft.linkedMemberUserId)?.displayName ?? "Connection"}
+                    </p>
+                  ) : null}
+                  {activityLinkedPickerOpen ? (
+                    <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                      <input
+                        type="text"
+                        value={activityLinkedMemberQuery}
+                        onChange={(event) => setActivityLinkedMemberQuery(event.target.value)}
+                        placeholder="Search connection..."
+                        className="mb-3 w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                      <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                        <button
+                          type="button"
+                          onClick={() => setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: "" }))}
+                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                            !activityDraft.linkedMemberUserId
+                              ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                              : "border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white"
+                          }`}
+                        >
+                          <span>No extra member</span>
+                          {!activityDraft.linkedMemberUserId ? (
+                            <span className="material-symbols-outlined text-[16px]">check</span>
+                          ) : null}
+                        </button>
+                        {filteredActivityLinkedConnectionOptions.map((option) => {
+                          const subtitle = [option.city, option.country].filter(Boolean).join(", ");
+                          const isSelected = activityDraft.linkedMemberUserId === option.userId;
+                          return (
+                            <button
+                              key={option.userId}
+                              type="button"
+                              onClick={() => {
+                                setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: option.userId }));
+                                setActivityLinkedPickerOpen(false);
+                                setActivityLinkedMemberQuery("");
+                              }}
+                              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${
+                                isSelected
+                                  ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                                  : "border-white/10 bg-black/20 text-white/80 hover:border-white/20 hover:text-white"
+                              }`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold">{option.displayName}</span>
+                                {subtitle ? <span className="block truncate text-xs text-white/45">{subtitle}</span> : null}
+                              </span>
+                              {isSelected ? <span className="material-symbols-outlined text-[16px]">check</span> : null}
+                            </button>
+                          );
+                        })}
+                        {filteredActivityLinkedConnectionOptions.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-3 text-sm text-white/45">
+                            No matching connections.
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="mb-5">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">Date</span>
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setActivityMoreFiltersOpen((prev) => !prev)}
-                    className="rounded-full border border-white/12 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-cyan-300/35 hover:text-cyan-100"
+                    onClick={() => setActivityDraft((prev) => ({ ...prev, dateMode: "set" }))}
+                    className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+                      activityDraft.dateMode === "set"
+                        ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                        : "border-white/15 bg-black/30 text-white/75 hover:border-white/30"
+                    }`}
                   >
-                    {activityMoreFiltersOpen ? "Less filters" : "More filters"}
+                    Set date
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivityDraft((prev) => ({ ...prev, dateMode: "none", startAt: "", endAt: "" }))}
+                    className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+                      activityDraft.dateMode === "none"
+                        ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
+                        : "border-white/15 bg-black/30 text-white/75 hover:border-white/30"
+                    }`}
+                  >
+                    No date
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {PRIMARY_ACTIVITY_QUICK_FILTERS.map((item) => {
-                    const selected = activityDraft.activityType === item;
-                    return (
-                      <button
-                        key={item}
-                        type="button"
-                        data-testid={`activity-filter-${item}`}
-                        onClick={() => setActivityDraft((prev) => ({ ...prev, activityType: item }))}
-                        className={[
-                          "rounded-full border px-3 py-2 text-xs font-semibold transition",
-                          selected
-                            ? "border-cyan-300/40 bg-[linear-gradient(90deg,rgba(0,245,255,0.18),rgba(255,0,255,0.12))] text-white"
-                            : "border-white/12 bg-white/[0.03] text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100",
-                        ].join(" ")}
-                      >
-                        {activityTypeLabel(item)}
-                      </button>
-                    );
-                  })}
-                </div>
-                {activityMoreFiltersOpen ? (
-                  <div className="mt-3 rounded-2xl border border-white/8 bg-black/20 p-3">
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">More activity filters</p>
-                    <div className="flex flex-wrap gap-2">
-                      {SECONDARY_ACTIVITY_QUICK_FILTERS.map((item) => {
-                        const selected = activityDraft.activityType === item;
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            data-testid={`activity-filter-more-${item}`}
-                            onClick={() => setActivityDraft((prev) => ({ ...prev, activityType: item }))}
-                            className={[
-                              "rounded-full border px-3 py-2 text-xs font-semibold transition",
-                              selected
-                                ? "border-cyan-300/40 bg-[linear-gradient(90deg,rgba(0,245,255,0.18),rgba(255,0,255,0.12))] text-white"
-                                : "border-white/12 bg-white/[0.03] text-slate-300 hover:border-cyan-300/35 hover:text-cyan-100",
-                            ].join(" ")}
-                          >
-                            {activityTypeLabel(item)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                {activityDraft.dateMode === "none" ? (
+                  <p className="mt-2 text-xs text-slate-400">You can leave a reference after 24h from mutual acceptance.</p>
                 ) : null}
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Start date</span>
-                  <input
-                    data-testid="activity-composer-start"
-                    type="datetime-local"
-                    value={activityDraft.startAt}
-                    onChange={(event) => setActivityDraft((prev) => ({ ...prev, startAt: event.target.value }))}
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/35"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">End date</span>
-                  <input
-                    data-testid="activity-composer-end"
-                    type="datetime-local"
-                    value={activityDraft.endAt}
-                    onChange={(event) => setActivityDraft((prev) => ({ ...prev, endAt: event.target.value }))}
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/35"
-                  />
-                </label>
-              </div>
+              {activityDraft.dateMode === "set" ? (
+                <div className={`mb-5 grid gap-4 ${activityDraftUsesDateRange ? "md:grid-cols-2" : ""}`}>
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">
+                      {activityDraftUsesDateRange ? "Start date" : "Date"}
+                    </span>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-white/60">calendar_today</span>
+                      <input
+                        data-testid="activity-composer-start"
+                        type="date"
+                        value={activityDraft.startAt}
+                        onChange={(event) => setActivityDraft((prev) => ({ ...prev, startAt: event.target.value }))}
+                        className="dark-calendar-input w-full rounded-xl border border-white/15 bg-black/35 py-3 pl-10 pr-3 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      />
+                    </div>
+                  </label>
+                  {activityDraftUsesDateRange ? (
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">End date</span>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-white/60">calendar_today</span>
+                        <input
+                          data-testid="activity-composer-end"
+                          type="date"
+                          value={activityDraft.endAt}
+                          onChange={(event) => setActivityDraft((prev) => ({ ...prev, endAt: event.target.value }))}
+                          className="dark-calendar-input w-full rounded-xl border border-white/15 bg-black/35 py-3 pl-10 pr-3 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        />
+                      </div>
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
 
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Note</span>
+              {/* Note */}
+              <div className="mb-6">
+                <div className="mb-2 text-sm font-semibold text-white">Note</div>
                 <textarea
                   data-testid="activity-composer-note"
                   rows={4}
@@ -7268,31 +7489,39 @@ function MessagesPageContent() {
                   value={activityDraft.note}
                   onChange={(event) => setActivityDraft((prev) => ({ ...prev, note: event.target.value }))}
                   placeholder="Add context, timing, or what you want to do together."
-                  className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/35"
+                  className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                 />
-                <div className="mt-2 text-right text-[11px] text-slate-500">{activityDraft.note.length}/600</div>
-              </label>
+                <div className="mt-2 text-right text-[11px] text-white/45">{activityDraft.note.length}/600</div>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-              <p className="text-xs text-slate-400">No dates means completion starts 24h after acceptance.</p>
-              <div className="flex items-center justify-end gap-2">
+            {/* Footer */}
+            <div className="shrink-0 border-t border-white/8 px-6 py-4 sm:px-8">
+              <p className="mb-3 text-xs text-slate-400">
+                {activityDraft.dateMode === "none"
+                  ? "You can leave a reference after 24h from mutual acceptance."
+                  : activityDraftUsesDateRange
+                  ? "Festival, Travel together, Offer hosting, and Request hosting use start and end dates."
+                  : "All other activities use one date only."}
+              </p>
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
                 <button
                   type="button"
                   disabled={activityBusy}
                   onClick={() => setActivityComposerOpen(false)}
-                  className="rounded-full border border-white/15 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-200 hover:border-white/25 disabled:opacity-60"
+                  className="h-12 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white disabled:opacity-45"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  disabled={activityBusy}
+                  disabled={activityBusy || Boolean(activityPendingWarning)}
                   onClick={() => void submitActivityInvite()}
                   data-testid="activity-composer-submit"
-                  className="rounded-full border border-cyan-300/30 bg-[linear-gradient(90deg,rgba(0,245,255,0.22),rgba(255,0,255,0.18))] px-4 py-2 text-sm font-semibold text-white hover:border-cyan-300/45 hover:bg-[linear-gradient(90deg,rgba(0,245,255,0.28),rgba(255,0,255,0.24))] disabled:opacity-60"
+                  className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
+                  style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
                 >
-                  {activityBusy ? "Sending..." : "Send Request"}
+                  {activityBusy ? "Sending…" : "Send invite"}
                 </button>
               </div>
             </div>
@@ -7304,8 +7533,8 @@ function MessagesPageContent() {
         open={Boolean(shareInquiryContext)}
         inquiryLabel={
           shareInquiryContext && typeof shareInquiryContext.metadata.inquiry_kind === "string"
-            ? SERVICE_INQUIRY_KIND_LABELS[shareInquiryContext.metadata.inquiry_kind as ServiceInquiryKind] ?? "Service inquiry"
-            : shareInquiryContext?.title || "Service inquiry"
+            ? SERVICE_INQUIRY_KIND_LABELS[shareInquiryContext.metadata.inquiry_kind as ServiceInquiryKind] ?? "Teaching services"
+            : shareInquiryContext?.title || "Teaching services"
         }
         blocks={shareInquiryBlocks}
         busy={shareInquiryBusy}

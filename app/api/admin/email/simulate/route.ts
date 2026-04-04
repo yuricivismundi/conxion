@@ -142,6 +142,8 @@ export async function POST(req: Request) {
         ? {
             kind,
             recipientUserId: body.recipientUserId,
+            recipientEmailOverride: body.recipientEmailOverride ?? null,
+            recipientNameOverride: body.recipientNameOverride ?? null,
             actorUserId: body.actorUserId,
             connectionId: body.connectionId ?? null,
             tripId: body.tripId ?? null,

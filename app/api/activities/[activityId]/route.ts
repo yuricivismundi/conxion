@@ -235,7 +235,7 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     }
 
     const startDate = current.start_at ? current.start_at.slice(0, 10) : null;
-    const endDate = (current.end_at ?? current.start_at) ? (current.end_at ?? current.start_at)!.slice(0, 10) : null;
+    const endDate = current.end_at ? current.end_at.slice(0, 10) : null;
     const title = current.title ?? activityTypeLabel(current.activity_type);
 
     const contextRes = await userRpc("cx_upsert_thread_context", {

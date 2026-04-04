@@ -10,6 +10,9 @@ import {
   writeOnboardingDraft,
 } from "@/lib/onboardingDraft";
 import { getAvatarStorageUrl } from "@/lib/avatar-storage";
+import { normalizeInterests } from "@/lib/interests";
+import { normalizeUsername } from "@/lib/username/normalize";
+import { mapUsernameServerError, validateUsernameFormat } from "@/lib/username/validate";
 import { supabase } from "@/lib/supabase/client";
 
 const AVAIL = [
@@ -17,7 +20,7 @@ const AVAIL = [
   { key: "weekends", title: "Weekends" },
   { key: "daytime", title: "Daytime" },
   { key: "evenings", title: "Evenings" },
-  { key: "travel", title: "Travel for Events" },
+  { key: "travel", title: "Travel for events" },
   { key: "rather_not_say", title: "I’d rather not say" },
 ] as const;
 
@@ -36,11 +39,11 @@ const DEFAULT_AVAIL: Record<AvailKey, boolean> = {
 };
 
 const AVAILABILITY_LABELS: Record<AvailKey, string> = {
-  weekdays: "Week Days",
+  weekdays: "Weekdays",
   weekends: "Weekends",
-  daytime: "Day Time",
+  daytime: "Daytime",
   evenings: "Evenings",
-  travel: "Travel for Events",
+  travel: "Travel for events",
   rather_not_say: "Rather not say",
 };
 
@@ -200,6 +203,7 @@ export default function OnboardingFinalizePage() {
 
       const draft = readOnboardingDraft();
       const displayName = typeof draft.displayName === "string" ? draft.displayName.trim() : "";
+      const username = normalizeUsername(typeof draft.username === "string" ? draft.username : "");
       const country = typeof draft.country === "string" ? draft.country.trim() : "";
       const city = typeof draft.city === "string" ? draft.city.trim() : "";
       const roles = toStringArray(draft.roles);
@@ -211,7 +215,7 @@ export default function OnboardingFinalizePage() {
           ? (draft.interestsByRole as Record<string, unknown>)
           : {};
       const interestsStructured = Object.values(structuredInterestMap).flatMap((value) => toStringArray(value));
-      const interests = Array.from(new Set([...interestsFlat, ...interestsStructured]));
+      const interests = normalizeInterests([...interestsFlat, ...interestsStructured]);
       const availability = (Object.entries(avail) as Array<[AvailKey, boolean]>)
         .filter(([, enabled]) => enabled)
         .map(([key]) => AVAILABILITY_LABELS[key]);
@@ -223,6 +227,10 @@ export default function OnboardingFinalizePage() {
 
       if (displayName.length < 2) {
         throw new Error("Display name is missing. Please complete Step 1 again.");
+      }
+      const usernameValidation = validateUsernameFormat(username);
+      if (!usernameValidation.valid) {
+        throw new Error(usernameValidation.error ?? "Username must be between 3 and 20 characters.");
       }
       if (city.length < 1 || country.length < 2) {
         throw new Error("City or country is missing. Please complete Step 1 again.");
@@ -252,6 +260,7 @@ export default function OnboardingFinalizePage() {
           user_id: user.id,
           auth_user_id: user.id,
           display_name: displayName,
+          username: usernameValidation.normalizedUsername,
           city,
           country,
           roles,
@@ -269,7 +278,7 @@ export default function OnboardingFinalizePage() {
       );
 
       if (upsertRes.error) {
-        throw new Error(upsertRes.error.message);
+        throw new Error(mapUsernameServerError(upsertRes.error.message));
       }
 
       const sessionRes = await supabase.auth.getSession();
@@ -421,7 +430,7 @@ export default function OnboardingFinalizePage() {
                 : undefined
             }
           >
-            {saving ? "Completing..." : "Complete Profile"}
+            {saving ? "Completing…" : "Complete profile"}
           </button>
         </div>
 

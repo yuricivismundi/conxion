@@ -6,21 +6,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Nav from "@/components/Nav";
 import { supabase } from "@/lib/supabase/client";
 import {
-  createSampleNotificationsForCurrentUser,
   fetchNotifications,
   formatNotificationRelativeTime,
   markAllNotificationsRead,
   markNotificationRead,
   notificationCategory,
   notificationCategoryLabel,
+  notificationIcon,
   type NotificationRow,
 } from "@/lib/notifications/client";
+import { cx } from "@/lib/cx";
 
 type FilterKey = "all" | "unread" | "requests" | "trips" | "hosting" | "references" | "events" | "general";
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "all", label: "All" },
@@ -138,19 +136,6 @@ export default function NotificationsPage() {
     setBusy(false);
   }
 
-  async function handleCreateSamples() {
-    setBusy(true);
-    setError(null);
-    const res = await createSampleNotificationsForCurrentUser();
-    if (res.error) {
-      setError(res.error);
-      setBusy(false);
-      return;
-    }
-    await refresh();
-    setBusy(false);
-  }
-
   async function handleMarkRead(id: string) {
     setBusy(true);
     const res = await markNotificationRead(id);
@@ -181,19 +166,6 @@ export default function NotificationsPage() {
             <span className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">
               Unread: {unreadCount}
             </span>
-            <button
-              type="button"
-              onClick={() => void handleCreateSamples()}
-              disabled={busy}
-              className={cx(
-                "rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
-                busy
-                  ? "cursor-not-allowed border-white/10 bg-white/5 text-slate-600"
-                  : "border-fuchsia-300/35 bg-fuchsia-300/12 text-fuchsia-100 hover:bg-fuchsia-300/22"
-              )}
-            >
-              Add samples
-            </button>
             <button
               type="button"
               onClick={() => void handleMarkAllRead()}
@@ -277,40 +249,47 @@ export default function NotificationsPage() {
             <ul className="divide-y divide-white/8">
               {visibleItems.map((item) => {
                 const category = notificationCategory(item.kind);
+                const { icon, colorClass, bgClass } = notificationIcon(item.kind);
                 return (
-                  <li key={item.id} className={cx("px-4 py-4", item.is_read ? "bg-transparent" : "bg-cyan-400/[0.04]")}> 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="mb-1 flex items-center gap-2">
-                          <span className="rounded-full border border-white/12 bg-black/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                            {notificationCategoryLabel(category)}
-                          </span>
-                          <span className="text-[11px] text-slate-500">{formatNotificationRelativeTime(item.created_at)}</span>
-                          {!item.is_read ? <span className="h-2 w-2 rounded-full bg-cyan-300" /> : null}
-                        </div>
-                        <p className="text-sm font-semibold text-white">{item.title}</p>
-                        {item.body ? <p className="mt-1 text-sm text-slate-400">{item.body}</p> : null}
+                  <li key={item.id} className={cx("px-4 py-4", item.is_read ? "bg-transparent" : "bg-cyan-400/[0.04]")}>
+                    <div className="flex gap-3">
+                      <div className={cx("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", bgClass)}>
+                        <span className={cx("material-symbols-outlined text-[18px]", colorClass)}>{icon}</span>
                       </div>
-
-                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                        {item.link_url ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleOpen(item)}
-                            className="rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
-                          >
-                            Open
-                          </button>
-                        ) : null}
-                        {!item.is_read ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleMarkRead(item.id)}
-                            className="rounded-lg border border-white/15 bg-black/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-white/30"
-                          >
-                            Mark read
-                          </button>
-                        ) : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="mb-1 flex items-center gap-2">
+                              <span className="rounded-full border border-white/12 bg-black/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                {notificationCategoryLabel(category)}
+                              </span>
+                              <span className="text-[11px] text-slate-500">{formatNotificationRelativeTime(item.created_at)}</span>
+                              {!item.is_read ? <span className="h-2 w-2 rounded-full bg-cyan-300" /> : null}
+                            </div>
+                            <p className="text-sm font-semibold text-white">{item.title}</p>
+                            {item.body ? <p className="mt-1 text-sm text-slate-400">{item.body}</p> : null}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                            {item.link_url ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleOpen(item)}
+                                className="rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
+                              >
+                                Open
+                              </button>
+                            ) : null}
+                            {!item.is_read ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleMarkRead(item.id)}
+                                className="rounded-lg border border-white/15 bg-black/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-white/30"
+                              >
+                                Mark read
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </li>

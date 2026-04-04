@@ -3,6 +3,7 @@
 import Link from "next/link";
 import VerifiedBadge from "@/components/VerifiedBadge";
 import Avatar from "@/components/Avatar";
+import { cx } from "@/lib/cx";
 
 type DanceSkill = { level?: string; verified?: boolean };
 
@@ -19,9 +20,6 @@ type ProfileCardModel = {
   verified: boolean;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function Icon({
   children,

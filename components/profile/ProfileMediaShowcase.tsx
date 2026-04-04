@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { deriveProfileMediaShowcase } from "@/lib/profile-media/read-model";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
+import { cx } from "@/lib/cx";
 
 type ProfileMediaShowcaseProps = {
   media: ProfileMediaItem[];
@@ -11,9 +12,6 @@ type ProfileMediaShowcaseProps = {
   onManage?: () => void;
 };
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function mediaPoster(item: ProfileMediaItem) {
   return item.kind === "photo" ? item.publicUrl : item.thumbnailUrl;
@@ -31,6 +29,16 @@ function formatDuration(value: number | null) {
   const minutes = Math.floor(value / 60);
   const seconds = value % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function mediaTileLabel(item: ProfileMediaItem, index: number, total: number) {
+  const positionLabel = `item ${index + 1} of ${total}`;
+  if (item.kind === "video") {
+    const duration = formatDuration(item.durationSec);
+    return duration ? `Open video, ${positionLabel}, duration ${duration}` : `Open video, ${positionLabel}`;
+  }
+
+  return `Open photo, ${positionLabel}`;
 }
 
 function tileSpanClass(index: number, total: number) {
@@ -155,6 +163,7 @@ export default function ProfileMediaShowcase({ media, isOwner, onManage }: Profi
                 type="button"
                 onClick={() => openLightbox(item.id)}
                 data-testid="profile-media-tile"
+                aria-label={mediaTileLabel(item, index, displayItems.length)}
                 className={tileClassName}
               >
                 {poster ? (

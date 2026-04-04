@@ -5,6 +5,7 @@ export type OnboardingDraft = {
   ageConfirmedAt?: string;
 
   displayName?: string;
+  username?: string;
   country?: string;
   city?: string;
   roles?: string[];

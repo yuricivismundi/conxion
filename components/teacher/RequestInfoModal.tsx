@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
+import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
 import { supabase } from "@/lib/supabase/client";
 import {
   SERVICE_INQUIRY_KIND_LABELS,
@@ -18,25 +20,94 @@ type RequestInfoModalProps = {
 };
 
 const NOTE_LIMIT = 220;
+type InquiryUsage = { used: number; limit: number; remaining: number };
 
 export default function RequestInfoModal({
   open,
   recipientUserId,
-  recipientName: _recipientName,
   onClose,
   onSubmitted,
 }: RequestInfoModalProps) {
+  const pendingWarningRequestIdRef = useRef(0);
   const [kind, setKind] = useState<ServiceInquiryKind>("private_class");
   const [shortNote, setShortNote] = useState("");
+  const [city, setCity] = useState("");
   const [requestedDatesText, setRequestedDatesText] = useState("");
   const [requesterType, setRequesterType] = useState<ServiceInquiryRequesterType>("individual");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingWarning, setPendingWarning] = useState<string | null>(null);
+  const [usage, setUsage] = useState<InquiryUsage | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    setError(null);
-    setBusy(false);
+    let cancelled = false;
+
+    async function loadPendingWarning() {
+      const requestId = ++pendingWarningRequestIdRef.current;
+      const canCommit = () => !cancelled && pendingWarningRequestIdRef.current === requestId;
+      if (!open || !recipientUserId) {
+        if (canCommit()) setPendingWarning(null);
+        return;
+      }
+
+      setError(null);
+      setBusy(false);
+
+      try {
+        const warning = await fetchPendingPairConflict(recipientUserId);
+        if (canCommit()) setPendingWarning(warning);
+      } catch {
+        if (canCommit()) setPendingWarning(null);
+      }
+    }
+
+    void loadPendingWarning();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, recipientUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUsage() {
+      if (!open) {
+        if (!cancelled) setUsage(null);
+        return;
+      }
+      try {
+        const sessionRes = await supabase.auth.getSession();
+        const accessToken = sessionRes.data.session?.access_token ?? "";
+        if (!accessToken) {
+          if (!cancelled) setUsage(null);
+          return;
+        }
+        const response = await fetch("/api/service-inquiries/usage", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const result = (await response.json().catch(() => null)) as
+          | { ok?: boolean; used?: number; limit?: number; remaining?: number }
+          | null;
+        if (!cancelled && response.ok && result?.ok) {
+          setUsage({
+            used: typeof result.used === "number" ? result.used : 0,
+            limit: typeof result.limit === "number" ? result.limit : 5,
+            remaining: typeof result.remaining === "number" ? result.remaining : 0,
+          });
+        }
+      } catch {
+        if (!cancelled) setUsage(null);
+      }
+    }
+
+    void loadUsage();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   const remaining = useMemo(() => NOTE_LIMIT - shortNote.length, [shortNote.length]);
@@ -68,6 +139,7 @@ export default function RequestInfoModal({
           inquiryKind: kind,
           requesterType,
           requesterMessage: shortNote,
+          city,
           requestedDatesText,
         }),
       });
@@ -78,6 +150,7 @@ export default function RequestInfoModal({
       }
 
       setShortNote("");
+      setCity("");
       setRequestedDatesText("");
       setRequesterType("individual");
       setKind("private_class");
@@ -97,7 +170,7 @@ export default function RequestInfoModal({
       <div className="flex max-h-[min(92svh,760px)] w-full max-w-xl flex-col overflow-hidden rounded-[28px] border border-white/12 bg-[#071017] shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
           <div>
-            <h2 className="mt-1 text-xl font-bold text-white">Request Teaching Info</h2>
+            <h2 className="mt-1 text-xl font-bold text-white">Teaching services request</h2>
           </div>
           <button
             type="button"
@@ -109,6 +182,18 @@ export default function RequestInfoModal({
           </button>
         </div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 overscroll-contain">
+          {pendingWarning ? (
+            <PendingRequestBanner
+              message={pendingWarning}
+              className="-mt-1"
+            />
+          ) : null}
+          {usage ? (
+            <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/8 px-4 py-3 text-sm text-cyan-50">
+              Info requests left this month: <span className="font-semibold">{usage.remaining}</span> of {usage.limit}
+            </div>
+          ) : null}
+
           <div>
             <p className="text-sm font-semibold text-white">What are you interested in?</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -133,7 +218,7 @@ export default function RequestInfoModal({
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-1">
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="text-sm font-semibold text-white">Requester type</span>
               <select
@@ -144,6 +229,15 @@ export default function RequestInfoModal({
                 <option value="individual">Individual</option>
                 <option value="organizer">Organizer</option>
               </select>
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-white">City</span>
+              <input
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+                placeholder="Tallinn"
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none"
+              />
             </label>
           </div>
 
@@ -186,7 +280,7 @@ export default function RequestInfoModal({
           <button
             type="button"
             onClick={() => void submitInquiry()}
-            disabled={busy || remaining < 0 || !shortNote.trim()}
+            disabled={busy || remaining < 0 || !shortNote.trim() || Boolean(pendingWarning)}
             className="rounded-2xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? "Sending..." : "Send request"}

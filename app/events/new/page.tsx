@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { DismissibleBanner } from "@/components/DismissibleBanner";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import EventCoverCropDialog from "@/components/events/EventCoverCropDialog";
@@ -170,31 +171,40 @@ function CreateEventForm() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr || !authData.user) {
-        router.replace("/auth");
-        return;
-      }
-      setMeId(authData.user.id);
+      try {
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr || !authData.user) {
+          router.replace("/auth");
+          return;
+        }
+        setMeId(authData.user.id);
 
-      const [{ data: sessionData }, profileRes] = await Promise.all([
-        supabase.auth.getSession(),
-        supabase.from("profiles").select("city,country").eq("user_id", authData.user.id).maybeSingle(),
-      ]);
+        const [{ data: sessionData }, profileRes] = await Promise.all([
+          supabase.auth.getSession(),
+          supabase.from("profiles").select("city,country").eq("user_id", authData.user.id).maybeSingle(),
+        ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      setAccessToken(sessionData.session?.access_token ?? null);
-      if (profileRes.data) {
-        const profileRow = profileRes.data as Record<string, unknown>;
-        if (typeof profileRow.city === "string") setCity(profileRow.city);
-        if (typeof profileRow.country === "string") setCountry(profileRow.country);
+        setAccessToken(sessionData.session?.access_token ?? null);
+        if (profileRes.data) {
+          const profileRow = profileRes.data as Record<string, unknown>;
+          if (typeof profileRow.city === "string") setCity(profileRow.city);
+          if (typeof profileRow.country === "string") setCountry(profileRow.country);
+        }
+        if (countriesAll.length === 0) {
+          const fetchedCountries = await getCountriesAll();
+          if (!cancelled && fetchedCountries.length > 0) setCountriesAll(fetchedCountries);
+        }
+      } catch (bootstrapError) {
+        if (!cancelled) {
+          setError(bootstrapError instanceof Error ? bootstrapError.message : "Could not load event form.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-      if (countriesAll.length === 0) {
-        const fetchedCountries = await getCountriesAll();
-        if (!cancelled && fetchedCountries.length > 0) setCountriesAll(fetchedCountries);
-      }
-      setLoading(false);
     })();
 
     return () => {
@@ -374,44 +384,49 @@ function CreateEventForm() {
       .filter((item) => item.length > 0)
       .slice(0, 12);
 
-    const response = await fetch("/api/events", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        title: title.trim(),
-        description: description.trim(),
-        eventType,
-        styles,
-        visibility,
-        city: city.trim(),
-        country: country.trim(),
-        venueName: venueName.trim(),
-        venueAddress: venueAddress.trim(),
-        startsAt,
-        endsAt,
-        capacity: hasCapacity && typeof capacity === "number" ? capacity : null,
-        coverUrl: coverUrl.trim(),
-        links: cleanedLinks,
-        status: nextStatus,
-      }),
-    });
+    try {
+      const response = await fetch("/api/events", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim(),
+          eventType,
+          styles,
+          visibility,
+          city: city.trim(),
+          country: country.trim(),
+          venueName: venueName.trim(),
+          venueAddress: venueAddress.trim(),
+          startsAt,
+          endsAt,
+          capacity: hasCapacity && typeof capacity === "number" ? capacity : null,
+          coverUrl: coverUrl.trim(),
+          links: cleanedLinks,
+          status: nextStatus,
+        }),
+      });
 
-    const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; event_id?: string } | null;
-    if (!response.ok || !json?.ok || !json.event_id) {
+      const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; event_id?: string } | null;
+      if (!response.ok || !json?.ok || !json.event_id) {
+        setSubmitting(false);
+        setError(json?.error ?? "Failed to create event.");
+        return;
+      }
+
+      if (nextStatus === "published") {
+        router.push(`/events/published?event=${encodeURIComponent(json.event_id)}`);
+        return;
+      }
+
+      router.push(`/events/${json.event_id}/edit`);
+    } catch {
       setSubmitting(false);
-      setError(json?.error ?? "Failed to create event.");
-      return;
+      setError("Could not save event. Check your connection and try again.");
     }
-
-    if (nextStatus === "published") {
-      router.push(`/events/published?event=${encodeURIComponent(json.event_id)}`);
-      return;
-    }
-
-    router.push(`/events/${json.event_id}/edit`);
   }
 
   async function lookupAddress() {
@@ -491,7 +506,9 @@ function CreateEventForm() {
         </header>
 
         {error ? (
-          <div className="mb-5 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
+          <div className="mb-5">
+            <DismissibleBanner message={error} tone="error" onDismiss={() => setError(null)} />
+          </div>
         ) : null}
 
         <div className="space-y-8 rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_35%),linear-gradient(180deg,rgba(11,18,25,0.96),rgba(5,7,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.36)] sm:p-8">
@@ -550,7 +567,7 @@ function CreateEventForm() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-base font-semibold text-white">Upload event cover</p>
-                    <p className="text-sm text-slate-400">JPG, PNG, or WEBP. You can zoom and reposition it before it uploads.</p>
+                    <p className="text-sm text-slate-400">Use a 1.91:1 cover, ideally 1920 × 1005. Keep key text centered for mobile crops.</p>
                   </div>
                   <button
                     type="button"
@@ -970,7 +987,7 @@ function CreateEventForm() {
                   disabled={submitting || uploadingCover || !canSaveDraft}
                   className="rounded-full border border-white/15 bg-white/[0.05] px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08] disabled:opacity-50"
                 >
-                  {submitting ? "Saving..." : "Save Draft"}
+                  {submitting ? "Saving..." : "Save draft"}
                 </button>
                 <button
                   type="button"
@@ -978,7 +995,7 @@ function CreateEventForm() {
                   disabled={submitting || uploadingCover || !canPublish}
                   className="rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-7 py-2.5 text-sm font-bold text-[#052328] hover:opacity-95 disabled:opacity-60"
                 >
-                  {submitting ? "Saving..." : uploadingCover ? "Uploading cover..." : "Publish Event"}
+                  {submitting ? "Saving..." : uploadingCover ? "Uploading cover..." : "Publish event"}
                 </button>
               </div>
             </div>

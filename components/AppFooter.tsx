@@ -4,10 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAppLanguage, type AppLanguage } from "@/components/AppLanguageProvider";
+import { cx } from "@/lib/cx";
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 function shouldHideFooter(pathname: string) {
   if (!pathname) return false;

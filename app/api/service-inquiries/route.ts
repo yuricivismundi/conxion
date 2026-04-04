@@ -3,7 +3,7 @@ import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
 import { fetchTeacherInfoProfile } from "@/lib/teacher-info/read-model";
 import { countServiceInquiriesThisMonth, SERVICE_INQUIRY_MONTHLY_LIMIT } from "@/lib/service-inquiries/read-model";
 import { requireServiceInquiryAuth, jsonError, singleLineTrimmed } from "@/lib/service-inquiries/server";
-import { ensureServiceInquiryThread, upsertServiceInquiryContext } from "@/lib/service-inquiries/thread";
+import { ensureServiceInquiryThread, upsertServiceInquiryContext, emitServiceInquiryEvent } from "@/lib/service-inquiries/thread";
 import { isServiceInquiryKind, isServiceInquiryRequesterType, normalizeServiceInquiryRow } from "@/lib/service-inquiries/types";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 
@@ -14,6 +14,7 @@ type CreateInquiryPayload = {
   inquiryKind?: unknown;
   requesterType?: unknown;
   requesterMessage?: unknown;
+  city?: unknown;
   requestedDatesText?: unknown;
 };
 
@@ -65,6 +66,7 @@ export async function POST(req: Request) {
     }
 
     const requesterMessage = singleLineTrimmed(body?.requesterMessage, 220);
+    const city = singleLineTrimmed(body?.city, 80);
     const requestedDatesText = singleLineTrimmed(body?.requestedDatesText, 120);
     if (!requesterMessage) {
       return jsonError("Please add a short note so the teacher has context.", 400);
@@ -86,7 +88,7 @@ export async function POST(req: Request) {
         inquiry_kind: inquiryKind,
         requester_type: isServiceInquiryRequesterType(requesterType) ? requesterType : null,
         requester_message: requesterMessage,
-        city: null,
+        city,
         requested_dates_text: requestedDatesText,
         status: "pending",
       } as never)
@@ -113,6 +115,20 @@ export async function POST(req: Request) {
       statusTag: "pending",
       extraMetadata: {
         requester_followup_used: false,
+      },
+    });
+
+    // Emit the student's note as the first message so it appears in the inbox preview.
+    await emitServiceInquiryEvent({
+      serviceClient: auth.serviceClient,
+      threadId,
+      senderId: auth.userId,
+      body: inquiry.requesterMessage ?? "Teaching services request sent.",
+      messageType: "request",
+      statusTag: "pending",
+      metadata: {
+        service_inquiry_id: inquiry.id,
+        inquiry_kind: inquiry.inquiryKind,
       },
     });
 

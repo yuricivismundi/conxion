@@ -41,7 +41,7 @@ const isString = (value: unknown): value is string => typeof value === "string";
 const STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
 const LEVELS = ["beginner", "intermediate", "advanced"] as const;
 
-const ROLE_OPTIONS = ["Social dancer / Student", "Organiser", "DJ", "Artist", "Teacher"] as const;
+const ROLE_OPTIONS = ["Social Dancer", "Student", "Organiser", "DJ", "Artist", "Teacher"] as const;
 
 // Keep this intentionally simple and extend as admin operations grow.
 const LANGUAGE_OPTIONS = [

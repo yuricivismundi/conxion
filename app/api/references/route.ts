@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { dispatchReferencePromptEmails } from "@/lib/email/reference-prompts";
 import {
   normalizeReferenceContextTag,
@@ -12,6 +11,8 @@ type SupabaseUserClient = UnsafeSupabaseClient;
 type SupabaseAdminClient = UnsafeSupabaseClient;
 
 const REFERENCE_COLUMNS_CACHE_TTL_MS = 60_000;
+const REFERENCE_WRITE_WINDOW_DAYS = 10;
+const REFERENCE_WINDOW_MS = REFERENCE_WRITE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 let cachedReferenceColumns:
   | {
       expiresAt: number;
@@ -75,12 +76,12 @@ function normalizeReferenceEntityType(value: string): ReferenceEntityType {
   return "connection";
 }
 
-function within15Days(value: string | null | undefined) {
+function withinReferenceWindow(value: string | null | undefined) {
   if (!value) return false;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return false;
   const delta = Date.now() - date.getTime();
-  return delta >= 0 && delta <= 15 * 24 * 60 * 60 * 1000;
+  return delta >= 0 && delta <= REFERENCE_WINDOW_MS;
 }
 
 function pickFirstString(row: Record<string, unknown>, keys: string[]) {
@@ -920,7 +921,7 @@ async function hasEligibleCompletedSync(params: {
     .eq("connection_id", params.connectionId)
     .eq("status", "completed")
     .not("completed_at", "is", null)
-    .gte("completed_at", new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString())
+    .gte("completed_at", new Date(Date.now() - REFERENCE_WINDOW_MS).toISOString())
     .or(
       `and(requester_id.eq.${params.meId},recipient_id.eq.${params.recipientId}),and(requester_id.eq.${params.recipientId},recipient_id.eq.${params.meId})`
     )
@@ -939,7 +940,7 @@ async function hasEligibleCompletedSync(params: {
     .eq("connection_id", params.connectionId)
     .eq("completed_by", params.meId)
     .not("completed_at", "is", null)
-    .gte("completed_at", new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString())
+    .gte("completed_at", new Date(Date.now() - REFERENCE_WINDOW_MS).toISOString())
     .maybeSingle();
   if (legacyRes.error) return false;
   return Boolean(pickRowId(legacyRes.data));
@@ -1446,21 +1447,6 @@ export async function POST(req: Request) {
           throw contextTagSync.error;
         }
 
-        await ensureReferenceReceivedNotification({
-          actorId: authData.user.id,
-          recipientId,
-          referenceId,
-          entityType: referenceEntityType,
-          entityId: entityIdInput || acceptedConnectionId,
-        });
-
-        await sendAppEmailBestEffort({
-          kind: "reference_received",
-          recipientUserId: recipientId,
-          actorUserId: authData.user.id,
-          referenceId,
-        });
-
         if (referenceRequestIdInput) {
           const markByIdRes = await applyReferenceRequestCompletionMatch(
             supabase.from("reference_requests").update({
@@ -1547,21 +1533,6 @@ export async function POST(req: Request) {
         throw syncMarker.error;
       }
     }
-
-    await ensureReferenceReceivedNotification({
-      actorId: authData.user.id,
-      recipientId,
-      referenceId: compat.referenceId,
-      entityType: referenceEntityType,
-      entityId: compatEntityId,
-    });
-
-    await sendAppEmailBestEffort({
-      kind: "reference_received",
-      recipientUserId: recipientId,
-      actorUserId: authData.user.id,
-      referenceId: compat.referenceId,
-    });
 
     if (referenceRequestIdInput) {
       const markByIdRes = await applyReferenceRequestCompletionMatch(
@@ -1661,7 +1632,7 @@ export async function PATCH(req: Request) {
       if (authorId !== authData.user.id) {
         return NextResponse.json({ ok: false, error: "reference_update_not_allowed" }, { status: 403 });
       }
-      if (!within15Days(createdAt || null)) {
+      if (!withinReferenceWindow(createdAt || null)) {
         return NextResponse.json({ ok: false, error: "reference_update_not_allowed" }, { status: 400 });
       }
       if (editCount >= 1 || (typeof lastEditedAt === "string" && lastEditedAt.trim().length > 0)) {
@@ -1749,7 +1720,7 @@ export async function PATCH(req: Request) {
       if (recipientId !== authData.user.id) {
         return NextResponse.json({ ok: false, error: "reference_reply_not_allowed" }, { status: 403 });
       }
-      if (!within15Days(createdAt || null)) {
+      if (!withinReferenceWindow(createdAt || null)) {
         return NextResponse.json({ ok: false, error: "reference_reply_not_allowed" }, { status: 400 });
       }
       if (typeof existingReply === "string" && existingReply.trim().length > 0) {

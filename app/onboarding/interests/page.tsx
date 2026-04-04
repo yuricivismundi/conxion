@@ -4,71 +4,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import OnboardingShell from "@/components/OnboardingShell";
+import { getInterestOptionsForRole, normalizeInterests } from "@/lib/interests";
 import { readOnboardingDraft, writeOnboardingDraft } from "@/lib/onboardingDraft";
 import { supabase } from "@/lib/supabase/client";
-
-// ------------------------------
-// Config
-// ------------------------------
-
-// Mapping provided by you (role -> interests)
-// If a role is missing, we fall back to DEFAULT_INTERESTS.
-const DEFAULT_INTERESTS = [
-  "Dance at local socials and events",
-  "Find practice partners",
-  "Get tips on the local dance scene",
-  "Collaborate on video projects",
-  "Find buddies for workshops, socials, accommodations, or rides",
-] as const;
-
-const INTERESTS_BY_ROLE: Record<string, readonly string[]> = {
-  "Social dancer / Student": [
-    "Dance at local socials and events",
-    "Find practice partners",
-    "Get tips on the local dance scene",
-    "Collaborate on video projects",
-    "Find buddies for workshops, socials, accommodations, or rides",
-  ],
-
-  Organizer: [
-    "Collaborate with artists/teachers for events/festivals",
-    "Organize recurring local events",
-    "Secure sponsorships and org collabs",
-    "Offer volunteer roles for events",
-    "Recruit guest dancers",
-  ],
-
-  "Studio Owner": [
-    "Promote special workshops and events",
-    "Organize classes and schedules",
-    "Collaborate with other studio owners",
-    "Secure sponsorships and hire talent",
-  ],
-
-  Promoter: [
-    "Partner to promote festivals",
-    "Refer artists, DJs, and teachers",
-    "Co-promote local parties/socials",
-    "Exchange guest lists and shoutouts",
-    "Share promo materials and audiences",
-  ],
-
-  DJ: [
-    "Produce new songs and tracks",
-    "Collaborate on tracks or live sets",
-    "Network for festival gigs",
-    "DJ international and local events",
-    "Feature in promo videos/socials",
-  ],
-
-  Teacher: [
-    "Offer private/group lessons",
-    "Teach regular classes",
-    "Lead festival workshops",
-    "Co-teach sessions",
-    "Exchange tips, curricula, and student referrals",
-  ],
-};
 
 // Levels (Master renamed)
 const LEVELS = [
@@ -160,7 +98,10 @@ export default function OnboardingInterestsPage() {
       const dIbr = d.interestsByRole;
       if (dIbr && typeof dIbr === "object") {
         const normalized = Object.fromEntries(
-          Object.entries(dIbr).map(([k, v]) => [k, Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []])
+          Object.entries(dIbr).map(([k, v]) => [
+            k,
+            normalizeInterests(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []),
+          ])
         );
         setInterestsByRole(normalized as InterestsByRole);
       } else {
@@ -218,7 +159,10 @@ export default function OnboardingInterestsPage() {
   useEffect(() => {
     if (!hydrated) return;
 
-    const flatInterests = uniq(Object.values(interestsByRole).flat());
+    const normalizedInterestsByRole = Object.fromEntries(
+      Object.entries(interestsByRole).map(([role, values]) => [role, normalizeInterests(values)])
+    ) as InterestsByRole;
+    const flatInterests = uniq(Object.values(normalizedInterestsByRole).flat());
 
     // Persist "styles" as the list of selected style names
     // If Other is enabled + named, include the name; otherwise, do not include.
@@ -242,7 +186,7 @@ export default function OnboardingInterestsPage() {
       styles: resolvedStyles,
 
       // preferred structured fields
-      interestsByRole,
+      interestsByRole: normalizedInterestsByRole,
       styleLevels: nextLevels,
 
       otherStyleEnabled,
@@ -257,9 +201,7 @@ export default function OnboardingInterestsPage() {
   const rolesToRender = useMemo(() => roles, [roles]);
 
   function getInterestsForRole(role: string): string[] {
-    const list = INTERESTS_BY_ROLE[role] ?? DEFAULT_INTERESTS;
-    // Ensure unique, stable list
-    return uniq([...list]);
+    return [...getInterestOptionsForRole(role)];
   }
 
   function toggleInterest(role: string, interest: string) {
@@ -399,7 +341,7 @@ export default function OnboardingInterestsPage() {
         {/* Dance styles FIRST */}
         <section>
           <div className="mb-3 flex items-center justify-between">
-            <div className="text-sm font-semibold uppercase tracking-wider text-white/60">Dance Styles</div>
+            <div className="text-sm font-semibold uppercase tracking-wider text-white/60">Dance styles</div>
             <button
               type="button"
               onClick={() => {
@@ -613,7 +555,7 @@ export default function OnboardingInterestsPage() {
             ].join(" ")}
             style={canContinue ? { backgroundImage: "linear-gradient(90deg, #00F5FF 0%, #FF00FF 100%)" } : undefined}
           >
-            Continue to Step 3
+            Continue to step 3
           </button>
         </div>
 

@@ -31,6 +31,8 @@ export async function fetchProfileMedia(
     userId: string;
     viewerUserId?: string | null;
     includeAllOwn?: boolean;
+    /** Pass false to hide showcase photos for non-Plus owners in public view. */
+    ownerIsPlus?: boolean;
   }
 ) {
   const canReadAll = params.includeAllOwn === true || params.viewerUserId === params.userId;
@@ -49,7 +51,18 @@ export async function fetchProfileMedia(
   const { data, error } = await query;
   if (error) throw error;
 
-  return sortProfileMedia(((data ?? []) as unknown[]).map(normalizeProfileMediaRow).filter((item): item is ProfileMediaItem => Boolean(item)));
+  let items = sortProfileMedia(
+    ((data ?? []) as unknown[]).map(normalizeProfileMediaRow).filter((item): item is ProfileMediaItem => Boolean(item))
+  );
+
+  // In public view, hide showcase photos for non-Plus owners.
+  // ownerIsPlus=undefined means unknown — treat as unlocked (safe default until
+  // a billing column is available on the profiles table).
+  if (!canReadAll && params.ownerIsPlus === false) {
+    items = items.filter((item) => item.kind !== "photo");
+  }
+
+  return items;
 }
 
 export function deriveProfileMediaShowcase(items: ProfileMediaItem[]) {
