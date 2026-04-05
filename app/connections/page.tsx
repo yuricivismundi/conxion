@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
+import DarkConnectModal from "@/components/DarkConnectModal";
 import PaginationControls from "@/components/PaginationControls";
 import { useAppLanguage } from "@/components/AppLanguageProvider";
 import {
@@ -42,13 +43,6 @@ type Role = "Social Dancer" | "Student" | "Organizer" | "Studio Owner" | "Promot
 type Style = "Bachata" | "Salsa" | "Kizomba" | "Zouk";
 const STYLE_OPTIONS: Style[] = ["Bachata", "Salsa", "Kizomba", "Zouk"];
 const ROLE_OPTIONS: Role[] = ["Social Dancer", "Student", "Organizer", "Studio Owner", "Promoter", "DJ", "Artist", "Teacher"];
-
-type ConnectReason = {
-  id: string;
-  label: string;
-  role: string;
-  sort_order?: number;
-};
 
 type ConnectModalState = {
   open: boolean;
@@ -592,8 +586,6 @@ function ConnectionsPageContent() {
   const [myLangCodes, setMyLangCodes] = useState<string[]>([]);
   const [myStyleLevels, setMyStyleLevels] = useState<Partial<Record<Style, Level>>>({});
   const [hiddenMemberIds, setHiddenMemberIds] = useState<string[]>([]);
-  const [connectRequestsUsed, setConnectRequestsUsed] = useState<number | null>(null);
-  const [connectRequestsLimit, setConnectRequestsLimit] = useState<number | null>(null);
   const [hostingOffersUsed, setHostingOffersUsed] = useState<number | null>(null);
   const [hostingOffersLimit, setHostingOffersLimit] = useState<number | null>(null);
   const [hostingRequestsUsed, setHostingRequestsUsed] = useState<number | null>(null);
@@ -613,12 +605,6 @@ function ConnectionsPageContent() {
   const [verificationResumePayload, setVerificationResumePayload] = useState<VerificationResumePayload | null>(null);
 
   const [connectModal, setConnectModal] = useState<ConnectModalState>(EMPTY_CONNECT_MODAL);
-  const [connectReasons, setConnectReasons] = useState<ConnectReason[]>([]);
-  const [selectedReason, setSelectedReason] = useState<string | null>(null);
-  const [connectReasonQuery, setConnectReasonQuery] = useState("");
-  const [sendingRequest, setSendingRequest] = useState(false);
-  const [pendingWarning, setPendingWarning] = useState<string | null>(null);
-  const [connectModalError, setConnectModalError] = useState<string | null>(null);
 
   const [hostingModal, setHostingModal] = useState<HostingModalState>(EMPTY_HOSTING_MODAL);
   const [hostingSending, setHostingSending] = useState(false);
@@ -639,11 +625,6 @@ function ConnectionsPageContent() {
 
   const closeConnectModal = useCallback(() => {
     setConnectModal(EMPTY_CONNECT_MODAL);
-    setSelectedReason(null);
-    setConnectReasonQuery("");
-    setConnectReasons([]);
-    setPendingWarning(null);
-    setConnectModalError(null);
   }, []);
 
   const closeHostingModal = useCallback(() => {
@@ -698,9 +679,6 @@ function ConnectionsPageContent() {
     tripId?: string | null;
   }) => {
     const safeRoles = (params.targetRoles ?? []).filter(isNonEmptyString);
-    setSelectedReason(null);
-    setConnectReasonQuery("");
-    setConnectReasons([]);
     setConnectModal({
       open: true,
       targetUserId: params.targetUserId,
@@ -820,28 +798,6 @@ function ConnectionsPageContent() {
     });
   }, [openHostingRequest, searchParams, viewerVerified]);
 
-  const selectedReasonObj = useMemo(() => {
-    if (!selectedReason) return null;
-    return connectReasons.find((r) => r.id === selectedReason) ?? null;
-  }, [selectedReason, connectReasons]);
-
-  const visibleConnectReasons = useMemo(() => {
-    const queryText = connectReasonQuery.trim().toLowerCase();
-    return connectReasons
-      .filter((reason) => {
-        if (!queryText) return true;
-        const haystack = `${reason.label} ${reason.role}`.toLowerCase();
-        return haystack.includes(queryText);
-      })
-      .slice()
-      .sort((a, b) => {
-        const left = a.sort_order ?? 100;
-        const right = b.sort_order ?? 100;
-        if (left !== right) return left - right;
-        return a.label.localeCompare(b.label);
-      });
-  }, [connectReasonQuery, connectReasons]);
-
   const [dbMembers, setDbMembers] = useState<MemberCard[]>([]);
   const [hostColumnsAvailable, setHostColumnsAvailable] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(true);
@@ -853,7 +809,6 @@ function ConnectionsPageContent() {
   const [iconsReady, setIconsReady] = useState(false);
   const autoRequestedHostRef = useRef<string | null>(null);
   const discoverLoadRequestIdRef = useRef(0);
-  const connectModalLoadRequestIdRef = useRef(0);
   const hostingModalLoadRequestIdRef = useRef(0);
   const tripJoinModalLoadRequestIdRef = useRef(0);
 
@@ -1290,77 +1245,6 @@ function ConnectionsPageContent() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!connectModal.open) return;
-    const requestId = connectModalLoadRequestIdRef.current + 1;
-    connectModalLoadRequestIdRef.current = requestId;
-    let cancelled = false;
-    const canCommit = () => !cancelled && connectModalLoadRequestIdRef.current === requestId;
-
-    setSelectedReason(null);
-    setConnectReasonQuery("");
-    setPendingWarning(null);
-
-    (async () => {
-      try {
-        const contexts =
-          connectModal.connectContext === "traveller"
-            ? (["traveller", "trip", "member", "general"] as const)
-            : (["member", "general"] as const);
-        const { data, error } = await supabase
-          .from("connect_reasons")
-          .select("id,label,role,sort_order")
-          .eq("active", true)
-          .in("context", [...contexts])
-          .order("sort_order");
-
-        if (!error) {
-          const reasons = data ?? [];
-          if (!canCommit()) return;
-          setConnectReasons(reasons);
-          const defaultReason = reasons.find((r) => r.id === "default_start_conxion");
-          if (defaultReason) setSelectedReason(defaultReason.id);
-        }
-      } catch {
-        if (canCommit()) setConnectReasons([]);
-      }
-    })();
-
-    // Check for existing pending/accepted request
-    (async () => {
-      try {
-        const targetId = connectModal.targetUserId;
-        if (!targetId) return;
-
-        const [pendingMessage, authUserRes] = await Promise.all([
-          fetchPendingPairConflict(targetId),
-          supabase.auth.getUser(),
-        ]);
-        if (!canCommit()) return;
-        setPendingWarning(pendingMessage);
-
-        const userId = authUserRes.data.user?.id;
-        if (!userId) return;
-        const { data: existing } = await supabase
-          .from("connections")
-          .select("id,status")
-          .or(
-            `and(requester_id.eq.${userId},target_id.eq.${targetId}),and(requester_id.eq.${targetId},target_id.eq.${userId})`
-          )
-          .eq("status", "accepted")
-          .limit(1)
-          .maybeSingle();
-
-        if (!pendingMessage && existing?.status === "accepted") {
-          if (canCommit()) setPendingWarning("You are already connected with this member.");
-        }
-      } catch {}
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [connectModal.open, connectModal.connectContext, connectModal.targetUserId]);
 
   // Check for existing hosting requests when hosting modal opens
   useEffect(() => {
@@ -1532,24 +1416,17 @@ function ConnectionsPageContent() {
             if (canCommit()) setLinkedConnectionOptions([]);
           }
 
-          // Load plan limits + monthly connection request count
+          // Load plan limits + monthly usage counts
           try {
             const { data: authUser } = await supabase.auth.getUser();
             const meta = authUser?.user?.user_metadata ?? {};
             const isVerified = isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null);
             const planId = getPlanIdFromMeta(meta, isVerified);
             const limits = getPlanLimits(planId);
-            if (canCommit()) setConnectRequestsLimit(limits.connectionRequestsPerMonth);
 
             const monthStart = new Date();
             monthStart.setDate(1);
             monthStart.setHours(0, 0, 0, 0);
-            const { count } = await supabase
-              .from("connections")
-              .select("id", { count: "exact", head: true })
-              .eq("requester_id", user.id)
-              .gte("created_at", monthStart.toISOString());
-            if (canCommit()) setConnectRequestsUsed(count ?? 0);
 
             if (canCommit()) setHostingOffersLimit(limits.hostingOffersPerMonth);
             const { count: hostingCount } = await supabase
@@ -4029,208 +3906,15 @@ function ConnectionsPageContent() {
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 h-28 bg-gradient-to-b from-transparent to-[#0A0A0A]" />
       ) : null}
 
-{connectModal.open && (
-  <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
-    <div className="relative flex w-full max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] shadow-2xl" style={{ maxHeight: "calc(100dvh - 1.5rem)" }}>
-      {/* Close */}
-      <button
-        type="button"
-        onClick={closeConnectModal}
-        className="absolute right-5 top-5 z-10 text-white/50 transition hover:text-white"
-        aria-label="Close"
-      >
-        <MSIcon name="close" className="text-[22px]" />
-      </button>
-
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
-        {/* Header */}
-        <div className="mb-6 flex items-center gap-4">
-          <div
-            className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
-            style={{
-              backgroundImage: connectModal.targetPhotoUrl
-                ? `url(${connectModal.targetPhotoUrl})`
-                : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,59,255,0.35))",
-            }}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Connect with</p>
-            <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">{connectModal.targetName}</h3>
-          </div>
-          {connectRequestsLimit !== null && connectRequestsUsed !== null && (
-            <div className="shrink-0 flex items-center gap-1.5">
-              <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
-              <span className={`text-[13px] font-black tabular-nums leading-tight ${
-                connectRequestsUsed >= connectRequestsLimit
-                  ? "text-rose-400"
-                  : connectRequestsUsed >= connectRequestsLimit * 0.8
-                    ? "text-amber-400"
-                    : "text-[#00F5FF]"
-              }`}>
-                {connectRequestsUsed}<span className="text-white/25 font-normal"> / {connectRequestsLimit}</span>
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Pending request warning */}
-        {pendingWarning ? <PendingRequestBanner message={pendingWarning} className="mb-4" /> : null}
-
-        {/* Error */}
-        {connectModalError && (
-          <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
-            <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">error</span>
-            <span>{connectModalError}</span>
-          </div>
-        )}
-
-        {/* Reason picker */}
-        <div>
-          <div className="mb-3 text-sm font-semibold text-white">Reason to connect</div>
-          <div className="relative">
-            <span className="material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[17px] text-white/25">search</span>
-            <input
-              value={connectReasonQuery}
-              onChange={(e) => {
-                setConnectReasonQuery(e.target.value);
-                setSelectedReason(null);
-              }}
-              placeholder="Filter reasons..."
-              className="w-full rounded-xl border border-white/10 bg-black/35 pl-10 pr-4 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 transition"
-            />
-          </div>
-          <div className="mt-2 max-h-48 overflow-y-auto rounded-xl bg-black/20">
-            {visibleConnectReasons.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-white/40">No matches</p>
-            ) : (
-              visibleConnectReasons.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedReason(r.id);
-                    setConnectReasonQuery("");
-                  }}
-                  className={`w-full px-4 py-2.5 text-left text-sm transition flex items-center justify-between gap-3 ${
-                    selectedReason === r.id
-                      ? "bg-[#00F5FF]/10 text-[#00F5FF]"
-                      : "text-white/80 hover:bg-white/[0.06] hover:text-white"
-                  }`}
-                >
-                  <span>{r.label}</span>
-                  {r.role && r.role !== "General" ? (
-                    <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
-                  ) : null}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="shrink-0 border-t border-white/8 px-6 py-4 sm:px-8">
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
-          <button
-            type="button"
-            onClick={closeConnectModal}
-            className="h-12 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={!selectedReason || sendingRequest || Boolean(pendingWarning)}
-            onClick={async () => {
-              const targetId = connectModal.targetUserId;
-              const reasonId = selectedReason;
-              const role = selectedReasonObj?.role ?? null;
-              const connectContext = connectModal.connectContext ?? "member";
-              const tripId = connectModal.tripId ?? null;
-              const requestsRedirect = "/messages?tab=requests";
-
-              if (!targetId || !reasonId) return;
-
-              try {
-                setSendingRequest(true);
-                setConnectModalError(null);
-
-                const {
-                  data: { user },
-                  error: authError,
-                } = await supabase.auth.getUser();
-                const { data: sessionData } = await supabase.auth.getSession();
-                const accessToken = sessionData.session?.access_token ?? "";
-
-                if (authError || !user) throw authError ?? new Error("Not authenticated");
-                if (!accessToken) throw new Error("Missing auth session token");
-
-                const { data: existing, error: existingErr } = await supabase
-                  .from("connections")
-                  .select("id,status,requester_id,target_id")
-                  .or(
-                    `and(requester_id.eq.${user.id},target_id.eq.${targetId}),and(requester_id.eq.${targetId},target_id.eq.${user.id})`
-                  )
-                  .limit(1)
-                  .maybeSingle();
-
-                if (existingErr) throw existingErr;
-
-                if (existing?.status === "accepted" || existing?.status === "pending") {
-                  if (existing.status === "accepted" && existing.id) {
-                    closeConnectModal();
-                    router.push(`/messages?thread=${encodeURIComponent(`conn:${existing.id}`)}`);
-                    return;
-                  }
-                  throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
-                }
-
-                const response = await fetch("/api/connect", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${accessToken}`,
-                  },
-                  body: JSON.stringify({
-                    requesterId: user.id,
-                    targetId,
-                    payload: {
-                      connect_context: connectContext,
-                      connect_reason: reasonId,
-                      connect_reason_role: role,
-                      trip_id: tripId,
-                    },
-                  }),
-                });
-                const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-                if (!response.ok || !result?.ok) {
-                  throw new Error(result?.error || "Failed to create connection request");
-                }
-
-                closeConnectModal();
-                router.push(requestsRedirect);
-              } catch (e) {
-                const message = e instanceof Error ? e.message : "Failed to send request.";
-                setConnectModalError(
-                  message.includes("Failed to fetch")
-                    ? "Network issue while sending request. Check your connection and retry."
-                    : message
-                );
-              } finally {
-                setSendingRequest(false);
-              }
-            }}
-            className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
-            style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
-          >
-            {sendingRequest ? "Sending…" : "Send request"}
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+<DarkConnectModal
+  open={connectModal.open}
+  onClose={closeConnectModal}
+  targetUserId={connectModal.targetUserId ?? ""}
+  targetName={connectModal.targetName ?? "Member"}
+  targetPhotoUrl={connectModal.targetPhotoUrl ?? null}
+  connectContext={connectModal.connectContext ?? "member"}
+  tripId={connectModal.tripId ?? null}
+/>
 
       {tripJoinModal.open ? (
         <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
