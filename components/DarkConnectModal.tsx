@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
 import { supabase } from "@/lib/supabase/client";
@@ -9,12 +9,23 @@ import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
 import { isPaymentVerified } from "@/lib/verification";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
-type ConnectReason = {
-  id: string;
-  label: string;
-  role: string;
-  sort_order?: number;
-};
+// ─── Hardcoded reason list ────────────────────────────────────────────────────
+
+type Reason = { id: string; label: string; icon: string };
+
+const REASONS: Reason[] = [
+  { id: "just_connect",        label: "Just connect",        icon: "waving_hand"       },
+  { id: "social_dance",        label: "Social dance",        icon: "nightlife"          },
+  { id: "practice_together",   label: "Practice together",   icon: "sports_gymnastics"  },
+  { id: "find_dance_partner",  label: "Find dance partner",  icon: "person_search"      },
+  { id: "attend_events",       label: "Attend events",       icon: "event_available"    },
+  { id: "classes",             label: "Classes",             icon: "school"             },
+  { id: "travel_hosting",      label: "Travel / hosting",    icon: "luggage"            },
+  { id: "collaborate",         label: "Collaborate",         icon: "handshake"          },
+  { id: "grow_network",        label: "Grow network",        icon: "group_add"          },
+];
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 type Props = {
   open: boolean;
@@ -26,9 +37,7 @@ type Props = {
   tripId?: string | null;
 };
 
-function MSIcon({ name, className }: { name: string; className?: string }) {
-  return <span className={`material-symbols-outlined ${className ?? ""}`}>{name}</span>;
-}
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DarkConnectModal({
   open,
@@ -42,76 +51,48 @@ export default function DarkConnectModal({
   const router = useRouter();
   useBodyScrollLock(open);
 
-  const [reasons, setReasons] = useState<ConnectReason[]>([]);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
-  const [reasonQuery, setReasonQuery] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage]               = useState("");
+  const [messageOpen, setMessageOpen]       = useState(false);
+  const [sending, setSending]               = useState(false);
+  const [error, setError]                   = useState<string | null>(null);
   const [pendingWarning, setPendingWarning] = useState<string | null>(null);
-  const [requestsUsed, setRequestsUsed] = useState<number | null>(null);
-  const [requestsLimit, setRequestsLimit] = useState<number | null>(null);
+  const [requestsUsed, setRequestsUsed]     = useState<number | null>(null);
+  const [requestsLimit, setRequestsLimit]   = useState<number | null>(null);
 
-  // Check for existing pending request when modal opens
-  useEffect(() => {
-    if (!open || !targetUserId) return;
-    setPendingWarning(null);
-
-    (async () => {
-      try {
-        setPendingWarning(await fetchPendingPairConflict(targetUserId));
-      } catch {}
-    })();
-  }, [open, targetUserId]);
-
-  // Fetch connect reasons when modal opens
+  // Reset on open/close
   useEffect(() => {
     if (!open) return;
     setSelectedReason(null);
-    setReasonQuery("");
+    setMessage("");
+    setMessageOpen(false);
     setError(null);
+    setPendingWarning(null);
+  }, [open]);
 
+  // Pending conflict check
+  useEffect(() => {
+    if (!open || !targetUserId) return;
     (async () => {
-      try {
-        const contexts =
-          connectContext === "traveller"
-            ? ["traveller", "trip", "member", "general"]
-            : ["member", "general"];
-        const { data, error: err } = await supabase
-          .from("connect_reasons")
-          .select("id,label,role,sort_order")
-          .eq("active", true)
-          .in("context", contexts)
-          .order("sort_order");
-        if (!err) {
-          const loaded = data ?? [];
-          setReasons(loaded);
-          const defaultReason = loaded.find((r) => r.id === "default_start_conxion");
-          if (defaultReason) setSelectedReason(defaultReason.id);
-        }
-      } catch {
-        setReasons([]);
-      }
+      try { setPendingWarning(await fetchPendingPairConflict(targetUserId)); } catch {}
     })();
-  }, [open, connectContext]);
+  }, [open, targetUserId]);
 
-  // Fetch usage counters when modal opens
+  // Usage counter
   useEffect(() => {
     if (!open) return;
-
     (async () => {
       try {
-        const { data: authUser } = await supabase.auth.getUser();
-        const user = authUser?.user;
+        const { data: authData } = await supabase.auth.getUser();
+        const user = authData?.user;
         if (!user) return;
-
-        const meta = user.user_metadata ?? {};
         const { data: profileRow } = await supabase
           .from("profiles")
           .select("verified,verified_label")
           .eq("user_id", user.id)
           .maybeSingle();
         const isVerified = isPaymentVerified((profileRow ?? null) as Record<string, unknown> | null);
-        const planId = getPlanIdFromMeta(meta, isVerified);
+        const planId = getPlanIdFromMeta(user.user_metadata ?? {}, isVerified);
         const limits = getPlanLimits(planId);
         setRequestsLimit(limits.connectionRequestsPerMonth);
 
@@ -128,65 +109,45 @@ export default function DarkConnectModal({
     })();
   }, [open]);
 
-  const selectedReasonObj = useMemo(
-    () => reasons.find((r) => r.id === selectedReason) ?? null,
-    [selectedReason, reasons]
-  );
-
-  const visibleReasons = useMemo(() => {
-    const q = reasonQuery.trim().toLowerCase();
-    return reasons
-      .filter((r) => {
-        if (!q) return true;
-        return `${r.label} ${r.role}`.toLowerCase().includes(q);
-      })
-      .sort((a, b) => (a.sort_order ?? 100) - (b.sort_order ?? 100) || a.label.localeCompare(b.label));
-  }, [reasonQuery, reasons]);
-
   const handleClose = useCallback(() => {
     if (sending) return;
-    setSelectedReason(null);
-    setReasonQuery("");
-    setError(null);
     onClose();
   }, [sending, onClose]);
 
   async function handleSend() {
     if (!selectedReason || sending) return;
-
     try {
       setSending(true);
       setError(null);
 
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data: authData } = await supabase.auth.getUser();
       const { data: sessionData } = await supabase.auth.getSession();
+      const user = authData?.user;
       const accessToken = sessionData.session?.access_token ?? "";
-
-      if (authError || !user) throw authError ?? new Error("Not authenticated");
+      if (!user) throw new Error("Not authenticated");
       if (!accessToken) throw new Error("Missing auth session token");
 
-      // Check existing connection
-      const { data: existing, error: existingErr } = await supabase
+      // Short-circuit if already connected / pending
+      const { data: existing } = await supabase
         .from("connections")
-        .select("id,status,requester_id,target_id")
+        .select("id,status")
         .or(
           `and(requester_id.eq.${user.id},target_id.eq.${targetUserId}),and(requester_id.eq.${targetUserId},target_id.eq.${user.id})`
         )
         .limit(1)
         .maybeSingle();
 
-      if (existingErr) throw existingErr;
-
-      if (existing?.status === "accepted" || existing?.status === "pending") {
-        if (existing.status === "accepted" && existing.id) {
-          handleClose();
-          router.push(`/messages?thread=${encodeURIComponent(`conn:${existing.id}`)}`);
-          return;
-        }
+      if (existing?.status === "accepted" && existing.id) {
+        handleClose();
+        router.push(`/messages?thread=${encodeURIComponent(`conn:${existing.id}`)}`);
+        return;
+      }
+      if (existing?.status === "pending") {
         throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
       }
 
-      // Create request
+      const reasonLabel = REASONS.find((r) => r.id === selectedReason)?.label ?? selectedReason;
+
       const response = await fetch("/api/connect", {
         method: "POST",
         headers: {
@@ -199,25 +160,24 @@ export default function DarkConnectModal({
           payload: {
             connect_context: connectContext,
             connect_reason: selectedReason,
-            connect_reason_role: selectedReasonObj?.role ?? null,
+            connect_reason_label: reasonLabel,
+            connect_message: message.trim() || null,
             trip_id: tripId,
           },
         }),
       });
       const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
       if (!response.ok || !result?.ok) {
-        throw new Error(result?.error || "Failed to create connection request");
+        throw new Error(result?.error ?? "Failed to create connection request");
       }
 
       handleClose();
       router.push("/messages?tab=requests");
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to send request.";
-      setError(
-        message.includes("Failed to fetch")
-          ? "Network issue while sending request. Check your connection and retry."
-          : message
-      );
+      const msg = e instanceof Error ? e.message : "Failed to send request.";
+      setError(msg.includes("Failed to fetch")
+        ? "Network issue while sending request. Check your connection and retry."
+        : msg);
     } finally {
       setSending(false);
     }
@@ -225,53 +185,59 @@ export default function DarkConnectModal({
 
   if (!open) return null;
 
+  const selectedLabel = REASONS.find((r) => r.id === selectedReason)?.label ?? null;
+  const atLimit = requestsLimit !== null && requestsUsed !== null && requestsUsed >= requestsLimit;
+
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
       <div
-        className="relative w-full max-w-[480px] overflow-hidden rounded-[28px] border border-white/8 bg-[#080e14] shadow-[0_32px_80px_rgba(0,0,0,0.5)] sm:rounded-[32px]"
-        style={{ background: "radial-gradient(circle at top left, rgba(13,204,242,0.07), transparent 40%), radial-gradient(circle at bottom right, rgba(217,59,255,0.07), transparent 40%), #080e14" }}
+        className="relative w-full max-w-[520px] overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
+        style={{
+          background:
+            "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14",
+        }}
       >
         {/* Close */}
         <button
           type="button"
           onClick={handleClose}
-          className="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 hover:text-white transition"
+          className="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors"
           aria-label="Close"
         >
-          <MSIcon name="close" className="text-[18px]" />
+          <span className="material-symbols-outlined text-[18px]">close</span>
         </button>
 
         {/* Header */}
-        <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/8">
-          <div className="shrink-0">
-            <div
-              className="h-14 w-14 rounded-2xl overflow-hidden border border-white/10"
-              style={{
-                backgroundImage: targetPhotoUrl
-                  ? `url(${targetPhotoUrl})`
-                  : "linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }}
-            />
-          </div>
+        <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/[0.07]">
+          <div
+            className="h-14 w-14 shrink-0 rounded-2xl border border-white/10 bg-cover bg-center"
+            style={{
+              backgroundImage: targetPhotoUrl
+                ? `url(${targetPhotoUrl})`
+                : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))",
+            }}
+          />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Connect with</p>
-            <h3 className="truncate text-lg font-extrabold tracking-tight text-white">{targetName}</h3>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
+              Start a ConXion with
+            </p>
+            <h3 className="truncate text-xl font-extrabold tracking-tight text-white leading-tight">
+              {targetName}
+            </h3>
+            <p className="text-[11px] text-white/35 mt-0.5">What&apos;s your intention?</p>
           </div>
         </div>
 
-        <div className="px-6 py-5 space-y-4">
-          {pendingWarning && (
-            <PendingRequestBanner message={pendingWarning} />
-          )}
+        <div className="px-5 pt-5 pb-4 space-y-4">
+          {/* Pending warning */}
+          {pendingWarning && <PendingRequestBanner message={pendingWarning} />}
 
           {/* Usage counter */}
           {requestsLimit !== null && requestsUsed !== null && (
-            <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2.5 text-xs">
-              <span className="text-white/40">Requests this month</span>
+            <div className="flex items-center justify-between rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2 text-xs">
+              <span className="text-white/35">Requests this month</span>
               <span className={
-                requestsUsed >= requestsLimit
+                atLimit
                   ? "font-bold text-rose-400"
                   : requestsUsed >= requestsLimit * 0.8
                     ? "font-bold text-amber-400"
@@ -282,71 +248,106 @@ export default function DarkConnectModal({
             </div>
           )}
 
-          {/* Reason — menu with optional search */}
-          <div>
-            <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">Reason to connect</label>
-            <div className="relative mt-2">
-              <span className="material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[17px] text-white/25">search</span>
-              <input
-                value={reasonQuery}
-                onChange={(e) => {
-                  setReasonQuery(e.target.value);
-                  setSelectedReason(null);
-                }}
-                placeholder="Filter reasons..."
-                className="w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 py-2.5 text-sm text-white outline-none focus:border-[#0df2f2]/40 focus:bg-white/[0.06] transition"
+          {/* Intent grid */}
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            {REASONS.map((r) => {
+              const selected = selectedReason === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setSelectedReason(r.id)}
+                  className={`group relative flex flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition-all duration-150 ${
+                    selected
+                      ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
+                      : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
+                  }`}
+                >
+                  {/* Selected glow ring */}
+                  {selected && (
+                    <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />
+                  )}
+                  <span
+                    className={`material-symbols-outlined text-[22px] transition-colors ${
+                      selected ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"
+                    }`}
+                    style={{ fontVariationSettings: selected ? "'FILL' 1" : "'FILL' 0" }}
+                  >
+                    {r.icon}
+                  </span>
+                  <span className={`text-[12px] font-semibold leading-tight transition-colors ${
+                    selected ? "text-white" : "text-white/55 group-hover:text-white/80"
+                  }`}>
+                    {r.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Dynamic preview */}
+          {selectedLabel && (
+            <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2.5">
+              <span className="material-symbols-outlined text-[14px] text-[#0df2f2] shrink-0">bolt</span>
+              <p className="text-xs text-white/60">
+                You want to connect to{" "}
+                <span className="font-semibold text-white/90">{selectedLabel.toLowerCase()}</span>
+              </p>
+            </div>
+          )}
+
+          {/* Optional message */}
+          {!messageOpen ? (
+            <button
+              type="button"
+              onClick={() => setMessageOpen(true)}
+              className="flex items-center gap-1.5 text-xs text-white/35 hover:text-white/60 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              Add a message
+            </button>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                  Message (optional)
+                </label>
+                <span className="text-[10px] text-white/25">{message.length}/220</span>
+              </div>
+              <textarea
+                autoFocus
+                value={message}
+                onChange={(e) => setMessage(e.target.value.slice(0, 220))}
+                placeholder="Say something..."
+                rows={3}
+                className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
               />
             </div>
-            <div className="mt-2 max-h-48 overflow-y-auto rounded-xl bg-[#0b1219]">
-              {visibleReasons.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-white/40">No matches</p>
-              ) : (
-                visibleReasons.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedReason(r.id);
-                      setReasonQuery("");
-                    }}
-                    className={`w-full px-4 py-2.5 text-left text-sm transition flex items-center justify-between gap-3 ${
-                      selectedReason === r.id
-                        ? "bg-[#0df2f2]/10 text-[#0df2f2]"
-                        : "text-white/80 hover:bg-white/[0.06] hover:text-white"
-                    }`}
-                  >
-                    <span>{r.label}</span>
-                    {r.role && r.role !== "General" ? (
-                      <span className="shrink-0 text-[11px] text-white/30">{r.role}</span>
-                    ) : null}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
+          )}
 
           {/* Error */}
           {error && (
-            <p className="text-xs text-rose-400">{error}</p>
+            <p className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-300">
+              {error}
+            </p>
           )}
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col gap-2 border-t border-white/8 px-6 py-5">
+        <div className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-4">
           <button
             type="button"
-            disabled={!selectedReason || sending || Boolean(pendingWarning)}
+            disabled={!selectedReason || sending || Boolean(pendingWarning) || atLimit}
             onClick={() => void handleSend()}
-            className="w-full h-13 rounded-2xl font-bold text-sm text-[#040a0f] disabled:opacity-40 transition hover:brightness-110"
-            style={{ backgroundImage: "linear-gradient(90deg,#0df2f2 0%, #ff00ff 100%)" }}
+            className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99]"
+            style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
           >
-            {sending ? "Sending..." : "Send request"}
+            {sending ? "Sending…" : "Start ConXion"}
           </button>
-
           <button
             type="button"
             onClick={handleClose}
-            className="w-full h-10 rounded-2xl border border-white/8 text-white/40 text-sm font-medium hover:text-white/70 hover:border-white/15 transition"
+            className="h-10 w-full rounded-2xl border border-white/[0.07] text-sm font-medium text-white/35 hover:border-white/15 hover:text-white/60 transition-colors"
           >
             Cancel
           </button>
