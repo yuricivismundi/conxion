@@ -22,7 +22,6 @@ const REASONS: Reason[] = [
   { id: "classes",             label: "Classes",             icon: "school"             },
   { id: "travel_hosting",      label: "Travel / hosting",    icon: "luggage"            },
   { id: "collaborate",         label: "Collaborate",         icon: "handshake"          },
-  { id: "grow_network",        label: "Grow network",        icon: "group_add"          },
 ];
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -36,6 +35,33 @@ type Props = {
   connectContext?: "member" | "traveller";
   tripId?: string | null;
 };
+
+// ─── Shared card ─────────────────────────────────────────────────────────────
+
+function ReasonCard({ r, selected, onSelect }: { r: Reason; selected: boolean; onSelect: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(r.id)}
+      className={`group relative flex w-full flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition-all duration-150 ${
+        selected
+          ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
+          : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
+      }`}
+    >
+      {selected && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />}
+      <span
+        className={`material-symbols-outlined text-[22px] transition-colors ${selected ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"}`}
+        style={{ fontVariationSettings: selected ? "'FILL' 1" : "'FILL' 0" }}
+      >
+        {r.icon}
+      </span>
+      <span className={`text-[12px] font-semibold leading-tight transition-colors ${selected ? "text-white" : "text-white/55 group-hover:text-white/80"}`}>
+        {r.label}
+      </span>
+    </button>
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -248,41 +274,18 @@ export default function DarkConnectModal({
             </div>
           )}
 
-          {/* Intent grid */}
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-            {REASONS.map((r) => {
-              const selected = selectedReason === r.id;
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => setSelectedReason(r.id)}
-                  className={`group relative flex flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition-all duration-150 ${
-                    selected
-                      ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
-                      : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
-                  }`}
-                >
-                  {/* Selected glow ring */}
-                  {selected && (
-                    <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />
-                  )}
-                  <span
-                    className={`material-symbols-outlined text-[22px] transition-colors ${
-                      selected ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"
-                    }`}
-                    style={{ fontVariationSettings: selected ? "'FILL' 1" : "'FILL' 0" }}
-                  >
-                    {r.icon}
-                  </span>
-                  <span className={`text-[12px] font-semibold leading-tight transition-colors ${
-                    selected ? "text-white" : "text-white/55 group-hover:text-white/80"
-                  }`}>
-                    {r.label}
-                  </span>
-                </button>
-              );
-            })}
+          {/* Intent grid — first 6 in 3-col grid, last 2 centered */}
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {REASONS.slice(0, 6).map((r) => <ReasonCard key={r.id} r={r} selected={selectedReason === r.id} onSelect={setSelectedReason} />)}
+            </div>
+            <div className="flex justify-center gap-2.5">
+              {REASONS.slice(6).map((r) => (
+                <div key={r.id} className="w-[calc(33.333%-5px)]">
+                  <ReasonCard r={r} selected={selectedReason === r.id} onSelect={setSelectedReason} />
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Dynamic preview */}
