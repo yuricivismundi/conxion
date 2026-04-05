@@ -227,6 +227,9 @@ export async function POST(req: Request) {
           .update({ linked_member_user_id: linkedMember.userId } as never)
           .eq("id", requestId);
         if (linkedUpdateRes.error) {
+          // Rollback: delete the just-created request so it doesn't orphan as a
+          // blocking pending entry the requester can't see or cancel.
+          await service.from("hosting_requests").delete().eq("id", requestId);
           throw new Error(linkedUpdateRes.error.message);
         }
 
