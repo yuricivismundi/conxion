@@ -13,20 +13,27 @@ import { supabase } from "@/lib/supabase/client";
 import { getBillingAccountState } from "@/lib/billing/account-state";
 import { getPlanLimits } from "@/lib/billing/limits";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
+import { fetchProfileMedia } from "@/lib/profile-media/read-model";
+import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import { fetchTeacherInfoBlocks } from "@/lib/teacher-info/read-model";
 import type { TeacherInfoBlock } from "@/lib/teacher-info/types";
 import {
   ACTIVITY_TYPES,
+  ACTIVITY_TYPE_ICONS,
+  LINKED_MEMBER_ACTIVITY_TYPES,
   REFERENCE_CONTEXT_TAGS,
   activityTypeLabel,
   activityUsesDateRange,
+  normalizeActivityType,
   normalizeReferenceContextTag,
   referenceContextLabel,
   type ActivityType,
   type ReferenceContextTag,
 } from "@/lib/activities/types";
 import {
+  formatSleepingArrangement,
   normalizeHostingPreferredGuestGender,
+  parseHostingSleepingArrangement,
   normalizeHostingSleepingArrangement,
   type HostingPreferredGuestGender,
   type HostingSleepingArrangement,
@@ -38,6 +45,15 @@ import {
 } from "@/lib/service-inquiries/types";
 import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
 import { fetchLinkedConnectionOptions, type LinkedMemberOption } from "@/lib/requests/linked-members";
+import { travelIntentReasonLabel, tripJoinReasonLabel } from "@/lib/trips/join-reasons";
+import {
+  canPostToEventThread,
+  eventThreadTabLabel,
+  normalizeEventAccessType,
+  normalizeEventChatMode,
+  type EventAccessType,
+  type EventChatMode,
+} from "@/lib/events/access";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
 
 type ThreadKind = "connection" | "trip" | "direct" | "event";
@@ -208,6 +224,9 @@ type ActiveThreadMeta = {
   serviceInquiryRequesterId?: string | null;
   serviceInquiryRecipientId?: string | null;
   serviceInquiryFollowupUsed?: boolean;
+  eventAccessType?: EventAccessType | null;
+  eventChatMode?: EventChatMode | null;
+  canPostToEventThread?: boolean;
 };
 
 type ContactSidebarData = {
@@ -240,6 +259,7 @@ type ContactSidebarData = {
   hostingTransitAccess: string | null;
   verified: boolean;
   verifiedLabel: string | null;
+  mediaItems: ProfileMediaItem[];
 };
 
 type ReferencePromptItem = {
@@ -293,6 +313,8 @@ type ThreadContextItem = {
   createdAt: string;
 };
 
+type ServiceInquiryOwnFlowState = "pending" | "followup_available" | "followup_pending";
+
 type ThreadPrefsPatch = {
   archived_at?: string | null;
   muted_until?: string | null;
@@ -324,6 +346,25 @@ type MessagingSummary = {
   cycleEnd: string | null;
 };
 
+type InteractionStatus = "none" | "pending" | "accepted";
+
+type RequestQuotaSummary = {
+  used: number;
+  limit: number | null;
+  remaining: number | null;
+};
+
+type ChatFooterCtaState = "request_connect" | "pending" | "start_conversation" | "unavailable";
+
+type ConnectRequestModalState = {
+  open: boolean;
+  targetUserId: string | null;
+  targetName: string;
+  targetPhotoUrl: string | null;
+  connectContext: "member" | "traveller";
+  tripId: string | null;
+};
+
 type VisibleConnectionLite = {
   id: string;
   other_user_id: string;
@@ -342,28 +383,8 @@ type ActivityDraft = {
 
 const ContactSidebarPanel = dynamic(() => import("@/components/messages/ContactSidebarPanel"), {
   ssr: false,
-  loading: () => (
-    <div className="space-y-4 animate-pulse">
-      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(155deg,rgba(10,22,24,0.95),rgba(12,14,18,0.98))] p-4">
-        <div className="mx-auto h-40 w-40 rounded-full border-2 border-white/10 bg-white/[0.06]" />
-        <div className="mt-4 text-center">
-          <div className="mx-auto h-7 w-40 rounded-full bg-white/[0.08]" />
-          <div className="mx-auto mt-2 h-4 w-28 rounded-full bg-white/[0.06]" />
-          <div className="mt-3 flex justify-center gap-2">
-            <div className="h-6 w-24 rounded-full bg-white/[0.06]" />
-            <div className="h-6 w-28 rounded-full bg-white/[0.06]" />
-          </div>
-        </div>
-      </div>
-      <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-        <div className="h-3 w-28 rounded-full bg-white/[0.08]" />
-        <div className="h-11 rounded-xl bg-white/[0.05]" />
-        <div className="h-11 rounded-xl bg-white/[0.05]" />
-        <div className="h-20 rounded-xl bg-white/[0.05]" />
-      </div>
-    </div>
-  ),
 });
+const DarkConnectModal = dynamic(() => import("@/components/DarkConnectModal"), { ssr: false });
 const ReportDialog = dynamic(() => import("@/components/messages/ReportDialog"), { ssr: false });
 const BlockDialog = dynamic(() => import("@/components/messages/BlockDialog"), { ssr: false });
 const ComposeDialog = dynamic(() => import("@/components/messages/ComposeDialog"), { ssr: false });
@@ -379,20 +400,28 @@ const DEFAULT_ACTIVITY_DRAFT: ActivityDraft = {
   endAt: "",
   linkedMemberUserId: "",
 };
-const LINKABLE_ACTIVITY_TYPES = new Set<ActivityType>([
-  "practice",
-  "social_dance",
-  "event",
-  "festival",
-  "travel_together",
-  "stay_as_guest",
-  "private_class",
-  "group_class",
-  "workshop",
-  "collaboration",
-  "content_video",
-  "competition",
-]);
+const EMPTY_CONNECT_REQUEST_MODAL: ConnectRequestModalState = {
+  open: false,
+  targetUserId: null,
+  targetName: "Member",
+  targetPhotoUrl: null,
+  connectContext: "member",
+  tripId: null,
+};
+const DAY_MS = 24 * 60 * 60 * 1000;
+const LINKABLE_ACTIVITY_TYPES = new Set<ActivityType>(LINKED_MEMBER_ACTIVITY_TYPES);
+
+function addOneMonthIso(value?: string | null) {
+  const base = value ? new Date(value) : new Date();
+  if (Number.isNaN(base.getTime())) {
+    const fallback = new Date();
+    fallback.setMonth(fallback.getMonth() + 1);
+    return fallback.toISOString();
+  }
+  base.setMonth(base.getMonth() + 1);
+  return base.toISOString();
+}
+
 const LOCAL_REACTIONS_STORAGE_KEY = "cx_messages_reactions_local_v1";
 const LOCAL_MANUAL_UNREAD_STORAGE_KEY = "cx_messages_manual_unread_v1";
 const LOCAL_THREAD_DRAFTS_STORAGE_KEY = "cx_messages_thread_drafts_v1";
@@ -505,42 +534,37 @@ function wait(ms: number) {
 }
 
 function activityTypeIcon(value: string) {
-  switch (value) {
-    case "practice":
-      return "sports_gymnastics";
-    case "social_dance":
-      return "music_note";
-    case "event":
-      return "event";
-    case "festival":
-      return "celebration";
-    case "travel_together":
-      return "flight_takeoff";
-    case "hosting":
-      return "home";
-    case "stay_as_guest":
-      return "luggage";
-    case "private_class":
-      return "school";
-    case "group_class":
-      return "groups";
-    case "workshop":
-      return "construction";
-    case "collaboration":
-      return "handshake";
-    case "content_video":
-      return "videocam";
-    case "competition":
-      return "emoji_events";
-    default:
-      return "bolt";
-  }
+  return ACTIVITY_TYPE_ICONS[normalizeActivityType(value)] ?? "bolt";
 }
 
 function parseTripLabel(row: TripRow | null | undefined) {
   if (!row?.destination_city || !row.destination_country) return "Trip chat";
   const datePart = row.start_date ? formatDateShort(row.start_date) : "TBD";
   return `${row.destination_city}, ${row.destination_country} • ${datePart}`;
+}
+
+function formatStarterDateWindow(startDate?: string | null, endDate?: string | null) {
+  const start = startDate ? formatDateShort(startDate) : "";
+  const end = endDate ? formatDateShort(endDate) : "";
+  if (start && end) return `${start} - ${end}`;
+  return start || end || "those dates";
+}
+
+function buildAcceptedStarterMessage(context: ThreadContextItem | null) {
+  if (!context) return "Hey! Happy to connect here 🙂";
+
+  if (context.contextTag === "trip_join_request") {
+    const city = context.city?.trim() || "your city";
+    return `Hey! I’m planning to join your trip to ${city}. Would be great to connect and dance together 🙌`;
+  }
+
+  if (context.contextTag === "hosting_request") {
+    const city = context.city?.trim() || "your city";
+    const dateWindow = formatStarterDateWindow(context.startDate, context.endDate);
+    return `Hey! I’ll be in ${city} ${dateWindow}. Would love to connect and see if staying together works 🙂`;
+  }
+
+  return "Hey! Happy to connect here 🙂";
 }
 
 function formatTime(iso?: string) {
@@ -642,6 +666,12 @@ const CHAT_UNLOCK_CONTEXT_TAGS: ThreadContextTag[] = [
 
 function isAcceptedInteractionStatus(status: ThreadStatusTag) {
   return status === "accepted" || status === "active" || status === "completed";
+}
+
+function isChatUnlockingContext(context: Pick<ThreadContextItem, "contextTag" | "statusTag">) {
+  if (context.contextTag === "service_inquiry") return context.statusTag === "active";
+  if (context.contextTag === "regular_chat") return context.statusTag === "active";
+  return context.statusTag === "accepted" || context.statusTag === "active";
 }
 
 function contextToneClasses(tag: ThreadContextTag) {
@@ -844,6 +874,58 @@ function describeServiceInquiryRequest(context: ThreadContextItem) {
   return parts;
 }
 
+function describeTripJoinRequest(context: ThreadContextItem) {
+  if (context.contextTag !== "trip_join_request") return [];
+  const parts: Array<{ label: string; value: string }> = [];
+  const reasonRaw =
+    asString(context.metadata.trip_join_reason).trim() ||
+    asString(context.metadata.reason).trim();
+  const note = asString(context.metadata.note).trim();
+  const noteIsDuplicateReason = Boolean(
+    reasonRaw &&
+      note &&
+      note.localeCompare(reasonRaw, undefined, { sensitivity: "accent" }) === 0
+  );
+
+  if (reasonRaw) {
+    parts.push({ label: "Reason", value: tripJoinReasonLabel(reasonRaw) });
+  }
+  if (note && !noteIsDuplicateReason) {
+    parts.push({ label: "Note", value: note });
+  }
+  return parts;
+}
+
+function describeHostingRequest(context: ThreadContextItem) {
+  if (context.contextTag !== "hosting_request") return [];
+  const parts: Array<{ label: string; value: string }> = [];
+  const requestType = asString(context.metadata.request_type).trim();
+  const reasonRaw = asString(context.metadata.reason).trim();
+  const normalizedHostingSpaceType = parseHostingSleepingArrangement(reasonRaw);
+  const note = asString(context.metadata.message).trim() || asString(context.metadata.note).trim();
+  const noteIsDuplicateReason = Boolean(
+    reasonRaw &&
+      note &&
+      note.localeCompare(reasonRaw, undefined, { sensitivity: "accent" }) === 0
+  );
+
+  if (reasonRaw) {
+    parts.push({
+      label: requestType === "offer_to_host" ? "Space type" : "Reason",
+      value:
+        requestType === "request_hosting"
+          ? travelIntentReasonLabel(reasonRaw)
+          : normalizedHostingSpaceType
+            ? formatSleepingArrangement(normalizedHostingSpaceType)
+            : reasonRaw,
+    });
+  }
+  if (note && !noteIsDuplicateReason) {
+    parts.push({ label: requestType === "offer_to_host" ? "Invite note" : "Note", value: note });
+  }
+  return parts;
+}
+
 function contextHistoryTitle(context: ThreadContextItem) {
   const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
   if (context.contextTag === "activity" && activityType) {
@@ -905,7 +987,7 @@ function defaultThreadPreview(kind: ThreadKind) {
   if (kind === "trip") return "Trip thread";
   if (kind === "event") return "Event thread";
   if (kind === "connection") return "No messages yet.";
-  return "Start chatting";
+  return "";
 }
 
 function latestTextPreview(messages: MessageItem[], fallback: string) {
@@ -982,6 +1064,12 @@ function formatRemaining(ms: number) {
   if (hours <= 0) return `${minutes}m`;
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
+}
+
+function formatDaysLeft(days: number) {
+  if (days <= 0) return "Expires today.";
+  if (days === 1) return "1 day left.";
+  return `${days} days left.`;
 }
 
 function parseReplyPayload(body: string) {
@@ -1284,17 +1372,19 @@ function MessagesPageContent() {
     contextTags: new Set<ReferenceContextTag>(),
     latestSubmittedAt: null,
   });
-  const [pendingReferenceCountsByPeer, setPendingReferenceCountsByPeer] = useState<Record<string, number>>({});
   const [contactSidebarLoading, setContactSidebarLoading] = useState(false);
   const [contactSidebarError, setContactSidebarError] = useState<string | null>(null);
   const [activeMessages, setActiveMessages] = useState<MessageItem[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(null);
+  const [requestQuotaSummary, setRequestQuotaSummary] = useState<RequestQuotaSummary | null>(null);
   const [activityComposerOpen, setActivityComposerOpen] = useState(false);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(DEFAULT_ACTIVITY_DRAFT);
   const [activityBusy, setActivityBusy] = useState(false);
+  const [activityNoteOpen, setActivityNoteOpen] = useState(false);
   const [activityPendingWarning, setActivityPendingWarning] = useState<string | null>(null);
+  const [activityComposerError, setActivityComposerError] = useState<string | null>(null);
   const [activityRequestsUsed, setActivityRequestsUsed] = useState<number | null>(null);
   const [activityRequestsLimit, setActivityRequestsLimit] = useState<number | null>(null);
   const [activityLinkedConnectionOptions, setActivityLinkedConnectionOptions] = useState<LinkedMemberOption[]>([]);
@@ -1336,6 +1426,12 @@ function MessagesPageContent() {
   const [threadActionsOpen, setThreadActionsOpen] = useState(false);
   const [archiveToContinueOpen, setArchiveToContinueOpen] = useState(false);
   const [requestActionBusyId, setRequestActionBusyId] = useState<string | null>(null);
+  const [chatFooterBusy, setChatFooterBusy] = useState<"request" | "activate" | null>(null);
+  const [showActivateConfirm, setShowActivateConfirm] = useState(false);
+  const [connectRequestModal, setConnectRequestModal] = useState<ConnectRequestModalState>(EMPTY_CONNECT_REQUEST_MODAL);
+  const [optimisticActivatedByThread, setOptimisticActivatedByThread] = useState<
+    Record<string, { activatedAt: string; activationEnd: string }>
+  >({});
   const [shareInquiryContext, setShareInquiryContext] = useState<ThreadContextItem | null>(null);
   const [shareInquiryBlocks, setShareInquiryBlocks] = useState<TeacherInfoBlock[]>([]);
   const [shareInquiryBusy, setShareInquiryBusy] = useState(false);
@@ -1381,6 +1477,15 @@ function MessagesPageContent() {
       cancelled = true;
     };
   }, [activityComposerOpen, activeMeta?.otherUserId]);
+
+  useEffect(() => {
+    if (!activityComposerOpen) {
+      setActivityComposerError(null);
+      return;
+    }
+    setActivityComposerError(null);
+  }, [activityComposerOpen, activeMeta?.otherUserId]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1457,6 +1562,7 @@ function MessagesPageContent() {
   const typingLastSentAtRef = useRef(0);
   const typingTimeoutRef = useRef<number | null>(null);
   const composerLockReasonRef = useRef<string | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const swipeGestureRef = useRef<{
     messageId: string;
     startX: number;
@@ -1499,13 +1605,28 @@ function MessagesPageContent() {
       ]);
       if (rpc.error) throw rpc.error;
       const data = asRecord(rpc.data);
+      const viewerId = authData.data.user?.id ?? "";
 
       // Derive the correct plan limits from auth metadata (RPC may return stale/free-tier values)
       const userMeta = authData.data.user?.user_metadata;
-      const profileRes = await supabase.from("profiles").select("verified,verified_label").eq("user_id", authData.data.user?.id ?? "").maybeSingle();
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const [profileRes, requestCountRes] = await Promise.all([
+        supabase.from("profiles").select("verified,verified_label").eq("user_id", viewerId).maybeSingle(),
+        viewerId
+          ? supabase
+              .from("connections")
+              .select("id", { count: "exact", head: true })
+              .eq("requester_id", viewerId)
+              .gte("created_at", monthStart.toISOString())
+          : Promise.resolve({ count: 0, error: null }),
+      ]);
       const isVerified = (profileRes.data as { verified?: boolean } | null)?.verified === true;
       const billingState = getBillingAccountState({ userMetadata: userMeta, isVerified });
       const planLimits = getPlanLimits(billingState.currentPlanId);
+      const requestLimit = planLimits.connectionRequestsPerMonth ?? null;
+      const requestsUsed = Number(requestCountRes.count) || 0;
 
       const summary: MessagingSummary = {
         plan: billingState.currentPlanId === "pro" ? "premium" : "free",
@@ -1518,9 +1639,15 @@ function MessagesPageContent() {
         cycleEnd: asString(data.cycleEnd) || null,
       };
       setMessagingSummary(summary);
+      setRequestQuotaSummary({
+        used: requestsUsed,
+        limit: requestLimit,
+        remaining: requestLimit === null ? null : Math.max(0, requestLimit - requestsUsed),
+      });
       return summary;
     } catch {
       setMessagingSummary((prev) => prev);
+      setRequestQuotaSummary((prev) => prev);
       return null;
     }
   }, []);
@@ -1531,8 +1658,25 @@ function MessagesPageContent() {
   }, []);
 
   useEffect(() => {
+    if (!activeThreadToken) return;
+    if (!optimisticActivatedByThread[activeThreadToken]) return;
+    const storedState = activeMeta?.messagingState ?? null;
+    const persistedActivationReady = storedState === "active" && Boolean(activeMeta?.activationCycleEnd);
+    const shouldClear = persistedActivationReady || (storedState !== null && storedState !== "active");
+    if (!shouldClear) return;
+
+    setOptimisticActivatedByThread((prev) => {
+      if (!prev[activeThreadToken]) return prev;
+      const next = { ...prev };
+      delete next[activeThreadToken];
+      return next;
+    });
+  }, [activeMeta?.activationCycleEnd, activeMeta?.messagingState, activeThreadToken, optimisticActivatedByThread]);
+
+  useEffect(() => {
     if (!meId) {
       setMessagingSummary(null);
+      setRequestQuotaSummary(null);
       return;
     }
     void refreshMessagingSummary();
@@ -1873,9 +2017,96 @@ function MessagesPageContent() {
           .limit(80);
         if (res.error) return [] as ThreadContextItem[];
         if (isStale()) return [] as ThreadContextItem[];
-        const normalized = ((res.data ?? []) as ThreadContextRow[])
+        let normalized = ((res.data ?? []) as ThreadContextRow[])
           .map((row) => normalizeThreadContextRow(row))
           .filter((row): row is ThreadContextItem => row !== null);
+
+        const tripRequestIds = normalized
+          .filter((row) => row.contextTag === "trip_join_request" && row.sourceId)
+          .map((row) => row.sourceId);
+
+        if (tripRequestIds.length > 0) {
+          const tripRequestRes = await supabase
+            .from("trip_requests")
+            .select("id,reason,note")
+            .in("id", tripRequestIds);
+          if (!tripRequestRes.error && !isStale()) {
+            const tripRequestById = new Map(
+              ((tripRequestRes.data ?? []) as Array<Record<string, unknown>>)
+                .map((row) => {
+                  const id = typeof row.id === "string" ? row.id : "";
+                  if (!id) return null;
+                  return [
+                    id,
+                    {
+                      reason: asString(row.reason).trim(),
+                      note: asString(row.note).trim(),
+                    },
+                  ] as const;
+                })
+                .filter((entry): entry is readonly [string, { reason: string; note: string }] => Boolean(entry))
+            );
+
+            normalized = normalized.map((row) => {
+              if (row.contextTag !== "trip_join_request") return row;
+              const tripRequest = tripRequestById.get(row.sourceId);
+              if (!tripRequest) return row;
+              return {
+                ...row,
+                metadata: {
+                  ...row.metadata,
+                  trip_join_reason: tripRequest.reason || row.metadata.trip_join_reason,
+                  note: tripRequest.note || row.metadata.note,
+                },
+              };
+            });
+          }
+        }
+
+        const hostingRequestIds = normalized
+          .filter((row) => row.contextTag === "hosting_request" && row.sourceId)
+          .map((row) => row.sourceId);
+
+        if (hostingRequestIds.length > 0) {
+          const hostingRequestRes = await supabase
+            .from("hosting_requests")
+            .select("id,request_type,reason,message")
+            .in("id", hostingRequestIds);
+          if (!hostingRequestRes.error && !isStale()) {
+            const hostingRequestById = new Map(
+              ((hostingRequestRes.data ?? []) as Array<Record<string, unknown>>)
+                .map((row) => {
+                  const id = typeof row.id === "string" ? row.id : "";
+                  if (!id) return null;
+                  return [
+                    id,
+                    {
+                      requestType: asString(row.request_type).trim(),
+                      reason: asString(row.reason).trim(),
+                      message: asString(row.message).trim(),
+                    },
+                  ] as const;
+                })
+                .filter((entry): entry is readonly [string, { requestType: string; reason: string; message: string }] => Boolean(entry))
+            );
+
+            normalized = normalized.map((row) => {
+              if (row.contextTag !== "hosting_request") return row;
+              const hostingRequest = hostingRequestById.get(row.sourceId);
+              if (!hostingRequest) return row;
+              return {
+                ...row,
+                metadata: {
+                  ...row.metadata,
+                  request_type: hostingRequest.requestType || row.metadata.request_type,
+                  reason: hostingRequest.reason || row.metadata.reason,
+                  message: hostingRequest.message || row.metadata.message,
+                },
+              };
+            });
+          }
+        }
+
         setThreadContextsByDbId((prev) => ({ ...prev, [threadId]: normalized }));
         return normalized;
       };
@@ -2347,7 +2578,11 @@ function MessagesPageContent() {
         const meParticipant = memberRes.data as ThreadParticipantDbRow;
 
         const [eventRes, messagesRes] = await Promise.all([
-          supabase.from("events").select("id,title,city,country,starts_at").eq("id", parsed.id).maybeSingle(),
+          supabase
+            .from("events")
+            .select("id,title,city,country,starts_at,host_user_id,event_access_type,visibility,chat_mode")
+            .eq("id", parsed.id)
+            .maybeSingle(),
           supabase
             .from("thread_messages")
             .select("id,sender_id,body,message_type,context_tag,status_tag,metadata,created_at")
@@ -2359,6 +2594,20 @@ function MessagesPageContent() {
         if (isStale()) return;
         const eventRow = (eventRes.data ?? null) as Record<string, unknown> | null;
         const title = typeof eventRow?.title === "string" ? eventRow.title : "Event chat";
+        const eventAccessType = normalizeEventAccessType(
+          typeof eventRow?.event_access_type === "string" ? eventRow.event_access_type : null,
+          typeof eventRow?.visibility === "string" ? eventRow.visibility : null
+        );
+        const eventChatMode = normalizeEventChatMode(
+          typeof eventRow?.chat_mode === "string" ? eventRow.chat_mode : null,
+          eventAccessType
+        );
+        const isEventHost = typeof eventRow?.host_user_id === "string" && eventRow.host_user_id === userId;
+        const eventComposerCanPost = canPostToEventThread({
+          accessType: eventAccessType,
+          chatMode: eventChatMode,
+          isHost: isEventHost,
+        });
         const location = [typeof eventRow?.city === "string" ? eventRow.city : "", typeof eventRow?.country === "string" ? eventRow.country : ""]
           .filter(Boolean)
           .join(", ");
@@ -2377,7 +2626,7 @@ function MessagesPageContent() {
           title,
           subtitle: [location, date].filter(Boolean).join(" • ") || "Event",
           avatarUrl: null,
-          badge: "Event",
+          badge: eventThreadTabLabel(eventAccessType),
           otherUserId: null,
           connectionId: null,
           tripId: null,
@@ -2392,6 +2641,9 @@ function MessagesPageContent() {
           serviceInquiryRequesterId: null,
           serviceInquiryRecipientId: null,
           serviceInquiryFollowupUsed: false,
+          eventAccessType,
+          eventChatMode,
+          canPostToEventThread: eventComposerCanPost,
         });
         setActiveMessages(
           ((messagesRes.data ?? []) as Array<Record<string, unknown>>).map((m) => ({
@@ -2873,7 +3125,7 @@ function MessagesPageContent() {
                   title: other?.displayName ?? "Direct chat",
                   subtitle: [other?.city ?? "", other?.country ?? ""].filter(Boolean).join(", ") || "Member chat",
                   avatarUrl: other?.avatarUrl ?? null,
-                  preview: last?.body || "Start chatting",
+                  preview: last?.body || "",
                   updatedAt,
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Chat",
@@ -3159,51 +3411,6 @@ function MessagesPageContent() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!meId) {
-      setPendingReferenceCountsByPeer({});
-      return;
-    }
-
-    (async () => {
-      try {
-        const nowIso = new Date().toISOString();
-        const promptRes = await supabase
-          .from("reference_requests")
-          .select("peer_user_id,context_tag,due_at,expires_at,status")
-          .eq("user_id", meId)
-          .eq("status", "pending")
-          .lte("due_at", nowIso)
-          .gte("expires_at", nowIso)
-          .limit(500);
-
-        if (promptRes.error) {
-          if (isSchemaMissingMessage(promptRes.error.message)) {
-            if (!cancelled) setPendingReferenceCountsByPeer({});
-            return;
-          }
-          throw new Error(promptRes.error.message);
-        }
-
-        const counts: Record<string, number> = {};
-        for (const raw of ((promptRes.data ?? []) as Array<Record<string, unknown>>)) {
-          const row = asRecord(raw);
-          const peerUserId = asString(row.peer_user_id);
-          if (!peerUserId) continue;
-          counts[peerUserId] = (counts[peerUserId] ?? 0) + 1;
-        }
-        if (!cancelled) setPendingReferenceCountsByPeer(counts);
-      } catch {
-        if (!cancelled) setPendingReferenceCountsByPeer({});
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [meId, reloadTick]);
-
-  useEffect(() => {
-    let cancelled = false;
     const targetUserId = activeMeta?.otherUserId;
     if (!targetUserId) {
       setContactSidebar(null);
@@ -3310,7 +3517,7 @@ function MessagesPageContent() {
           return merged;
         };
 
-        const [refsRows, tripsJoinedRes, hostingRes] = await Promise.all([
+        const [refsRows, tripsJoinedRes, hostingRes, mediaItems] = await Promise.all([
           fetchReferenceRowsForRecipient(["recipient_id", "to_user_id", "target_id"]),
           supabase.from("trip_requests").select("id", { count: "exact", head: true }).eq("requester_id", targetUserId).eq("status", "accepted"),
           supabase
@@ -3320,6 +3527,7 @@ function MessagesPageContent() {
             .or(
               `and(request_type.eq.request_hosting,recipient_user_id.eq.${targetUserId}),and(request_type.eq.offer_to_host,sender_user_id.eq.${targetUserId})`
             ),
+          fetchProfileMedia(supabase, { userId: targetUserId }).catch(() => [] as ProfileMediaItem[]),
         ]);
         const referencesByContext: Record<ReferenceContextTag, number> = emptyReferenceContextCounts();
         let referencesTotal = 0;
@@ -3331,7 +3539,7 @@ function MessagesPageContent() {
           if (sentimentRaw === "positive" || sentimentRaw === "4" || sentimentRaw === "5") {
             referencesPositive += 1;
           }
-          const ctxRaw = asString(row.context_tag ?? row.entity_type ?? row.context ?? "collaboration");
+          const ctxRaw = asString(row.context_tag ?? row.entity_type ?? row.context ?? "collaborate");
           const context = normalizeReferenceContext(ctxRaw);
           referencesByContext[context] += 1;
         });
@@ -3400,6 +3608,7 @@ function MessagesPageContent() {
             typeof profileRecord.verified_label === "string" && profileRecord.verified_label.trim().length > 0
               ? profileRecord.verified_label
               : null,
+          mediaItems,
         });
       } catch (e: unknown) {
         if (cancelled) return;
@@ -3484,7 +3693,7 @@ function MessagesPageContent() {
         for (const rawRow of ((authoredRefsRes.data ?? []) as Array<Record<string, unknown>>)) {
           const row = asRecord(rawRow);
           const context = normalizeReferenceContext(
-            asString(row.context_tag ?? row.context ?? row.entity_type ?? "collaboration")
+            asString(row.context_tag ?? row.context ?? row.entity_type ?? "collaborate")
           );
           submittedTags.add(context);
           const createdAt = asString(row.created_at);
@@ -3521,7 +3730,7 @@ function MessagesPageContent() {
           setActiveReferencePrompt({
             id,
             peerUserId,
-            contextTag: normalizeReferenceContext(asString(row.context_tag || "collaboration")),
+            contextTag: normalizeReferenceContext(asString(row.context_tag || "collaborate")),
             sourceTable,
             sourceId,
             dueAt,
@@ -3560,6 +3769,7 @@ function MessagesPageContent() {
     setActivityComposerOpen(false);
     setActivityDraft(DEFAULT_ACTIVITY_DRAFT);
     setActivityBusy(false);
+    setActivityNoteOpen(false);
   }, [activeThreadToken]);
 
   const sendActiveMessage = useCallback(async () => {
@@ -3633,32 +3843,45 @@ function MessagesPageContent() {
           p_connection_id: activeMeta.connectionId ?? null,
           p_body: outboundText,
         });
-        if (rpc.error) throw rpc.error;
-        const payload = asRecord(rpc.data);
-        const returnedThreadId = asString(payload.threadId) || activeMeta.threadId || null;
-        const returnedMessagingState = normalizeMessagingState(asString(payload.messagingState), "active");
-        const returnedCycleStart = asString(payload.cycleStart) || null;
-        const returnedCycleEnd = asString(payload.cycleEnd) || null;
-        const nextSummary: MessagingSummary = {
-          plan: asString(payload.plan) === "premium" ? "premium" : "free",
-          activeCount: Number(payload.activeCount) || 0,
-          activeLimit: Number(payload.activeLimit) || 10,
-          monthlyUsed: Number(payload.monthlyUsed) || 0,
+      if (rpc.error) throw rpc.error;
+      const payload = asRecord(rpc.data);
+      const returnedThreadId = asString(payload.threadId) || activeMeta.threadId || null;
+      const returnedMessagingState = normalizeMessagingState(asString(payload.messagingState), "active");
+      const returnedCycleStart = asString(payload.cycleStart) || null;
+      const returnedCycleEnd = asString(payload.cycleEnd) || null;
+      const returnedActivationStart =
+        asString(payload.activationStart) || asString(payload.activationCycleStart) || returnedCycleStart;
+      const returnedActivationEnd =
+        asString(payload.activationEnd) || asString(payload.activationCycleEnd) || addOneMonthIso(returnedActivationStart);
+      const nextSummary: MessagingSummary = {
+        plan: asString(payload.plan) === "premium" ? "premium" : "free",
+        activeCount: Number(payload.activeCount) || 0,
+        activeLimit: Number(payload.activeLimit) || 10,
+        monthlyUsed: Number(payload.monthlyUsed) || 0,
           monthlyLimit: Number(payload.monthlyLimit) || 10,
           pendingCount: messagingSummary?.pendingCount ?? 0,
           cycleStart: returnedCycleStart,
           cycleEnd: returnedCycleEnd,
         };
         setMessagingSummary(nextSummary);
+        if (activeThreadToken && returnedMessagingState === "active" && returnedActivationStart && returnedActivationEnd) {
+          setOptimisticActivatedByThread((prev) => ({
+            ...prev,
+            [activeThreadToken]: {
+              activatedAt: returnedActivationStart,
+              activationEnd: returnedActivationEnd,
+            },
+          }));
+        }
         setActiveMeta((prev) =>
           prev
             ? {
                 ...prev,
                 threadId: returnedThreadId,
                 messagingState: returnedMessagingState,
-                activatedAt: optimisticCreatedAt,
-                activationCycleStart: returnedCycleStart,
-                activationCycleEnd: returnedCycleEnd,
+                activatedAt: returnedActivationStart || optimisticCreatedAt,
+                activationCycleStart: returnedActivationStart,
+                activationCycleEnd: returnedActivationEnd,
               }
             : prev
         );
@@ -3672,9 +3895,9 @@ function MessagesPageContent() {
                     preview: parseReplyPayload(outboundText).text,
                     updatedAt: optimisticCreatedAt,
                     messagingState: returnedMessagingState,
-                    activatedAt: optimisticCreatedAt,
-                    activationCycleStart: returnedCycleStart,
-                    activationCycleEnd: returnedCycleEnd,
+                    activatedAt: returnedActivationStart || optimisticCreatedAt,
+                    activationCycleStart: returnedActivationStart,
+                    activationCycleEnd: returnedActivationEnd,
                   }
                 : thread
             )].sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
@@ -3739,7 +3962,7 @@ function MessagesPageContent() {
   const submitActivityInvite = useCallback(async () => {
     if ((!activeMeta?.threadId && !activeMeta?.connectionId) || !activeMeta?.otherUserId || !meId) return;
     setActivityBusy(true);
-    setThreadError(null);
+    setActivityComposerError(null);
     setThreadInfo(null);
     try {
       const usesDateRange = activityUsesDateRange(activityDraft.activityType);
@@ -3833,7 +4056,7 @@ function MessagesPageContent() {
       );
       setThreadInfo(`${activityTypeLabel(activityDraft.activityType)} request sent.`);
     } catch (e: unknown) {
-      setThreadError(e instanceof Error ? e.message : "Failed to create activity.");
+      setActivityComposerError(e instanceof Error ? e.message : "Failed to create activity.");
     } finally {
       setActivityBusy(false);
     }
@@ -4182,6 +4405,9 @@ function MessagesPageContent() {
     return submittedReferenceState.contextTags.has(latestCompletedActivityReferenceTag);
   }, [latestCompletedActivityReferenceTag, submittedReferenceState]);
   const activeReferencePromptTag = activeReferencePrompt?.contextTag ?? null;
+  const activeReferencePromptCtaLabel = activeReferencePrompt
+    ? `Add ${referenceContextLabel(activeReferencePrompt.contextTag)} reference`
+    : null;
   const activeServiceInquiryContext = useMemo(
     () => activeThreadContexts.find((context) => context.contextTag === "service_inquiry") ?? null,
     [activeThreadContexts]
@@ -4202,21 +4428,30 @@ function MessagesPageContent() {
   const acceptedInteractionContexts = useMemo(
     () =>
       activeThreadContexts.filter(
-        (context) => CHAT_UNLOCK_CONTEXT_TAGS.includes(context.contextTag) && isAcceptedInteractionStatus(context.statusTag)
+        (context) => CHAT_UNLOCK_CONTEXT_TAGS.includes(context.contextTag) && isChatUnlockingContext(context)
       ),
     [activeThreadContexts]
   );
+  const serviceInquiryOwnFlowState = useMemo<ServiceInquiryOwnFlowState | null>(() => {
+    if (!activeServiceInquiryContext || acceptedInteractionContexts.length > 0) return null;
+    if (activeServiceInquiryContext.statusTag === "pending") return "pending";
+    if (activeServiceInquiryContext.statusTag === "inquiry_followup_pending") return "followup_pending";
+    if (activeServiceInquiryContext.statusTag === "info_shared" && canSendFreeServiceInquiryFollowup) {
+      return "followup_available";
+    }
+    return null;
+  }, [acceptedInteractionContexts.length, activeServiceInquiryContext, canSendFreeServiceInquiryFollowup]);
   const hasAcceptedConnectionContext = useMemo(
     () =>
       acceptedInteractionContexts.some(
-        (context) => context.contextTag === "connection_request" && isAcceptedInteractionStatus(context.statusTag)
+        (context) => context.contextTag === "connection_request"
       ),
     [acceptedInteractionContexts]
   );
   const hasAcceptedNonConnectionContext = useMemo(
     () =>
       acceptedInteractionContexts.some(
-        (context) => context.contextTag !== "connection_request" && isAcceptedInteractionStatus(context.statusTag)
+        (context) => context.contextTag !== "connection_request"
       ),
     [acceptedInteractionContexts]
   );
@@ -4705,76 +4940,133 @@ function MessagesPageContent() {
     [meId]
   );
 
-  const composerLockReason = useMemo(() => {
-    if (!activeMeta) return null;
-    if (interactionBlocked) {
-      return "Messaging is disabled for this thread.";
-    }
-    if (activeServiceInquiryContext) {
-      if (activeServiceInquiryContext.statusTag === "active") {
-        return null;
-      }
-      if (activeServiceInquiryContext.statusTag === "info_shared") {
-        if (viewerIsServiceInquiryRequester) {
-          return canSendFreeServiceInquiryFollowup ? null : "Your free follow-up has already been used.";
-        }
-        return "You can send one follow-up message after receiving details.";
-      }
-      if (activeServiceInquiryContext.statusTag === "inquiry_followup_pending") {
-        return viewerIsServiceInquiryRecipient
-          ? "Accept the conversation to open normal chat."
-          : "Waiting for the teacher to accept your follow-up.";
-      }
-      if (activeServiceInquiryContext.statusTag === "declined" || activeServiceInquiryContext.statusTag === "expired") {
-        return "This professional inquiry is closed.";
-      }
-    }
-    if (acceptedInteractionContexts.length > 0) {
-      return null;
-    }
-    if (
-      (activePrimaryContext?.contextTag ?? activeMeta.contextTag ?? "regular_chat") === "regular_chat" &&
-      hasHistoricalFreeText
-    ) {
-      return null;
-    }
+  const openConnectRequestFromThread = useCallback(() => {
+    if (!activeMeta?.otherUserId) return;
 
-    const context = activePendingContext ?? activePrimaryContext;
-    const contextTag = context?.contextTag ?? activeMeta.contextTag ?? "regular_chat";
-    const statusTag = context?.statusTag ?? activeMeta.statusTag ?? "active";
-    if (statusTag === "pending") {
-      if (contextTag === "service_inquiry") {
-        return viewerIsServiceInquiryRecipient
-          ? "Review the inquiry and choose what information to share."
-          : "Waiting for the teacher to review this professional inquiry.";
-      }
-      if (contextTag === "connection_request") return "Messaging unlocks once this connection request is accepted.";
-      if (contextTag === "trip_join_request") return "Messaging unlocks after the trip request is accepted.";
-      if (contextTag === "hosting_request") return "Messaging unlocks after the hosting request is accepted.";
-      if (contextTag === "event_chat") return "Messaging unlocks after this event request is accepted.";
-      if (contextTag === "activity") return "Messaging unlocks after at least one interaction in this thread is accepted.";
-      return "Messaging unlocks once at least one request is accepted.";
-    }
-    if (statusTag === "declined" || statusTag === "cancelled") {
-      return "Messaging is locked until one interaction is accepted.";
-    }
-    return "Messaging is locked until one interaction is accepted.";
+    const connectContextRaw =
+      asString(activePrimaryContext?.metadata.connect_context) ||
+      (activeMeta.tripId || activeMeta.kind === "trip" ? "traveller" : "member");
+    const connectContext = connectContextRaw === "traveller" || connectContextRaw === "trip" ? "traveller" : "member";
+    const tripIdFromContext = asString(activePrimaryContext?.metadata.trip_id) || activeMeta.tripId || null;
+
+    setThreadError(null);
+    setThreadInfo(null);
+    setConnectRequestModal({
+      open: true,
+      targetUserId: activeMeta.otherUserId,
+      targetName: activeMeta.title || "Member",
+      targetPhotoUrl: activeMeta.avatarUrl ?? null,
+      connectContext,
+      tripId: connectContext === "traveller" ? tripIdFromContext : null,
+    });
   }, [
-    acceptedInteractionContexts.length,
-    activeMeta,
-    activePendingContext,
-    activePrimaryContext,
-    activeServiceInquiryContext,
-    canSendFreeServiceInquiryFollowup,
-    hasHistoricalFreeText,
-    interactionBlocked,
-    viewerIsServiceInquiryRecipient,
-    viewerIsServiceInquiryRequester,
+    activeMeta?.avatarUrl,
+    activeMeta?.kind,
+    activeMeta?.otherUserId,
+    activeMeta?.title,
+    activeMeta?.tripId,
+    activePrimaryContext?.metadata.connect_context,
+    activePrimaryContext?.metadata.trip_id,
   ]);
 
-  useEffect(() => {
-    composerLockReasonRef.current = composerLockReason;
-  }, [composerLockReason]);
+  const activateConversationFromThread = useCallback(async () => {
+    if (!activeMeta?.threadId) return;
+
+    setChatFooterBusy("activate");
+    setThreadError(null);
+    setThreadInfo(null);
+
+    try {
+      const nowIso = new Date().toISOString();
+      const rpc = await supabase.rpc("cx_set_thread_messaging_state", {
+        p_thread_id: activeMeta.threadId,
+        p_next_state: "active",
+      });
+      if (rpc.error) throw rpc.error;
+
+      const payload = asRecord(rpc.data);
+      const returnedCycleStart = asString(payload.cycleStart) || messagingSummary?.cycleStart || null;
+      const returnedCycleEnd = asString(payload.cycleEnd) || messagingSummary?.cycleEnd || null;
+      const returnedActivationStart =
+        asString(payload.activationStart) || asString(payload.activationCycleStart) || nowIso;
+      const returnedActivationEnd =
+        asString(payload.activationEnd) || asString(payload.activationCycleEnd) || addOneMonthIso(returnedActivationStart);
+
+      setMessagingSummary((prev) => ({
+        plan: asString(payload.plan) === "premium" ? "premium" : prev?.plan ?? "free",
+        activeCount: Number(payload.activeCount) || 0,
+        activeLimit: Number(payload.activeLimit) || prev?.activeLimit || 10,
+        monthlyUsed: Number(payload.monthlyUsed) || 0,
+        monthlyLimit: Number(payload.monthlyLimit) || prev?.monthlyLimit || 10,
+        pendingCount: prev?.pendingCount ?? 0,
+        cycleStart: returnedCycleStart,
+        cycleEnd: returnedCycleEnd,
+      }));
+      if (activeThreadToken) {
+        setOptimisticActivatedByThread((prev) => ({
+          ...prev,
+          [activeThreadToken]: {
+            activatedAt: returnedActivationStart,
+            activationEnd: returnedActivationEnd,
+          },
+        }));
+        setArchivedThreads((prev) => {
+          if (!prev[activeThreadToken]) return prev;
+          const next = { ...prev };
+          delete next[activeThreadToken];
+          return next;
+        });
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.threadId === activeThreadToken
+              ? {
+                  ...thread,
+                  messagingState: "active",
+                  activatedAt: returnedActivationStart,
+                  activationCycleStart: returnedActivationStart,
+                  activationCycleEnd: returnedActivationEnd,
+                }
+              : thread
+          )
+        );
+      }
+      setActiveMeta((prev) =>
+        prev
+          ? {
+              ...prev,
+              messagingState: "active",
+              activatedAt: returnedActivationStart,
+              activationCycleStart: returnedActivationStart,
+              activationCycleEnd: returnedActivationEnd,
+            }
+          : prev
+      );
+      if (activeThreadToken && meId) {
+        void loadThreadByToken(activeThreadToken, meId);
+      }
+      setThreadInfo("Conversation activated.");
+      window.setTimeout(() => composerTextareaRef.current?.focus(), 20);
+    } catch (activationError) {
+      const message = activationError instanceof Error ? activationError.message : "Could not activate the conversation.";
+      if (
+        message.toLowerCase().includes("monthly_activation_limit_reached") ||
+        message.toLowerCase().includes("monthly activation") ||
+        message.toLowerCase().includes("concurrent_active_limit_reached") ||
+        message.toLowerCase().includes("concurrent active")
+      ) {
+        await refreshMessagingSummary();
+        if (
+          message.toLowerCase().includes("concurrent_active_limit_reached") ||
+          message.toLowerCase().includes("concurrent active")
+        ) {
+          setArchiveToContinueOpen(true);
+        }
+      }
+      setThreadError(message);
+    } finally {
+      setChatFooterBusy(null);
+    }
+  }, [activeMeta?.threadId, activeThreadToken, loadThreadByToken, meId, messagingSummary?.cycleEnd, messagingSummary?.cycleStart, refreshMessagingSummary]);
 
   const blockConnection = useCallback(async () => {
     if (!activeMeta?.connectionId) return;
@@ -4829,30 +5121,265 @@ function MessagesPageContent() {
     return Math.max(0, messagingSummary.monthlyLimit - messagingSummary.monthlyUsed);
   }, [messagingSummary]);
   const activeMessagingState: MessagingState = normalizeMessagingState(activeMeta?.messagingState, activeIsArchived ? "archived" : "inactive");
-  const activationCoveredThisCycle = Boolean(
-    messagingSummary?.cycleStart && activeMeta?.activationCycleStart && activeMeta.activationCycleStart === messagingSummary.cycleStart
+  const optimisticActivation = activeThreadToken ? optimisticActivatedByThread[activeThreadToken] ?? null : null;
+  const chatActivationRecorded = Boolean(
+    activeMeta?.activatedAt || activeMeta?.activationCycleStart || activeMeta?.activationCycleEnd || optimisticActivation?.activatedAt
   );
-  const needsActiveSlot = Boolean(
-    activeMeta && !composerLockReason && !interactionBlocked && activeMessagingState !== "active" && !canSendFreeServiceInquiryFollowup
+  const optimisticActivationLive = Boolean(
+    optimisticActivation &&
+      (!optimisticActivation.activationEnd || toTime(optimisticActivation.activationEnd) > clockMs)
   );
-  const activationRequiredToSend = Boolean(needsActiveSlot && !activationCoveredThisCycle);
-  const concurrentLimitReachedForComposer = Boolean(
-    messagingSummary && needsActiveSlot && messagingSummary.activeCount >= messagingSummary.activeLimit
+  const activationWindowLive = Boolean(
+    optimisticActivationLive ||
+      (chatActivationRecorded && (!activeMeta?.activationCycleEnd || toTime(activeMeta.activationCycleEnd) > clockMs))
   );
-  const monthlyLimitReachedForComposer = Boolean(
-    messagingSummary && activationRequiredToSend && monthlyActivationRemaining !== null && monthlyActivationRemaining <= 0
+  const effectiveMessagingState: MessagingState =
+    activeMessagingState === "archived" ? "archived" : optimisticActivationLive ? "active" : activeMessagingState;
+  const chatActivated =
+    effectiveMessagingState === "active" &&
+    (optimisticActivationLive || (chatActivationRecorded ? activationWindowLive : hasHistoricalFreeText));
+  const activeActivationEnd = optimisticActivation?.activationEnd || activeMeta?.activationCycleEnd || null;
+  const activeActivationStart =
+    optimisticActivation?.activatedAt || activeMeta?.activationCycleStart || activeMeta?.activatedAt || null;
+  const activeConversationDaysLeft = useMemo(() => {
+    if (!activeActivationEnd) return null;
+    const endMs = toTime(activeActivationEnd);
+    if (!endMs) return null;
+    return Math.max(0, Math.ceil((endMs - clockMs) / DAY_MS));
+  }, [activeActivationEnd, clockMs]);
+  const activeConversationDaysLeftText = useMemo(() => {
+    if (!chatActivated || activeConversationDaysLeft === null) return "";
+    return `Active chat: ${formatDaysLeft(activeConversationDaysLeft)}`;
+  }, [activeConversationDaysLeft, chatActivated]);
+  const activeConversationNoticeBody = useMemo(() => {
+    if (!chatActivated) return "";
+    const startText = activeActivationStart ? ` started ${formatDateShort(activeActivationStart)}` : "";
+    return `You started an active conversation${startText}. It stays active for 1 month.`;
+  }, [activeActivationStart, chatActivated]);
+  const hasUnlockedChatHistory = useMemo(
+    () =>
+      acceptedInteractionContexts.length > 0 ||
+      ((activePrimaryContext?.contextTag ?? activeMeta?.contextTag ?? "regular_chat") === "regular_chat" && hasHistoricalFreeText),
+    [acceptedInteractionContexts.length, activeMeta?.contextTag, activePrimaryContext?.contextTag, hasHistoricalFreeText]
   );
-  const composerDisabled = Boolean(composerLockReason || concurrentLimitReachedForComposer || monthlyLimitReachedForComposer);
+  const interactionStatus = useMemo<InteractionStatus>(() => {
+    if (hasUnlockedChatHistory) return "accepted";
+    if (activePendingContext && activePendingContext.contextTag !== "service_inquiry") return "pending";
+    return "none";
+  }, [activePendingContext, hasUnlockedChatHistory]);
+  const requestLimitReached = Boolean(
+    requestQuotaSummary && requestQuotaSummary.remaining !== null && requestQuotaSummary.remaining <= 0
+  );
+  const needsConversationActivation = Boolean(
+    activeMeta &&
+      !serviceInquiryOwnFlowState &&
+      !interactionBlocked &&
+      interactionStatus === "accepted" &&
+      !chatActivated &&
+      activeMeta.threadId
+  );
+  const activationRequiredToStart = Boolean(needsConversationActivation && !activationWindowLive);
+  const concurrentLimitReachedForStart = Boolean(
+    messagingSummary && needsConversationActivation && messagingSummary.activeCount >= messagingSummary.activeLimit
+  );
+  const monthlyLimitReachedForStart = Boolean(
+    messagingSummary && activationRequiredToStart && monthlyActivationRemaining !== null && monthlyActivationRemaining <= 0
+  );
+  const chatFooterCtaState = useMemo<ChatFooterCtaState | null>(() => {
+    if (!activeMeta || serviceInquiryOwnFlowState || interactionBlocked) return null;
+    if (activeMeta.kind === "event") return null;
+    if (interactionStatus === "pending") return "pending";
+    if (interactionStatus === "accepted" && !chatActivated && activeMeta.threadId) return "start_conversation";
+    if (interactionStatus === "none" && activeMeta.otherUserId) return "request_connect";
+    return null;
+  }, [activeMeta, chatActivated, interactionBlocked, interactionStatus, serviceInquiryOwnFlowState]);
+  const composerLockReason = useMemo(() => {
+    if (!activeMeta) return null;
+    if (interactionBlocked) {
+      return "Messaging is disabled for this thread.";
+    }
+    if (activeMeta.kind === "event" && activeMeta.canPostToEventThread === false) {
+      return activeMeta.eventChatMode === "broadcast"
+        ? "Only organisers can post in this event thread."
+        : "You need to be a member of this event to post.";
+    }
+    if (acceptedInteractionContexts.length > 0) {
+      return activeMeta.threadId && !chatActivated
+        ? "Start conversation to activate chat."
+        : null;
+    }
+    if (serviceInquiryOwnFlowState) {
+      if (serviceInquiryOwnFlowState === "followup_available") {
+        return null;
+      }
+      if (serviceInquiryOwnFlowState === "followup_pending") {
+        return viewerIsServiceInquiryRecipient
+          ? "Accept the conversation to open normal chat."
+          : "Waiting for the teacher to accept your follow-up.";
+      }
+      return viewerIsServiceInquiryRecipient
+        ? "Review the inquiry and choose what information to share."
+        : "Waiting for the teacher to review this professional inquiry.";
+    }
+    if (
+      (activePrimaryContext?.contextTag ?? activeMeta.contextTag ?? "regular_chat") === "regular_chat" &&
+      hasHistoricalFreeText
+    ) {
+      return activeMeta.threadId && !chatActivated
+        ? "Start conversation to reactivate chat."
+        : null;
+    }
+
+    const context = activePendingContext ?? activePrimaryContext;
+    const contextTag = context?.contextTag ?? activeMeta.contextTag ?? "regular_chat";
+    const statusTag = context?.statusTag ?? activeMeta.statusTag ?? "active";
+    if (statusTag === "pending") {
+      if (contextTag === "service_inquiry") {
+        return viewerIsServiceInquiryRecipient
+          ? "Review the inquiry and choose what information to share."
+          : "Waiting for the teacher to review this professional inquiry.";
+      }
+      if (contextTag === "connection_request") return "Messaging unlocks once this connection request is accepted.";
+      if (contextTag === "trip_join_request") return "Messaging unlocks after the trip request is accepted.";
+      if (contextTag === "hosting_request") return "Messaging unlocks after the hosting request is accepted.";
+      if (contextTag === "event_chat") return "Messaging unlocks after this event request is accepted.";
+      if (contextTag === "activity") return "Messaging unlocks after at least one interaction in this thread is accepted.";
+      return "Messaging unlocks once at least one request is accepted.";
+    }
+    if (statusTag === "declined" || statusTag === "cancelled") {
+      if (activeMeta.kind === "event") return null;
+      return "Messaging is locked until one interaction is accepted.";
+    }
+    if (activeMeta.kind === "event") return null;
+    return "Messaging is locked until one interaction is accepted.";
+  }, [
+    acceptedInteractionContexts.length,
+    activeMeta,
+    activePendingContext,
+    activePrimaryContext,
+    chatActivated,
+    hasHistoricalFreeText,
+    interactionBlocked,
+    serviceInquiryOwnFlowState,
+    viewerIsServiceInquiryRecipient,
+  ]);
+  useEffect(() => {
+    composerLockReasonRef.current = composerLockReason;
+  }, [composerLockReason]);
+  const composerDisabled = Boolean(composerLockReason || concurrentLimitReachedForStart || monthlyLimitReachedForStart);
   const canCreateActivity = Boolean(
     activeMeta?.otherUserId &&
       !interactionBlocked &&
+      chatActivated &&
       meId &&
       (
         (activeMeta?.connectionId &&
-          isAcceptedInteractionStatus(activePrimaryContext?.statusTag ?? activeMeta.statusTag ?? "active")) ||
+          isChatUnlockingContext({
+            contextTag: activePrimaryContext?.contextTag ?? activeMeta.contextTag ?? "regular_chat",
+            statusTag: activePrimaryContext?.statusTag ?? activeMeta.statusTag ?? "active",
+          })) ||
         acceptedInteractionContexts.some((context) => context.contextTag !== "activity")
       )
   );
+  const memberUnavailableForConnection = Boolean(
+    activeMeta?.otherUserId &&
+      !contactSidebarLoading &&
+      (!contactSidebar || Boolean(contactSidebarError))
+  );
+  const chatFooterCta = useMemo<{
+    state: ChatFooterCtaState;
+    label: string;
+    helper: string;
+    disabled: boolean;
+  } | null>(() => {
+    if (!chatFooterCtaState) return null;
+    if (memberUnavailableForConnection) {
+      return {
+        state: "unavailable",
+        label: "Not available in chat",
+        helper: "This member is not available for chat right now",
+        disabled: true,
+      };
+    }
+
+    if (chatFooterCtaState === "pending") {
+      return {
+        state: "pending",
+        label: "Request pending",
+        helper: "You’ll be able to chat once accepted",
+        disabled: true,
+      };
+    }
+
+    if (chatFooterCtaState === "request_connect") {
+      return {
+        state: "request_connect",
+        label: chatFooterBusy === "request" ? "Sending request..." : "Request to connect",
+        helper: requestLimitReached ? "No requests left this month" : "Use 1 request to start a conversation",
+        disabled: chatFooterBusy === "request" || requestLimitReached,
+      };
+    }
+
+    return {
+      state: "start_conversation",
+      label: chatFooterBusy === "activate" ? "Starting..." : "Start conversation",
+      helper:
+        concurrentLimitReachedForStart
+          ? `You have ${messagingSummary?.activeLimit ?? 10} active conversations. Archive one to continue.`
+          : monthlyLimitReachedForStart
+          ? "No conversations left this month"
+          : "",
+      disabled: chatFooterBusy === "activate" || concurrentLimitReachedForStart || monthlyLimitReachedForStart,
+    };
+  }, [
+    chatFooterBusy,
+    chatFooterCtaState,
+    concurrentLimitReachedForStart,
+    memberUnavailableForConnection,
+    messagingSummary?.activeLimit,
+    monthlyLimitReachedForStart,
+    requestLimitReached,
+  ]);
+  const showChatFooterCta = Boolean(chatFooterCta);
+  const acceptedStarterContext = useMemo(() => {
+    const acceptedPrimary =
+      activePrimaryContext && isChatUnlockingContext(activePrimaryContext)
+        ? activePrimaryContext
+        : null;
+    if (acceptedPrimary?.contextTag === "trip_join_request" || acceptedPrimary?.contextTag === "hosting_request") {
+      return acceptedPrimary;
+    }
+
+    return (
+      acceptedInteractionContexts.find(
+        (context) => context.contextTag === "trip_join_request" || context.contextTag === "hosting_request"
+      ) ??
+      acceptedInteractionContexts.find((context) => context.contextTag === "connection_request") ??
+      acceptedPrimary ??
+      null
+    );
+  }, [acceptedInteractionContexts, activePrimaryContext]);
+  const acceptedStarterMessage = useMemo(
+    () => buildAcceptedStarterMessage(acceptedStarterContext),
+    [acceptedStarterContext]
+  );
+  useEffect(() => {
+    if (!activeThreadToken || !chatActivated) return;
+    if (!acceptedStarterContext) return;
+    if (activeMessages.some((message) => (message.messageType ?? "text") === "text")) return;
+
+    const existingDraft = threadDraftsRef.current[activeThreadToken] ?? "";
+    if (existingDraft.trim() || threadBody.trim()) return;
+
+    setThreadBody(acceptedStarterMessage);
+  }, [
+    acceptedStarterContext,
+    acceptedStarterMessage,
+    activeMessages,
+    activeThreadToken,
+    chatActivated,
+    threadBody,
+  ]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const rows = threads.filter((thread) => {
@@ -4893,6 +5420,25 @@ function MessagesPageContent() {
       return toTime(b.updatedAt) - toTime(a.updatedAt);
     });
   }, [activeTab, archivedThreads, manualUnreadByThread, pinnedThreads, query, threads]);
+  const tabCounts = useMemo(() => {
+    const counts = { all: 0, active: 0, pending: 0, archived: 0 };
+    for (const thread of threads) {
+      const isArchived = thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]);
+      const isPendingRelationship = Boolean(thread.isRelationshipPending);
+      if (isArchived) {
+        counts.archived += 1;
+      } else if (isPendingRelationship) {
+        counts.pending += 1;
+        counts.all += 1;
+      } else if (thread.messagingState === "active") {
+        counts.active += 1;
+        counts.all += 1;
+      } else {
+        counts.all += 1;
+      }
+    }
+    return counts;
+  }, [archivedThreads, threads]);
   const archivableActiveThreads = useMemo(
     () =>
       threads.filter(
@@ -4952,10 +5498,6 @@ function MessagesPageContent() {
     return composeTripTargets.filter((item) => `${item.displayName} ${item.subtitle}`.toLowerCase().includes(needle));
   }, [composeQuery, composeTripTargets]);
 
-  const pendingThreadCount = useMemo(
-    () => threads.filter((thread) => Boolean(thread.isRelationshipPending) && thread.messagingState !== "archived").length,
-    [threads]
-  );
   const threadStateBanner = useMemo<{
     tone: string;
     title: string;
@@ -4966,6 +5508,7 @@ function MessagesPageContent() {
     ctaAction?: () => void;
   } | null>(() => {
     if (!activeMeta) return null;
+    if (showChatFooterCta) return null;
 
     if (activeServiceInquiryContext?.statusTag === "info_shared") {
       const followupBody = viewerIsServiceInquiryRequester
@@ -5018,18 +5561,18 @@ function MessagesPageContent() {
       };
     }
 
-    if (monthlyLimitReachedForComposer) {
+    if (monthlyLimitReachedForStart) {
       const limit = messagingSummary?.monthlyLimit ?? 10;
       return {
         tone: "border-fuchsia-300/30 bg-fuchsia-500/10 text-fuchsia-100",
-        title: `You've used all ${limit} conversation activations this month`,
+        title: `You've used all ${limit} conversation starts this month`,
         body: "Upgrade to continue activating new conversations.",
         ctaLabel: "Upgrade to continue",
-        ctaHref: "/my-space",
+        ctaHref: "/pricing",
       };
     }
 
-    if (concurrentLimitReachedForComposer) {
+    if (concurrentLimitReachedForStart) {
       const limit = messagingSummary?.activeLimit ?? 10;
       return {
         tone: "border-rose-300/25 bg-rose-500/10 text-rose-100",
@@ -5045,18 +5588,7 @@ function MessagesPageContent() {
         tone: "",
         discrete: true,
         title: "Archived conversation",
-        body: activationCoveredThisCycle
-          ? "Send a message to reactivate. No new activation will be used this cycle."
-          : "Send a message to reactivate.",
-      };
-    }
-
-    if (activeMessagingState === "active") {
-      return {
-        tone: "",
-        discrete: true,
-        title: "Active conversation",
-        body: "Unlimited replies are available in this active conversation.",
+        body: "Start conversation to reactivate chat.",
       };
     }
 
@@ -5064,24 +5596,37 @@ function MessagesPageContent() {
 
     return null;
   }, [
-    activationCoveredThisCycle,
     activeMessagingState,
     activeMeta,
     activePendingContext,
     composerLockReason,
-    concurrentLimitReachedForComposer,
+    concurrentLimitReachedForStart,
     messagingSummary?.activeLimit,
     messagingSummary?.monthlyLimit,
-    monthlyLimitReachedForComposer,
+    monthlyLimitReachedForStart,
     activeServiceInquiryContext,
     convertServiceInquiryConversation,
     requestActionBusyId,
+    canSendFreeServiceInquiryFollowup,
+    serviceInquiryFollowupUsed,
+    showChatFooterCta,
     viewerIsServiceInquiryRecipient,
     viewerIsServiceInquiryRequester,
   ]);
 
   const visibleActiveMessages = useMemo(
-    () => activeMessages.filter((message) => (message.messageType ?? "text") === "text"),
+    () =>
+      activeMessages.filter((message) => {
+        const messageType = message.messageType ?? "text";
+        if (messageType === "text") return true;
+        // Include non-text messages that have renderable card content
+        const meta = message.metadata ?? {};
+        if (typeof meta.card_type === "string") return true; // e.g. teacher_inquiry_share
+        const ctag = message.contextTag ?? "";
+        if (ctag === "activity" || ctag === "service_inquiry") return true;
+        if (messageType === "request") return true; // request lifecycle events
+        return false;
+      }),
     [activeMessages]
   );
 
@@ -5542,18 +6087,26 @@ function MessagesPageContent() {
           ].join(" ")}
         >
           <div className="flex flex-col gap-4 px-3 pt-4 pb-2 sm:px-4 sm:pt-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <h1 className="text-2xl font-bold leading-tight">Inbox</h1>
-              <button
-                aria-label="New Message"
-                onClick={() => setComposeOpen(true)}
-                className="flex size-10 items-center justify-center rounded-full bg-[#0df2f2]/10 text-[#0df2f2] transition-colors hover:bg-[#0df2f2]/20"
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
-                  edit_square
-                </span>
-              </button>
-            </div>
+                <div className="flex items-center gap-2">
+                  {messagingSummary ? (
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+                      <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">Active chats</span>
+                      <span className="text-[11px] font-bold tabular-nums text-white">{messagingSummary.monthlyUsed} / {messagingSummary.monthlyLimit}</span>
+                    </div>
+                  ) : null}
+                  <button
+                    aria-label="New Message"
+                    onClick={() => setComposeOpen(true)}
+                    className="flex size-10 items-center justify-center rounded-full bg-[#0df2f2]/10 text-[#0df2f2] transition-colors hover:bg-[#0df2f2]/20"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
+                      edit_square
+                    </span>
+                  </button>
+                </div>
+              </div>
 
             <div className="relative w-full h-11">
               <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-[#90cbcb]">
@@ -5571,11 +6124,11 @@ function MessagesPageContent() {
               />
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+            <div className="flex items-center gap-1.5">
               {([
                 { key: "all", label: "All" },
                 { key: "active", label: "Active" },
-                { key: "pending", label: "Pending" },
+                { key: "pending", label: "Requests" },
                 { key: "archived", label: "Archived" },
               ] as const).map((tab) => {
                 const selected = activeTab === tab.key;
@@ -5586,31 +6139,20 @@ function MessagesPageContent() {
                     onClick={() => selectFilterTab(tab.key)}
                     data-testid={`thread-filter-${tab.key}`}
                     className={[
-                      "min-h-10 shrink-0 rounded-full border px-4 py-2 text-sm font-semibold transition-colors",
+                      "min-h-8 shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
                       selected
                         ? "border-[#0df2f2]/40 bg-[#0df2f2]/20 text-[#0df2f2]"
                         : "border-white/15 bg-white/[0.04] text-[#90cbcb] hover:text-white",
                     ].join(" ")}
                   >
                     {tab.label}
+                    <span className="ml-1 rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tabular-nums">
+                      {tabCounts[tab.key]}
+                    </span>
                   </button>
                 );
               })}
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Used this month</p>
-                <p className="text-sm font-semibold text-white">
-                  {messagingSummary ? `${messagingSummary.monthlyUsed} / ${messagingSummary.monthlyLimit}` : "—"}
-                </p>
-              </div>
-              <div className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Pending</p>
-                <p className="text-sm font-semibold text-white">
-                  {messagingSummary ? `${messagingSummary.pendingCount}` : `${pendingThreadCount}`}
-                </p>
-              </div>
             </div>
           </div>
 
@@ -5644,13 +6186,12 @@ function MessagesPageContent() {
                 const isPinned = Boolean(pinnedThreads[thread.threadId]);
                 const rowMenuOpen = openThreadRowMenuId === thread.threadId;
                 const isUnread = thread.unreadCount > 0 || Boolean(manualUnreadByThread[thread.threadId]);
-                const contextTag = thread.contextTag ?? (thread.kind === "event" ? "event_chat" : thread.kind === "trip" ? "trip_join_request" : "regular_chat");
-                const statusTag = thread.statusTag ?? "active";
-                const contextLabel = CONTEXT_LABELS[contextTag];
-                const statusLabel = STATUS_LABELS[statusTag];
-                const contextClasses = contextToneClasses(contextTag);
-                const showPendingRequestChip = isPendingLikeStatus(statusTag) || Boolean(thread.hasPendingRequest);
+                const rowPreview = toSingleLineText(thread.preview.trim() || thread.subtitle.trim() || "No messages yet.", 84);
                 const activateThread = () => {
+                  if (activeThreadToken === thread.threadId && typeof window !== "undefined" && !window.matchMedia("(max-width: 767px)").matches) {
+                    setOpenThreadRowMenuId(null);
+                    return;
+                  }
                   setOpenThreadRowMenuId(null);
                   setManualUnreadByThread((prev) => {
                     if (!prev[thread.threadId]) return prev;
@@ -5684,7 +6225,7 @@ function MessagesPageContent() {
                       data-testid="thread-row"
                       data-thread-token={thread.threadId}
                       className={[
-                        "w-full min-h-[98px] text-left group flex items-center gap-2 rounded-xl border bg-black/25 p-2.5 transition-colors",
+                        "w-full min-h-[86px] text-left group flex items-center gap-3 rounded-xl border bg-black/25 px-3 py-3 transition-colors",
                         activeThreadToken === thread.threadId
                           ? "border-[#db2777]/45 bg-[#241723]"
                           : "border-white/10 hover:border-[#25d1f4]/30 hover:bg-[#1c2224]",
@@ -5719,20 +6260,22 @@ function MessagesPageContent() {
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className={`truncate text-[14px] leading-tight ${isUnread ? "font-semibold text-white" : "font-medium text-[#e8f4f4]"}`}>
-                            {thread.title}
-                          </p>
-                          <div className="relative flex shrink-0 items-center gap-1 pl-1" data-thread-row-menu="true">
-                            <p className={`text-[11px] leading-tight ${isUnread ? "text-[#f472b6]" : "text-[#7fd8e0]"}`}>
-                              {formatRelative(thread.updatedAt)}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className={`truncate text-[15px] leading-tight ${isUnread ? "font-semibold text-white" : "font-medium text-[#e8f4f4]"}`}>
+                              {thread.title}
                             </p>
-                            {thread.otherUserId && pendingReferenceCountsByPeer[thread.otherUserId] ? (
-                              <span className="inline-flex min-w-[18px] items-center justify-center rounded-full border border-cyan-300/35 bg-[linear-gradient(90deg,rgba(0,245,255,0.14),rgba(255,0,255,0.08))] px-1.5 py-0.5 text-[10px] font-semibold text-cyan-100" title={`${pendingReferenceCountsByPeer[thread.otherUserId]} pending references`}>
-                                {pendingReferenceCountsByPeer[thread.otherUserId]}
-                              </span>
-                            ) : null}
-                            {isUnread ? <span data-testid="thread-unread-dot" className="h-2 w-2 rounded-full bg-[#db2777]" /> : null}
+                            <p className={`mt-1 truncate text-[13px] leading-snug ${isUnread ? "text-[#f5e6f0]" : "text-[#c3dddd]"}`}>
+                              {rowPreview}
+                            </p>
+                          </div>
+                          <div className="relative flex shrink-0 items-start gap-2 pl-1" data-thread-row-menu="true">
+                            <div className="flex min-w-[36px] items-center justify-end gap-1">
+                              <p className={`text-[11px] leading-tight ${isUnread ? "text-[#f472b6]" : "text-[#7fd8e0]"}`}>
+                                {formatRelative(thread.updatedAt)}
+                              </p>
+                              {isUnread ? <span data-testid="thread-unread-dot" className="h-2 w-2 rounded-full bg-[#db2777]" /> : null}
+                            </div>
                             <button
                               type="button"
                               onClick={(event) => {
@@ -5740,7 +6283,7 @@ function MessagesPageContent() {
                                 setOpenThreadRowMenuId((prev) => (prev === thread.threadId ? null : thread.threadId));
                               }}
                               data-testid="thread-row-menu-button"
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/5 hover:text-[#f5a5cf]"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/5 hover:text-[#f5a5cf]"
                               aria-label="Thread row actions"
                             >
                               <span className="material-symbols-outlined" style={{ fontSize: 13, lineHeight: 1 }}>
@@ -5792,21 +6335,11 @@ function MessagesPageContent() {
                           </div>
                         </div>
 
-                        <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                          {showPendingRequestChip && contextTag !== "regular_chat" ? (
-                            <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${contextClasses}`}>
-                              {contextLabel}
-                            </span>
-                          ) : null}
-                          {showPendingRequestChip ? (
-                            <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${statusToneClasses(statusTag)}`}>
-                              {isPendingLikeStatus(statusTag) ? statusLabel : STATUS_LABELS.pending}
-                            </span>
-                          ) : null}
+                        <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
                           {isPinned ? (
                             <span
                               data-testid="thread-pinned-indicator"
-                              className="material-symbols-outlined text-fuchsia-200/90"
+                              className="material-symbols-outlined shrink-0 text-fuchsia-200/90"
                               style={{ fontSize: 12 }}
                               title="Pinned"
                             >
@@ -5816,18 +6349,14 @@ function MessagesPageContent() {
                           {isMuted ? (
                             <span
                               data-testid="thread-muted-indicator"
-                              className="material-symbols-outlined text-slate-300/90"
+                              className="material-symbols-outlined shrink-0 text-slate-300/90"
                               style={{ fontSize: 12 }}
                               title="Muted"
                             >
                               notifications_off
                             </span>
                           ) : null}
-                          <span className="truncate text-[12px] text-[#90cbcb]">{thread.subtitle}</span>
                         </div>
-                        {thread.metaLabel ? <p className="mt-0.5 truncate text-[11px] text-slate-400">{thread.metaLabel}</p> : null}
-
-                        <p className={`mt-1 truncate text-[13px] leading-snug ${isUnread ? "text-[#f5e6f0]" : "text-[#c3dddd]"}`}>{thread.preview}</p>
                       </div>
                     </div>
 
@@ -5838,7 +6367,7 @@ function MessagesPageContent() {
                           className="mt-1 text-[12px] leading-snug text-[#f1dde8]"
                           style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
                         >
-                          {thread.preview || "New activity in this chat."}
+                          {rowPreview || "New activity in this chat."}
                         </p>
                         <div className="mt-2 flex justify-end">
                           <button
@@ -5870,12 +6399,30 @@ function MessagesPageContent() {
           ].join(" ")}
         >
           {showThreadPlaceholderSkeleton ? (
-            <div className="flex h-full flex-col justify-center p-8">
-              <div className="mx-auto w-full max-w-2xl space-y-6 animate-pulse">
-                <div className="mx-auto h-28 w-28 rounded-full bg-white/10" />
-                <div className="mx-auto h-8 w-52 rounded bg-white/10" />
-                <div className="mx-auto h-4 w-80 max-w-full rounded bg-white/10" />
-                <div className="mx-auto h-12 w-56 rounded-full bg-white/10" />
+            <div className="flex h-full flex-col animate-pulse">
+              {/* Header skeleton — matches real header */}
+              <div className="flex min-h-[72px] items-center gap-4 border-b border-white/10 px-4 py-3 sm:px-6 md:min-h-[88px]">
+                <div className="h-10 w-10 shrink-0 rounded-full bg-white/10" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-4 w-36 rounded bg-white/10" />
+                  <div className="h-3 w-24 rounded bg-white/[0.07]" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="h-8 w-8 rounded-full bg-white/[0.06]" />
+                  <div className="h-8 w-8 rounded-full bg-white/[0.06]" />
+                </div>
+              </div>
+              {/* Messages area skeleton */}
+              <div className="flex flex-1 flex-col gap-3 px-4 py-5 sm:px-6">
+                <div className="flex justify-start"><div className="h-10 w-48 rounded-2xl bg-white/[0.07]" /></div>
+                <div className="flex justify-end"><div className="h-10 w-40 rounded-2xl bg-white/[0.07]" /></div>
+                <div className="flex justify-start"><div className="h-16 w-64 rounded-2xl bg-white/[0.07]" /></div>
+                <div className="flex justify-end"><div className="h-10 w-52 rounded-2xl bg-white/[0.07]" /></div>
+                <div className="flex justify-start"><div className="h-10 w-36 rounded-2xl bg-white/[0.07]" /></div>
+              </div>
+              {/* Input area skeleton */}
+              <div className="border-t border-white/10 px-4 py-3 sm:px-6">
+                <div className="h-11 w-full rounded-full bg-white/[0.07]" />
               </div>
             </div>
           ) : !activeMeta ? (
@@ -5972,17 +6519,6 @@ function MessagesPageContent() {
                       )}
                     </div>
                     <p className="truncate text-[11px] text-[#90cbcb] sm:text-xs">{activeMeta.subtitle}</p>
-                    {activeReferencePrompt ? (
-                      <div className="mt-2">
-                        <Link
-                          href="/references"
-                          className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-cyan-100 hover:bg-cyan-300/15"
-                        >
-                          <span className="material-symbols-outlined text-[12px]">rate_review</span>
-                          Leave reference
-                        </Link>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 
@@ -5991,9 +6527,10 @@ function MessagesPageContent() {
                     <button
                       type="button"
                       onClick={() => setActivityComposerOpen(true)}
-                      className="inline-flex min-h-9 items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300/35 hover:text-cyan-100"
+                      aria-label="Invite to activity"
+                      className="select-none bg-gradient-to-r from-[#00F5FF] via-[#58E9FF] to-[#FF00FF] bg-clip-text text-[22px] font-black uppercase leading-none tracking-[-0.07em] text-transparent opacity-[0.18] transition-opacity hover:opacity-40 sm:text-[28px]"
                     >
-                      Invite to activity
+                      Activity
                     </button>
                   ) : null}
                   {threadPrefsInLocalMode ? (
@@ -6169,58 +6706,37 @@ function MessagesPageContent() {
                       {pinnedPendingContexts.map((pendingContext) => {
                         const pendingContextActions = pendingActionsForContext(pendingContext);
                         const serviceInquiryDetails = describeServiceInquiryRequest(pendingContext);
+                        const tripJoinDetails = describeTripJoinRequest(pendingContext);
+                        const hostingRequestDetails = describeHostingRequest(pendingContext);
+                        const allDetails = [...serviceInquiryDetails, ...tripJoinDetails, ...hostingRequestDetails];
+                        const expiryDays = daysUntilPendingExpiry(pendingContext);
+                        const metaDesc = describeContextMeta(pendingContext);
                         return (
                           <div
                             key={pendingContext.id}
                             data-testid="thread-pending-context-card"
-                            className="rounded-2xl border border-cyan-300/30 bg-[linear-gradient(135deg,rgba(13,242,242,0.12),rgba(219,39,119,0.10))] p-3 sm:p-3.5"
+                            className="rounded-xl px-3 py-2.5"
+                            style={{ background: "linear-gradient(90deg, rgba(13,204,242,0.07) 0%, rgba(217,59,255,0.05) 100%)" }}
                           >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">
-                                  {pendingContext.contextTag === "service_inquiry" ? "Teaching services request" : "Pending Request"}
-                                </p>
-                                <p className="mt-1 text-sm font-semibold text-white">
-                                  {pendingContext.title || CONTEXT_LABELS[pendingContext.contextTag]}
-                                </p>
-                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                                  {pendingContext.contextTag !== "service_inquiry" ? (
-                                    <span
-                                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contextToneClasses(pendingContext.contextTag)}`}
-                                    >
-                                      {CONTEXT_LABELS[pendingContext.contextTag]}
-                                    </span>
-                                  ) : null}
-                                  <span
-                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${statusToneClasses(pendingContext.statusTag)}`}
-                                  >
-                                    {STATUS_LABELS[pendingContext.statusTag]}
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs text-slate-300">
+                                  <span className="font-semibold text-slate-100">
+                                    {pendingContext.title || CONTEXT_LABELS[pendingContext.contextTag]}
                                   </span>
-                                  {describeContextMeta(pendingContext) ? (
-                                    <span className="text-[11px] text-slate-100/85">{describeContextMeta(pendingContext)}</span>
+                                  {metaDesc ? <span className="text-slate-500"> · {metaDesc}</span> : null}
+                                  {expiryDays !== null ? (
+                                    <span className="text-slate-500"> · expires in {expiryDays} day{expiryDays === 1 ? "" : "s"}</span>
                                   ) : null}
-                                  {daysUntilPendingExpiry(pendingContext) !== null ? (
-                                    <span className="text-[11px] text-slate-100/85">
-                                      Expires in {daysUntilPendingExpiry(pendingContext)} day
-                                      {daysUntilPendingExpiry(pendingContext) === 1 ? "" : "s"}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                {serviceInquiryDetails.length > 0 ? (
-                                  <div className="mt-2 space-y-1.5 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
-                                    {serviceInquiryDetails.map((detail) => (
-                                      <div key={`${pendingContext.id}:${detail.label}`} className="flex flex-wrap items-start gap-2 text-xs">
-                                        <span className="font-semibold uppercase tracking-[0.08em] text-white/45">
-                                          {detail.label}
-                                        </span>
-                                        <span className="text-slate-100">{detail.value}</span>
-                                      </div>
-                                    ))}
-                                  </div>
+                                </p>
+                                {allDetails.length > 0 ? (
+                                  <p className="mt-0.5 text-[11px] text-slate-500">
+                                    {allDetails.map((d) => `${d.label}: ${d.value}`).join(" · ")}
+                                  </p>
                                 ) : null}
                               </div>
                               {pendingContextActions.length > 0 ? (
-                                <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex shrink-0 items-center gap-2">
                                   {pendingContextActions.map((action) => {
                                     const busy = requestActionBusyId === `${pendingContext.id}:${action.key}`;
                                     const isAccept = action.key === "accept";
@@ -6232,15 +6748,11 @@ function MessagesPageContent() {
                                         onClick={() => void updateRequestContext(pendingContext.id, action.key)}
                                         disabled={Boolean(requestActionBusyId)}
                                         className={[
-                                          "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60",
-                                          isAccept
-                                            ? "border-emerald-300/35 bg-emerald-300/15 text-emerald-100 hover:bg-emerald-300/25"
-                                            : isDecline
-                                            ? "border-rose-300/35 bg-rose-300/15 text-rose-100 hover:bg-rose-300/25"
-                                            : "border-white/20 bg-white/[0.06] text-slate-100 hover:bg-white/[0.12]",
+                                          "text-xs font-semibold transition-opacity disabled:opacity-50 hover:opacity-80",
+                                          isAccept ? "text-emerald-300" : isDecline ? "text-rose-300" : "text-slate-300",
                                         ].join(" ")}
                                       >
-                                        {busy ? "Saving..." : action.label}
+                                        {busy ? "…" : action.label}
                                       </button>
                                     );
                                   })}
@@ -6265,10 +6777,34 @@ function MessagesPageContent() {
                     <div className="text-sm text-[#90cbcb]">Loading conversation...</div>
                   ) : null}
                   {historicalThreadContexts.length > 0 ? (
-                    <div className="space-y-2.5">
+                    <div className="divide-y divide-white/[0.05]">
                         {historicalThreadContexts.map((context) => {
                           const metaLabel = describeContextMeta(context);
                           const note = asString(context.metadata.note).trim();
+                          const tripJoinReasonRaw =
+                            context.contextTag === "trip_join_request"
+                              ? asString(context.metadata.trip_join_reason).trim() ||
+                                asString(context.metadata.reason).trim()
+                              : "";
+                          const tripJoinReason = tripJoinReasonRaw ? tripJoinReasonLabel(tripJoinReasonRaw) : "";
+                          const hostingReasonRaw =
+                            context.contextTag === "hosting_request"
+                              ? asString(context.metadata.reason).trim()
+                              : "";
+                          const hostingReason =
+                            hostingReasonRaw && asString(context.metadata.request_type).trim() === "request_hosting"
+                              ? travelIntentReasonLabel(hostingReasonRaw)
+                              : hostingReasonRaw;
+                          const noteIsDuplicateTripJoinReason = Boolean(
+                            tripJoinReasonRaw &&
+                              note &&
+                              note.localeCompare(tripJoinReasonRaw, undefined, { sensitivity: "accent" }) === 0
+                          );
+                          const noteIsDuplicateHostingReason = Boolean(
+                            hostingReasonRaw &&
+                              note &&
+                              note.localeCompare(hostingReasonRaw, undefined, { sensitivity: "accent" }) === 0
+                          );
                           const loggedAt = formatActivityDateTime(context.updatedAt || context.createdAt);
                           const activityType = asString(context.metadata.activity_type);
                           const contextReferenceTag =
@@ -6290,41 +6826,33 @@ function MessagesPageContent() {
                           return (
                             <div
                               key={context.id}
-                              className="rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2"
+                              className="py-2.5"
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                    <p className="text-[12px] font-medium text-slate-100">{contextHistoryTitle(context)}</p>
-                                    <span className="text-[10px] uppercase tracking-[0.08em] text-slate-500">
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                    <p className="text-[12px] font-medium text-slate-300">{contextHistoryTitle(context)}</p>
+                                    <span className="text-[10px] uppercase tracking-[0.08em] text-slate-600">
                                       {STATUS_LABELS[context.statusTag]}
                                     </span>
-                                    {metaLabel ? <span className="text-[10px] text-slate-500">{metaLabel}</span> : null}
+                                    {metaLabel ? <span className="text-[10px] text-slate-600">{metaLabel}</span> : null}
                                   </div>
-                                  <p className="mt-1 text-[11px] leading-5 text-slate-400">{contextHistorySummary(context)}</p>
-                                  {note ? <p className="mt-1 text-[11px] leading-5 text-slate-500">Note: {note}</p> : null}
-                                  {canReferenceFromCard ? (
-                                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                      {cardHasPrompt ? (
-                                        <Link
-                                          href="/references"
-                                          className="inline-flex items-center rounded-full border border-white/12 px-2 py-0.5 text-[10px] font-medium text-slate-300 hover:border-white/20 hover:text-white"
-                                        >
-                                          Add reference
-                                        </Link>
-                                      ) : cardAlreadySubmitted ? (
-                                        <span className="inline-flex items-center rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-400">
-                                          Reference submitted
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                                          Reference not available
-                                        </span>
-                                      )}
-                                    </div>
+                                  {tripJoinReason ? (
+                                    <p className="mt-0.5 text-[11px] leading-5 text-slate-600">Reason: {tripJoinReason}</p>
+                                  ) : null}
+                                  {!tripJoinReason && hostingReason ? (
+                                    <p className="mt-0.5 text-[11px] leading-5 text-slate-600">Reason: {hostingReason}</p>
+                                  ) : null}
+                                  {note && !noteIsDuplicateTripJoinReason && !noteIsDuplicateHostingReason ? (
+                                    <p className="mt-0.5 text-[11px] leading-5 text-slate-600">Note: {note}</p>
+                                  ) : null}
+                                  {cardHasPrompt ? (
+                                    <p className="mt-0.5 text-[11px] text-cyan-300/70">Reference available</p>
+                                  ) : cardAlreadySubmitted ? (
+                                    <p className="mt-0.5 text-[11px] text-slate-600">Reference submitted</p>
                                   ) : null}
                                 </div>
-                                {loggedAt ? <span className="shrink-0 text-[10px] text-slate-500">{loggedAt}</span> : null}
+                                {loggedAt ? <span className="shrink-0 text-[10px] text-slate-600">{loggedAt}</span> : null}
                               </div>
                             </div>
                           );
@@ -6332,59 +6860,53 @@ function MessagesPageContent() {
                     </div>
                   ) : null}
                   {activeReferencePrompt ? (
-                    <div className="rounded-2xl border border-[#00F5FF]/30 bg-[linear-gradient(135deg,rgba(0,245,255,0.12),rgba(255,0,255,0.08))] p-3 sm:p-3.5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">Reference Prompt</p>
-                          <p className="mt-1 text-sm font-semibold text-white">
-                            {referenceContextLabel(activeReferencePrompt.contextTag)} completed. Leave a quick reference.
-                          </p>
-                          <p className="mt-1 text-xs text-slate-200/80">Due since {formatDateShort(activeReferencePrompt.dueAt)}</p>
-                        </div>
-                        <Link
-                          href="/references"
-                          className="inline-flex items-center rounded-full border border-cyan-300/35 bg-cyan-300/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                        >
-                          Leave reference
-                        </Link>
-                      </div>
+                    <div
+                      className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5"
+                      style={{ background: "linear-gradient(90deg, rgba(13,204,242,0.07) 0%, rgba(217,59,255,0.05) 100%)" }}
+                    >
+                      <p className="text-xs text-slate-400">
+                        <span className="font-medium text-slate-200">{referenceContextLabel(activeReferencePrompt.contextTag)}</span>
+                        {" "}completed {formatDateShort(activeReferencePrompt.dueAt)}
+                        {activeReferencePrompt.expiresAt ? <span className="text-slate-500"> · expires {formatDateShort(activeReferencePrompt.expiresAt)}</span> : null}
+                      </p>
+                      <Link
+                        href={meId ? `/profile/${encodeURIComponent(meId)}?tab=references&userId=${encodeURIComponent(activeReferencePrompt.peerUserId)}` : `/references?userId=${encodeURIComponent(activeReferencePrompt.peerUserId)}`}
+                        className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-cyan-300/40 bg-cyan-300/10 px-4 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20 hover:border-cyan-300/60 transition-all"
+                      >
+                        <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>rate_review</span>
+                        Leave reference
+                      </Link>
                     </div>
                   ) : hasSubmittedLatestCompletedActivityReference && latestCompletedActivityReferenceTag ? (
-                    <div className="rounded-2xl border border-emerald-300/25 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,255,255,0.03))] p-3 sm:p-3.5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-200">Reference Submitted</p>
-                          <p className="mt-1 text-sm font-semibold text-white">
-                            Your {referenceContextLabel(latestCompletedActivityReferenceTag)} reference for this member is already on file.
-                          </p>
-                          {submittedReferenceState.latestSubmittedAt ? (
-                            <p className="mt-1 text-xs text-slate-200/80">
-                              Submitted {formatDateShort(submittedReferenceState.latestSubmittedAt)}
-                            </p>
-                          ) : null}
-                        </div>
-                        <Link
-                          href="/references"
-                          className="inline-flex items-center rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-300/20"
-                        >
-                          View references
-                        </Link>
-                      </div>
+                    <div
+                      className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5"
+                      style={{ background: "linear-gradient(90deg, rgba(16,185,129,0.06) 0%, rgba(13,204,242,0.04) 100%)" }}
+                    >
+                      <p className="text-xs text-slate-500">
+                        <span className="font-medium text-emerald-300/80">{referenceContextLabel(latestCompletedActivityReferenceTag)}</span>
+                        {" "}reference submitted
+                        {submittedReferenceState.latestSubmittedAt ? <span> {formatDateShort(submittedReferenceState.latestSubmittedAt)}</span> : null}
+                      </p>
+                      <Link
+                        href={meId ? `/profile/${encodeURIComponent(meId)}?tab=references` : "/references"}
+                        className="shrink-0 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                      >
+                        View →
+                      </Link>
                     </div>
                   ) : null}
                   {activeMeta?.otherUserId && hasAcceptedNonConnectionContext && !hasAcceptedConnectionContext && !interactionBlocked ? (
-                    <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-3 sm:p-3.5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-sm text-cyan-50">
-                          Chat is unlocked from an accepted request. Add this user to your connections?
-                        </p>
-                        <Link
-                          href={`/profile/${activeMeta.otherUserId}`}
-                          className="inline-flex items-center rounded-full border border-cyan-300/35 bg-cyan-300/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                        >
-                          Add this user to your connections
-                        </Link>
-                      </div>
+                    <div
+                      className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5"
+                      style={{ background: "linear-gradient(90deg, rgba(13,204,242,0.07) 0%, rgba(13,204,242,0.03) 100%)" }}
+                    >
+                      <p className="text-xs text-slate-400">Chat unlocked from an accepted request.</p>
+                      <Link
+                        href={`/profile/${activeMeta.otherUserId}`}
+                        className="shrink-0 text-xs font-semibold text-cyan-300 hover:text-cyan-100 transition-colors"
+                      >
+                        Connect →
+                      </Link>
                     </div>
                   ) : null}
                   <DismissibleBanner message={threadInfo} tone="info" onDismiss={() => setThreadInfo(null)} />
@@ -6394,55 +6916,68 @@ function MessagesPageContent() {
                       <div className="px-1 py-0.5">
                         <p className="text-xs font-semibold text-white/40">{threadStateBanner.title} <span className="font-normal">— {threadStateBanner.body}</span></p>
                       </div>
-                    ) : (
-                    <div className={`rounded-xl border p-3 ${threadStateBanner.tone}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold">{threadStateBanner.title}</p>
-                          <p className="mt-1 text-xs opacity-90">{threadStateBanner.body}</p>
+                    ) : (() => {
+                      const toneGradient =
+                        threadStateBanner.tone.includes("fuchsia") ? "linear-gradient(90deg, rgba(217,59,255,0.08) 0%, rgba(217,59,255,0.03) 100%)" :
+                        threadStateBanner.tone.includes("rose") ? "linear-gradient(90deg, rgba(244,63,94,0.08) 0%, rgba(244,63,94,0.03) 100%)" :
+                        threadStateBanner.tone.includes("amber") ? "linear-gradient(90deg, rgba(251,191,36,0.08) 0%, rgba(251,191,36,0.03) 100%)" :
+                        "linear-gradient(90deg, rgba(13,204,242,0.07) 0%, rgba(13,204,242,0.03) 100%)";
+                      const toneText =
+                        threadStateBanner.tone.includes("fuchsia") ? "text-fuchsia-200" :
+                        threadStateBanner.tone.includes("rose") ? "text-rose-200" :
+                        threadStateBanner.tone.includes("amber") ? "text-amber-200" :
+                        "text-cyan-200";
+                      return (
+                        <div
+                          className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5"
+                          style={{ background: toneGradient }}
+                        >
+                          <div className="min-w-0">
+                            <p className={`text-xs font-semibold ${toneText}`}>{threadStateBanner.title}</p>
+                            <p className="mt-0.5 text-[11px] text-slate-500">{threadStateBanner.body}</p>
+                          </div>
+                          {threadStateBanner.ctaHref ? (
+                            <Link
+                              href={threadStateBanner.ctaHref}
+                              className={`shrink-0 text-xs font-semibold ${toneText} hover:opacity-80 transition-opacity`}
+                            >
+                              {threadStateBanner.ctaLabel} →
+                            </Link>
+                          ) : threadStateBanner.ctaAction ? (
+                            <button
+                              type="button"
+                              onClick={threadStateBanner.ctaAction}
+                              className={`shrink-0 text-xs font-semibold ${toneText} hover:opacity-80 transition-opacity`}
+                            >
+                              {threadStateBanner.ctaLabel} →
+                            </button>
+                          ) : null}
                         </div>
-                        {threadStateBanner.ctaHref ? (
-                          <Link
-                            href={threadStateBanner.ctaHref}
-                            className="inline-flex items-center rounded-full border border-current/30 px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
-                          >
-                            {threadStateBanner.ctaLabel}
-                          </Link>
-                        ) : threadStateBanner.ctaAction ? (
-                          <button
-                            type="button"
-                            onClick={threadStateBanner.ctaAction}
-                            className="inline-flex items-center rounded-full border border-current/30 px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
-                          >
-                            {threadStateBanner.ctaLabel}
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                    )
+                      );
+                    })()
                   ) : null}
                   {activeServiceInquiryContext &&
                   viewerIsServiceInquiryRecipient &&
                   (activeServiceInquiryContext.statusTag === "info_shared" ||
                     activeServiceInquiryContext.statusTag === "inquiry_followup_pending") ? (
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-4">
                       {activeServiceInquiryContext.statusTag === "inquiry_followup_pending" ? (
                         <button
                           type="button"
                           onClick={() => void convertServiceInquiryConversation()}
                           disabled={Boolean(requestActionBusyId)}
-                          className="rounded-full border border-emerald-300/35 bg-emerald-300/15 px-3 py-1.5 text-xs font-semibold text-emerald-100 disabled:opacity-60"
+                          className="text-xs font-semibold text-emerald-300 transition-opacity hover:opacity-80 disabled:opacity-50"
                         >
-                          {requestActionBusyId === `${activeServiceInquiryContext.id}:convert` ? "Activating..." : "Accept conversation"}
+                          {requestActionBusyId === `${activeServiceInquiryContext.id}:convert` ? "Activating…" : "Accept conversation"}
                         </button>
                       ) : null}
                       <button
                         type="button"
                         onClick={() => void declineServiceInquiryConversation()}
                         disabled={Boolean(requestActionBusyId)}
-                        className="rounded-full border border-rose-300/35 bg-rose-300/15 px-3 py-1.5 text-xs font-semibold text-rose-100 disabled:opacity-60"
+                        className="text-xs font-semibold text-rose-300 transition-opacity hover:opacity-80 disabled:opacity-50"
                       >
-                        {requestActionBusyId === `${activeServiceInquiryContext.id}:decline` ? "Declining..." : "Decline inquiry"}
+                        {requestActionBusyId === `${activeServiceInquiryContext.id}:decline` ? "Declining…" : "Decline inquiry"}
                       </button>
                     </div>
                   ) : null}
@@ -6580,7 +7115,7 @@ function MessagesPageContent() {
                                 <div className="space-y-3 px-4 py-3">
                                   <div className="flex flex-wrap gap-2">
                                     <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-200">
-                                      {referenceContextLabel(activityTypeRaw || "collaboration")}
+                                      {referenceContextLabel(activityTypeRaw || "collaborate")}
                                     </span>
                                     <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-300">
                                       {activityWindow}
@@ -6725,11 +7260,11 @@ function MessagesPageContent() {
                                     event.stopPropagation();
                                     setOpenMessageMenuId((prev) => (prev === message.id ? null : message.id));
                                   }}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/25 text-slate-300 transition-colors hover:border-[#f39acb]/55 hover:text-[#f6a7d1]"
+                                  className="px-1 text-white/25 transition-colors hover:text-white/60"
                                   aria-label="Message actions"
                                 >
-                                  <span className="material-symbols-outlined" style={{ fontSize: 15, lineHeight: 1 }}>
-                                    more_vert
+                                  <span className="material-symbols-outlined" style={{ fontSize: 16, lineHeight: 1 }}>
+                                    more_horiz
                                   </span>
                                 </button>
 
@@ -6967,6 +7502,11 @@ function MessagesPageContent() {
                       );
                     })
                   )}
+                  {activeConversationNoticeBody ? (
+                    <p className="px-2 py-2 text-center text-[11px] leading-5 text-slate-500">
+                      {activeConversationNoticeBody}
+                    </p>
+                  ) : null}
                 </div>
 
                 {showJumpToLatest ? (
@@ -6980,7 +7520,6 @@ function MessagesPageContent() {
                 ) : null}
               </div>
 
-              {!composerLockReason ? (
                 <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2.5 sm:p-3">
                 {replyTo ? (
                   <div className="mx-auto mb-2 max-w-4xl rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 flex items-start justify-between gap-3">
@@ -7002,96 +7541,131 @@ function MessagesPageContent() {
                     </button>
                   </div>
                 ) : null}
-                <div className="mx-auto flex max-w-4xl items-end gap-2">
-                  <div className="relative mb-1 shrink-0">
-                    <button
-                      type="button"
-                      disabled={composerDisabled}
-                      onClick={() => setComposerEmojiOpen((prev) => !prev)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/25 text-slate-300 transition-colors hover:border-cyan-300/35 hover:text-cyan-100 disabled:opacity-50"
-                      aria-label="Open emoji picker"
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 17 }}>
-                        sentiment_satisfied
-                      </span>
-                    </button>
-                    {composerEmojiOpen ? (
-                      <div className="absolute left-0 bottom-11 z-[80] w-44 rounded-xl border border-white/10 bg-[#101616] p-2 shadow-xl">
-                        <div className="grid grid-cols-4 gap-1">
-                          {QUICK_EMOJIS.map((emoji) => (
-                            <button
-                              key={`composer-${emoji}`}
-                              type="button"
-                              onClick={() => {
-                                setThreadBody((prev) => `${prev}${prev && !prev.endsWith(" ") ? " " : ""}${emoji}`);
-                                setComposerEmojiOpen(false);
-                              }}
-                              className="rounded-lg px-1 py-1.5 text-lg transition-colors hover:bg-white/10"
-                            >
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
+                {showChatFooterCta && chatFooterCta ? (
+                  <div className="mx-auto max-w-4xl">
+                    <div className="rounded-[26px] border border-white/10 bg-white/[0.03] px-3 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (chatFooterCta.state === "request_connect") {
+                            openConnectRequestFromThread();
+                            return;
+                          }
+                          if (chatFooterCta.state === "start_conversation") {
+                            setShowActivateConfirm(true);
+                          }
+                        }}
+                        disabled={chatFooterCta.disabled}
+                        className={`inline-flex min-h-12 w-full items-center justify-center rounded-full px-4 text-sm font-semibold transition ${
+                          chatFooterCta.disabled
+                            ? "cursor-not-allowed border border-white/10 bg-white/[0.04] text-white/45"
+                            : "bg-[linear-gradient(135deg,#0df2f2,#d93bff)] text-[#041316] shadow-[0_14px_28px_rgba(13,242,242,0.18)] hover:brightness-105"
+                        }`}
+                      >
+                        {chatFooterCta.label}
+                      </button>
+                      <p className={`mt-2 text-center text-[11px] ${chatFooterCta.disabled ? "text-slate-400" : "text-[#90cbcb]"}`}>
+                        {chatFooterCta.helper}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mx-auto flex max-w-4xl items-end gap-2">
+                      <div className="relative mb-1 shrink-0">
+                        <button
+                          type="button"
+                          disabled={composerDisabled}
+                          onClick={() => setComposerEmojiOpen((prev) => !prev)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/25 text-slate-300 transition-colors hover:border-cyan-300/35 hover:text-cyan-100 disabled:opacity-50"
+                          aria-label="Open emoji picker"
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 17 }}>
+                            sentiment_satisfied
+                          </span>
+                        </button>
+                        {composerEmojiOpen ? (
+                          <div className="absolute left-0 bottom-11 z-[80] w-44 rounded-xl border border-white/10 bg-[#101616] p-2 shadow-xl">
+                            <div className="grid grid-cols-4 gap-1">
+                              {QUICK_EMOJIS.map((emoji) => (
+                                <button
+                                  key={`composer-${emoji}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setThreadBody((prev) => `${prev}${prev && !prev.endsWith(" ") ? " " : ""}${emoji}`);
+                                    setComposerEmojiOpen(false);
+                                  }}
+                                  className="rounded-lg px-1 py-1.5 text-lg transition-colors hover:bg-white/10"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                  <div className="relative flex flex-1 items-end gap-1.5 rounded-full border border-slate-700/90 bg-black/35 px-2 py-1">
-                  <textarea
-                    className="flex-1 bg-transparent border-none px-2 py-1.5 text-[14px] leading-5 text-white placeholder-slate-500 focus:ring-0 resize-none max-h-28"
-                    placeholder={
-                      monthlyLimitReachedForComposer
-                        ? "Upgrade to activate more conversations."
-                        : concurrentLimitReachedForComposer
-                        ? "Archive one active conversation to continue."
-                        : activationRequiredToSend
-                        ? "Send a message to activate this conversation..."
-                        : "Type a message..."
-                    }
-                    rows={1}
-                    disabled={composerDisabled}
-                    value={threadBody}
-                    onChange={(e) => setThreadBody(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (!sending) void sendActiveMessage();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void sendActiveMessage()}
-                    disabled={sending || composerDisabled || !threadBody.trim()}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0df2f2] text-[#052328] hover:bg-[#0be0e0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                      send
-                    </span>
-                  </button>
-                  </div>
-                </div>
-                <div className="mx-auto mt-1 min-h-[16px] max-w-4xl">
-                  {monthlyLimitReachedForComposer ? (
-                    <p className="text-[10px] text-fuchsia-200/90">
-                      You&apos;ve used all {messagingSummary?.monthlyLimit ?? 10} conversation activations this month.
-                    </p>
-                  ) : concurrentLimitReachedForComposer ? (
-                    <p className="text-[10px] text-rose-200/90">
-                      You have {messagingSummary?.activeLimit ?? 10} active conversations. Archive one to continue.
-                    </p>
-                  ) : activationRequiredToSend && monthlyActivationRemaining !== null ? (
-                    <p className="text-center text-[10px] font-medium text-cyan-100/95 animate-pulse">
-                      Sending a message will activate this conversation. {monthlyActivationRemaining} activation
-                      {monthlyActivationRemaining === 1 ? "" : "s"} remaining this month.
-                    </p>
-                  ) : threadPrefsInLocalMode ? (
-                    <p className="text-[10px] text-slate-400">
-                      Archive, mute, and pin are currently stored locally on this device.
-                    </p>
-                  ) : null}
-                </div>
+                      <div className="relative flex flex-1 items-end gap-1.5 rounded-full border border-slate-700/90 bg-black/35 px-2 py-1">
+                        <textarea
+                          ref={composerTextareaRef}
+                          className="flex-1 resize-none border-none bg-transparent px-2 py-1.5 text-[14px] leading-5 text-white placeholder-slate-500 focus:ring-0 max-h-28"
+                          placeholder={
+                            composerLockReason
+                              ? composerLockReason
+                              : monthlyLimitReachedForStart
+                              ? "Upgrade to activate more conversations."
+                              : concurrentLimitReachedForStart
+                              ? "Archive one active conversation to continue."
+                              : "Type a message..."
+                          }
+                          rows={1}
+                          disabled={composerDisabled}
+                          value={threadBody}
+                          onChange={(e) => setThreadBody(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              if (!sending) void sendActiveMessage();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void sendActiveMessage()}
+                          disabled={sending || composerDisabled || !threadBody.trim()}
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0df2f2] text-[#052328] transition-colors hover:bg-[#0be0e0] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                            send
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mx-auto mt-1 min-h-[16px] max-w-4xl">
+                      {composerLockReason ? (
+                        <p className="text-[10px] text-slate-300/85">
+                          {composerLockReason}
+                        </p>
+                      ) : monthlyLimitReachedForStart ? (
+                        <p className="text-[10px] text-fuchsia-200/90">
+                          You&apos;ve used all {messagingSummary?.monthlyLimit ?? 10} conversation starts this month.
+                        </p>
+                      ) : concurrentLimitReachedForStart ? (
+                        <p className="text-[10px] text-rose-200/90">
+                          You have {messagingSummary?.activeLimit ?? 10} active conversations. Archive one to continue.
+                        </p>
+                      ) : activeConversationDaysLeftText ? (
+                        <p className="text-[10px] text-slate-500">
+                          {activeConversationDaysLeftText}
+                        </p>
+                      ) : threadPrefsInLocalMode ? (
+                        <p className="text-[10px] text-slate-400">
+                          Archive, mute, and pin are currently stored locally on this device.
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
+                )}
                 </footer>
-              ) : null}
               </div>
 
               <aside className="hidden xl:flex w-[340px] shrink-0 flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))]">
@@ -7101,13 +7675,6 @@ function MessagesPageContent() {
                       loading={contactSidebarLoading}
                       error={contactSidebarError}
                       contact={contactSidebar}
-                      referencePromptLabel={activeReferencePrompt ? referenceContextLabel(activeReferencePrompt.contextTag) : null}
-                      onOpenReferences={activeReferencePrompt ? () => router.push("/references") : null}
-                      latestSubmittedReferenceLabel={
-                        !activeReferencePrompt && hasSubmittedLatestCompletedActivityReference && latestCompletedActivityReferenceTag
-                          ? referenceContextLabel(latestCompletedActivityReferenceTag)
-                          : null
-                      }
                     />
                   ) : (
                     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
@@ -7256,156 +7823,138 @@ function MessagesPageContent() {
         />
       ) : null}
 
+      <DarkConnectModal
+        open={connectRequestModal.open}
+        onClose={() => setConnectRequestModal(EMPTY_CONNECT_REQUEST_MODAL)}
+        targetUserId={connectRequestModal.targetUserId ?? ""}
+        targetName={connectRequestModal.targetName}
+        targetPhotoUrl={connectRequestModal.targetPhotoUrl}
+        connectContext={connectRequestModal.connectContext}
+        tripId={connectRequestModal.tripId}
+      />
+
       {activityComposerOpen && activeMeta?.otherUserId ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
           <div
             data-testid="activity-composer-modal"
-            className="relative flex w-full max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] shadow-2xl"
-            style={{ maxHeight: "calc(100dvh - 1.5rem)" }}
+            className="relative w-full max-w-[520px] overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
+            style={{ background: "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14" }}
           >
-            {/* Close */}
-            <button
-              type="button"
-              disabled={activityBusy}
-              onClick={() => setActivityComposerOpen(false)}
-              className="absolute right-5 top-5 z-10 text-white/50 transition hover:text-white disabled:opacity-40"
-              aria-label="Close activity composer"
-            >
-              <span className="material-symbols-outlined text-[22px]">close</span>
-            </button>
-
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
-              {/* Header */}
-              <div className="mb-6 flex items-start gap-4">
-                <div
-                  className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
-                  style={{
-                    backgroundImage: activeMeta.avatarUrl
-                      ? `url(${activeMeta.avatarUrl})`
-                      : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                  }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Invite to Activity</p>
-                  <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">{activeMeta.title}</h3>
-                </div>
-                <div className="mr-12 shrink-0 flex flex-col items-end gap-2 sm:mr-14">
-                  {activitySupportsLinkedMember ? (
-                    <button
-                      type="button"
-                      onClick={() => setActivityLinkedPickerOpen((prev) => !prev)}
-                      className="inline-flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3.5 text-xs font-semibold text-white transition hover:border-[#00F5FF]/40 hover:text-[#9EFBFF]"
-                    >
-                      <span className="material-symbols-outlined text-[15px]">group_add</span>
-                      Add Member
-                    </button>
-                  ) : null}
-                  {activityRequestsLimit !== null && activityRequestsUsed !== null && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
-                      <span className={`text-[13px] font-black tabular-nums leading-tight ${
-                        activityRequestsUsed >= activityRequestsLimit
-                          ? "text-rose-400"
-                          : activityRequestsUsed >= activityRequestsLimit * 0.8
-                            ? "text-amber-400"
-                            : "text-[#00F5FF]"
-                      }`}>
-                        {activityRequestsUsed}<span className="text-white/25 font-normal"> / {activityRequestsLimit}</span>
-                      </span>
-                    </div>
-                  )}
-                </div>
+            {/* Top-right cluster: [counter | close] then add member below */}
+            <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-1.5">
+                {activityRequestsLimit !== null && activityRequestsUsed !== null && (
+                  <div className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px]">
+                    <span className={activityRequestsUsed >= activityRequestsLimit ? "font-bold text-rose-400" : activityRequestsUsed >= activityRequestsLimit * 0.8 ? "font-bold text-amber-400" : "font-semibold text-[#0df2f2]"}>
+                      {activityRequestsUsed}/{activityRequestsLimit}
+                    </span>
+                    <span className="text-white/30">req/mo</span>
+                  </div>
+                )}
+                <button type="button" disabled={activityBusy} onClick={() => { setActivityComposerOpen(false); setActivityNoteOpen(false); }}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors disabled:opacity-40" aria-label="Close">
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
               </div>
+              {activitySupportsLinkedMember && (
+                <button type="button" onClick={() => setActivityLinkedPickerOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white/45 hover:text-white/80 transition-colors">
+                  <span className="material-symbols-outlined text-[13px]">group_add</span>
+                  Add member
+                </button>
+              )}
+            </div>
 
-              {activityPendingWarning ? (
-                <PendingRequestBanner
-                  message={activityPendingWarning}
-                  className="mb-5"
-                />
+            {/* Header */}
+            <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/[0.07]">
+              <div className="h-14 w-14 shrink-0 rounded-2xl border border-white/10 bg-cover bg-center"
+                style={{ backgroundImage: activeMeta.avatarUrl ? `url(${activeMeta.avatarUrl})` : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))" }} />
+              <div className="min-w-0 pr-24">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Invite to Activity</p>
+                <h3 className="truncate text-xl font-extrabold tracking-tight text-white leading-tight">{activeMeta.title}</h3>
+                <p className="text-[11px] text-white/35 mt-0.5">What would you like to do?</p>
+              </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="max-h-[min(65svh,520px)] overflow-y-auto overscroll-contain px-5 pt-5 pb-4 space-y-4">
+
+              {activityPendingWarning ? <PendingRequestBanner message={activityPendingWarning} className="mb-1" /> : null}
+
+              {activityComposerError ? (
+                <p className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-300">
+                  {activityComposerError}
+                </p>
               ) : null}
 
-              {/* Activity Type — dropdown */}
-              <div className="mb-5">
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">Activity Type</span>
-                  <div className="relative">
-                    <select
-                      data-testid="activity-type-select"
-                      value={activityDraft.activityType}
-                      onChange={(event) => setActivityDraft((prev) => ({ ...prev, activityType: event.target.value as ActivityType }))}
-                      className="w-full appearance-none rounded-xl border border-white/15 bg-black/35 px-3 py-3 pr-10 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+              {/* Activity type icon grid */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {ACTIVITY_TYPES.map((type) => {
+                  const sel = activityDraft.activityType === type;
+                  const icon = ACTIVITY_TYPE_ICONS[type] ?? "star";
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      data-testid={type === activityDraft.activityType ? "activity-type-select" : undefined}
+                      onClick={() => setActivityDraft((prev) => ({ ...prev, activityType: type }))}
+                      className={`group relative flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition-all duration-150 ${
+                        sel
+                          ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
+                          : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
+                      }`}
                     >
-                      {ACTIVITY_TYPES.map((type) => (
-                        <option key={type} value={type}>{activityTypeLabel(type)}</option>
-                      ))}
-                    </select>
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-white/50">expand_more</span>
-                  </div>
-                </label>
+                      {sel && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />}
+                      <span
+                        className={`material-symbols-outlined text-[20px] transition-colors ${sel ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"}`}
+                        style={{ fontVariationSettings: sel ? "'FILL' 1" : "'FILL' 0" }}
+                      >
+                        {icon}
+                      </span>
+                      <span className={`text-[10px] font-semibold leading-tight transition-colors ${sel ? "text-white" : "text-white/55 group-hover:text-white/80"}`}>
+                        {activityTypeLabel(type)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {activitySupportsLinkedMember ? (
-                <div className="mb-5">
+              {/* Travel companion picker */}
+              {activitySupportsLinkedMember && (activityDraft.linkedMemberUserId || activityLinkedPickerOpen) ? (
+                <div className="space-y-2">
                   {activityDraft.linkedMemberUserId ? (
-                    <p className="text-xs text-[#9EFBFF]">
-                      Added: {activityLinkedConnectionOptions.find((option) => option.userId === activityDraft.linkedMemberUserId)?.displayName ?? "Connection"}
+                    <p className="text-xs text-[#0df2f2]/70">
+                      + {activityLinkedConnectionOptions.find((o) => o.userId === activityDraft.linkedMemberUserId)?.displayName ?? "Connection"}
                     </p>
                   ) : null}
                   {activityLinkedPickerOpen ? (
-                    <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
-                      <input
-                        type="text"
-                        value={activityLinkedMemberQuery}
-                        onChange={(event) => setActivityLinkedMemberQuery(event.target.value)}
-                        placeholder="Search connection..."
-                        className="mb-3 w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      />
-                      <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
-                        <button
-                          type="button"
-                          onClick={() => setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: "" }))}
-                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
-                            !activityDraft.linkedMemberUserId
-                              ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                              : "border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white"
-                          }`}
-                        >
-                          <span>No extra member</span>
-                          {!activityDraft.linkedMemberUserId ? (
-                            <span className="material-symbols-outlined text-[16px]">check</span>
-                          ) : null}
+                    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 space-y-2">
+                      <input type="text" value={activityLinkedMemberQuery}
+                        onChange={(e) => setActivityLinkedMemberQuery(e.target.value)}
+                        placeholder="Search connection…"
+                        className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 transition" />
+                      <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                        <button type="button" onClick={() => setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: "" }))}
+                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${!activityDraft.linkedMemberUserId ? "border-[#0df2f2]/30 bg-[#0df2f2]/8 text-white" : "border-white/[0.07] bg-transparent text-white/60 hover:text-white"}`}>
+                          <span>No companion</span>
+                          {!activityDraft.linkedMemberUserId ? <span className="material-symbols-outlined text-[15px] text-[#0df2f2]">check</span> : null}
                         </button>
                         {filteredActivityLinkedConnectionOptions.map((option) => {
-                          const subtitle = [option.city, option.country].filter(Boolean).join(", ");
                           const isSelected = activityDraft.linkedMemberUserId === option.userId;
                           return (
-                            <button
-                              key={option.userId}
-                              type="button"
-                              onClick={() => {
-                                setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: option.userId }));
-                                setActivityLinkedPickerOpen(false);
-                                setActivityLinkedMemberQuery("");
-                              }}
-                              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${
-                                isSelected
-                                  ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                                  : "border-white/10 bg-black/20 text-white/80 hover:border-white/20 hover:text-white"
-                              }`}
-                            >
+                            <button key={option.userId} type="button"
+                              onClick={() => { setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: option.userId })); setActivityLinkedPickerOpen(false); setActivityLinkedMemberQuery(""); }}
+                              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${isSelected ? "border-[#0df2f2]/30 bg-[#0df2f2]/8 text-white" : "border-white/[0.07] bg-transparent text-white/70 hover:text-white"}`}>
                               <span className="min-w-0">
                                 <span className="block truncate text-sm font-semibold">{option.displayName}</span>
-                                {subtitle ? <span className="block truncate text-xs text-white/45">{subtitle}</span> : null}
+                                {[option.city, option.country].filter(Boolean).join(", ") ? <span className="block truncate text-xs text-white/35">{[option.city, option.country].filter(Boolean).join(", ")}</span> : null}
                               </span>
-                              {isSelected ? <span className="material-symbols-outlined text-[16px]">check</span> : null}
+                              {isSelected ? <span className="material-symbols-outlined text-[15px] text-[#0df2f2]">check</span> : null}
                             </button>
                           );
                         })}
                         {filteredActivityLinkedConnectionOptions.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-3 text-sm text-white/45">
-                            No matching connections.
-                          </div>
+                          <p className="px-3 py-3 text-sm text-white/35">No matching connections.</p>
                         ) : null}
                       </div>
                     </div>
@@ -7413,117 +7962,72 @@ function MessagesPageContent() {
                 </div>
               ) : null}
 
-              <div className="mb-5">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">Date</span>
+              {/* Date */}
+              <div className="space-y-2">
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActivityDraft((prev) => ({ ...prev, dateMode: "set" }))}
-                    className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-                      activityDraft.dateMode === "set"
-                        ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                        : "border-white/15 bg-black/30 text-white/75 hover:border-white/30"
-                    }`}
-                  >
+                  <button type="button" onClick={() => setActivityDraft((prev) => ({ ...prev, dateMode: "set" }))}
+                    className={`rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${activityDraft.dateMode === "set" ? "border-[#0df2f2]/40 bg-[#0df2f2]/10 text-white" : "border-white/[0.07] bg-white/[0.03] text-white/55 hover:border-white/15"}`}>
                     Set date
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setActivityDraft((prev) => ({ ...prev, dateMode: "none", startAt: "", endAt: "" }))}
-                    className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-                      activityDraft.dateMode === "none"
-                        ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                        : "border-white/15 bg-black/30 text-white/75 hover:border-white/30"
-                    }`}
-                  >
+                  <button type="button" onClick={() => setActivityDraft((prev) => ({ ...prev, dateMode: "none", startAt: "", endAt: "" }))}
+                    className={`rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${activityDraft.dateMode === "none" ? "border-[#0df2f2]/40 bg-[#0df2f2]/10 text-white" : "border-white/[0.07] bg-white/[0.03] text-white/55 hover:border-white/15"}`}>
                     No date
                   </button>
                 </div>
-                {activityDraft.dateMode === "none" ? (
-                  <p className="mt-2 text-xs text-slate-400">You can leave a reference after 24h from mutual acceptance.</p>
-                ) : null}
-              </div>
-
-              {activityDraft.dateMode === "set" ? (
-                <div className={`mb-5 grid gap-4 ${activityDraftUsesDateRange ? "md:grid-cols-2" : ""}`}>
-                  <label className="block">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">
-                      {activityDraftUsesDateRange ? "Start date" : "Date"}
-                    </span>
+                {activityDraft.dateMode === "set" && (
+                  <div className={`grid gap-3 ${activityDraftUsesDateRange ? "grid-cols-2" : "grid-cols-1"}`}>
                     <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-white/60">calendar_today</span>
-                      <input
-                        data-testid="activity-composer-start"
-                        type="date"
-                        value={activityDraft.startAt}
-                        onChange={(event) => setActivityDraft((prev) => ({ ...prev, startAt: event.target.value }))}
-                        className="dark-calendar-input w-full rounded-xl border border-white/15 bg-black/35 py-3 pl-10 pr-3 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      />
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-white/40">calendar_today</span>
+                      <input data-testid="activity-composer-start" type="date" value={activityDraft.startAt}
+                        onChange={(e) => setActivityDraft((prev) => ({ ...prev, startAt: e.target.value }))}
+                        className="dark-calendar-input w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm text-white outline-none focus:border-[#0df2f2]/30 transition" />
                     </div>
-                  </label>
-                  {activityDraftUsesDateRange ? (
-                    <label className="block">
-                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-white">End date</span>
+                    {activityDraftUsesDateRange && (
                       <div className="relative">
-                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-white/60">calendar_today</span>
-                        <input
-                          data-testid="activity-composer-end"
-                          type="date"
-                          value={activityDraft.endAt}
-                          onChange={(event) => setActivityDraft((prev) => ({ ...prev, endAt: event.target.value }))}
-                          className="dark-calendar-input w-full rounded-xl border border-white/15 bg-black/35 py-3 pl-10 pr-3 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                        />
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-white/40">calendar_today</span>
+                        <input data-testid="activity-composer-end" type="date" value={activityDraft.endAt}
+                          onChange={(e) => setActivityDraft((prev) => ({ ...prev, endAt: e.target.value }))}
+                          className="dark-calendar-input w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm text-white outline-none focus:border-[#0df2f2]/30 transition" />
                       </div>
-                    </label>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {/* Note */}
-              <div className="mb-6">
-                <div className="mb-2 text-sm font-semibold text-white">Note</div>
-                <textarea
-                  data-testid="activity-composer-note"
-                  rows={4}
-                  maxLength={600}
-                  value={activityDraft.note}
-                  onChange={(event) => setActivityDraft((prev) => ({ ...prev, note: event.target.value }))}
-                  placeholder="Add context, timing, or what you want to do together."
-                  className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                />
-                <div className="mt-2 text-right text-[11px] text-white/45">{activityDraft.note.length}/600</div>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* Note — collapsible */}
+              {!activityNoteOpen ? (
+                <button type="button" onClick={() => setActivityNoteOpen(true)} className="flex items-center gap-1.5 text-xs text-white/35 hover:text-white/60 transition-colors">
+                  <span className="material-symbols-outlined text-[14px]">add</span>
+                  Add a note
+                </button>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Note (optional)</label>
+                    <span className="text-[10px] text-white/25">{activityDraft.note.length}/600</span>
+                  </div>
+                  <textarea data-testid="activity-composer-note" autoFocus rows={3} maxLength={600}
+                    value={activityDraft.note}
+                    onChange={(e) => setActivityDraft((prev) => ({ ...prev, note: e.target.value }))}
+                    placeholder="Add context, timing, or what you want to do together."
+                    className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition" />
+                </div>
+              )}
             </div>
 
-            {/* Footer */}
-            <div className="shrink-0 border-t border-white/8 px-6 py-4 sm:px-8">
-              <p className="mb-3 text-xs text-slate-400">
-                {activityDraft.dateMode === "none"
-                  ? "You can leave a reference after 24h from mutual acceptance."
-                  : activityDraftUsesDateRange
-                  ? "Festival, Travel together, Offer hosting, and Request hosting use start and end dates."
-                  : "All other activities use one date only."}
-              </p>
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
-                <button
-                  type="button"
-                  disabled={activityBusy}
-                  onClick={() => setActivityComposerOpen(false)}
-                  className="h-12 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white disabled:opacity-45"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={activityBusy || Boolean(activityPendingWarning)}
-                  onClick={() => void submitActivityInvite()}
-                  data-testid="activity-composer-submit"
-                  className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
-                  style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
-                >
-                  {activityBusy ? "Sending…" : "Send invite"}
-                </button>
-              </div>
+            {/* Flush footer */}
+            <div className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-4">
+              <button type="button" disabled={activityBusy || Boolean(activityPendingWarning)}
+                onClick={() => void submitActivityInvite()}
+                data-testid="activity-composer-submit"
+                className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99]"
+                style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}>
+                {activityBusy ? "Sending…" : "Send invite"}
+              </button>
+              <button type="button" disabled={activityBusy} onClick={() => { setActivityComposerOpen(false); setActivityNoteOpen(false); }}
+                className="h-10 w-full rounded-2xl border border-white/[0.07] text-sm font-medium text-white/35 hover:border-white/15 hover:text-white/60 transition-colors disabled:opacity-40">
+                Cancel
+              </button>
             </div>
           </div>
         </div>
@@ -7547,6 +8051,58 @@ function MessagesPageContent() {
         }}
         onConfirm={(payload) => void acceptServiceInquiryShare(payload)}
       />
+
+      {/* Activate conversation confirmation modal */}
+      {showActivateConfirm ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 backdrop-blur-md">
+          <div
+            className="relative w-full max-w-[400px] overflow-hidden rounded-[28px] border border-white/[0.08] p-6 shadow-[0_32px_80px_rgba(0,0,0,0.6)]"
+            style={{ background: "radial-gradient(circle at 20% 0%, rgba(13,204,242,0.07), transparent 50%), radial-gradient(circle at 80% 100%, rgba(217,59,255,0.07), transparent 50%), #080e14" }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowActivateConfirm(false)}
+              className="absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+
+            <div className="mb-5 flex items-center gap-3">
+              <div
+                className="h-12 w-12 shrink-0 rounded-2xl border border-white/10 bg-cover bg-center"
+                style={{ backgroundImage: activeMeta?.avatarUrl ? `url(${activeMeta.avatarUrl})` : "linear-gradient(135deg,rgba(13,204,242,0.25),rgba(217,59,255,0.25))" }}
+              />
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Activate chat with</p>
+                <p className="text-lg font-bold text-white leading-tight">{activeMeta?.title ?? "this member"}</p>
+              </div>
+            </div>
+            <p className="mb-5 text-center text-sm text-white/55">
+              Active chats used: <span className="font-semibold text-white">{messagingSummary?.activeCount ?? "—"} / {messagingSummary?.activeLimit ?? "—"}</span>
+            </p>
+
+            <button
+              type="button"
+              disabled={chatFooterCta?.disabled ?? false}
+              onClick={() => {
+                setShowActivateConfirm(false);
+                void activateConversationFromThread();
+              }}
+              className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110"
+              style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
+            >
+              {chatFooterBusy === "activate" ? "Activating…" : "Start Conversation"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowActivateConfirm(false)}
+              className="mt-2 h-10 w-full rounded-2xl border border-white/[0.07] text-sm font-medium text-white/35 hover:text-white/60 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <style jsx global>{`
         .cx-scroll::-webkit-scrollbar {

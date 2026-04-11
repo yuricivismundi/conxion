@@ -20,6 +20,7 @@ import {
   pickEventFallbackHeroUrl,
   pickEventHeroUrl,
 } from "@/lib/events/model";
+import { eventAccessTypeShortLabel, isEventDiscoverable } from "@/lib/events/access";
 import { cx } from "@/lib/cx";
 
 type DatePreset = "any" | "today" | "tomorrow" | "this_weekend" | "this_week" | "next_week" | "this_month" | "custom";
@@ -377,6 +378,7 @@ function EventsExplorePageContent() {
   const [myLocationOnly, setMyLocationOnly] = useState(false);
   const [connectionsOnly, setConnectionsOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState("all");
+  const [modeFilter, setModeFilter] = useState<"all" | "public" | "request">("all");
   const [styleFilter, setStyleFilter] = useState("all");
   const [referencesFilter, setReferencesFilter] = useState<"all" | "has" | "none">("all");
   const [countryFilter, setCountryFilter] = useState("all");
@@ -711,7 +713,8 @@ function EventsExplorePageContent() {
     const queryText = isAuthenticated ? query.trim().toLowerCase() : "";
 
     return events.filter((event) => {
-      if (!isAuthenticated && event.visibility !== "public") return false;
+      if (!isEventDiscoverable(event.accessType)) return false;
+      if (modeFilter !== "all" && event.accessType !== modeFilter) return false;
       if (typeFilter !== "all" && event.eventType !== typeFilter) return false;
       if (styleFilter !== "all" && !event.styles.some((style) => style.toLowerCase() === styleFilter.toLowerCase())) return false;
       if (referencesFilter !== "all") {
@@ -791,6 +794,7 @@ function EventsExplorePageContent() {
     effectiveCityFilter,
     hostReferenceTotals,
     meId,
+    modeFilter,
   ]);
 
   const orderedEvents = useMemo(() => {
@@ -807,13 +811,9 @@ function EventsExplorePageContent() {
     () => discoverEvents.slice((currentEventsPage - 1) * EVENTS_PAGE_SIZE, currentEventsPage * EVENTS_PAGE_SIZE),
     [currentEventsPage, discoverEvents]
   );
-  const featuredEvents = useMemo(
-    () => (currentEventsPage === 1 ? pagedEvents.slice(0, 3) : []),
-    [currentEventsPage, pagedEvents]
-  );
   const regularEvents = useMemo(
-    () => (currentEventsPage === 1 ? pagedEvents.slice(3) : pagedEvents),
-    [currentEventsPage, pagedEvents]
+    () => pagedEvents,
+    [pagedEvents]
   );
   const myEventsCount = useMemo(() => {
     return meId ? events.filter((event) => event.hostUserId === meId).length : 0;
@@ -827,12 +827,13 @@ function EventsExplorePageContent() {
     if (styleFilter !== "all") count += 1;
     if (referencesFilter !== "all") count += 1;
     if (typeFilter !== "all") count += 1;
+    if (modeFilter !== "all") count += 1;
     if (connectionsOnly) count += 1;
     if (datePreset !== "any") count += 1;
     if (isAuthenticated && myLocationOnly) count += 1;
     if (isAuthenticated && query.trim().length > 0) count += 1;
     return count;
-  }, [connectionsOnly, countryFilter, datePreset, effectiveCityFilter, effectivePastOnly, isAuthenticated, myLocationOnly, query, referencesFilter, styleFilter, typeFilter]);
+  }, [connectionsOnly, countryFilter, datePreset, effectiveCityFilter, effectivePastOnly, isAuthenticated, modeFilter, myLocationOnly, query, referencesFilter, styleFilter, typeFilter]);
 
   const setEventsView = useCallback(
     (view: "active" | "past") => {
@@ -854,6 +855,7 @@ function EventsExplorePageContent() {
     setStyleFilter("all");
     setReferencesFilter("all");
     setTypeFilter("all");
+    setModeFilter("all");
     setConnectionsOnly(false);
     setDatePreset("any");
     setCustomDateFrom("");
@@ -875,6 +877,7 @@ function EventsExplorePageContent() {
     myLocationOnly,
     connectionsOnly,
     typeFilter,
+    modeFilter,
     styleFilter,
     countryFilter,
     cityFilter,
@@ -1023,7 +1026,7 @@ function EventsExplorePageContent() {
     return base;
   }, [isAuthenticated]);
 
-  const renderEventCard = (event: EventRecord, featured = false) => {
+  const renderEventCard = (event: EventRecord) => {
     const myMembership = memberStatusByEvent[event.id];
     const myRequest = requestStatusByEvent[event.id] ?? null;
     const hero = pickEventHeroUrl(event);
@@ -1043,21 +1046,18 @@ function EventsExplorePageContent() {
     const currentResponseState = getResponseStateFromParticipation(myMembership, myRequest);
     const currentResponseLabel = responseLabel(currentResponseState);
     const eventTitle = isAuthenticated ? event.title : "Public dance event";
+    const requiresApproval = event.accessType === "request";
 
     return (
       <article
         key={event.id}
         className={cx(
-          "relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30",
-          featured &&
-            "border-cyan-300/35 bg-[linear-gradient(180deg,rgba(37,209,244,0.08)_0%,rgba(18,18,18,0.98)_40%)] shadow-[0_12px_32px_rgba(37,209,244,0.18)]"
+          "relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
         )}
         onClick={() => router.push(`/events/${event.id}`)}
       >
-        {featured ? <div className="h-[2px] w-full bg-gradient-to-r from-cyan-300 via-fuchsia-400 to-cyan-200" /> : null}
-
         <Link href={`/events/${event.id}`} className="block">
-          <div className={cx("relative h-[108px]", featured && "h-[112px]")}>
+          <div className="relative h-[108px]">
             <EventHeroImage
               key={`${hero ?? ""}|${fallbackHero ?? ""}`}
               primarySrc={hero}
@@ -1075,7 +1075,7 @@ function EventsExplorePageContent() {
 
             <div className="absolute right-2 top-2">
               <span className="rounded-full border border-white/20 bg-black/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-slate-100">
-                {event.visibility}
+                {eventAccessTypeShortLabel(event.accessType)}
               </span>
             </div>
           </div>
@@ -1194,7 +1194,7 @@ function EventsExplorePageContent() {
                     onClick={() =>
                       void handleResponseAction(
                         event,
-                        event.visibility === "private" && myRequest?.status === "pending"
+                        requiresApproval && myRequest?.status === "pending"
                           ? "request_sent_to_interested"
                           : "interested"
                       )
@@ -1216,11 +1216,11 @@ function EventsExplorePageContent() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (event.visibility === "private" && myRequest?.status === "pending") {
+                      if (requiresApproval && myRequest?.status === "pending") {
                         void handleResponseAction(event, "cancel_request");
                         return;
                       }
-                      void handleResponseAction(event, event.visibility === "private" ? "request" : "join");
+                      void handleResponseAction(event, requiresApproval ? "request" : "join");
                     }}
                     className={cx(
                       "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
@@ -1233,9 +1233,9 @@ function EventsExplorePageContent() {
                   >
                       <span className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-[18px]">
-                          {event.visibility === "private" && myRequest?.status === "pending" ? "close" : event.visibility === "private" ? "mail" : "check_circle"}
+                          {requiresApproval && myRequest?.status === "pending" ? "close" : requiresApproval ? "mail" : "check_circle"}
                         </span>
-                        {event.visibility === "private" && myRequest?.status === "pending" ? "Cancel request" : event.visibility === "private" ? "Request joining" : "Joining"}
+                        {requiresApproval && myRequest?.status === "pending" ? "Cancel request" : requiresApproval ? "Request joining" : "Joining"}
                       </span>
                     {currentResponseState === "going" || currentResponseState === "waitlist" ? (
                       <span className="text-emerald-200">●</span>
@@ -1249,7 +1249,7 @@ function EventsExplorePageContent() {
                     onClick={() =>
                       void handleResponseAction(
                         event,
-                        event.visibility === "private" && myRequest?.status === "pending" ? "cancel_request" : "not_interested"
+                        requiresApproval && myRequest?.status === "pending" ? "cancel_request" : "not_interested"
                       )
                     }
                     className={cx(
@@ -1348,48 +1348,60 @@ function EventsExplorePageContent() {
           </section>
         ) : null}
 
-        <header className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pr-1 no-scrollbar sm:flex-wrap sm:gap-3 sm:overflow-visible sm:whitespace-normal">
-            <p className="shrink-0 text-[13px] text-white/50 sm:text-sm">
-              Showing <span className="font-semibold text-white">{discoverEvents.length}</span>{" "}
-              {effectivePastOnly ? "past events" : "events"}
-            </p>
-            {isAuthenticated ? (
-              <>
-                <Link
-                  href="/events/my"
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1.5 text-[13px] font-semibold text-white/85 hover:bg-white/[0.08] sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <span className="material-symbols-outlined text-[16px] sm:text-[18px]">calendar_month</span>
-                  My Events
-                  <span className="rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-bold">{myEventsCount}</span>
-                </Link>
-                <Link
-                  href="/events/new"
-                  className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-3 py-1.5 text-[13px] font-semibold text-cyan-50 hover:bg-cyan-300/30 sm:ml-0 sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <span className="material-symbols-outlined text-[16px] sm:text-[18px]">add</span>
-                  Create Event
-                </Link>
-              </>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {/* Left: filters + search + count */}
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 setFiltersOpen((value) => !value);
               }}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90 sm:w-auto"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#00F5FF] px-4 py-2 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
             >
-              <span className="material-symbols-outlined text-[18px]">tune</span>
+              <span className="material-symbols-outlined text-[16px]">tune</span>
               Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
             </button>
+            <label className="group relative hidden sm:block">
+              <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
+                search
+              </span>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search events, cities, venues..."
+                className="h-10 w-[300px] rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+              />
+            </label>
+            <p className="hidden text-[13px] text-white/50 sm:block">
+              Showing <span className="font-semibold text-white">{discoverEvents.length}</span>{" "}
+              {effectivePastOnly ? "past events" : "events"}
+            </p>
           </div>
+
+          {/* Right: My Events + Create Event */}
+          {isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href="/events/my"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.05] px-3 py-2 text-[13px] font-semibold text-white/85 hover:bg-white/[0.08]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span className="material-symbols-outlined text-[16px]">calendar_month</span>
+                My Events
+                <span className="rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-bold">{myEventsCount}</span>
+              </Link>
+              <Link
+                href="/events/new"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-3 py-2 text-[13px] font-semibold text-cyan-50 hover:bg-cyan-300/30"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                Create Event
+              </Link>
+            </div>
+          ) : null}
         </header>
 
         {!isAuthenticated ? (
@@ -1686,6 +1698,37 @@ function EventsExplorePageContent() {
 
                 <section className="space-y-4">
                   <div className="flex items-center gap-2 text-[#00F5FF]">
+                    <span className="material-symbols-outlined text-[20px]">lock_open</span>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event Mode</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: "all", label: "All" },
+                      { key: "public", label: "Public Event" },
+                      { key: "request", label: "Request Event" },
+                    ].map((option) => {
+                      const selected = modeFilter === option.key;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => setModeFilter(option.key as "all" | "public" | "request")}
+                          className={cx(
+                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                            selected
+                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
+                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2 text-[#00F5FF]">
                     <span className="material-symbols-outlined text-[20px]">category</span>
                     <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event Type</h3>
                   </div>
@@ -1849,28 +1892,6 @@ function EventsExplorePageContent() {
 
         {loading ? (
           <div className="space-y-4">
-            <section className="rounded-2xl border border-cyan-300/20 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.12),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.1),transparent_46%),#101214] p-3">
-              <div className="mb-3 h-5 w-36 animate-pulse rounded bg-white/10" />
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 3 }).map((_, index) => (
-                  <div
-                    key={`event-featured-sk-${index}`}
-                    className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
-                  >
-                    <div className="h-44 bg-white/5" />
-                    <div className="space-y-3 p-4">
-                      <div className="h-4 w-24 rounded bg-white/10" />
-                      <div className="h-6 w-4/5 rounded bg-white/10" />
-                      <div className="h-4 w-3/5 rounded bg-white/10" />
-                      <div className="flex gap-2 pt-1">
-                        <div className="h-8 w-20 rounded-full bg-white/10" />
-                        <div className="h-8 w-24 rounded-full bg-white/10" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
             <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {Array.from({ length: 8 }).map((_, index) => (
                 <div
@@ -1935,17 +1956,6 @@ function EventsExplorePageContent() {
           </div>
         ) : (
           <div className="animate-fade-in space-y-4">
-            {featuredEvents.length ? (
-              <section className="rounded-2xl border border-cyan-300/25 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.14),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.12),transparent_46%),#101214] p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <h2 className="text-sm font-bold uppercase tracking-wide text-cyan-100">Featured Events</h2>
-                </div>
-                <div className="animate-fade-in-grid grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {featuredEvents.map((event) => renderEventCard(event, true))}
-                </div>
-              </section>
-            ) : null}
-
             {regularEvents.length ? (
               <>
                 <section className="animate-fade-in-grid grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -2045,24 +2055,6 @@ export default function EventsExplorePage() {
                   <div className="h-11 w-full animate-pulse rounded-full bg-[#00F5FF]/80 sm:w-[144px]" />
                 </div>
               </div>
-              <section className="rounded-2xl border border-cyan-300/20 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.12),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.1),transparent_46%),#101214] p-3">
-                <div className="mb-3 h-5 w-36 animate-pulse rounded bg-white/10" />
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <div
-                      key={`event-fallback-featured-sk-${index}`}
-                      className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
-                    >
-                      <div className="h-44 bg-white/5" />
-                      <div className="space-y-3 p-4">
-                        <div className="h-4 w-24 rounded bg-white/10" />
-                        <div className="h-6 w-4/5 rounded bg-white/10" />
-                        <div className="h-4 w-3/5 rounded bg-white/10" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
               <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                 {Array.from({ length: 8 }).map((_, index) => (
                   <div

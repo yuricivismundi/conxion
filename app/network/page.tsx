@@ -12,7 +12,17 @@ import { fetchVisibleConnections } from "@/lib/connections/read-model";
 import { isSchemaMissingError } from "@/lib/growth/types";
 import { supabase } from "@/lib/supabase/client";
 
-type NetworkTab = "connections" | "references" | "following" | "contacts";
+type NetworkTab = "feed" | "connections" | "references" | "following" | "contacts";
+
+type EventActivity = {
+  eventId: string;
+  title: string;
+  city: string | null;
+  country: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  attendees: Array<{ userId: string; displayName: string; avatarUrl: string | null }>;
+};
 type ConnectionView = "all" | "recent" | "following";
 type ContactType = "member" | "external";
 type TrackActivity = "travel_plans" | "hosting_availability" | "new_references" | "competition_results";
@@ -140,6 +150,7 @@ type InfoTooltipProps = {
 };
 
 const NETWORK_PAGE_SIZE = 25;
+const CONNECTIONS_PAGE_SIZE = 40; // 4 cols × 10 rows
 
 const TRACK_ACTIVITY_OPTIONS: Array<{ key: TrackActivity; label: string; shortLabel: string; hint: string }> = [
   {
@@ -169,7 +180,7 @@ const TRACK_ACTIVITY_OPTIONS: Array<{ key: TrackActivity; label: string; shortLa
 ];
 
 const DEFAULT_TRACK_ACTIVITY: TrackActivity[] = TRACK_ACTIVITY_OPTIONS.map((item) => item.key);
-const TAB_ORDER: NetworkTab[] = ["connections", "references", "following", "contacts"];
+const TAB_ORDER: NetworkTab[] = ["feed", "connections", "references", "following", "contacts"];
 const ReferencesHubView = dynamic(() => import("@/components/network/ReferencesHubView"), {
   ssr: false,
   loading: () => (
@@ -447,18 +458,66 @@ function uniqueValues(values: string[]) {
   return out;
 }
 
+function mergeDuplicateContacts(rows: ContactRow[]) {
+  const dedupedMembers = new Map<string, ContactRow>();
+  const passthrough: ContactRow[] = [];
+
+  for (const row of rows) {
+    if (row.contactType !== "member" || !row.linkedUserId) {
+      passthrough.push(row);
+      continue;
+    }
+
+    const existing = dedupedMembers.get(row.linkedUserId);
+    if (!existing) {
+      dedupedMembers.set(row.linkedUserId, row);
+      continue;
+    }
+
+    const representative =
+      existing.isFollowing !== row.isFollowing
+        ? existing.isFollowing
+          ? existing
+          : row
+        : toMs(existing.updatedAt) >= toMs(row.updatedAt)
+          ? existing
+          : row;
+    const mergedIsFollowing = existing.isFollowing || row.isFollowing;
+
+    dedupedMembers.set(row.linkedUserId, {
+      ...representative,
+      roles: uniqueValues([...existing.roles, ...row.roles]),
+      danceStyles: uniqueValues([...existing.danceStyles, ...row.danceStyles]),
+      tags: uniqueValues([...existing.tags, ...row.tags]).map((tag) => normalizeToken(tag)),
+      notes: representative.notes ?? existing.notes ?? row.notes,
+      meetingContext: representative.meetingContext ?? existing.meetingContext ?? row.meetingContext,
+      isFollowing: mergedIsFollowing,
+      trackActivity: mergedIsFollowing ? normalizeActivityArray([...existing.trackActivity, ...row.trackActivity]) : [],
+      createdAt:
+        toMs(existing.createdAt) && toMs(row.createdAt)
+          ? toMs(existing.createdAt) <= toMs(row.createdAt)
+            ? existing.createdAt
+            : row.createdAt
+          : existing.createdAt || row.createdAt,
+      updatedAt: toMs(existing.updatedAt) >= toMs(row.updatedAt) ? existing.updatedAt : row.updatedAt,
+    });
+  }
+
+  return [...passthrough, ...dedupedMembers.values()].sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt));
+}
+
 function getActiveTab(value: string | null): NetworkTab {
-  if (!value) return "connections";
+  if (!value) return "feed";
   const normalized = value.toLowerCase();
   if (normalized === "saved") return "following";
   if (TAB_ORDER.includes(normalized as NetworkTab)) {
     return normalized as NetworkTab;
   }
-  return "connections";
+  return "feed";
 }
 
 function tabHref(tab: NetworkTab) {
-  return tab === "connections" ? "/network" : `/network?tab=${tab}`;
+  return tab === "feed" ? "/network" : `/network?tab=${tab}`;
 }
 
 function hasRole(roles: string[], keyword: string) {
@@ -471,17 +530,191 @@ function isColumnMissingError(message: string) {
   return text.includes("column") && text.includes("does not exist");
 }
 
+function GenericAvatar() {
+  return (
+    <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-2xl bg-gradient-to-b from-white/[0.06] to-white/[0.03]">
+      <svg viewBox="0 0 60 72" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-[70%]">
+        <ellipse cx="30" cy="22" rx="13" ry="13" fill="rgba(255,255,255,0.12)" />
+        <path d="M4 66c0-14.36 11.64-26 26-26s26 11.64 26 26" fill="rgba(255,255,255,0.08)" />
+      </svg>
+    </div>
+  );
+}
+
+function useFixedDropdown() {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (btnRef.current && btnRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    function handleScroll() { setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (btnRef.current) setRect(btnRef.current.getBoundingClientRect());
+    setOpen((v) => !v);
+  }
+
+  return { btnRef, rect, open, setOpen, toggle };
+}
+
+function FixedDropdown({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
+  const top = rect.bottom + 6;
+  const right = window.innerWidth - rect.right;
+  return (
+    <div
+      style={{ position: "fixed", top, right, zIndex: 9999 }}
+      className="min-w-[180px] overflow-hidden rounded-2xl border border-white/10 bg-[#111] shadow-2xl"
+    >
+      {children}
+    </div>
+  );
+}
+
+function ConnectionCardMenu({
+  connId,
+  isFollowing,
+  contactId,
+  onUnfollow,
+  onRemove,
+}: {
+  connId: string;
+  isFollowing: boolean;
+  contactId: string | null;
+  onUnfollow: () => void;
+  onRemove: () => void;
+}) {
+  const { btnRef, rect, open, setOpen, toggle } = useFixedDropdown();
+
+  async function handleUnfollow() {
+    setOpen(false);
+    if (!contactId) return;
+    onUnfollow();
+    await supabase.from("contacts").update({ is_following: false }).eq("id", contactId);
+  }
+
+  async function handleRemove() {
+    setOpen(false);
+    onRemove();
+    const { data: authData } = await supabase.auth.getSession();
+    const token = authData.session?.access_token;
+    if (!token) return;
+    await fetch("/api/connections/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ connId, action: "remove" }),
+    });
+  }
+
+  return (
+    <div className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className="flex h-10 w-6 shrink-0 items-center justify-center text-white/50 transition-colors hover:text-white"
+        aria-label="Connection options"
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1, fontVariationSettings: "'wght' 700" }}>more_vert</span>
+      </button>
+      {open && rect ? (
+        <FixedDropdown rect={rect}>
+          {isFollowing ? (
+            <button type="button" onClick={() => void handleUnfollow()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
+              <span className="material-symbols-outlined text-[16px] text-white/40">person_off</span>
+              Unfollow
+            </button>
+          ) : null}
+          <button type="button" onClick={() => void handleRemove()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-rose-400 hover:bg-white/[0.06]">
+            <span className="material-symbols-outlined text-[16px]">link_off</span>
+            Remove connection
+          </button>
+        </FixedDropdown>
+      ) : null}
+    </div>
+  );
+}
+
+function ContactCardMenu({
+  card,
+  busyContactId,
+  onEditContact,
+  onEditNote,
+  onRemove,
+}: {
+  card: { id: string; linkedUserId?: string | null };
+  busyContactId: string | null;
+  onEditContact: () => void;
+  onEditNote: () => void;
+  onRemove: () => void;
+}) {
+  const { btnRef, rect, open, setOpen, toggle } = useFixedDropdown();
+
+  return (
+    <div className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className="flex h-10 w-6 shrink-0 items-center justify-center text-white/50 transition-colors hover:text-white"
+        aria-label="Contact options"
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1, fontVariationSettings: "'wght' 700" }}>more_vert</span>
+      </button>
+      {open && rect ? (
+        <FixedDropdown rect={rect}>
+          {card.linkedUserId ? (
+            <button type="button" onClick={() => { setOpen(false); onEditContact(); }} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
+              <span className="material-symbols-outlined text-[16px] text-white/40">person_edit</span>
+              Edit Contact
+            </button>
+          ) : null}
+          <button type="button" onClick={() => { setOpen(false); onEditNote(); }} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
+            <span className="material-symbols-outlined text-[16px] text-white/40">edit_note</span>
+            Edit Note
+          </button>
+          <button type="button" onClick={() => { setOpen(false); onRemove(); }} disabled={busyContactId === card.id} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-rose-400 hover:bg-white/[0.06] disabled:opacity-60">
+            <span className="material-symbols-outlined text-[16px]">person_remove</span>
+            Remove
+          </button>
+        </FixedDropdown>
+      ) : null}
+    </div>
+  );
+}
+
 function NetworkPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = getActiveTab(searchParams.get("tab"));
   const referenceConnectionId = searchParams.get("connectionId");
+  const referenceUserId = searchParams.get("userId");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   const [meId, setMeId] = useState<string | null>(null);
+  const [myCity, setMyCity] = useState<string>("");
+  const [myCountry, setMyCountry] = useState<string>("");
+
+  const [eventActivities, setEventActivities] = useState<EventActivity[]>([]);
+  const [followersCount, setFollowersCount] = useState<number>(0);
+  const [followerProfiles, setFollowerProfiles] = useState<Array<{ userId: string; displayName: string; avatarUrl: string | null }>>([]);
+  const [networkSection, setNetworkSection] = useState<"feed" | "connections" | "following" | "contacts">("feed");
+const [followingListPage, setFollowingListPage] = useState(1);
+  const [followersListPage, setFollowersListPage] = useState(1);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
 
   const [contacts, setContacts] = useState<ContactRow[]>([]);
@@ -541,8 +774,11 @@ function NetworkPageContent() {
     if (referenceConnectionId) {
       params.set("connectionId", referenceConnectionId);
     }
+    if (referenceUserId) {
+      params.set("userId", referenceUserId);
+    }
     router.replace(`/profile/${encodeURIComponent(meId)}?${params.toString()}`);
-  }, [activeTab, meId, referenceConnectionId, router]);
+  }, [activeTab, meId, referenceConnectionId, referenceUserId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -697,15 +933,16 @@ function NetworkPageContent() {
               updatedAt,
             } satisfies ContactRow;
           })
-          .filter((item: ContactRow | null): item is ContactRow => Boolean(item))
-          .sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt));
+          .filter((item: ContactRow | null): item is ContactRow => Boolean(item));
+
+        const dedupedContacts = mergeDuplicateContacts(mappedContacts);
 
         if (cancelled) return;
-        setContacts(mappedContacts);
+        setContacts(dedupedContacts);
 
         const memberIds = Array.from(
           new Set(
-            mappedContacts
+            dedupedContacts
               .filter((contact) => contact.contactType === "member")
               .map((contact) => contact.linkedUserId)
               .filter((value): value is string => Boolean(value))
@@ -729,6 +966,9 @@ function NetworkPageContent() {
           hostingRes,
           tripsRes,
           competitionRes,
+          myProfileRes,
+          followersCountRes,
+          eventMembersRes,
         ] = await Promise.all([
           supabase
             .from("profiles")
@@ -764,6 +1004,28 @@ function NetworkPageContent() {
             .in("user_id", memberIds)
             .order("created_at", { ascending: false })
             .limit(1000),
+          supabase
+            .from("profiles")
+            .select("city,country")
+            .eq("user_id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("dance_contacts")
+            .select("user_id")
+            .eq("linked_user_id", user.id)
+            .eq("is_following", true)
+            .eq("contact_type", "member")
+            .limit(300),
+          (async () => {
+            const todayIso = new Date().toISOString().slice(0, 10);
+            return supabase
+              .from("event_members")
+              .select("user_id,event_id,events(id,title,city,country,start_date,end_date)")
+              .in("user_id", memberIds.slice(0, 200))
+              .in("status", ["going", "host", "waitlist"])
+              .gte("events.start_date", todayIso)
+              .limit(300);
+          })(),
         ]);
 
         const fetchReferencesByMemberColumns = async (
@@ -899,6 +1161,70 @@ function NetworkPageContent() {
         setTripByUser(tripMap);
         setReferenceByUser(referenceMap);
         setCompetitionByUser(competitionMap);
+
+        // My city
+        const myProfileRow = asRecord(myProfileRes?.data ?? {});
+        setMyCity(pickString(myProfileRow, "city"));
+        setMyCountry(pickString(myProfileRow, "country"));
+        const followerUserIds = ((followersCountRes?.data ?? []) as Array<{ user_id?: string }>)
+          .map((r) => r.user_id)
+          .filter((id): id is string => Boolean(id));
+        setFollowersCount(followerUserIds.length);
+        if (followerUserIds.length > 0) {
+          const followerProfilesRes = await supabase
+            .from("profiles")
+            .select("user_id,display_name,avatar_url")
+            .in("user_id", followerUserIds.slice(0, 200));
+          if (!followerProfilesRes.error) {
+            setFollowerProfiles(
+              (followerProfilesRes.data ?? []).map((r: unknown) => {
+                const row = asRecord(r);
+                return {
+                  userId: pickString(row, "user_id"),
+                  displayName: pickString(row, "display_name", "Member"),
+                  avatarUrl: pickNullableString(row, "avatar_url"),
+                };
+              })
+            );
+          }
+        }
+
+        // Events attended by connections — group by event
+        const eventMap = new Map<string, EventActivity>();
+        if (!eventMembersRes.error) {
+          for (const raw of eventMembersRes.data ?? []) {
+            const row = asRecord(raw);
+            const userId = pickString(row, "user_id");
+            const eventRow = asRecord(row.events ?? {});
+            const eventId = pickString(eventRow, "id");
+            if (!eventId || !userId) continue;
+            const startDate = pickNullableString(eventRow, "start_date");
+            // Skip events without start date or in the past
+            if (!startDate) continue;
+            if (!eventMap.has(eventId)) {
+              eventMap.set(eventId, {
+                eventId,
+                title: pickString(eventRow, "title", "Event"),
+                city: pickNullableString(eventRow, "city"),
+                country: pickNullableString(eventRow, "country"),
+                startDate,
+                endDate: pickNullableString(eventRow, "end_date"),
+                attendees: [],
+              });
+            }
+            const profile = connectionsProfileMap.get(userId);
+            if (profile) {
+              const ev = eventMap.get(eventId)!;
+              if (ev.attendees.length < 8 && !ev.attendees.find((a) => a.userId === userId)) {
+                ev.attendees.push({ userId, displayName: profile.displayName, avatarUrl: profile.avatarUrl });
+              }
+            }
+          }
+        }
+        const eventsWithAttendees = Array.from(eventMap.values())
+          .filter((ev) => ev.attendees.length > 0)
+          .sort((a, b) => (a.startDate ?? "").localeCompare(b.startDate ?? ""));
+        setEventActivities(eventsWithAttendees);
 
         setReferencesReceivedCount(refsRows.length);
         setReferencesGivenCount(refsGivenRows.length);
@@ -1095,19 +1421,19 @@ function NetworkPageContent() {
     return filteredConnections.filter((item) => followedMemberIds.has(item.otherUserId));
   }, [connectionView, filteredConnections, recentConnectionCutoff, followedMemberIds]);
   const totalConnectionsPages = useMemo(
-    () => Math.max(1, Math.ceil(visibleConnections.length / NETWORK_PAGE_SIZE)),
+    () => Math.max(1, Math.ceil(visibleConnections.length / CONNECTIONS_PAGE_SIZE)),
     [visibleConnections.length]
   );
   const paginatedConnections = useMemo(
-    () => visibleConnections.slice((connectionsPage - 1) * NETWORK_PAGE_SIZE, connectionsPage * NETWORK_PAGE_SIZE),
+    () => visibleConnections.slice((connectionsPage - 1) * CONNECTIONS_PAGE_SIZE, connectionsPage * CONNECTIONS_PAGE_SIZE),
     [connectionsPage, visibleConnections]
   );
 
   const scopedContacts = useMemo(() => {
-    if (activeTab === "following") return contactCards.filter((card) => card.contactType === "member" && card.isFollowing);
-    if (activeTab === "contacts") return contactCards.filter((card) => card.contactType === "external");
+    if (networkSection === "following") return contactCards.filter((card) => card.contactType === "member" && card.isFollowing);
+    if (networkSection === "contacts") return contactCards.filter((card) => card.contactType === "external");
     return contactCards;
-  }, [activeTab, contactCards]);
+  }, [networkSection, contactCards]);
 
   const filteredContactCards = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -1155,11 +1481,11 @@ function NetworkPageContent() {
     });
   }, [activityFilter, cityFilter, query, roleFilter, scopedContacts, styleFilter]);
   const totalContactsPages = useMemo(
-    () => Math.max(1, Math.ceil(filteredContactCards.length / NETWORK_PAGE_SIZE)),
+    () => Math.max(1, Math.ceil(filteredContactCards.length / CONNECTIONS_PAGE_SIZE)),
     [filteredContactCards.length]
   );
   const paginatedContactCards = useMemo(
-    () => filteredContactCards.slice((contactsPage - 1) * NETWORK_PAGE_SIZE, contactsPage * NETWORK_PAGE_SIZE),
+    () => filteredContactCards.slice((contactsPage - 1) * CONNECTIONS_PAGE_SIZE, contactsPage * CONNECTIONS_PAGE_SIZE),
     [contactsPage, filteredContactCards]
   );
 
@@ -1168,12 +1494,12 @@ function NetworkPageContent() {
   const hasConnectionFilters =
     query.trim().length > 0 || connectionCityFilter !== "all" || connectionStyleFilter !== "all" || connectionRoleFilter !== "all";
   const activeNotesTooltip =
-    activeTab === "following"
+    networkSection === "following"
       ? {
           title: "Following Notes",
           body: "Keep private notes on the members you follow. Add tags, meeting context, and personal reminders so you always have reference context for why they matter in your network.",
         }
-      : activeTab === "contacts"
+      : networkSection === "contacts"
       ? {
           title: "Contact Notes",
           body: "Keep private notes on the contacts you add, including external contacts. Add tags, context, roles, and notes so you always have reference context for why they matter in your network.",
@@ -1268,11 +1594,11 @@ function NetworkPageContent() {
 
   useEffect(() => {
     setConnectionsPage(1);
-  }, [activeTab, query, connectionView, connectionCityFilter, connectionStyleFilter, connectionRoleFilter]);
+  }, [networkSection, query, connectionView, connectionCityFilter, connectionStyleFilter, connectionRoleFilter]);
 
   useEffect(() => {
     setContactsPage(1);
-  }, [activeTab, query, cityFilter, styleFilter, roleFilter, activityFilter]);
+  }, [networkSection, query, cityFilter, styleFilter, roleFilter, activityFilter]);
 
   useEffect(() => {
     if (connectionsPage > totalConnectionsPages) setConnectionsPage(totalConnectionsPages);
@@ -1310,11 +1636,15 @@ function NetworkPageContent() {
         : DEFAULT_TRACK_ACTIVITY
       : [];
 
-    const res = await supabase
+    const updateQuery = supabase
       .from("dance_contacts")
       .update({ is_following: nextFollowing, track_activity: nextTrackActivity })
-      .eq("id", contact.id)
       .eq("user_id", meId);
+
+    const res =
+      contact.contactType === "member" && contact.linkedUserId
+        ? await updateQuery.eq("contact_type", "member").eq("linked_user_id", contact.linkedUserId)
+        : await updateQuery.eq("id", contact.id);
 
     if (res.error) {
       setError(res.error.message);
@@ -1464,7 +1794,12 @@ function NetworkPageContent() {
     setBusyContactId(contactId);
     setError(null);
 
-    const res = await supabase.from("dance_contacts").delete().eq("id", contactId).eq("user_id", meId);
+    const target = contactsById[contactId];
+    const deleteQuery = supabase.from("dance_contacts").delete().eq("user_id", meId);
+    const res =
+      target?.contactType === "member" && target.linkedUserId
+        ? await deleteQuery.eq("contact_type", "member").eq("linked_user_id", target.linkedUserId)
+        : await deleteQuery.eq("id", contactId);
 
     if (res.error) {
       setError(res.error.message);
@@ -1487,56 +1822,320 @@ function NetworkPageContent() {
             <div className="rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-xs text-cyan-100">{info}</div>
           ) : null}
 
-          <section className="border-b border-white/6 pb-3">
-            <div className="no-scrollbar mx-auto flex w-full max-w-[860px] flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:justify-center">
-              {[
-                { key: "connections" as const, label: "Connections", icon: "hub", count: connectionCount },
-                { key: "following" as const, label: "Following", icon: "person_add", count: followingCount },
-                { key: "contacts" as const, label: "Contacts", icon: "contacts", count: externalContactsCount },
-              ].map((tab) => {
-                const selected = activeTab === tab.key;
-                return (
-                  <Link
-                    key={tab.key}
-                    href={tabHref(tab.key)}
-                    className={`inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-3 text-[15px] font-semibold tracking-tight transition-colors duration-200 ${
-                      selected
-                        ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
-                        : "text-white/70"
-                    }`}
-                  >
-                    <span
-                      className={`material-symbols-outlined text-[18px] ${
-                        selected ? "opacity-100" : "opacity-80"
-                      }`}
-                    >
-                      {tab.icon}
-                    </span>
-                    <span>{tab.label}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        selected
-                          ? "border border-[#00F5FF]/35 bg-[#00F5FF]/15 text-[#B8FBFF]"
-                          : "border border-white/20 bg-white/[0.04] text-slate-300"
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
+          <section className="space-y-8">
+              {/* Combined header: summary + tabs */}
+              <div className="border-b border-white/[0.07] pb-0">
+                {/* Title + stats row */}
+                <div className="flex flex-col gap-5 pb-5 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <h1 className="font-['Epilogue'] text-2xl font-extrabold tracking-tight text-white md:text-3xl">
+                      Network · <span style={{ backgroundImage: "linear-gradient(135deg,#c1fffe,#ff51fa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{connectionCount} connections</span>
+                    </h1>
+                    <p className="text-[11px] uppercase tracking-widest text-white/40">Your global dance network overview</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-5 sm:grid-cols-5 md:gap-8">
+                    <div>
+                      <p className="font-['Epilogue'] text-2xl font-bold text-[#c1fffe]">{followingCount}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Following</p>
+                    </div>
+                    <div>
+                      <p className="font-['Epilogue'] text-2xl font-bold text-[#ff51fa]">{followersCount}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Followers</p>
+                    </div>
+                    <div>
+                      <p className="font-['Epilogue'] text-2xl font-bold text-[#c1fffe]/70">{Object.values(tripByUser).length}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Travelling</p>
+                    </div>
+                    <div>
+                      <p className="font-['Epilogue'] text-2xl font-bold text-white/50">{Object.values(hostingByUser).filter((h) => h.canHost).length}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Hosting</p>
+                    </div>
+                    <div>
+                      <p className="font-['Epilogue'] text-2xl font-bold text-[#00f5f5]">{eventActivities.length}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Events</p>
+                    </div>
+                  </div>
+                </div>
+                {/* Profile-style tabs */}
+                <div className="flex items-end gap-6 overflow-x-auto no-scrollbar">
+                  {([
+                    { key: "feed" as const, label: "Feed", count: null },
+                    { key: "connections" as const, label: "Connections", count: connectionCount },
+                    { key: "following" as const, label: "Following", count: followingCount + followersCount },
+                    { key: "contacts" as const, label: "Contacts", count: externalContactsCount },
+                  ] as const).map((s) => {
+                    const active = networkSection === s.key;
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => setNetworkSection(s.key)}
+                        className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-3 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                          active
+                            ? "border-[#25d1f4] text-white"
+                            : "border-transparent text-white/35 hover:text-white/60"
+                        }`}
+                      >
+                        <span>{s.label}</span>
+                        {s.count !== null ? (
+                          <span className="rounded-full bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-bold text-white/50">{s.count}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-          {activeTab !== "references" ? (
+              {networkSection === "feed" ? (
+              <>
+              {loading ? (
+                <div className="space-y-8">
+                  <div className="h-48 animate-pulse rounded-2xl bg-white/[0.03]" />
+                  <div className="h-64 animate-pulse rounded-2xl bg-white/[0.03]" />
+                </div>
+              ) : (
+                <>
+                  {/* Following activity — top of feed, 2-row carousel */}
+                  {!loading ? (() => {
+                    const followedWithActivity = connections.filter((c) => {
+                      if (!c.otherUserId) return false;
+                      const inFollowing = contacts.some((ct) => ct.linkedUserId === c.otherUserId && ct.isFollowing);
+                      return inFollowing && (tripByUser[c.otherUserId] || hostingByUser[c.otherUserId]?.canHost);
+                    });
+                    if (followedWithActivity.length === 0) return null;
+                    return (
+                      <div className="space-y-3">
+                        <h2 className="font-['Epilogue'] text-xl font-bold text-white">Following activity</h2>
+                        {(() => {
+                          const row1 = followedWithActivity.slice(0, Math.ceil(followedWithActivity.length / 2));
+                          const row2 = followedWithActivity.slice(Math.ceil(followedWithActivity.length / 2));
+                          const renderCard = (conn: typeof followedWithActivity[0]) => {
+                            const prof = conn.profile!;
+                            const trip = tripByUser[conn.otherUserId];
+                            const hosting = hostingByUser[conn.otherUserId];
+                            return (
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[190px] shrink-0 items-center gap-2.5 rounded-xl border border-white/[0.06] bg-[#131313] px-3 py-2.5 hover:border-[#ff51fa]/20 transition-colors">
+                                <div className="h-8 w-8 shrink-0 rounded-full bg-cover bg-center border border-[#ff51fa]/30" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white">{prof.displayName}</p>
+                                  {trip ? (
+                                    <p className="truncate text-[11px] text-[#c1fffe]">✈ {trip.city}{trip.country ? `, ${trip.country}` : ""}</p>
+                                  ) : hosting?.canHost ? (
+                                    <p className="text-[11px] text-white/40">Open for hosting</p>
+                                  ) : null}
+                                </div>
+                              </Link>
+                            );
+                          };
+                          return (
+                            <div className="no-scrollbar overflow-x-auto pb-1">
+                              <div className="flex flex-col gap-2" style={{ width: "max-content" }}>
+                                <div className="flex gap-2">{row1.map(renderCard)}</div>
+                                {row2.length > 0 ? <div className="flex gap-2">{row2.map(renderCard)}</div> : null}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })() : null}
+
+                  {/* Travelling now */}
+                  {(() => {
+                    const travellers = connections.filter((c) => c.otherUserId && tripByUser[c.otherUserId] && c.profile);
+                    if (travellers.length === 0) return null;
+                    return (
+                      <div className="space-y-3">
+                        <h2 className="font-['Epilogue'] text-xl font-bold text-white">Travelling now</h2>
+                        <div className="no-scrollbar flex gap-3 overflow-x-auto pb-2">
+                          {travellers.slice(0, 12).map((conn) => {
+                            const prof = conn.profile!;
+                            const trip = tripByUser[conn.otherUserId]!;
+                            const dateStr = trip.startDate
+                              ? `${new Date(trip.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}`
+                              : "";
+                            return (
+                              <div
+                                key={conn.id}
+                                className="group min-w-[180px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/[0.07] bg-[#131313] transition-all hover:-translate-y-1"
+                              >
+                                <div className="relative aspect-square w-full overflow-hidden bg-[#1a1a1a]">
+                                  <div
+                                    className="h-full w-full bg-cover bg-center grayscale transition-all duration-700 group-hover:grayscale-0 group-hover:scale-105"
+                                    style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.15),rgba(255,81,250,0.15))" }}
+                                  />
+                                </div>
+                                <div className="p-3 space-y-1.5">
+                                  <h3 className="font-['Epilogue'] text-sm font-bold text-white truncate">{prof.displayName}</h3>
+                                  <p className="flex items-center gap-1 text-xs font-bold text-[#c1fffe] truncate">
+                                    <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
+                                    {trip.city}{trip.country ? `, ${trip.country}` : ""}
+                                  </p>
+                                  {dateStr ? <p className="text-[10px] text-white/30">{dateStr}</p> : null}
+                                  <div className="flex gap-1.5 pt-0.5">
+                                    <Link href={`/profile/${prof.userId}`} className="flex-1 rounded-full bg-[#262626] py-1.5 text-center text-[11px] font-bold text-white hover:bg-white/10 transition-colors">Profile</Link>
+                                    <Link href="/messages?tab=connections" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#00ffff] text-[#004343] hover:scale-105 transition-transform">
+                                      <span className="material-symbols-outlined text-[13px]">chat_bubble</span>
+                                    </Link>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Dancers in your city */}
+                  {myCity ? (() => {
+                    const inCity = connections.filter((c) => {
+                      const trip = c.otherUserId ? tripByUser[c.otherUserId] : null;
+                      if (!trip) return false;
+                      return trip.city.toLowerCase() === myCity.toLowerCase();
+                    });
+                    if (inCity.length === 0) return null;
+                    return (
+                      <div className="space-y-3">
+                        <h2 className="font-['Epilogue'] text-xl font-bold text-white">Dancers in your city</h2>
+                        <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
+                          {inCity.slice(0, 12).map((conn) => {
+                            const prof = conn.profile!;
+                            const trip = tripByUser[conn.otherUserId]!;
+                            return (
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[165px] shrink-0 items-center gap-2.5 rounded-xl border border-[#c1fffe]/15 bg-gradient-to-r from-[#c1fffe]/5 to-transparent p-2.5 hover:border-[#c1fffe]/30 transition-colors">
+                                <div className="h-8 w-8 shrink-0 rounded-full border-2 border-[#c1fffe]/30 bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.3),rgba(255,81,250,0.3))" }} />
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white">{prof.displayName}</p>
+                                  <p className="truncate text-[11px] text-[#c1fffe]/70">{trip.city}{trip.country ? `, ${trip.country}` : ""}</p>
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })() : null}
+
+                  {/* Attending Events */}
+                  {eventActivities.length > 0 ? (
+                    <div className="space-y-5">
+                      <div className="flex items-center justify-between">
+                        <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                          <span className="material-symbols-outlined text-[#ff51fa]" style={{ fontVariationSettings: "'FILL' 1" }}>calendar_month</span>
+                          Attending Events
+                        </h2>
+                        <Link href="/events" className="text-xs font-bold uppercase tracking-wider text-white/40 hover:text-[#ff51fa] transition-colors">Explore all</Link>
+                      </div>
+                      <div className="no-scrollbar flex gap-4 overflow-x-auto pb-2">
+                        {eventActivities.map((ev) => {
+                          const dateStr = ev.startDate
+                            ? new Date(ev.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                            : "";
+                          const endStr = ev.endDate && ev.endDate !== ev.startDate
+                            ? `–${new Date(ev.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                            : "";
+                          return (
+                            <div key={ev.eventId} className="min-w-[290px] shrink-0 snap-start rounded-2xl border border-white/[0.07] bg-[rgba(38,38,38,0.4)] p-5 backdrop-blur-2xl flex flex-col justify-between gap-4">
+                              <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <h3 className="font-['Epilogue'] text-lg font-bold leading-tight text-white">{ev.title}</h3>
+                                    <p className="mt-1 text-xs font-medium text-[#c1fffe]">{[dateStr, endStr].filter(Boolean).join(" ")}{ev.city ? ` · ${ev.city}` : ""}</p>
+                                  </div>
+                                  {ev.startDate && new Date(ev.startDate).getTime() - Date.now() < 14 * 86400_000 ? (
+                                    <span className="shrink-0 rounded-full bg-[#ff51fa]/20 px-2 py-0.5 text-[10px] font-bold text-[#ff51fa]">SOON</span>
+                                  ) : null}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="flex -space-x-2">
+                                    {ev.attendees.slice(0, 4).map((a) => (
+                                      <div
+                                        key={a.userId}
+                                        title={a.displayName}
+                                        className="h-7 w-7 rounded-full border-2 border-[#131313] bg-cover bg-center"
+                                        style={{ backgroundImage: a.avatarUrl ? `url(${a.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.3),rgba(255,81,250,0.3))" }}
+                                      />
+                                    ))}
+                                  </div>
+                                  <span className="text-xs text-white/40">
+                                    {ev.attendees.length > 4 ? `+${ev.attendees.length - 4} ` : ""}{ev.attendees.length === 1 ? ev.attendees[0].displayName : `${ev.attendees.length} connections going`}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Link href={`/events/${ev.eventId}`} className="flex-1 rounded-full bg-[#262626] py-2 text-center text-xs font-bold text-white hover:bg-white/10 transition-colors">View Event</Link>
+                                <button type="button" className="flex-1 rounded-full border border-[#ff51fa]/40 py-2 text-xs font-bold text-[#ff51fa] hover:bg-[#ff51fa]/10 transition-colors">Who&apos;s going</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Hosting */}
+                  {(() => {
+                    const hosts = connections.filter((c) => c.otherUserId && hostingByUser[c.otherUserId]?.canHost && c.profile);
+                    if (hosts.length === 0) return null;
+                    return (
+                      <div className="space-y-3">
+                        <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                          <span className="material-symbols-outlined text-white/40" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
+                          Hosting available
+                        </h2>
+                        <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
+                          {hosts.slice(0, 12).map((conn) => {
+                            const prof = conn.profile!;
+                            const hosting = hostingByUser[conn.otherUserId]!;
+                            return (
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[175px] shrink-0 items-center gap-2.5 rounded-xl border border-white/[0.07] bg-[#131313] p-2.5 hover:border-white/20 transition-colors">
+                                <div
+                                  className="h-9 w-9 shrink-0 rounded-lg bg-cover bg-center"
+                                  style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }}
+                                />
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white">{prof.displayName}</p>
+                                  <p className="truncate text-[11px] text-white/40">{prof.city}{prof.country ? `, ${prof.country}` : ""}</p>
+                                  {hosting.hostingStatus ? <p className="truncate text-[10px] text-[#c1fffe]/60">{hosting.hostingStatus}</p> : null}
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })() }
+
+                  {/* Empty state */}
+                  {!loading && connections.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center">
+                      <span className="material-symbols-outlined text-4xl text-white/20">group</span>
+                      <p className="mt-3 text-sm text-white/40">No connections yet. Start connecting with dancers!</p>
+                      <Link href="/connections" className="mt-4 inline-flex items-center gap-1 rounded-full bg-[#00ffff] px-5 py-2.5 text-sm font-bold text-[#004343]">
+                        Discover dancers
+                      </Link>
+                    </div>
+                  ) : null}
+                </>
+              )}
+
+
+              </>
+              ) : null}
+            </section>
+
+          {/* Network directory: Connections / Following+Followers / Contacts */}
+          {networkSection !== "feed" ? (
+          <section className="space-y-4">
             <section className="space-y-3">
-              {activeTab === "connections" ? (
+              {networkSection === "connections" ? (
                   <div className="hidden sm:flex justify-start sm:justify-end">
                     <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{visibleConnections.length} visible</p>
                   </div>
               ) : null}
 
-              {activeTab === "following" || activeTab === "contacts" ? (
+              {networkSection === "contacts" ? (
                 <div className="flex justify-start sm:justify-end">
                   <div className="flex items-center gap-2 text-xs text-slate-500">
                     <p>
@@ -1549,37 +2148,9 @@ function NetworkPageContent() {
                 </div>
               ) : null}
 
-              {activeTab === "connections" ? (
+              {networkSection === "connections" ? (
                 <div className="space-y-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                    <div className="no-scrollbar flex items-center overflow-x-auto rounded-xl border border-white/10 bg-white/[0.03] p-1">
-                      {([
-                        { key: "all" as const, label: "All", count: filteredConnections.length },
-                        { key: "recent" as const, label: "Recent", count: recentConnectionsCount },
-                        { key: "following" as const, label: "Following", count: followingConnectionsCount },
-                      ] as const).map((option) => {
-                        const selected = connectionView === option.key;
-                        return (
-                          <button
-                            key={option.key}
-                            type="button"
-                            onClick={() => setConnectionView(option.key)}
-                            className={`min-h-10 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
-                              selected ? "bg-[#25d1f4] text-[#0A0A0A]" : "text-white/65 hover:text-white"
-                            }`}
-                          >
-                            <span>{option.label}</span>
-                            <span
-                              className={`ml-2 hidden rounded-full px-1.5 py-0.5 text-[10px] font-bold sm:inline-flex ${
-                                selected ? "bg-white/35 text-[#06121a]" : "border border-white/20 bg-white/[0.04] text-white/80"
-                              }`}
-                            >
-                              {option.count}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
                     <div className="group relative w-full min-w-0 sm:flex-1 md:max-w-[340px] md:ml-auto">
                       <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors group-focus-within:text-cyan-300">
                         search
@@ -1656,7 +2227,7 @@ function NetworkPageContent() {
                 </div>
               ) : null}
 
-              {activeTab === "following" || activeTab === "contacts" ? (
+              {networkSection === "contacts" ? (
                 <div className="space-y-3">
                   <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:justify-end">
                       <div className="group relative w-full min-w-0 sm:flex-1">
@@ -1666,11 +2237,11 @@ function NetworkPageContent() {
                         <input
                           value={query}
                           onChange={(event) => setQuery(event.target.value)}
-                          placeholder={activeTab === "following" ? "Search following..." : "Search contacts..."}
+                          placeholder="Search contacts..."
                           className="w-full rounded-2xl border border-white/10 bg-[#121212] py-3 pl-12 pr-4 text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
                         />
                       </div>
-                      {activeTab === "contacts" ? (
+                      {true ? (
                         <button
                           type="button"
                           onClick={() => setShowAddModal(true)}
@@ -1756,22 +2327,19 @@ function NetworkPageContent() {
                 </div>
               ) : null}
             </section>
-          ) : null}
 
           <section className="space-y-6">
-            {activeTab === "connections" ? (
+            {networkSection === "connections" ? (
               <>
                 {loading ? (
-                  <div className="grid grid-cols-1 justify-items-center gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                    {Array.from({ length: 8 }).map((_, i) => (
-                      <div key={`net-sk-conn-${i}`} className="flex w-full max-w-[252px] animate-pulse flex-col items-center rounded-2xl border border-white/10 bg-white/[0.03] px-2 py-3">
-                        <div className="mb-1.5 h-[78px] w-[78px] rounded-2xl bg-white/10" />
-                        <div className="mt-1 h-4 w-28 rounded bg-white/10" />
-                        <div className="mt-1.5 h-3 w-24 rounded bg-white/10" />
-                        <div className="mt-1 h-3 w-20 rounded bg-white/10" />
-                        <div className="mt-3 flex gap-2">
-                          <div className="h-8 w-20 rounded-xl bg-white/10" />
-                          <div className="h-8 w-8 rounded-xl bg-white/10" />
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                    {Array.from({ length: 16 }).map((_, i) => (
+                      <div key={`net-sk-conn-${i}`} className="flex animate-pulse items-center gap-3 py-2.5">
+                        <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-3.5 w-24 rounded bg-white/[0.07]" />
+                          <div className="h-2.5 w-20 rounded bg-white/[0.05]" />
+                          <div className="h-2.5 w-16 rounded bg-white/[0.04]" />
                         </div>
                       </div>
                     ))}
@@ -1781,61 +2349,41 @@ function NetworkPageContent() {
                     No connections found for this filter.
                   </div>
                 ) : (
-                  <div className="animate-fade-in-grid grid grid-cols-1 justify-items-center gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                     {paginatedConnections.map((item) => {
                       const profile = item.profile;
                       const cityLabel = [profile?.city, profile?.country].filter(Boolean).join(", ") || "Location not set";
                       const roleLabel = profile?.roles.slice(0, 2).join(" • ") || "Dancer";
                       const isFollowing = followedMemberIds.has(item.otherUserId);
                       return (
-                        <article
-                          key={item.id}
-                          className="group flex w-full max-w-[252px] flex-col items-center rounded-2xl border border-white/10 bg-white/[0.03] px-2 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#00F5FF]/35 hover:shadow-[0_0_20px_rgba(0,245,255,0.12)]"
-                        >
-                          <div className="relative mb-2 flex justify-center">
-                            <Avatar
-                              src={profile?.avatarUrl ?? null}
-                              alt={profile?.displayName ?? "Member"}
-                              size={78}
-                              className="rounded-2xl border border-white/10"
+                        <div key={item.id} className="flex items-center gap-2 py-2.5">
+                          <Link href={`/profile/${encodeURIComponent(item.otherUserId)}`} className="relative shrink-0">
+                            <div
+                              className="h-[60px] w-[60px] rounded-2xl bg-cover bg-center"
+                              style={{ backgroundImage: profile?.avatarUrl ? `url(${profile.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.15),rgba(255,81,250,0.15))" }}
                             />
                             {isFollowing ? (
-                              <div
-                                className="absolute -right-2 -top-2 z-10 flex items-center justify-center rounded-full"
-                                style={{
-                                  width: 22,
-                                  height: 22,
-                                  background: "linear-gradient(135deg, #00F5FF, #FF00E5)",
-                                  boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-                                }}
-                                title="Following"
-                              >
-                                <span className="material-symbols-outlined" style={{ fontSize: 13, color: "#06121a", lineHeight: 1 }}>check</span>
+                              <div className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#00F5FF,#FF00E5)" }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: 10, color: "#06121a", lineHeight: 1 }}>check</span>
                               </div>
                             ) : null}
+                          </Link>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1">
+                              <Link href={`/profile/${encodeURIComponent(item.otherUserId)}`} className="truncate text-[13px] font-bold text-white hover:text-[#7FEFF8] transition-colors">{profile?.displayName ?? "Member"}</Link>
+                              {profile?.verified ? <VerifiedBadge size={14} /> : null}
+                            </div>
+                            <p className="truncate text-[11px] text-[#7FEFF8]/80">{cityLabel}</p>
+                            <p className="truncate text-[10px] text-slate-500">{roleLabel}</p>
                           </div>
-                          <div className="flex max-w-full items-center justify-center gap-1 text-center">
-                            <h3 className="truncate text-[15px] font-bold leading-tight text-white">{profile?.displayName ?? "Member"}</h3>
-                            {profile?.verified ? <VerifiedBadge size={18} /> : null}
-                          </div>
-                          <p className="mt-1 truncate text-center text-[12px] font-medium text-[#7FEFF8]">{cityLabel}</p>
-                          <p className="mt-1 truncate text-center text-[10px] text-slate-400">{roleLabel}</p>
-                          <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                            <Link
-                              href={`/profile/${encodeURIComponent(item.otherUserId)}`}
-                              className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#00F5FF] to-[#FF00E5] px-2.5 text-[11px] font-bold text-[#06121a] hover:brightness-110"
-                            >
-                              View Profile
-                            </Link>
-                            <Link
-                              href={`/messages?thread=${encodeURIComponent(`conn:${item.id}`)}`}
-                              className="inline-flex h-9 w-full items-center justify-center rounded-xl border border-white/20 bg-white/[0.05] px-2.5 text-[11px] font-bold text-white/90 hover:border-[#00F5FF]/35 hover:text-[#B8FBFF]"
-                              aria-label={`Message ${profile?.displayName ?? "member"}`}
-                            >
-                              Message
-                            </Link>
-                          </div>
-                        </article>
+                          <ConnectionCardMenu
+                            connId={item.id}
+                            isFollowing={isFollowing}
+                            contactId={contacts.find((c) => c.linkedUserId === item.otherUserId)?.id ?? null}
+                            onUnfollow={() => setContacts((prev) => prev.map((c) => c.linkedUserId === item.otherUserId ? { ...c, isFollowing: false } : c))}
+                            onRemove={() => setConnections((prev) => prev.filter((c) => c.id !== item.id))}
+                          />
+                        </div>
                       );
                     })}
                   </div>
@@ -1845,7 +2393,7 @@ function NetworkPageContent() {
                     page={connectionsPage}
                     totalPages={totalConnectionsPages}
                     totalItems={visibleConnections.length}
-                    pageSize={NETWORK_PAGE_SIZE}
+                    pageSize={CONNECTIONS_PAGE_SIZE}
                     itemLabel="connections"
                     onPageChange={setConnectionsPage}
                   />
@@ -1853,175 +2401,171 @@ function NetworkPageContent() {
               </>
             ) : null}
 
-            {activeTab === "following" || activeTab === "contacts" ? (
+            {networkSection === "following" ? (() => {
+              const FOLLOW_PAGE_SIZE = 20;
+              const followingCards = contactCards.filter((c) => c.isFollowing && c.contactType === "member");
+              const totalFollowingPages = Math.ceil(followingCards.length / FOLLOW_PAGE_SIZE);
+              const pagedFollowing = followingCards.slice((followingListPage - 1) * FOLLOW_PAGE_SIZE, followingListPage * FOLLOW_PAGE_SIZE);
+              const totalFollowersPages = Math.ceil(followerProfiles.length / FOLLOW_PAGE_SIZE);
+              const pagedFollowers = followerProfiles.slice((followersListPage - 1) * FOLLOW_PAGE_SIZE, followersListPage * FOLLOW_PAGE_SIZE);
+              return (
+              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
+                {/* Following */}
+                <div className="space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Following · {followingCount}</p>
+                  {loading ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <div key={i} className="flex animate-pulse items-center gap-3 rounded-xl bg-white/[0.03] p-3">
+                          <div className="h-9 w-9 shrink-0 rounded-full bg-white/10" />
+                          <div className="h-4 w-32 rounded bg-white/10" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : followingCards.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-white/10 py-6 text-center text-sm text-white/30">Not following anyone yet.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        {pagedFollowing.map((card) => (
+                          <Link key={card.id} href={card.linkedUserId ? `/profile/${card.linkedUserId}` : "#"} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-white/[0.04] transition-colors">
+                            <div className="h-9 w-9 shrink-0 rounded-full border border-white/10 bg-cover bg-center" style={{ backgroundImage: card.avatarUrl ? `url(${card.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                            <span className="truncate font-medium text-white/90">{card.displayName}</span>
+                          </Link>
+                        ))}
+                      </div>
+                      {totalFollowingPages > 1 ? (
+                        <PaginationControls page={followingListPage} totalPages={totalFollowingPages} totalItems={followingCards.length} pageSize={FOLLOW_PAGE_SIZE} itemLabel="people" onPageChange={setFollowingListPage} />
+                      ) : null}
+                    </>
+                  )}
+                </div>
+                {/* Followers */}
+                <div className="space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Followers · {followersCount}</p>
+                  {loading ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <div key={i} className="flex animate-pulse items-center gap-3 rounded-xl bg-white/[0.03] p-3">
+                          <div className="h-9 w-9 shrink-0 rounded-full bg-white/10" />
+                          <div className="h-4 w-32 rounded bg-white/10" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : followerProfiles.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-white/10 py-6 text-center text-sm text-white/30">No followers yet.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        {pagedFollowers.map((fp) => (
+                          <Link key={fp.userId} href={`/profile/${fp.userId}`} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-white/[0.04] transition-colors">
+                            <div className="h-9 w-9 shrink-0 rounded-full border border-white/10 bg-cover bg-center" style={{ backgroundImage: fp.avatarUrl ? `url(${fp.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                            <span className="truncate font-medium text-white/90">{fp.displayName}</span>
+                          </Link>
+                        ))}
+                      </div>
+                      {totalFollowersPages > 1 ? (
+                        <PaginationControls page={followersListPage} totalPages={totalFollowersPages} totalItems={followerProfiles.length} pageSize={FOLLOW_PAGE_SIZE} itemLabel="people" onPageChange={setFollowersListPage} />
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+              );
+            })() : null}
+
+            {networkSection === "contacts" ? (
               <>
                 <article className="space-y-6">
                   {loading ? (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                      {Array.from({ length: 6 }).map((_, i) => (
-                        <div key={`net-sk-contact-${i}`} className="flex animate-pulse flex-col gap-3 rounded-2xl border border-white/12 bg-[#17191d] p-4">
-                          <div className="flex items-start gap-3">
-                            <div className="h-[46px] w-[46px] shrink-0 rounded-xl bg-white/10" />
-                            <div className="flex-1 space-y-2 pt-1">
-                              <div className="h-4 w-32 rounded bg-white/10" />
-                              <div className="h-3 w-24 rounded bg-white/10" />
-                              <div className="h-3 w-20 rounded bg-white/10" />
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <div className="h-4 w-16 rounded bg-white/10" />
-                            <div className="h-4 w-20 rounded bg-white/10" />
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                      {Array.from({ length: 16 }).map((_, i) => (
+                        <div key={`net-sk-contact-${i}`} className="flex animate-pulse items-center gap-3 py-2.5">
+                          <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-3.5 w-24 rounded bg-white/[0.07]" />
+                            <div className="h-2.5 w-20 rounded bg-white/[0.05]" />
+                            <div className="h-2.5 w-16 rounded bg-white/[0.04]" />
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : filteredContactCards.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-white/15 bg-black/20 px-3 py-8 text-center text-sm text-slate-500">
-                      {activeTab === "following" ? "No followed members match the current filters." : "No contacts match the current filters."}
+                      No contacts match the current filters.
                     </div>
                   ) : (
-                    <div className="animate-fade-in-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                       {paginatedContactCards.map((card) => {
                         const cityLabel = [card.city, card.country].filter(Boolean).join(", ") || "Location not set";
-                        const cardChips = uniqueValues([...card.statusIndicators, ...card.roles, ...card.tags]);
+                        const roleLabel = card.roles.slice(0, 2).join(" • ") || (card.contactType === "external" ? "External contact" : "Dancer");
                         return (
-                          <article
-                            key={card.id}
-                            className="flex flex-col gap-3 rounded-2xl border border-white/12 bg-[#17191d] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-cyan-300/35 hover:shadow-[0_0_0_1px_rgba(0,245,255,0.08),0_14px_30px_rgba(0,0,0,0.28)]"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex min-w-0 items-center gap-3">
-                                <Avatar src={card.avatarUrl} alt={card.displayName} size={46} className="rounded-xl" />
-                                <div className="min-w-0">
-                                  <p className="truncate text-[15px] font-bold text-white">{card.displayName}</p>
-                                  <p className="truncate text-xs text-cyan-100/85">{cityLabel}</p>
-                                  <p className="truncate text-[11px] text-slate-400">Updated {formatRelative(card.updatedAt)}</p>
-                                </div>
+                          <div key={card.id} className="flex items-center gap-2 py-2.5">
+                            {card.linkedUserId ? (
+                              <Link href={`/profile/${encodeURIComponent(card.linkedUserId)}`} className="relative h-[60px] w-[60px] shrink-0">
+                                {card.avatarUrl ? (
+                                  <div className="h-full w-full rounded-2xl bg-cover bg-center" style={{ backgroundImage: `url(${card.avatarUrl})` }} />
+                                ) : (
+                                  <div className="h-full w-full rounded-2xl overflow-hidden"><GenericAvatar /></div>
+                                )}
+                                {card.isFollowing ? (
+                                  <div className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#00F5FF,#FF00E5)" }}>
+                                    <span className="material-symbols-outlined" style={{ fontSize: 10, color: "#06121a", lineHeight: 1 }}>check</span>
+                                  </div>
+                                ) : null}
+                              </Link>
+                            ) : (
+                              <div className="relative h-[60px] w-[60px] shrink-0 rounded-2xl overflow-hidden">
+                                {card.avatarUrl ? (
+                                  <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${card.avatarUrl})` }} />
+                                ) : (
+                                  <GenericAvatar />
+                                )}
                               </div>
-                              {card.contactType === "member" ? (
-                                <button
-                                  type="button"
-                                  disabled={busyContactId === card.id}
-                                  onClick={() => void updateFollow(card, !card.isFollowing)}
-                                  className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] ${
-                                    card.isFollowing
-                                      ? "border border-emerald-300/35 bg-emerald-300/15 text-emerald-100"
-                                      : "border border-cyan-300/35 bg-cyan-300/15 text-cyan-100"
-                                  } disabled:opacity-60`}
-                                >
-                                  {card.isFollowing ? "Following" : "Follow"}
-                                </button>
-                              ) : null}
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1">
+                                {card.linkedUserId ? (
+                                  <Link href={`/profile/${encodeURIComponent(card.linkedUserId)}`} className="truncate text-[13px] font-bold text-white hover:text-[#7FEFF8] transition-colors">{card.displayName}</Link>
+                                ) : (
+                                  <span className="truncate text-[13px] font-bold text-white">{card.displayName}</span>
+                                )}
+                              </div>
+                              <p className="truncate text-[11px] text-[#7FEFF8]/80">{cityLabel}</p>
+                              <p className="truncate text-[10px] text-slate-500">{roleLabel}</p>
                             </div>
-
-                            {cardChips.length > 0 ? (
-                              <div className="no-scrollbar -mx-1 flex flex-nowrap gap-1.5 overflow-x-auto px-1 pb-1">
-                                {cardChips.map((chip) => (
-                                  <span
-                                    key={`${card.id}-chip-${chip}`}
-                                    className="shrink-0 whitespace-nowrap rounded-full border border-white/14 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-200"
-                                  >
-                                    {chip}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-
-                            {card.meetingContext ? (
-                              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[11px] text-slate-200">
-                                <span className="mr-1 text-slate-500">Context:</span>
-                                {card.meetingContext}
-                              </p>
-                            ) : null}
-
-                            {card.notes ? (
-                              <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5">
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Notes</p>
-                                <p className="mt-1 text-[11px] text-slate-300">{card.notes}</p>
-                              </div>
-                            ) : null}
-
-                            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditModal(card)}
-                                  className="rounded-lg border border-white/20 bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-semibold text-slate-100 hover:bg-white/[0.1]"
-                                >
-                                  Edit Note
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void removeContact(card.id)}
-                                  disabled={busyContactId === card.id}
-                                  className="rounded-lg border border-rose-300/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-rose-100 hover:bg-rose-500/20 disabled:opacity-60"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                              {card.linkedUserId ? (
-                                <Link
-                                  href={`/profile/${encodeURIComponent(card.linkedUserId)}`}
-                                  className="rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-2.5 py-1.5 text-[11px] font-semibold text-cyan-100 hover:bg-cyan-300/20"
-                                >
-                                  View profile
-                                </Link>
-                              ) : null}
-                            </div>
-                          </article>
+                            <ContactCardMenu
+                              card={card}
+                              busyContactId={busyContactId}
+                              onEditContact={() => openEditModal(card)}
+                              onEditNote={() => openEditModal(card)}
+                              onRemove={() => void removeContact(card.id)}
+                            />
+                          </div>
                         );
                       })}
                     </div>
                   )}
 
-                  {(activeTab === "following" || activeTab === "contacts") && filteredContactCards.length ? (
+                  {networkSection === "contacts" && filteredContactCards.length ? (
                     <PaginationControls
                       page={contactsPage}
                       totalPages={totalContactsPages}
                       totalItems={filteredContactCards.length}
-                      pageSize={NETWORK_PAGE_SIZE}
-                      itemLabel={activeTab === "following" ? "followed members" : "contacts"}
+                      pageSize={CONNECTIONS_PAGE_SIZE}
+                      itemLabel="contacts"
                       onPageChange={setContactsPage}
                       className="pt-2"
                     />
                   ) : null}
                 </article>
 
-                {activeTab === "following" ? (
-                  <article className="rounded-2xl border border-white/5 bg-[#121212] p-6">
-                    <h3 className="text-lg font-bold text-white">Following Activity</h3>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Travel, hosting, references, and competition updates from members you follow.
-                    </p>
-                    {loading ? (
-                      <p className="mt-3 text-xs text-slate-500">Loading activity…</p>
-                    ) : followedFeed.length === 0 ? (
-                      <p className="mt-3 rounded-lg border border-dashed border-white/15 bg-black/20 px-3 py-3 text-xs text-slate-500">
-                        Follow members to build your activity feed.
-                      </p>
-                    ) : (
-                      <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                        {followedFeed.map((item) => (
-                          <article key={item.id} className="rounded-lg border border-white/10 bg-black/25 p-2.5">
-                            <div className="flex items-center gap-2">
-                              <Avatar src={item.avatarUrl} alt={item.contactName} size={30} className="rounded-md" />
-                              <div className="min-w-0">
-                                <p className="truncate text-xs font-semibold text-white">{item.contactName}</p>
-                                <p className="truncate text-[11px] text-cyan-100">{item.title}</p>
-                              </div>
-                              <span className="ml-auto text-[10px] text-slate-500">{formatRelative(item.at)}</span>
-                            </div>
-                            <p className="mt-1 text-[11px] text-slate-300">{item.body}</p>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ) : null}
               </>
             ) : null}
 
+            </section>
           </section>
+          ) : null}
         </div>
       </main>
 

@@ -20,6 +20,7 @@ import {
   type EventRecord,
   type LiteProfile,
 } from "@/lib/events/model";
+import { eventAccessTypeShortLabel } from "@/lib/events/access";
 import { supabase } from "@/lib/supabase/client";
 
 type MyEventsFilter = "all" | "created" | "drafts" | "joining" | "interested" | "pending" | "past";
@@ -180,7 +181,7 @@ function EventRelationshipCard({
 
   return (
     <article className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30">
-      <div className="relative h-[150px] overflow-hidden bg-[#0d141a]">
+      <div className="relative h-[108px] overflow-hidden bg-[#0d141a]">
         <EventHeroImage
           key={`${hero ?? ""}|${fallbackHero ?? ""}`}
           primarySrc={hero}
@@ -203,12 +204,12 @@ function EventRelationshipCard({
 
         <div className="absolute right-3 top-3">
           <span className="rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-100">
-            {event.visibility}
+            {eventAccessTypeShortLabel(event.accessType)}
           </span>
         </div>
       </div>
 
-      <div className="relative flex flex-1 flex-col p-3">
+      <div className="relative flex flex-1 flex-col p-2">
         <div className="pointer-events-none absolute right-3 top-2">
           <div className="rounded-xl border border-cyan-300/30 bg-cyan-300/14 px-2 py-1 text-center shadow-[0_8px_20px_rgba(34,211,238,0.12)]">
             <p className="text-[10px] font-semibold tracking-wide text-cyan-100">{badge.weekday}</p>
@@ -290,6 +291,7 @@ export default function MyEventsPage() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
   const [createdEventLimit, setCreatedEventLimit] = useState<number | null>(2);
+  const [myTab, setMyTab] = useState<"events" | "groups">("events");
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<MyEventsFilter>("all");
   const [events, setEvents] = useState<EventRecord[]>([]);
@@ -537,7 +539,7 @@ export default function MyEventsPage() {
       return;
     }
 
-    setActionInfo(action === "accept" ? "Private event request accepted." : "Private event request declined.");
+    setActionInfo(action === "accept" ? "Request Event access accepted." : "Request Event access declined.");
     await loadData();
     setActionBusyRequestId(null);
   }
@@ -614,6 +616,108 @@ export default function MyEventsPage() {
           <div className="mb-5 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">{actionInfo}</div>
         ) : null}
 
+        {/* Tab switch */}
+        <div className="mb-5 border-b border-white/[0.07]">
+          <div className="no-scrollbar flex gap-6 overflow-x-auto px-1">
+            {(["events", "groups"] as const).map((tab) => {
+              const selected = myTab === tab;
+              const label = tab === "events" ? "Events" : "Groups";
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setMyTab(tab)}
+                  className={cx(
+                    "inline-flex shrink-0 items-center gap-1.5 border-b-2 pb-4 min-h-[44px] text-[11px] font-black uppercase tracking-[0.18em] transition",
+                    selected ? "border-cyan-300 text-cyan-100" : "border-transparent text-slate-500 hover:text-white"
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {myTab === "groups" ? (() => {
+          const groups = events.filter((e) => e.accessType === "private_group");
+          const memberCountByEvent: Record<string, number> = {};
+          memberships.forEach((m) => { memberCountByEvent[m.eventId] = (memberCountByEvent[m.eventId] ?? 0) + 1; });
+          return (
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-white/50">{groups.length} group{groups.length !== 1 ? "s" : ""}</p>
+                <Link
+                  href="/events/new?type=private_group"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-4 py-2 text-[13px] font-semibold text-cyan-50 hover:bg-cyan-300/30"
+                >
+                  <span className="material-symbols-outlined text-[16px]">add</span>
+                  Create Group
+                </Link>
+              </div>
+              {groups.length === 0 ? (
+                <section className="rounded-[28px] border border-white/10 bg-[#0c1117] p-7 text-center">
+                  <span className="material-symbols-outlined text-4xl text-white/20">group</span>
+                  <h2 className="mt-3 text-xl font-bold text-white">No groups yet</h2>
+                  <p className="mt-2 text-sm text-slate-400">Create a private group to connect with your community.</p>
+                  <Link
+                    href="/events/new?type=private_group"
+                    className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#00F5FF] px-5 py-2.5 text-sm font-bold text-[#071116] hover:opacity-90"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">add</span>
+                    Create Group
+                  </Link>
+                </section>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {groups.map((group) => {
+                    const isHost = group.hostUserId === meId;
+                    const memberCount = (memberCountByEvent[group.id] ?? 0) + 1;
+                    const lastActivity = new Date(group.updatedAt);
+                    const lastActivityStr = lastActivity.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                    return (
+                      <article key={group.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#121212] p-4 transition hover:border-cyan-300/25">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-300/10">
+                                <span className="material-symbols-outlined text-[18px] text-cyan-300">group</span>
+                              </span>
+                              <h2 className="truncate text-[15px] font-bold text-white">{group.title}</h2>
+                            </div>
+                            {isHost ? (
+                              <span className="mt-1.5 inline-block rounded-full border border-cyan-300/35 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cyan-100">Admin</span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-[12px] text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px] text-white/30">person</span>
+                            {memberCount} member{memberCount !== 1 ? "s" : ""}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px] text-white/30">schedule</span>
+                            {lastActivityStr}
+                          </span>
+                        </div>
+                        <Link
+                          href={`/events/${group.id}`}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.05] py-2.5 text-sm font-semibold text-white/90 transition hover:bg-white/[0.08]"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                          Open group
+                        </Link>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })() : null}
+
+        {myTab === "events" ? <>
+
         <section className="mb-5 rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(14,18,24,0.98),rgba(9,11,15,0.98))] p-4 sm:p-5">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -664,8 +768,8 @@ export default function MyEventsPage() {
         {activeFilter === "pending" && (incomingPendingRequests.length > 0 || incomingAcceptedRequests.length > 0) ? (
           <section className="mb-5 space-y-4 rounded-[28px] border border-white/10 bg-[#0c1117] p-5">
             <div className="flex flex-col gap-2">
-              <h2 className="text-2xl font-black tracking-tight text-white">Pending requests to join private events</h2>
-              <p className="text-sm text-slate-400">Handle incoming private-event access requests here. Accepted members move into the event automatically.</p>
+              <h2 className="text-2xl font-black tracking-tight text-white">Pending requests to join Request Events</h2>
+              <p className="text-sm text-slate-400">Handle incoming Request Event access requests here. Accepted members move into the event automatically.</p>
             </div>
 
             {incomingPendingRequests.length > 0 ? (
@@ -686,7 +790,7 @@ export default function MyEventsPage() {
                             </span>
                             <span className="text-xs text-slate-500">{formatShortDateTime(request.createdAt)}</span>
                           </div>
-                          <p className="mt-1 text-sm font-semibold text-cyan-100">{event?.title ?? "Private event"}</p>
+                          <p className="mt-1 text-sm font-semibold text-cyan-100">{event?.title ?? "Request Event"}</p>
                           <p className="mt-1 text-sm text-slate-400">
                             {[event?.city ?? "", event?.country ?? "", event?.startsAt ? formatEventRange(event.startsAt, event.endsAt) : ""]
                               .filter(Boolean)
@@ -724,7 +828,7 @@ export default function MyEventsPage() {
               <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Log</h3>
-                  <span className="text-xs text-slate-500">Private event joins</span>
+                  <span className="text-xs text-slate-500">Request Event joins</span>
                 </div>
                 <div className="space-y-2">
                   {incomingAcceptedRequests.map((request) => {
@@ -795,6 +899,8 @@ export default function MyEventsPage() {
             ))}
           </section>
         ) : null}
+
+        </> : null}
       </main>
     </div>
   );

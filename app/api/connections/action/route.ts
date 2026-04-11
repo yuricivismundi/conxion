@@ -3,7 +3,36 @@ import { createClient } from "@supabase/supabase-js";
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
-type ActionType = "accept" | "decline" | "undo_decline" | "cancel" | "block" | "unblock" | "report";
+async function sendConnectionNotification(params: {
+  service: ReturnType<typeof getSupabaseServiceClient>;
+  recipientId: string;
+  actorId: string;
+  kind: "connection_request_accepted" | "connection_request_declined";
+  connectionId: string;
+}) {
+  const isAccepted = params.kind === "connection_request_accepted";
+  const linkUrl = `/messages?thread=conn%3A${params.connectionId}`;
+  const payload = {
+    user_id: params.recipientId,
+    actor_id: params.actorId,
+    kind: params.kind,
+    type: params.kind,
+    title: isAccepted ? "Connection request accepted" : "Connection request declined",
+    body: isAccepted ? "Your connection request was accepted. Say hello!" : "Your connection request was declined.",
+    link_url: linkUrl,
+    metadata: { connection_id: params.connectionId },
+  };
+  try {
+    const svc = params.service as unknown as {
+      from: (t: string) => { insert: (v: unknown) => Promise<{ error: unknown }> };
+    };
+    await svc.from("notifications").insert(payload);
+  } catch {
+    // best-effort, do not block the main action
+  }
+}
+
+type ActionType = "accept" | "decline" | "undo_decline" | "cancel" | "block" | "unblock" | "report" | "remove";
 
 type ActionPayload = {
   connId?: string;
@@ -40,7 +69,8 @@ function isActionType(value: unknown): value is ActionType {
     value === "cancel" ||
     value === "block" ||
     value === "unblock" ||
-    value === "report"
+    value === "report" ||
+    value === "remove"
   );
 }
 
@@ -118,13 +148,22 @@ export async function POST(req: Request) {
       const { error } = await supabase.rpc("accept_connection_request", { p_connection_id: connId });
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       const requesterId = typeof connectionRow?.requester_id === "string" ? connectionRow.requester_id : "";
-      if (requesterId) {
-        await sendAppEmailBestEffort({
-          kind: "connection_request_accepted",
-          recipientUserId: requesterId,
-          actorUserId: authData.user.id,
-          connectionId: connId ?? null,
-        });
+      if (requesterId && connId) {
+        await Promise.all([
+          sendAppEmailBestEffort({
+            kind: "connection_request_accepted",
+            recipientUserId: requesterId,
+            actorUserId: authData.user.id,
+            connectionId: connId,
+          }),
+          sendConnectionNotification({
+            service,
+            recipientId: requesterId,
+            actorId: authData.user.id,
+            kind: "connection_request_accepted",
+            connectionId: connId,
+          }),
+        ]);
       }
       return NextResponse.json({ ok: true });
     }
@@ -140,13 +179,22 @@ export async function POST(req: Request) {
       const { error } = await supabase.rpc("decline_connection_request", { p_connection_id: connId });
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       const requesterId = typeof connectionRow?.requester_id === "string" ? connectionRow.requester_id : "";
-      if (requesterId) {
-        await sendAppEmailBestEffort({
-          kind: "connection_request_declined",
-          recipientUserId: requesterId,
-          actorUserId: authData.user.id,
-          connectionId: connId ?? null,
-        });
+      if (requesterId && connId) {
+        await Promise.all([
+          sendAppEmailBestEffort({
+            kind: "connection_request_declined",
+            recipientUserId: requesterId,
+            actorUserId: authData.user.id,
+            connectionId: connId,
+          }),
+          sendConnectionNotification({
+            service,
+            recipientId: requesterId,
+            actorId: authData.user.id,
+            kind: "connection_request_declined",
+            connectionId: connId,
+          }),
+        ]);
       }
       return NextResponse.json({ ok: true });
     }
@@ -175,6 +223,17 @@ export async function POST(req: Request) {
     if (action === "unblock") {
       const { error } = await supabase.rpc("unblock_connection", { p_connection_id: connId });
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "remove") {
+      const userId = authData.user.id;
+      const { error } = await service
+        .from("connections")
+        .delete()
+        .eq("id", connId!)
+        .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`);
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }
 
