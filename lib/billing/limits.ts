@@ -26,7 +26,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     tripsPerMonth: 1,
     eventsPerMonth: 2,
     profileVideos: 2,
-    profilePhotos: 1,
+    profilePhotos: 0,
   },
   verified: {
     activeChatThreadsPerMonth: 10,
@@ -39,7 +39,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     tripsPerMonth: 1,
     eventsPerMonth: 2,
     profileVideos: 2,
-    profilePhotos: 1,
+    profilePhotos: 0,
   },
   pro: {
     activeChatThreadsPerMonth: 30,

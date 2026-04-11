@@ -46,12 +46,13 @@ function slugify(value: string) {
 export function getTripHeroStorageUrl(country?: string | null): string {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!base) return "";
+  const genericUrl = `${base}/storage/v1/object/public/${TRIP_HERO_BUCKET}/generic.webp`;
   if (!country) {
-    return `${base}/storage/v1/object/public/${TRIP_HERO_BUCKET}/generic.webp`;
+    return genericUrl;
   }
   const key = country.trim().toLowerCase();
-  const filename = COUNTRY_FILE_OVERRIDES[key] ?? `${slugify(country)}.jpg`;
-  if (!filename || filename === ".jpg") return "";
+  const filename = COUNTRY_FILE_OVERRIDES[key];
+  if (!filename) return genericUrl;
   return `${base}/storage/v1/object/public/${TRIP_HERO_BUCKET}/${filename}`;
 }
 
@@ -59,13 +60,17 @@ export function getTripHeroStorageFolderUrl(country?: string | null): string {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!base || !country) return "";
   const key = country.trim().toLowerCase();
-  const filename = COUNTRY_FILE_OVERRIDES[key] ?? `${slugify(country)}.jpg`;
+  const filename = COUNTRY_FILE_OVERRIDES[key];
+  if (!filename) return "";
   if (filename.toLowerCase() === "generic.webp") return "";
-  if (!filename || filename === ".jpg") return "";
   return `${base}/storage/v1/object/public/${TRIP_HERO_BUCKET}/countries/${filename}`;
 }
 
 export function getTripHeroFallbackUrl(city?: string | null, country?: string | null): string {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (base) {
+    return `${base}/storage/v1/object/public/${TRIP_HERO_BUCKET}/generic.webp`;
+  }
   const cityQ = city ? encodeQuery(city) : "";
   const countryQ = country ? encodeQuery(country) : "";
   const query = [cityQ, countryQ, "cityscape"].filter(Boolean).join(",");

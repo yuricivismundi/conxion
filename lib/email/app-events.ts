@@ -187,6 +187,9 @@ export async function sendAppEmail(params: AppEmailParams) {
     sync,
     contextTag: params.contextTag,
     promptDueAt: params.promptDueAt,
+    promptExpiresAt: params.promptExpiresAt,
+    activityTitle: params.activityTitle,
+    activityHappenedAt: params.activityHappenedAt,
     unreadCount: params.unreadCount,
   });
   const ctaUrl = absoluteAppUrl(buildCtaPath(params));
@@ -226,6 +229,9 @@ export async function sendAppEmail(params: AppEmailParams) {
     params.promptId ?? "",
     params.contextTag ?? "",
     params.promptDueAt ?? "",
+    params.promptExpiresAt ?? "",
+    params.activityTitle ?? "",
+    params.activityHappenedAt ?? "",
     String(params.unreadCount ?? ""),
     String(params.reminderCount ?? ""),
     params.ticketCode ?? "",

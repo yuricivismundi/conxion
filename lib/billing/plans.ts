@@ -43,19 +43,10 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         ],
       },
       {
-        title: "Events",
+        title: "Events & Activities",
         items: [
-          "Create up to 2 public or private events per month",
-          "Join events across the community",
-        ],
-      },
-      {
-        title: "Activities",
-        items: [
-          "Connect through activities like practice, lessons, travel, or collaboration",
+          "Create up to 2 public/request events or private groups per month",
           "5 activity requests per month",
-          "Unlimited accepted activities",
-          "Leave references",
         ],
       },
       {
@@ -110,7 +101,6 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       {
         title: "Discovery",
         items: [
-          "Discover social dancers, teachers, organizers, DJs, and artists",
           "60 connection requests per month",
           "30 active chat threads per month",
           "Appear before free users",
@@ -119,7 +109,6 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       {
         title: "Travelling",
         items: [
-          "Find travellers and join their trips",
           "3 accepted trips per month",
           "10 trip requests per month",
           "Create 5 trips per month",
@@ -129,9 +118,10 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         ],
       },
       {
-        title: "Events",
+        title: "Events & Activities",
         items: [
-          "Create up to 5 public or private events per month",
+          "Create up to 5 public/request events or private groups per month",
+          "15 activity requests per month",
           "Your events appear before free users (Ideal for Organisers)",
         ],
       },
@@ -140,16 +130,12 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         items: [
           "2 showcase videos",
           "3 additional photos on your profile",
-          "Dance Tools to manage your Growth Path, have a record of your competitions and your goals",
         ],
       },
       {
-        title: "Activities",
+        title: "Privacy",
         items: [
-          "Connect through activities like practice, lessons, travel, or collaboration",
-          "15 activity requests per month",
-          "Unlimited accepted activities",
-          "Leave references",
+          "Private mode — hide from Discover and search",
         ],
       },
       {

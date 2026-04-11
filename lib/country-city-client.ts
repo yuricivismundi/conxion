@@ -3,65 +3,69 @@ export type CountryEntry = {
   isoCode: string;
 };
 
-type CountryStateCityModule = typeof import("country-state-city");
-
-let countryStateCityModulePromise: Promise<CountryStateCityModule> | null = null;
 let cachedCountriesAll: CountryEntry[] | null = null;
+let countriesFetchPromise: Promise<CountryEntry[]> | null = null;
+
 const cachedCitiesByCountryIso = new Map<string, string[]>();
+const citiesFetchPromises = new Map<string, Promise<string[]>>();
 
-function normalizeCountryIso(value: string) {
-  return value.trim().toUpperCase();
-}
-
-function uniqueOrdered(items: string[]) {
-  return Array.from(new Set(items)).sort((a, b) => a.localeCompare(b));
-}
-
-async function loadCountryStateCityModule() {
-  if (!countryStateCityModulePromise) {
-    countryStateCityModulePromise = import("country-state-city");
-  }
-  return countryStateCityModulePromise;
-}
-
-export function getCachedCountriesAll() {
+export function getCachedCountriesAll(): CountryEntry[] {
   return cachedCountriesAll ?? [];
 }
 
-export function getCachedCitiesOfCountry(countryIso: string) {
-  return cachedCitiesByCountryIso.get(normalizeCountryIso(countryIso)) ?? [];
+export function getCachedCitiesOfCountry(countryIso: string): string[] {
+  return cachedCitiesByCountryIso.get(countryIso.trim().toUpperCase()) ?? [];
 }
 
-export async function getCountriesAll() {
+export async function getCountriesAll(): Promise<CountryEntry[]> {
   if (cachedCountriesAll) return cachedCountriesAll;
 
-  const countryStateCity = await loadCountryStateCityModule();
-  cachedCountriesAll = uniqueOrdered(
-    countryStateCity.Country.getAllCountries()
-      .map((entry) => `${entry.name}\t${entry.isoCode}`)
-      .filter((entry) => entry.trim().length > 0)
-  ).map((entry) => {
-    const [name, isoCode] = entry.split("\t");
-    return { name, isoCode };
-  });
+  if (!countriesFetchPromise) {
+    countriesFetchPromise = fetch("/api/geodata/countries", { cache: "force-cache" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Could not load country list.");
+        return res.json() as Promise<{ countries: CountryEntry[] }>;
+      })
+      .then((payload) => {
+        cachedCountriesAll = payload.countries ?? [];
+        return cachedCountriesAll;
+      })
+      .catch(() => {
+        countriesFetchPromise = null;
+        cachedCountriesAll = [];
+        return cachedCountriesAll;
+      });
+  }
 
-  return cachedCountriesAll;
+  return countriesFetchPromise;
 }
 
-export async function getCitiesOfCountry(countryIso: string) {
-  const normalizedIso = normalizeCountryIso(countryIso);
-  if (!normalizedIso) return [];
+export async function getCitiesOfCountry(countryIso: string): Promise<string[]> {
+  const iso = countryIso.trim().toUpperCase();
+  if (!iso) return [];
 
-  const cached = cachedCitiesByCountryIso.get(normalizedIso);
+  const cached = cachedCitiesByCountryIso.get(iso);
   if (cached) return cached;
 
-  const countryStateCity = await loadCountryStateCityModule();
-  const cities = uniqueOrdered(
-    (countryStateCity.City.getCitiesOfCountry(normalizedIso) ?? [])
-      .map((entry) => entry.name?.trim() ?? "")
-      .filter(Boolean)
-  );
+  if (!citiesFetchPromises.has(iso)) {
+    const promise = fetch(`/api/geodata/cities/${encodeURIComponent(iso)}`, { cache: "force-cache" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Could not load city list.");
+        return res.json() as Promise<{ cities: string[] }>;
+      })
+      .then((payload) => {
+        const cities = payload.cities ?? [];
+        cachedCitiesByCountryIso.set(iso, cities);
+        citiesFetchPromises.delete(iso);
+        return cities;
+      })
+      .catch(() => {
+        citiesFetchPromises.delete(iso);
+        cachedCitiesByCountryIso.set(iso, []);
+        return [] as string[];
+      });
+    citiesFetchPromises.set(iso, promise);
+  }
 
-  cachedCitiesByCountryIso.set(normalizedIso, cities);
-  return cities;
+  return citiesFetchPromises.get(iso)!;
 }

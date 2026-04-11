@@ -8,6 +8,27 @@ export type HostingSleepingArrangement =
   | "floor_space"
   | "mixed";
 
+const HOSTING_SLEEPING_ARRANGEMENT_ALIAS_MAP: Record<string, HostingSleepingArrangement> = {
+  not_specified: "not_specified",
+  "not specified": "not_specified",
+  shared_room: "shared_room",
+  "shared room": "shared_room",
+  spare_room: "shared_room",
+  "spare room": "shared_room",
+  private_room: "private_room",
+  "private room": "private_room",
+  private_space: "private_room",
+  "private space": "private_room",
+  sofa: "sofa",
+  couch: "sofa",
+  "couch / sofa": "sofa",
+  "couch/sofa": "sofa",
+  floor_space: "floor_space",
+  "floor space": "floor_space",
+  mixed: "mixed",
+  "depends on dates": "mixed",
+};
+
 export const HOSTING_GUEST_GENDER_OPTIONS: Array<{ value: HostingPreferredGuestGender; label: string }> = [
   { value: "any", label: "Any" },
   { value: "women", label: "Women" },
@@ -17,25 +38,30 @@ export const HOSTING_GUEST_GENDER_OPTIONS: Array<{ value: HostingPreferredGuestG
 
 export const HOSTING_SLEEPING_ARRANGEMENT_OPTIONS: Array<{ value: HostingSleepingArrangement; label: string }> = [
   { value: "not_specified", label: "Not specified" },
-  { value: "shared_room", label: "Shared room" },
-  { value: "private_room", label: "Private room" },
-  { value: "sofa", label: "Sofa" },
+  { value: "shared_room", label: "Spare room" },
+  { value: "private_room", label: "Private space" },
+  { value: "sofa", label: "Couch / sofa" },
   { value: "floor_space", label: "Floor space" },
   { value: "mixed", label: "Depends on dates" },
 ];
+
+export const HOSTING_OFFER_SPACE_TYPE_OPTIONS = HOSTING_SLEEPING_ARRANGEMENT_OPTIONS.filter((option) =>
+  option.value === "shared_room" || option.value === "private_room" || option.value === "sofa"
+);
 
 export function normalizeHostingPreferredGuestGender(value: unknown): HostingPreferredGuestGender {
   return value === "women" || value === "men" || value === "nonbinary" ? value : "any";
 }
 
+export function parseHostingSleepingArrangement(value: unknown): HostingSleepingArrangement | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return HOSTING_SLEEPING_ARRANGEMENT_ALIAS_MAP[normalized] ?? null;
+}
+
 export function normalizeHostingSleepingArrangement(value: unknown): HostingSleepingArrangement {
-  return value === "shared_room" ||
-    value === "private_room" ||
-    value === "sofa" ||
-    value === "floor_space" ||
-    value === "mixed"
-    ? value
-    : "not_specified";
+  return parseHostingSleepingArrangement(value) ?? "not_specified";
 }
 
 export function formatGuestGenderPreference(value: HostingPreferredGuestGender) {

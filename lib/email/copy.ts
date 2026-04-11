@@ -109,12 +109,16 @@ function formatSyncLabel(sync: SyncSummary | null) {
 
 function formatContextTagLabel(value: string | null | undefined) {
   const key = (value ?? "").trim().toLowerCase();
-  if (key === "travel") return "trip";
-  if (key === "host") return "hosting stay";
-  if (key === "guest") return "hosted stay";
+  if (key === "travel" || key === "travelling" || key === "travel_together") return "travelling";
+  if (key === "host" || key === "offer_hosting" || key === "hosting") return "offer hosting";
+  if (key === "guest" || key === "request_hosting" || key === "stay_as_guest") return "request hosting";
   if (key === "practice") return "practice";
-  if (key === "event") return "event";
-  if (key === "festival") return "festival";
+  if (key === "private_class" || key === "private class" || key === "private_lesson") return "private class";
+  if (key === "social_dance") return "social dance";
+  if (key === "event" || key === "festival" || key === "event_festival" || key === "workshop" || key === "competition") {
+    return "event / festival";
+  }
+  if (key === "collaboration" || key === "content_video" || key === "collaborate") return "collaborate";
   return "recent interaction";
 }
 
@@ -151,9 +155,12 @@ export function buildCtaPath(params: AppEmailParams) {
       return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
     case "sync_completed":
     case "reference_received":
+      return "/references";
     case "reference_prompt_due":
     case "reference_prompt_reminder":
-      return "/references";
+      return params.actorUserId
+        ? `/references?userId=${encodeURIComponent(params.actorUserId)}`
+        : "/references";
     case "event_request_received":
     case "event_joined":
       return params.eventId ? `/events/${params.eventId}/inbox` : "/events";
@@ -181,6 +188,9 @@ export function buildEmailCopy(params: {
   sync: SyncSummary | null;
   contextTag?: string | null;
   promptDueAt?: string | null;
+  promptExpiresAt?: string | null;
+  activityTitle?: string | null;
+  activityHappenedAt?: string | null;
   unreadCount?: number | null;
   ticketCode?: string | null;
   supportSubject?: string | null;
@@ -192,6 +202,8 @@ export function buildEmailCopy(params: {
   const syncLabel = formatSyncLabel(params.sync);
   const referenceContextLabel = formatContextTagLabel(params.contextTag);
   const promptDue = formatDateTime(params.promptDueAt);
+  const promptExpires = formatDate(params.promptExpiresAt);
+  const activityDate = formatDate(params.activityHappenedAt);
   const tripWindow =
     params.trip && (params.trip.startDate || params.trip.endDate)
       ? [formatDate(params.trip.startDate), formatDate(params.trip.endDate)].filter(Boolean).join(" to ")
@@ -434,25 +446,35 @@ export function buildEmailCopy(params: {
         ctaLabel: "Read reference",
         footerNote: "Open your references to review and respond if needed.",
       };
-    case "reference_prompt_due":
+    case "reference_prompt_due": {
+      const activityLabel = params.activityTitle
+        ? capitalizeLabel(params.activityTitle)
+        : capitalizeLabel(referenceContextLabel);
+      const details: string[] = [];
+      if (activityDate) details.push(`Activity: ${activityLabel} on ${activityDate}`);
+      else details.push(`Activity type: ${activityLabel}`);
+      if (promptExpires) details.push(`Expires: ${promptExpires} (14 days to submit)`);
       return {
-        eyebrow: "Reference Reminder",
-        subject: `Leave a reference for your ${referenceContextLabel}`,
+        eyebrow: "Reference Request",
+        subject: `Leave a reference for your ${activityLabel.toLowerCase()} with ${params.actorName}`,
         title: "Your reference is ready",
-        intro: `Your ${referenceContextLabel} with ${params.actorName} is now eligible for a reference.`,
-        details: promptDue ? [`Available since: ${promptDue}`] : [],
+        intro: `Your ${activityLabel.toLowerCase()} with ${params.actorName} is now eligible for a reference. Leave your feedback while the experience is still fresh.`,
+        details,
         ctaLabel: "Leave a reference",
-        footerNote: "A short reference keeps trust signals fresh for both dancers.",
+        footerNote:
+          "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
       };
+    }
     case "reference_prompt_reminder":
       return {
-        eyebrow: "Reference Follow-up",
-        subject: `Reminder: leave a reference for your ${referenceContextLabel}`,
-        title: "Quick reminder to leave a reference",
-        intro: `You still have time to leave a reference for your ${referenceContextLabel} with ${params.actorName}.`,
-        details: promptDue ? [`Reference unlocked: ${promptDue}`] : [],
-        ctaLabel: "Open references",
-        footerNote: "Reference prompts expire, so it is best to leave feedback while the interaction is still fresh.",
+        eyebrow: "Reference Request",
+        subject: `Leave a reference for your ${referenceContextLabel} with ${params.actorName}`,
+        title: "Your reference is ready",
+        intro: `Your ${referenceContextLabel} with ${params.actorName} is still waiting for a reference.`,
+        details: promptExpires ? [`Expires: ${promptExpires}`] : [],
+        ctaLabel: "Leave a reference",
+        footerNote:
+          "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
       };
     case "welcome_member":
       return {

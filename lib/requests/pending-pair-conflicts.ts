@@ -24,7 +24,7 @@ function createConflict(kind: PendingPairRequestKind, label: string, requestId?:
     kind,
     label,
     requestId: requestId ?? null,
-    message: `There is already a pending ${label} with this member. Open Requests in Messages to continue.`,
+    message: `There is already a pending ${label} with this member.`,
   };
 }
 

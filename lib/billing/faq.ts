@@ -39,7 +39,7 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
   {
     id: "trip-event-limits",
     question: "How many trips and events can I create?",
-    answer: "Starter and Verified include 1 trip per month and 2 public or private events per month. Plus includes 5 trips and 5 events per month.",
+    answer: "Starter and Verified include 1 trip per month and 2 public/request events or private groups per month. Plus includes 5 trips and 5 events/private groups per month.",
   },
   {
     id: "leave-reference",
@@ -76,6 +76,17 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
     id: "cancel-plus",
     question: "Can I cancel Plus anytime?",
     answer: "Yes. You can cancel anytime from your account settings.",
+  },
+  {
+    id: "private-mode",
+    question: "What is Private mode and who can use it?",
+    answer:
+      "Private mode is a Plus feature that hides your profile from the Discover dancers feed and search results. When enabled, only people you are already connected with or have an active chat with can see your profile. You can still share your profile link directly and you remain visible to your existing connections. Anyone on Starter or Verified can still be found in Discover.",
+  },
+  {
+    id: "private-mode-connections",
+    question: "If I enable Private mode, do my existing connections lose access?",
+    answer: "No. Existing connections are never affected. Private mode only prevents new people from finding you in Discover or search. People you are already connected with or chatting with continue to see your profile normally.",
   },
 ];
 

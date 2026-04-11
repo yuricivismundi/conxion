@@ -1,3 +1,11 @@
+import {
+  type EventAccessType,
+  type EventChatMode,
+  legacyVisibilityFromAccessType,
+  normalizeEventAccessType,
+  normalizeEventChatMode,
+} from "@/lib/events/access";
+
 export type EventVisibility = "public" | "private";
 export type EventStatus = "draft" | "published" | "cancelled";
 export type EventCoverStatus = "pending" | "approved" | "rejected";
@@ -16,6 +24,8 @@ export type EventRecord = {
   title: string;
   description: string | null;
   eventType: string;
+  accessType: EventAccessType;
+  chatMode: EventChatMode;
   styles: string[];
   visibility: EventVisibility;
   city: string;
@@ -25,6 +35,7 @@ export type EventRecord = {
   startsAt: string;
   endsAt: string;
   capacity: number | null;
+  maxMembers: number | null;
   coverUrl: string | null;
   coverStatus: EventCoverStatus;
   coverReviewedBy: string | null;
@@ -34,6 +45,7 @@ export type EventRecord = {
   hiddenReason: string | null;
   links: EventLink[];
   status: EventStatus;
+  inviteToken: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -151,8 +163,9 @@ function parseStyles(rawStyles: unknown): string[] {
   return [];
 }
 
-function normalizeEventVisibility(raw: string): EventVisibility {
-  return raw === "private" ? "private" : "public";
+function normalizeEventVisibility(raw: string, accessType: EventAccessType): EventVisibility {
+  if (raw === "private" || raw === "public") return raw;
+  return legacyVisibilityFromAccessType(accessType);
 }
 
 function normalizeEventStatus(raw: string): EventStatus {
@@ -197,14 +210,18 @@ export function mapEventRows(rows: unknown[]): EventRecord[] {
 
       if (!id || !hostUserId || !startsAt || !endsAt || !createdAt || !updatedAt) return null;
 
+      const accessType = normalizeEventAccessType(pickString(row, "event_access_type"), pickString(row, "visibility"));
+
       return {
         id,
         hostUserId,
         title: pickString(row, "title") || "Untitled Event",
         description: pickNullableString(row, "description"),
         eventType: pickString(row, "event_type") || "Social",
+        accessType,
+        chatMode: normalizeEventChatMode(pickString(row, "chat_mode"), accessType),
         styles: parseStyles(row.styles),
-        visibility: normalizeEventVisibility(pickString(row, "visibility")),
+        visibility: normalizeEventVisibility(pickString(row, "visibility"), accessType),
         city: pickString(row, "city"),
         country: pickString(row, "country"),
         venueName: pickNullableString(row, "venue_name"),
@@ -212,6 +229,7 @@ export function mapEventRows(rows: unknown[]): EventRecord[] {
         startsAt,
         endsAt,
         capacity: pickNumber(row, "capacity"),
+        maxMembers: pickNumber(row, "max_members"),
         coverUrl: pickNullableString(row, "cover_url"),
         coverStatus: normalizeCoverStatus(pickString(row, "cover_status")),
         coverReviewedBy: pickNullableString(row, "cover_reviewed_by"),
@@ -221,6 +239,7 @@ export function mapEventRows(rows: unknown[]): EventRecord[] {
         hiddenReason: pickNullableString(row, "hidden_reason"),
         links: parseLinks(row.links),
         status: normalizeEventStatus(pickString(row, "status")),
+        inviteToken: pickNullableString(row, "invite_token"),
         createdAt,
         updatedAt,
       } satisfies EventRecord;
@@ -277,6 +296,11 @@ export function mapEventRequestRows(rows: unknown[]): EventRequestRecord[] {
       } satisfies EventRequestRecord;
     })
     .filter((request): request is EventRequestRecord => Boolean(request));
+}
+
+export function getEventMemberLimit(event: Pick<EventRecord, "accessType" | "maxMembers" | "capacity">) {
+  if (event.accessType === "private_group") return event.maxMembers ?? 25;
+  return event.maxMembers ?? event.capacity;
 }
 
 export function mapProfileRows(rows: unknown[]): Record<string, LiteProfile> {

@@ -44,6 +44,9 @@ export type AppEmailParams = {
   promptId?: string | null;
   contextTag?: string | null;
   promptDueAt?: string | null;
+  promptExpiresAt?: string | null;
+  activityTitle?: string | null;
+  activityHappenedAt?: string | null;
   reminderCount?: number | null;
   unreadCount?: number | null;
   ticketCode?: string | null;

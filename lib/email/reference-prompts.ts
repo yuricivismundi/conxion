@@ -7,15 +7,13 @@ type ReferencePromptRow = {
   peer_user_id: string;
   context_tag: string | null;
   connection_id: string | null;
+  source_table: string | null;
+  source_id: string | null;
   due_at: string;
-  remind_after: string;
   expires_at: string;
-  reminder_count: number | null;
   last_reminded_at: string | null;
   status: string;
 };
-
-type DispatchPhase = "due" | "reminder";
 
 export type DispatchReferencePromptEmailsOptions = {
   userId?: string | null;
@@ -28,11 +26,7 @@ export type DispatchReferencePromptEmailsResult = {
   sent: number;
   skipped: number;
   failed: number;
-  due: number;
-  reminders: number;
 };
-
-const REMINDER_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000;
 
 function isMissingSchemaError(message: string) {
   const text = message.toLowerCase();
@@ -50,35 +44,56 @@ function toMillis(value: string | null | undefined) {
   return new Date(value).getTime();
 }
 
-function getDispatchPhase(row: ReferencePromptRow, nowMs: number): DispatchPhase | null {
+function shouldSend(row: ReferencePromptRow, nowMs: number): boolean {
   const dueAtMs = toMillis(row.due_at);
-  const remindAfterMs = toMillis(row.remind_after);
   const expiresAtMs = toMillis(row.expires_at);
 
-  if (
-    row.status !== "pending" ||
-    Number.isNaN(dueAtMs) ||
-    Number.isNaN(remindAfterMs) ||
-    Number.isNaN(expiresAtMs) ||
-    dueAtMs > nowMs ||
-    expiresAtMs < nowMs
-  ) {
-    return null;
+  return (
+    row.status === "pending" &&
+    !Number.isNaN(dueAtMs) &&
+    !Number.isNaN(expiresAtMs) &&
+    dueAtMs <= nowMs &&
+    expiresAtMs > nowMs &&
+    row.last_reminded_at == null // only send once — no reminders
+  );
+}
+
+async function loadActivityDetails(
+  service: ReturnType<typeof getSupabaseServiceClient>,
+  sourceTable: string | null,
+  sourceId: string | null
+): Promise<{ title: string | null; happenedAt: string | null }> {
+  if (!sourceTable || !sourceId || sourceTable !== "activities") {
+    return { title: null, happenedAt: null };
   }
 
-  const lastRemindedAtMs = toMillis(row.last_reminded_at);
-  if (nowMs >= remindAfterMs) {
-    if (Number.isNaN(lastRemindedAtMs) || lastRemindedAtMs <= nowMs - REMINDER_INTERVAL_MS) {
-      return "reminder";
-    }
-    return null;
-  }
+  const res = await (service as unknown as {
+    from: (table: string) => {
+      select: (cols: string) => {
+        eq: (col: string, val: string) => {
+          maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+        };
+      };
+    };
+  })
+    .from("activities")
+    .select("title,activity_type,start_at,end_at,accepted_at")
+    .eq("id", sourceId)
+    .maybeSingle();
 
-  if (!row.last_reminded_at) {
-    return "due";
-  }
+  if (!res.data) return { title: null, happenedAt: null };
 
-  return null;
+  const row = res.data as {
+    title?: string | null;
+    activity_type?: string | null;
+    start_at?: string | null;
+    end_at?: string | null;
+    accepted_at?: string | null;
+  };
+
+  const title = (row.title?.trim() || row.activity_type?.replace(/_/g, " ")?.trim()) ?? null;
+  const happenedAt = row.end_at ?? row.start_at ?? row.accepted_at ?? null;
+  return { title, happenedAt };
 }
 
 function shouldRecordAttempt(result: Awaited<ReturnType<typeof sendAppEmail>>) {
@@ -87,19 +102,15 @@ function shouldRecordAttempt(result: Awaited<ReturnType<typeof sendAppEmail>>) {
   return !/not configured/i.test(result.error);
 }
 
-async function markPromptAttempted(row: ReferencePromptRow, phase: DispatchPhase, attemptedAtIso: string) {
-  const service = getSupabaseServiceClient();
-  const nextReminderCount = phase === "reminder" ? (row.reminder_count ?? 0) + 1 : row.reminder_count ?? 0;
-  const payload = {
-    last_reminded_at: attemptedAtIso,
-    reminder_count: nextReminderCount,
-    updated_at: attemptedAtIso,
-  } as never;
-
+async function markPromptSent(
+  service: ReturnType<typeof getSupabaseServiceClient>,
+  rowId: string,
+  sentAtIso: string
+) {
   const update = await service
     .from("reference_requests")
-    .update(payload)
-    .eq("id", row.id)
+    .update({ last_reminded_at: sentAtIso, updated_at: sentAtIso } as never)
+    .eq("id", rowId)
     .eq("status", "pending");
 
   if (update.error) {
@@ -118,9 +129,10 @@ export async function dispatchReferencePromptEmails(
   let query = service
     .from("reference_requests")
     .select(
-      "id,user_id,peer_user_id,context_tag,connection_id,due_at,remind_after,expires_at,reminder_count,last_reminded_at,status"
+      "id,user_id,peer_user_id,context_tag,connection_id,source_table,source_id,due_at,expires_at,last_reminded_at,status"
     )
     .eq("status", "pending")
+    .is("last_reminded_at", null) // unsent only
     .lte("due_at", nowIso)
     .gte("expires_at", nowIso)
     .order("due_at", { ascending: false })
@@ -133,56 +145,50 @@ export async function dispatchReferencePromptEmails(
   const rowsRes = await query;
   if (rowsRes.error) {
     if (isMissingSchemaError(rowsRes.error.message)) {
-      return {
-        ok: true,
-        inspected: 0,
-        sent: 0,
-        skipped: 0,
-        failed: 0,
-        due: 0,
-        reminders: 0,
-      };
+      return { ok: true, inspected: 0, sent: 0, skipped: 0, failed: 0 };
     }
     throw new Error(rowsRes.error.message);
   }
 
-  const rows = ((rowsRes.data ?? []) as ReferencePromptRow[]).filter((row) => row.id && row.user_id && row.peer_user_id);
+  const rows = ((rowsRes.data ?? []) as ReferencePromptRow[]).filter(
+    (row) => row.id && row.user_id && row.peer_user_id
+  );
+
   let sent = 0;
   let skipped = 0;
   let failed = 0;
-  let due = 0;
-  let reminders = 0;
 
   for (const row of rows) {
-    const phase = getDispatchPhase(row, nowMs);
-    if (!phase) {
-      continue;
-    }
+    if (!shouldSend(row, nowMs)) continue;
+
+    const { title: activityTitle, happenedAt: activityHappenedAt } = await loadActivityDetails(
+      service,
+      row.source_table,
+      row.source_id
+    );
 
     const result = await sendAppEmail({
-      kind: phase === "due" ? "reference_prompt_due" : "reference_prompt_reminder",
+      kind: "reference_prompt_due",
       recipientUserId: row.user_id,
       actorUserId: row.peer_user_id,
       connectionId: row.connection_id,
       promptId: row.id,
       contextTag: row.context_tag,
       promptDueAt: row.due_at,
-      reminderCount: phase === "reminder" ? (row.reminder_count ?? 0) + 1 : row.reminder_count ?? 0,
+      promptExpiresAt: row.expires_at,
+      activityTitle,
+      activityHappenedAt,
     });
 
     if (result.ok) {
-      await markPromptAttempted(row, phase, nowIso);
+      await markPromptSent(service, row.id, nowIso);
       sent += 1;
-      if (phase === "due") due += 1;
-      else reminders += 1;
       continue;
     }
 
     if (shouldRecordAttempt(result)) {
-      await markPromptAttempted(row, phase, nowIso);
+      await markPromptSent(service, row.id, nowIso);
       skipped += 1;
-      if (phase === "due") due += 1;
-      else reminders += 1;
       continue;
     }
 
@@ -190,13 +196,5 @@ export async function dispatchReferencePromptEmails(
     console.error("[email] reference prompt dispatch failed", row.id, result.error);
   }
 
-  return {
-    ok: true,
-    inspected: rows.length,
-    sent,
-    skipped,
-    failed,
-    due,
-    reminders,
-  };
+  return { ok: true, inspected: rows.length, sent, skipped, failed };
 }
