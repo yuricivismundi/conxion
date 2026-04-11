@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { activityTypeLabel } from "@/lib/activities/types";
+import { validatePairActivityMonthlyLimit } from "@/lib/activities/limits";
 
 type ActivityAction = "accept" | "decline" | "cancel";
 
@@ -146,8 +147,10 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
 
     const supabaseUser = getSupabaseUserClient(token);
     const service = getSupabaseServiceClient();
-    const userRpc = (fn: string, args?: Record<string, unknown>) =>
-      supabaseUser.rpc(fn, args) as unknown as Promise<{ data: unknown; error: { message?: string } | null }>;
+    const serviceRpc = (fn: string, args?: Record<string, unknown>) =>
+      (service as unknown as {
+        rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      }).rpc(fn, args);
     const { data: authData, error: authErr } = await supabaseUser.auth.getUser(token);
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
@@ -202,6 +205,18 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
       return NextResponse.json({ ok: false, error: "Only the sender can cancel." }, { status: 403 });
     }
 
+    if (action === "accept") {
+      const pairLimitCheck = await validatePairActivityMonthlyLimit({
+        serviceClient: service,
+        requesterUserId: current.requester_id,
+        recipientUserId: current.recipient_id,
+        activityType: current.activity_type,
+      });
+      if (!pairLimitCheck.ok) {
+        return NextResponse.json({ ok: false, error: pairLimitCheck.error }, { status: 409 });
+      }
+    }
+
     const nextStatus = action === "accept" ? "accepted" : action === "decline" ? "declined" : "cancelled";
     const acceptedAt = action === "accept" ? new Date().toISOString() : null;
     const resolvedAt = action === "accept" ? null : new Date().toISOString();
@@ -238,7 +253,8 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     const endDate = current.end_at ? current.end_at.slice(0, 10) : null;
     const title = current.title ?? activityTypeLabel(current.activity_type);
 
-    const contextRes = await userRpc("cx_upsert_thread_context", {
+    // Best-effort: activity status is already updated in DB; don't fail if context upsert errors.
+    const contextRes = await serviceRpc("cx_upsert_thread_context", {
       p_thread_id: current.thread_id,
       p_source_table: "activities",
       p_source_id: current.id,
@@ -254,7 +270,8 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     });
 
     if (contextRes.error) {
-      return NextResponse.json({ ok: false, error: contextRes.error.message }, { status: 400 });
+      // Log but don't fail — the activity status was already updated successfully.
+      console.error("[activity action] cx_upsert_thread_context failed:", contextRes.error.message);
     }
 
     if (nextStatus === "accepted" || nextStatus === "declined" || nextStatus === "cancelled") {

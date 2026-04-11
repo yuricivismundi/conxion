@@ -63,6 +63,12 @@ export default function Nav({ title }: NavProps) {
           return;
         }
 
+        // Stamp last_seen_at on every page load (fire-and-forget)
+        void supabase
+          .from("profiles")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("user_id", userId);
+
         const { data: admin, error: adminErr } = await supabase
           .from("admins")
           .select("user_id")

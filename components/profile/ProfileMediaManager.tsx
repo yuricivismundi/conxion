@@ -48,23 +48,23 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+const FALLBACK_DURATION_SEC = 300; // used when browser can't parse metadata
+
 async function readVideoDuration(file: File) {
   const objectUrl = URL.createObjectURL(file);
   try {
-    return await new Promise<number>((resolve, reject) => {
+    return await new Promise<number>((resolve) => {
       const video = document.createElement("video");
       let settled = false;
       let timeoutId: number | null = null;
 
-      const finish = (value: number, fallbackMessage?: string) => {
+      const finish = (value: number) => {
         if (settled) return;
         settled = true;
         if (timeoutId !== null) window.clearTimeout(timeoutId);
-        if (Number.isFinite(value) && value > 0) {
-          resolve(value);
-          return;
-        }
-        reject(new Error(fallbackMessage ?? "Could not read video metadata."));
+        // If we can't determine duration, fall back to a large value so the
+        // clip editor still opens and the user can trim the video.
+        resolve(Number.isFinite(value) && value > 0 ? value : FALLBACK_DURATION_SEC);
       };
 
       const resolveIfReady = () => {
@@ -81,7 +81,7 @@ async function readVideoDuration(file: File) {
         try {
           video.currentTime = 10 ** 7;
         } catch {
-          finish(0, "We couldn't read this video's length. Try an MP4 or MOV export.");
+          finish(FALLBACK_DURATION_SEC);
         }
       };
 
@@ -100,11 +100,11 @@ async function readVideoDuration(file: File) {
       video.ontimeupdate = () => {
         finish(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : video.currentTime);
       };
-      video.onerror = () => finish(0, "Could not read video metadata.");
+      video.onerror = () => finish(FALLBACK_DURATION_SEC);
       video.src = objectUrl;
       video.load();
       timeoutId = window.setTimeout(() => {
-        finish(0, "We couldn't read this video's length. Try an MP4 or MOV export.");
+        finish(FALLBACK_DURATION_SEC);
       }, 8000);
     });
   } finally {
@@ -112,15 +112,24 @@ async function readVideoDuration(file: File) {
   }
 }
 
-function isAcceptedVideoFile(file: File) {
+/** Returns null if accepted, or a human-readable error string if not. */
+function getVideoFileError(file: File): string | null {
   const normalizedType = file.type.toLowerCase();
   if (PROFILE_MEDIA_ACCEPTED_VIDEO_MIME_TYPES.includes(normalizedType as (typeof PROFILE_MEDIA_ACCEPTED_VIDEO_MIME_TYPES)[number])) {
-    return true;
+    return null;
   }
-  if (!normalizedType) {
-    return /\.(mp4|mov|m4v)$/i.test(file.name);
+  if (!normalizedType && /\.(mp4|mov|m4v)$/i.test(file.name)) {
+    return null;
   }
-  return false;
+  // Known unsupported types — give a specific message
+  if (normalizedType === "video/webm") return "WebM is not supported. Please convert to MP4 or MOV and try again.";
+  if (normalizedType === "video/x-msvideo" || normalizedType === "video/avi") return "AVI is not supported. Please convert to MP4 or MOV and try again.";
+  if (normalizedType === "video/x-matroska" || normalizedType === "video/mkv") return "MKV is not supported. Please convert to MP4 or MOV and try again.";
+  if (normalizedType === "video/x-ms-wmv" || normalizedType === "video/wmv") return "WMV is not supported. Please convert to MP4 or MOV and try again.";
+  if (normalizedType === "video/3gpp" || normalizedType === "video/3gpp2") return "3GP is not supported. Please convert to MP4 or MOV and try again.";
+  if (normalizedType === "video/x-flv" || normalizedType === "video/flv") return "FLV is not supported. Please convert to MP4 or MOV and try again.";
+  if (normalizedType.startsWith("video/")) return `${normalizedType} is not supported. Only MP4 and QuickTime (MOV) are accepted.`;
+  return "Unsupported file type. Only MP4 and QuickTime (MOV) videos are accepted.";
 }
 
 function parseUploadFailure(status: number, responseText: string) {
@@ -215,6 +224,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
   const clipTrackRef = useRef<HTMLDivElement | null>(null);
   const clipPointerDragRef = useRef<{ pointerId: number; grabOffsetSec: number } | null>(null);
   const mediaLoadRequestIdRef = useRef(0);
+  // Tracks when each mediaId first appeared as "processing" so we can time out
+  const processingFirstSeenRef = useRef<Record<string, number>>({});
 
   const [meId, setMeId] = useState<string | null>(null);
   const [billingPlanId, setBillingPlanId] = useState<PlanId>("starter");
@@ -239,16 +250,22 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
     () => countProfileMedia(media, billingPlanId, { avatarPhotoCount }),
     [avatarPhotoCount, billingPlanId, media]
   );
+  const [clipZoom, setClipZoom] = useState<1 | 2 | 4 | 8>(1);
   const clipStartMax = videoDraft ? Math.max(videoDraft.durationSec - PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC, 0) : 0;
   const clipDurationSec = videoDraft ? Math.max(videoDraft.clipEndSec - videoDraft.clipStartSec, 0) : 0;
-  const clipWindowPercent = videoDraft && videoDraft.durationSec > 0 ? Math.min(100, (clipDurationSec / videoDraft.durationSec) * 100) : 0;
-  const clipStartPercent = videoDraft && videoDraft.durationSec > 0 ? (videoDraft.clipStartSec / videoDraft.durationSec) * 100 : 0;
   const needsVideoTrim = Boolean(videoDraft && videoDraft.durationSec > PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC);
+  // Zoomed view window — keeps the selection centered in the visible range
+  const clipViewDuration = videoDraft && clipZoom > 1 ? Math.max(videoDraft.durationSec / clipZoom, PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC + 2) : (videoDraft?.durationSec ?? 0);
+  const clipViewCenter = videoDraft ? videoDraft.clipStartSec + clipDurationSec / 2 : 0;
+  const clipViewStart = videoDraft ? clamp(clipViewCenter - clipViewDuration / 2, 0, Math.max(0, videoDraft.durationSec - clipViewDuration)) : 0;
+  const clipViewEnd = clipViewStart + clipViewDuration;
+  const clipWindowPercent = clipViewDuration > 0 ? Math.min(100, (clipDurationSec / clipViewDuration) * 100) : 0;
+  const clipStartPercent = clipViewDuration > 0 ? Math.max(0, ((videoDraft?.clipStartSec ?? 0) - clipViewStart) / clipViewDuration) * 100 : 0;
 
   // Auto-dismiss info messages after 3 seconds
   useEffect(() => {
     if (!info) return;
-    const timer = window.setTimeout(() => setInfo(null), 3000);
+    const timer = window.setTimeout(() => setInfo(null), 6000);
     return () => window.clearTimeout(timer);
   }, [info]);
 
@@ -302,7 +319,9 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
       mediaLoadRequestIdRef.current = requestId;
       const isStale = () => mediaLoadRequestIdRef.current !== requestId;
 
-      setLoading(true);
+      // Only show loading spinner on first load — background refreshes update silently
+      const isFirstLoad = media.length === 0;
+      if (isFirstLoad) setLoading(true);
       try {
         const nextMedia = await fetchProfileMedia(supabase, {
           userId: ownerId,
@@ -312,6 +331,33 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
         if (!cancelled && !isStale()) {
           setMedia(nextMedia);
           setError(null);
+
+          // Auto-repair: videos that Cloudflare marked ready but have no playback_url saved
+          const brokenReadyVideos = nextMedia.filter(
+            (m) => m.kind === "video" && m.status === "ready" && !m.playbackUrl && m.streamUid
+          );
+          for (const brokenItem of brokenReadyVideos) {
+            try {
+              const result = await authorizedFetch("/api/profile-media/video/status", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mediaId: brokenItem.id }),
+              });
+              const playbackUrl = typeof result.playbackUrl === "string" ? result.playbackUrl : null;
+              const thumbnailUrl = typeof result.thumbnailUrl === "string" ? result.thumbnailUrl : null;
+              if (playbackUrl && !cancelled && !isStale()) {
+                setMedia((prev) =>
+                  prev.map((m) =>
+                    m.id === brokenItem.id
+                      ? { ...m, playbackUrl, thumbnailUrl: thumbnailUrl ?? m.thumbnailUrl }
+                      : m
+                  )
+                );
+              }
+            } catch {
+              // silent — video may still be genuinely pending
+            }
+          }
         }
       } catch (loadError) {
         if (!cancelled && !isStale()) {
@@ -328,11 +374,68 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
     };
   }, [meId, refreshSeq]);
 
+  // Poll only processing items — update their card in-place without reloading the full list
   useEffect(() => {
-    if (!media.some((item) => item.status === "processing")) return;
-    const timer = window.setTimeout(() => {
-      setRefreshSeq((value) => value + 1);
-    }, 8000);
+    const processingItems = media.filter((item) => item.status === "processing" && (item.sourceStreamUid ?? item.streamUid));
+    if (processingItems.length === 0) return;
+
+    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
+
+    // Record first-seen time for new processing items
+    processingItems.forEach((item) => {
+      if (!processingFirstSeenRef.current[item.id]) {
+        processingFirstSeenRef.current[item.id] = now;
+      }
+    });
+
+    const timer = window.setTimeout(async () => {
+      for (const item of processingItems) {
+        const firstSeen = processingFirstSeenRef.current[item.id] ?? now;
+        const elapsed = Date.now() - firstSeen;
+
+        try {
+          // Lightweight Cloudflare ping — just checks status, no clip re-creation
+          const result = await authorizedFetch("/api/profile-media/video/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mediaId: item.id }),
+          });
+          const newStatus = typeof result.status === "string" ? result.status : "processing";
+          const playbackUrl = typeof result.playbackUrl === "string" ? result.playbackUrl : null;
+          const thumbnailUrl = typeof result.thumbnailUrl === "string" ? result.thumbnailUrl : null;
+
+          if (newStatus === "ready") {
+            delete processingFirstSeenRef.current[item.id];
+            // Update card with playbackUrl + thumbnail so it becomes immediately playable
+            setMedia((prev) =>
+              prev.map((m) =>
+                m.id === item.id
+                  ? { ...m, status: "ready", playbackUrl, thumbnailUrl: thumbnailUrl ?? m.thumbnailUrl }
+                  : m
+              )
+            );
+            setInfo("Your video is ready.");
+          } else if (newStatus === "failed" || elapsed >= TIMEOUT_MS) {
+            delete processingFirstSeenRef.current[item.id];
+            setMedia((prev) =>
+              prev.map((m) => (m.id === item.id ? { ...m, status: "failed" } : m))
+            );
+            setError("Video processing failed or timed out. Please delete it and re-upload.");
+          } else {
+            // Still processing — just keep the status in sync
+            setMedia((prev) =>
+              prev.map((m) =>
+                m.id === item.id ? { ...m, status: newStatus as ProfileMediaItem["status"] } : m
+              )
+            );
+          }
+        } catch {
+          // silent — will retry next cycle
+        }
+      }
+    }, 10000);
+
     return () => window.clearTimeout(timer);
   }, [media]);
 
@@ -503,11 +606,12 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
       if (!counts.canAddVideo) {
         throw new Error("You already reached the video limit for your current plan.");
       }
-      if (!isAcceptedVideoFile(file)) {
-        throw new Error("Videos must be MP4 or QuickTime.");
+      const videoFileError = getVideoFileError(file);
+      if (videoFileError) {
+        throw new Error(videoFileError);
       }
       if (file.size > PROFILE_MEDIA_MAX_DIRECT_VIDEO_BYTES) {
-        throw new Error("Videos must stay under 200MB for direct upload.");
+        throw new Error("Video file is too large (max 1 GB). Try exporting a smaller version.");
       }
 
       const duration = await readVideoDuration(file);
@@ -515,6 +619,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
         throw new Error(`Source videos must stay under ${Math.floor(PROFILE_MEDIA_MAX_SOURCE_VIDEO_DURATION_SEC / 60)} minutes.`);
       }
 
+      setClipZoom(1);
       setVideoDraft({
         file,
         objectUrl: URL.createObjectURL(file),
@@ -567,7 +672,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
     const rect = clipTrackRef.current.getBoundingClientRect();
     if (!rect.width) return null;
     const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
-    return ratio * videoDraft.durationSec;
+    // Map pointer into the zoomed view window, then clamp to full duration
+    return clamp(clipViewStart + ratio * clipViewDuration, 0, videoDraft.durationSec);
   }
 
   function startClipDrag(pointerId: number, clientX: number) {
@@ -620,20 +726,19 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
 
   async function confirmVideoDraft() {
     if (!videoDraft) return;
-    const uploaded = await uploadVideoFile(videoDraft.file, {
+    const draft = videoDraft;
+    // Close modal immediately so user sees the loading card instead of a frozen editor
+    closeVideoDraft();
+    await uploadVideoFile(draft.file, {
       clipWindow:
-        videoDraft.durationSec > PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC
+        draft.durationSec > PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC
           ? {
-              startSec: videoDraft.clipStartSec,
-              endSec: videoDraft.clipEndSec,
+              startSec: draft.clipStartSec,
+              endSec: draft.clipEndSec,
             }
           : undefined,
-      needsTrim: videoDraft.durationSec > PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC,
+      needsTrim: draft.durationSec > PROFILE_MEDIA_MAX_VIDEO_DURATION_SEC,
     });
-
-    if (uploaded) {
-      closeVideoDraft();
-    }
   }
 
   async function setMainMedia(mediaId: string) {
@@ -729,24 +834,31 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
   }
 
   async function retryStatus(item: ProfileMediaItem) {
-    const retryStreamUid = item.sourceStreamUid ?? item.streamUid;
+    const retryStreamUid = item.streamUid;
     if (!retryStreamUid) return;
     setBusyId(`retry:${item.id}`);
     setError(null);
     try {
-      const result = await authorizedFetch("/api/profile-media/video/finalize", {
+      const result = await authorizedFetch("/api/profile-media/video/status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mediaId: item.id,
-          streamUid: retryStreamUid,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mediaId: item.id }),
       });
 
-      const status = typeof result.status === "string" ? result.status : "";
-      await refreshNow(status === "ready" ? "Video is ready." : "Processing status refreshed.");
+      const newStatus = typeof result.status === "string" ? result.status : "";
+      const playbackUrl = typeof result.playbackUrl === "string" ? result.playbackUrl : null;
+      const thumbnailUrl = typeof result.thumbnailUrl === "string" ? result.thumbnailUrl : null;
+
+      if (newStatus === "ready") {
+        setMedia((prev) =>
+          prev.map((m) =>
+            m.id === item.id
+              ? { ...m, status: "ready", playbackUrl, thumbnailUrl: thumbnailUrl ?? m.thumbnailUrl }
+              : m
+          )
+        );
+      }
+      await refreshNow(newStatus === "ready" ? "Video is ready." : "Processing status refreshed.");
     } catch (retryError) {
       setError(retryError instanceof Error ? retryError.message : "Could not refresh video status.");
       setRefreshSeq((value) => value + 1);
@@ -853,16 +965,12 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                   >
                     {uploadingVideo ? "Uploading…" : "Upload video"}
                   </button>
-                ) : billingPlanId !== "pro" ? (
-                  <button
-                    type="button"
-                    onClick={() => openForReason("media_limit_reached")}
-                    className="inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-2 text-xs font-semibold text-[#06121a] hover:brightness-110"
-                  >
-                    Upgrade to Plus
-                  </button>
                 ) : (
-                  <span className="block text-center text-xs text-slate-500">Limit reached</span>
+                  <div
+                    className="inline-flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/40 cursor-default select-none"
+                  >
+                    Full capacity
+                  </div>
                 )}
               </div>
             </div>
@@ -1055,19 +1163,26 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                 : "-mx-1 flex gap-3 overflow-x-auto overflow-y-visible px-1 pb-3"
             )}
           >
+            {uploadingVideo && (
+              <div className={cx(
+                "animate-pulse rounded-[20px] border border-white/10 bg-white/[0.04] flex flex-col items-center justify-center gap-2",
+                embedded ? "aspect-[3/4]" : "h-[220px] w-[160px] shrink-0"
+              )}>
+                <span className="material-symbols-outlined text-[28px] text-white/20 animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
+                <p className="text-[10px] font-semibold text-white/30">Uploading…</p>
+              </div>
+            )}
             {media.map((item, index) => {
               const poster = mediaPoster(item);
               const statusBusy = busyId?.endsWith(item.id);
               const menuOpen = activeMenuId === item.id;
-              // Photos are locked (showcase is Plus-only) when user is not on Plus plan
-              const photoLocked = embedded && item.kind === "photo" && billingPlanId !== "pro";
-              const canSetProfilePicture = item.kind === "photo" && item.status === "ready" && Boolean(item.publicUrl) && !photoLocked;
-              const canSetMain = item.status === "ready" && !item.isPrimary && !photoLocked;
+              const canSetProfilePicture = item.kind === "photo" && item.status === "ready" && Boolean(item.publicUrl);
+              const canSetMain = item.status === "ready" && !item.isPrimary;
               return (
                 <div
                   key={item.id}
                   data-media-menu-root={item.id}
-                  draggable={media.length > 1 && !Boolean(statusBusy) && !photoLocked}
+                  draggable={media.length > 1 && !Boolean(statusBusy)}
                   onDragStart={(event) => {
                     if (statusBusy) {
                       event.preventDefault();
@@ -1136,14 +1251,6 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
 
                       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
 
-                      {/* Locked overlay for non-Plus showcase photos */}
-                      {photoLocked ? (
-                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 backdrop-blur-[2px]">
-                          <span className="material-symbols-outlined text-[20px] text-white/70">lock</span>
-                          <span className="text-[9px] font-semibold uppercase tracking-wider text-white/60">Locked</span>
-                        </div>
-                      ) : null}
-
                       {/* Position watermark */}
                       <div className={cx(
                         "pointer-events-none absolute left-1.5 top-1.5 flex items-center justify-center rounded-full bg-black/60 font-bold text-white/90 backdrop-blur-sm",
@@ -1165,15 +1272,28 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                       ) : null}
 
                       {item.status !== "ready" ? (
-                        <div
-                          className={cx(
+                        item.status === "failed" ? (
+                          <div className={cx(
                             "absolute rounded-full font-semibold",
                             embedded ? "bottom-1 right-1 px-1.5 py-0.5 text-[9px]" : "bottom-3 right-3 px-2.5 py-1 text-[11px]",
-                            item.status === "failed" ? "bg-rose-500/20 text-rose-100" : "bg-cyan-300/15 text-cyan-100"
-                          )}
-                        >
-                          {embedded ? (item.status === "failed" ? "Failed" : "…") : describeStatus(item)}
-                        </div>
+                            "bg-rose-500/20 text-rose-100"
+                          )}>
+                            {embedded ? "Failed" : "Failed"}
+                          </div>
+                        ) : (
+                          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2"
+                            style={{ background: "radial-gradient(circle at 50% 50%, rgba(13,204,242,0.12), rgba(0,0,0,0.55) 70%)" }}>
+                            <div className="relative flex items-center justify-center">
+                              <span className="absolute h-10 w-10 rounded-full border border-[#0df2f2]/25 animate-ping" style={{ animationDuration: "2s" }} />
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[#0df2f2]/30 bg-[#0df2f2]/10">
+                                <span className="material-symbols-outlined text-[16px] text-[#0df2f2] animate-spin" style={{ animationDuration: "3s" }}>
+                                  progress_activity
+                                </span>
+                              </div>
+                            </div>
+                            <span className={cx("font-semibold text-white/60", embedded ? "text-[9px]" : "text-[10px]")}>Processing…</span>
+                          </div>
+                        )
                       ) : item.kind === "video" && item.durationSec ? (
                         <div className={cx("absolute right-1.5 rounded-full bg-black/60 font-semibold text-white/95", embedded ? "bottom-1.5 px-1.5 py-0.5 text-[9px]" : "bottom-3 px-2.5 py-1 text-[11px]")}>
                           {item.durationSec}s
@@ -1216,21 +1336,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
 
                   {menuOpen ? (
                     <div className="absolute right-2 top-14 z-[5] w-[min(15rem,calc(100vw-2.5rem))] rounded-[22px] border border-white/12 bg-[#10171d]/96 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.4)] backdrop-blur">
-                      {photoLocked ? (
-                        <div className="space-y-1">
-                          <p className="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-slate-500">Locked · upgrade to unlock</p>
-                          <button
-                            type="button"
-                            onClick={() => void deleteItem(item)}
-                            disabled={Boolean(statusBusy)}
-                            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-rose-300 hover:bg-white/[0.06] disabled:opacity-50"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">delete</span>
-                            Delete photo
-                          </button>
-                        </div>
-                      ) : null}
-                      <div className={cx("space-y-1", photoLocked ? "hidden" : "")}>
+                      <div className="space-y-1">
                         {canSetMain ? (
                           <button
                             type="button"
@@ -1351,7 +1457,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
 
             <div className="overflow-y-auto overscroll-contain">
               <div className="grid gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,360px)]">
-              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-black/30">
+              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-black/30 flex items-center justify-center" style={{ minHeight: "240px" }}>
                 <video
                   ref={trimVideoRef}
                   src={videoDraft.objectUrl}
@@ -1388,7 +1494,24 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                     <div className="mt-5">
                       <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
                         <span>Clip position</span>
-                        <span>{formatDurationClock(videoDraft.clipStartSec)}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="normal-case tracking-normal text-slate-500">{formatDurationClock(videoDraft.clipStartSec)}</span>
+                          <div className="flex items-center rounded-xl border border-white/10 bg-white/[0.04]">
+                            {([1, 2, 4, 8] as const).map((level) => (
+                              <button
+                                key={level}
+                                type="button"
+                                onClick={() => setClipZoom(level)}
+                                className={cx(
+                                  "px-2 py-1 text-[11px] font-bold transition-colors",
+                                  clipZoom === level ? "text-cyan-300" : "text-slate-500 hover:text-slate-300"
+                                )}
+                              >
+                                {level}×
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                       <div
                         ref={clipTrackRef}
@@ -1420,8 +1543,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                         </div>
                       </div>
                       <div className="mt-2 flex justify-between text-[11px] text-slate-500">
-                        <span>0:00</span>
-                        <span>{formatDurationClock(videoDraft.durationSec)}</span>
+                        <span>{formatDurationClock(clipViewStart)}</span>
+                        <span>{formatDurationClock(clipViewEnd)}</span>
                       </div>
                     </div>
                   ) : null}

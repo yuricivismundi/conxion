@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeEventAccessType, normalizeEventChatMode } from "@/lib/events/access";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 
 type EventLinkInput = {
@@ -57,6 +58,8 @@ function mapCreateErrorStatus(message: string) {
     message.includes("location_required") ||
     message.includes("invalid_event_window") ||
     message.includes("invalid_visibility") ||
+    message.includes("invalid_event_access_type") ||
+    message.includes("invalid_chat_mode") ||
     message.includes("invalid_status") ||
     message.includes("invalid_capacity") ||
     message.includes("invalid_cover_url") ||
@@ -70,6 +73,12 @@ function mapCreateErrorStatus(message: string) {
     return 400;
   }
   if (message.includes("active_event_limit_reached")) return 409;
+  if (
+    message.includes("private_group_monthly_limit_reached") ||
+    message.includes("private_group_member_limit_reached")
+  ) {
+    return 409;
+  }
   return 500;
 }
 
@@ -86,7 +95,11 @@ export async function POST(req: Request) {
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     const description = typeof body?.description === "string" ? body.description : "";
     const eventType = typeof body?.eventType === "string" ? body.eventType : "Social";
-    const visibility = typeof body?.visibility === "string" ? body.visibility : "public";
+    const eventAccessType = normalizeEventAccessType(
+      typeof body?.eventAccessType === "string" ? body.eventAccessType : null,
+      typeof body?.visibility === "string" ? body.visibility : null
+    );
+    const chatMode = normalizeEventChatMode(typeof body?.chatMode === "string" ? body.chatMode : null, eventAccessType);
     const city = typeof body?.city === "string" ? body.city.trim() : "";
     const country = typeof body?.country === "string" ? body.country.trim() : "";
     const venueName = typeof body?.venueName === "string" ? body.venueName : "";
@@ -140,7 +153,9 @@ export async function POST(req: Request) {
       p_title: title,
       p_description: description || null,
       p_event_type: eventType,
-      p_visibility: visibility,
+      p_visibility: eventAccessType === "private_group" ? "private" : "public",
+      p_event_access_type: eventAccessType,
+      p_chat_mode: chatMode,
       p_city: city,
       p_country: country,
       p_venue_name: venueName || null,

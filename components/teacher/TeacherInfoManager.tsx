@@ -166,13 +166,13 @@ export default function TeacherInfoManager({ embedded = false }: TeacherInfoMana
 
   useEffect(() => {
     if (!error) return;
-    const timeoutId = window.setTimeout(() => setError(null), 3000);
+    const timeoutId = window.setTimeout(() => setError(null), 6000);
     return () => window.clearTimeout(timeoutId);
   }, [error]);
 
   useEffect(() => {
     if (!info) return;
-    const timeoutId = window.setTimeout(() => setInfo(null), 3000);
+    const timeoutId = window.setTimeout(() => setInfo(null), 6000);
     return () => window.clearTimeout(timeoutId);
   }, [info]);
 

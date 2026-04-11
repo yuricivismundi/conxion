@@ -6,13 +6,15 @@ import Nav from "@/components/Nav";
 import { resolveAvatarUrl } from "@/lib/avatar-storage";
 import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
 import TeacherHeroActions from "@/components/teacher/TeacherHeroActions";
+import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
+import { isPaymentVerified } from "@/lib/verification";
 import {
-  TEACHER_INFO_KIND_LABELS,
   normalizeTeacherInfoBlockRow,
-  getTeacherInfoTemplateText,
   type TeacherInfoBlock,
-  type TeacherInfoBlockKind,
 } from "@/lib/teacher-info/types";
+import { normalizeProfileMediaRow, sortProfileMedia } from "@/lib/profile-media/types";
+import type { ProfileMediaItem } from "@/lib/profile-media/types";
+import TeacherExperiencesSection from "@/components/teacher/TeacherExperiencesSection";
 
 // ---------------------------------------------------------------------------
 // Supabase helper (public anon client — reads public data only)
@@ -37,6 +39,8 @@ type TeacherProfile = {
   bio: string | null;
   availability_summary: string | null;
   teacher_profile_enabled: boolean;
+  teacher_profile_trial_started_at: string | null;
+  teacher_profile_trial_ends_at: string | null;
   is_public: boolean;
   base_school: string | null;
   travel_available: boolean;
@@ -84,7 +88,6 @@ type WeeklyAvailabilitySlot = {
 // ---------------------------------------------------------------------------
 
 const WEEKDAY_SHORT = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as const;
-const WEEKDAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -107,24 +110,6 @@ function formatEventDate(dateStr: string | null): string {
   return date
     .toLocaleDateString("en-US", { month: "short", year: "numeric" })
     .toUpperCase();
-}
-
-function kindToIcon(kind: TeacherInfoBlockKind): string {
-  switch (kind) {
-    case "private_class":
-      return "person_book";
-    case "group_class":
-      return "groups";
-    case "workshop":
-      return "school";
-    case "show":
-      return "theater_comedy";
-    case "organizer_collab":
-      return "edit_note";
-    case "other":
-    default:
-      return "star";
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +135,7 @@ export default async function TeacherProfilePage({
   // ── 1. Fetch profile row ────────────────────────────────────────────────
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("user_id, display_name, avatar_url, roles, city, country")
+    .select("user_id, username, display_name, avatar_url, roles, city, country, verified, verified_label")
     .eq("user_id", id)
     .maybeSingle();
 
@@ -180,69 +165,96 @@ export default async function TeacherProfilePage({
     // Table may not exist yet — treat as no teacher profile
   }
 
-  // ── 3. Fetch service blocks ─────────────────────────────────────────────
-  let infoBlocks: TeacherInfoBlock[] = [];
-  try {
-    const { data } = await supabase
+  const isVerified = isPaymentVerified(profileRow as Record<string, unknown>);
+  if (
+    !teacherProfile ||
+    !teacherProfile.is_public ||
+    !canUseTeacherProfile({
+      roles,
+      teacherProfileEnabled: teacherProfile.teacher_profile_enabled,
+      trialEndsAt: teacherProfile.teacher_profile_trial_ends_at,
+      isVerified,
+    })
+  ) {
+    redirect(`/profile/${id}`);
+  }
+
+  // ── 3–7. Parallel fetches ───────────────────────────────────────────────
+  const [
+    infoBlocksResult,
+    regularClassesResult,
+    eventTeachingResult,
+    weeklyAvailabilityResult,
+    profileMediaResult,
+  ] = await Promise.allSettled([
+    supabase
       .from("teacher_info_blocks")
       .select("*")
       .eq("user_id", id)
-      .eq("is_active", true);
-    if (data) {
-      infoBlocks = data
-        .map((row) => normalizeTeacherInfoBlockRow(row))
-        .filter((b): b is TeacherInfoBlock => b !== null);
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  // ── 4. Fetch regular classes ────────────────────────────────────────────
-  let regularClasses: RegularClass[] = [];
-  try {
-    const { data } = await supabase
+      .eq("is_active", true),
+    supabase
       .from("teacher_regular_classes")
       .select("*")
       .eq("user_id", id)
       .eq("is_active", true)
-      .order("position", { ascending: true });
-    if (data) regularClasses = data as RegularClass[];
-  } catch {
-    // Non-fatal
-  }
-
-  // ── 5. Fetch event teaching ─────────────────────────────────────────────
-  let eventTeaching: EventTeaching[] = [];
-  try {
-    const { data } = await supabase
+      .order("position", { ascending: true }),
+    supabase
       .from("teacher_event_teaching")
       .select("*")
       .eq("user_id", id)
       .eq("is_active", true)
-      .order("start_date", { ascending: false, nullsFirst: false });
-    if (data) eventTeaching = data as EventTeaching[];
-  } catch {
-    // Non-fatal
-  }
-
-  // ── 6. Fetch weekly availability ────────────────────────────────────────
-  let weeklyAvailability: WeeklyAvailabilitySlot[] = [];
-  try {
-    const { data } = await supabase
+      .order("start_date", { ascending: false, nullsFirst: false }),
+    supabase
       .from("teacher_weekly_availability")
       .select("*")
       .eq("user_id", id)
       .order("weekday")
-      .order("start_time");
-    if (data) weeklyAvailability = data as WeeklyAvailabilitySlot[];
-  } catch {
-    // Non-fatal
-  }
+      .order("start_time"),
+    supabase
+      .from("profile_media")
+      .select("*")
+      .eq("user_id", id)
+      .eq("status", "ready"),
+  ]);
+
+  const infoBlocks: TeacherInfoBlock[] =
+    infoBlocksResult.status === "fulfilled" && infoBlocksResult.value.data
+      ? infoBlocksResult.value.data
+          .map((row) => normalizeTeacherInfoBlockRow(row))
+          .filter((b): b is TeacherInfoBlock => b !== null)
+      : [];
+
+  const regularClasses: RegularClass[] =
+    regularClassesResult.status === "fulfilled" && regularClassesResult.value.data
+      ? (regularClassesResult.value.data as RegularClass[])
+      : [];
+
+  const eventTeaching: EventTeaching[] =
+    eventTeachingResult.status === "fulfilled" && eventTeachingResult.value.data
+      ? (eventTeachingResult.value.data as EventTeaching[])
+      : [];
+
+  const weeklyAvailability: WeeklyAvailabilitySlot[] =
+    weeklyAvailabilityResult.status === "fulfilled" && weeklyAvailabilityResult.value.data
+      ? (weeklyAvailabilityResult.value.data as WeeklyAvailabilitySlot[])
+      : [];
+
+  const profileMedia: ProfileMediaItem[] =
+    profileMediaResult.status === "fulfilled" && profileMediaResult.value.data
+      ? sortProfileMedia(
+          profileMediaResult.value.data
+            .map((row) => normalizeProfileMediaRow(row))
+            .filter((item): item is ProfileMediaItem => item !== null)
+        )
+      : [];
 
   // ── Derived values ───────────────────────────────────────────────────────
-  const isVerified = roles.includes("verified");
   const displayName: string = profileRow.display_name ?? "Unknown";
   const avatarUrl = resolveAvatarUrl({ avatarUrl: profileRow.avatar_url });
+  const socialProfileHref =
+    typeof profileRow.username === "string" && profileRow.username.trim().length > 0
+      ? `/u/${encodeURIComponent(profileRow.username)}?view=social`
+      : `/profile/${id}?view=social`;
   const languages: string[] = Array.isArray(teacherProfile?.languages)
     ? teacherProfile.languages!
     : [];
@@ -258,23 +270,10 @@ export default async function TeacherProfilePage({
   const DISPLAY_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
   return (
-    <div className="min-h-screen bg-[#0e0e0e] text-white">
+    <div className="min-h-screen bg-[#0e0e0e] text-white overflow-x-hidden">
       <Nav />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 pb-24">
-
-        {/* ── View switcher ───────────────────────────────────────────────── */}
-        <div className="mb-10 flex items-center gap-3">
-          <Link
-            href={`/profile/${id}`}
-            className="px-4 py-2 rounded-full border border-zinc-700 text-zinc-400 text-xs uppercase font-bold tracking-[0.2em] hover:border-zinc-500 hover:text-zinc-300 transition-all"
-          >
-            Social Profile
-          </Link>
-          <span className="px-4 py-2 rounded-full bg-[#c1fffe]/10 border border-[#c1fffe]/30 text-[#c1fffe] text-xs uppercase font-bold tracking-[0.2em]">
-            Teacher Profile
-          </span>
-        </div>
 
         {/* ── Hero ────────────────────────────────────────────────────────── */}
         <section className="grid grid-cols-1 lg:grid-cols-12 gap-12 mb-24">
@@ -373,66 +372,21 @@ export default async function TeacherProfilePage({
             {/* View social profile link */}
             <div className="mt-4">
               <Link
-                href={`/profile/${id}`}
-                className="text-zinc-600 hover:text-zinc-400 text-xs uppercase tracking-widest flex items-center gap-1 transition-colors w-fit"
+                href={socialProfileHref}
+                className="inline-flex min-h-[44px] items-center gap-1 text-xs font-semibold uppercase tracking-widest text-[#0df2f2] opacity-70 hover:opacity-100 transition-opacity w-fit"
               >
                 Social Profile
-                <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
               </Link>
             </div>
           </div>
         </section>
 
-        {/* ── Curated Experiences (info blocks) ───────────────────────────── */}
-        <section className="mb-24">
-          <div className="mb-12">
-            <h2 className="font-black text-4xl tracking-tighter text-white">Curated Experiences</h2>
-            <p className="text-zinc-500 mt-3 max-w-lg">
-              Bespoke training programs designed for rapid growth and artistic development.
-            </p>
-          </div>
-          {infoBlocks.length === 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {(["private_class", "group_class", "workshop"] as TeacherInfoBlockKind[]).map((kind) => (
-                <div key={kind} className="bg-zinc-900/20 backdrop-blur-2xl p-8 rounded-2xl border border-white/5 border-dashed flex flex-col items-center justify-center gap-4 min-h-[200px]">
-                  <span className="material-symbols-outlined text-zinc-700 text-4xl">{kindToIcon(kind)}</span>
-                  <p className="text-zinc-700 text-sm font-bold uppercase tracking-widest">{TEACHER_INFO_KIND_LABELS[kind]}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {infoBlocks.map((block) => {
-                const bodyText = getTeacherInfoTemplateText(block);
-                const priceText = block.contentJson.priceText;
-                const ctaText = block.contentJson.ctaText;
-                return (
-                  <div
-                    key={block.id}
-                    className="bg-zinc-900/40 backdrop-blur-2xl p-8 rounded-2xl hover:-translate-y-2 transition-all duration-500 group border border-white/5"
-                  >
-                    <span className="material-symbols-outlined text-[#c1fffe] text-4xl mb-6 group-hover:scale-110 transition-transform block">
-                      {kindToIcon(block.kind)}
-                    </span>
-                    <h3 className="font-bold text-xl mb-3 text-white">{block.title}</h3>
-                    {bodyText && (
-                      <p className="text-zinc-400 text-sm leading-relaxed mb-6">
-                        {bodyText.slice(0, 150)}
-                        {bodyText.length > 150 ? "…" : ""}
-                      </p>
-                    )}
-                    {priceText && (
-                      <p className="text-[#ff51fa] font-black text-xl tracking-tighter">{priceText}</p>
-                    )}
-                    {ctaText && !priceText && (
-                      <p className="text-[#ff51fa] font-black text-xl tracking-tighter">{ctaText}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        {/* ── Experiences + Videos (tabbed) ───────────────────────────────── */}
+        <TeacherExperiencesSection
+          infoBlocks={infoBlocks}
+          videos={profileMedia.filter((m) => m.kind === "video")}
+        />
 
         {/* ── Private Class Availability (weekly availability) ─────────────── */}
         <div className="bg-zinc-950 p-10 rounded-2xl mb-24">

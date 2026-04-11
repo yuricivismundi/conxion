@@ -50,28 +50,28 @@ function notificationContentForKind(kind: string, params: {
     return {
       title: "Trip request received",
       body: "A traveller sent you a request for this trip.",
-      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips",
+      linkUrl: params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/trips",
     };
   }
   if (kind === "trip_request_accepted") {
     return {
       title: "Trip request accepted",
       body: "Your trip request was accepted.",
-      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips/my",
+      linkUrl: params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/trips/my",
     };
   }
   if (kind === "trip_request_declined") {
     return {
       title: "Trip request declined",
       body: "A host declined this request. You can send a new one.",
-      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips/explore",
+      linkUrl: params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/trips/explore",
     };
   }
   if (kind === "trip_details_updated") {
     return {
       title: "Trip details updated",
       body: "A trip you requested has updated its destination or dates. Review if it still works for you.",
-      linkUrl: params.tripId ? `/trips/${params.tripId}` : "/trips",
+      linkUrl: params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/trips",
     };
   }
   return {

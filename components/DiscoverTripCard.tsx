@@ -5,7 +5,7 @@ import VerifiedBadge from "@/components/VerifiedBadge";
 import Avatar from "@/components/Avatar";
 import { cx } from "@/lib/cx";
 
-type TripPurpose = "Holiday Trip" | "Dance Festival";
+type TripPurpose = "Dance trip / Holiday" | "Training & Classes" | "Festival / Event";
 type TripStatus = "active" | "inactive";
 
 export type TripCardTrip = {

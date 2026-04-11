@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import OnboardingShell from "@/components/OnboardingShell";
+import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import {
   getCachedCitiesOfCountry,
   getCachedCountriesAll,
@@ -28,6 +29,19 @@ const ROLES = [
   "Teacher",
 ] as const;
 const MAX_DISPLAY_NAME_LENGTH = 48;
+
+const LEGACY_ROLES_REMOVE = new Set([
+  "social dancer / student",
+  "social dancer/student",
+  "organiser",
+]);
+function normalizeLegacyRoles(roles: string[]): Role[] {
+  return roles.filter(
+    (r): r is Role =>
+      !LEGACY_ROLES_REMOVE.has(r.toLowerCase().trim()) &&
+      (ROLES as readonly string[]).includes(r)
+  );
+}
 
 type Role = (typeof ROLES)[number];
 
@@ -121,7 +135,7 @@ export default function OnboardingProfilePage() {
       }
       if (typeof d.country === "string") setCountry(d.country);
       if (typeof d.city === "string") setCity(d.city);
-      if (Array.isArray(d.roles)) setRoles(d.roles.filter(Boolean) as Role[]);
+      if (Array.isArray(d.roles)) setRoles(normalizeLegacyRoles(d.roles.filter(Boolean)));
       const draftAvatarPath = typeof d.avatarPath === "string" && d.avatarPath.trim() ? d.avatarPath.trim() : undefined;
       const draftAvatarUrl =
         typeof d.avatarDataUrl === "string" && d.avatarDataUrl
@@ -456,13 +470,27 @@ export default function OnboardingProfilePage() {
             <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div>
                 <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">Country</label>
+                <div className="mt-2 sm:hidden">
+                  <SearchableMobileSelect
+                    label="Country"
+                    value={country}
+                    options={countryNames}
+                    placeholder="Select country..."
+                    searchPlaceholder="Search countries..."
+                    onSelect={(nextCountry) => {
+                      setCountry(nextCountry);
+                      setCity("");
+                    }}
+                    buttonClassName="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left text-sm text-[#E0E0E0] outline-none"
+                  />
+                </div>
                 <select
                   value={country}
                   onChange={(e) => {
                     setCountry(e.target.value);
                     setCity("");
                   }}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                  className="mt-2 hidden w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 sm:block"
                 >
                   <option value="" disabled>
                     Select country…
@@ -485,21 +513,36 @@ export default function OnboardingProfilePage() {
                     className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                   />
                 ) : (
-                  <select
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    disabled={!country}
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
-                  >
-                    <option value="" disabled>
-                      {!country ? "Select country first" : "Select city…"}
-                    </option>
-                    {cityNames.map((n, idx) => (
-                      <option key={`${n}-${idx}`} value={n}>
-                        {n}
+                  <>
+                    <div className="mt-2 sm:hidden">
+                      <SearchableMobileSelect
+                        label="City"
+                        value={city}
+                        options={cityNames}
+                        placeholder={!country ? "Select country first" : "Select city..."}
+                        searchPlaceholder="Search cities..."
+                        disabled={!country}
+                        emptyMessage={!country ? "Choose a country first." : "No cities found."}
+                        onSelect={(nextCity) => setCity(nextCity)}
+                        buttonClassName="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left text-sm text-[#E0E0E0] outline-none disabled:opacity-50"
+                      />
+                    </div>
+                    <select
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      disabled={!country}
+                      className="mt-2 hidden w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50 sm:block"
+                    >
+                      <option value="" disabled>
+                        {!country ? "Select country first" : "Select city…"}
                       </option>
-                    ))}
-                  </select>
+                      {cityNames.map((n, idx) => (
+                        <option key={`${n}-${idx}`} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </>
                 )}
               </div>
             </div>

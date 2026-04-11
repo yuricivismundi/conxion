@@ -19,6 +19,7 @@ import {
   buildMapsUrl,
   dayToken,
   formatEventRange,
+  getEventMemberLimit,
   mapEventMemberRows,
   mapEventRequestRows,
   mapEventRows,
@@ -27,6 +28,7 @@ import {
   pickEventFallbackHeroUrl,
   pickEventHeroUrl,
 } from "@/lib/events/model";
+import { eventAccessTypeShortLabel, eventThreadTabLabel } from "@/lib/events/access";
 import { cx } from "@/lib/cx";
 
 type EventAction = "join" | "request" | "cancel_request" | "leave" | "interested" | "not_interested";
@@ -233,6 +235,7 @@ export default function EventDetailsPage() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [responseMenuOpen, setResponseMenuOpen] = useState(false);
   const [inviteBusyUserId, setInviteBusyUserId] = useState<string | null>(null);
+  const [activeEventTab, setActiveEventTab] = useState<"details" | "people" | "thread">("details");
   const loadRequestIdRef = useRef(0);
 
   const shareUrl = useMemo(() => {
@@ -556,9 +559,13 @@ export default function EventDetailsPage() {
   const mapEmbedUrl = mapLocation ? buildOsmEmbedUrl(mapLocation.lat, mapLocation.lon) : null;
   const fallbackHeroUrl = event ? pickEventFallbackHeroUrl(event) : null;
   const preferredHeroUrl = event ? (isHost && event.coverUrl ? event.coverUrl : pickEventHeroUrl(event)) : null;
-  const spotsLeft = event?.capacity === null ? null : Math.max((event?.capacity ?? 0) - counts.going, 0);
+  const eventMemberLimit = event ? getEventMemberLimit(event) : null;
+  const spotsLeft = eventMemberLimit === null ? null : Math.max(eventMemberLimit - counts.going, 0);
   const currentResponseState = responseStateFromParticipation(myMembership, myRequest);
   const respondedCount = counts.going + counts.interested + counts.waitlist;
+  const requiresApproval = event?.accessType === "request";
+  const isPrivateGroup = event?.accessType === "private_group";
+  const threadTabLabel = event ? eventThreadTabLabel(event.accessType) : "Updates";
 
   useEffect(() => {
     setHeroSrc(preferredHeroUrl);
@@ -613,21 +620,21 @@ export default function EventDetailsPage() {
     if (!event) return { label: "Join", action: "join" as EventAction, outline: false };
     if (!isAuthenticated) {
       return {
-        label: event.visibility === "private" ? "Sign in to Request" : "Sign in to Join",
+        label: event.accessType === "request" ? "Sign in to Request" : "Sign in to Join",
         action: "join" as EventAction,
         outline: false,
       };
     }
     if (myMembership && (myMembership.status === "going" || myMembership.status === "waitlist")) {
-      return { label: "Leave event", action: "leave" as EventAction, outline: true };
+      return { label: event.accessType === "private_group" ? "Leave group" : "Leave event", action: "leave" as EventAction, outline: true };
     }
-    if (event.visibility === "private") {
+    if (event.accessType === "request") {
       if (myRequest?.status === "pending") {
         return { label: "Cancel request", action: "cancel_request" as EventAction, outline: true };
       }
       return { label: "Request invite", action: "request" as EventAction, outline: false };
     }
-    return { label: "Join event", action: "join" as EventAction, outline: false };
+    return { label: event.accessType === "private_group" ? "Join group" : "Join event", action: "join" as EventAction, outline: false };
   }, [event, isAuthenticated, myMembership, myRequest]);
 
   async function handleAction(action: EventAction | "request_sent_to_interested", requestNoteOverride?: string) {
@@ -977,7 +984,7 @@ export default function EventDetailsPage() {
                       {event.eventType}
                     </span>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/65">
-                      {event.visibility}
+                      {eventAccessTypeShortLabel(event.accessType)}
                     </span>
                     {event.styles.slice(0, 3).map((style) => (
                       <span
@@ -1063,7 +1070,7 @@ export default function EventDetailsPage() {
                               onClick={() => {
                                 setResponseMenuOpen(false);
                                 void handleAction(
-                                  event.visibility === "private" && myRequest?.status === "pending"
+                                  requiresApproval && myRequest?.status === "pending"
                                     ? "request_sent_to_interested"
                                     : "interested"
                                 );
@@ -1107,7 +1114,13 @@ export default function EventDetailsPage() {
                                 <span className="material-symbols-outlined text-[18px]">
                                   {cta.action === "request" ? "mail" : cta.action === "cancel_request" ? "close" : "check_circle"}
                                 </span>
-                                {cta.action === "request" ? "Request joining" : cta.action === "cancel_request" ? "Cancel request" : "Joining"}
+                                {cta.action === "request"
+                                  ? "Request joining"
+                                  : cta.action === "cancel_request"
+                                    ? "Cancel request"
+                                    : isPrivateGroup
+                                      ? "Join group"
+                                      : "Joining"}
                               </span>
                               {currentResponseState === "going" || currentResponseState === "waitlist" ? (
                                 <span className="text-emerald-200">●</span>
@@ -1121,7 +1134,7 @@ export default function EventDetailsPage() {
                               onClick={() => {
                                 setResponseMenuOpen(false);
                                 void handleAction(
-                                  event.visibility === "private" && myRequest?.status === "pending"
+                                  requiresApproval && myRequest?.status === "pending"
                                     ? "cancel_request"
                                     : "not_interested"
                                 );
@@ -1142,7 +1155,7 @@ export default function EventDetailsPage() {
                     ) : null}
                     {isHost ? (
                       <>
-                        {event.visibility === "private" && (
+                        {event.accessType === "request" && (
                           <Link
                             href={`/events/${event.id}/inbox`}
                             className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#2374e1] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#2d7ff0]"
@@ -1160,6 +1173,8 @@ export default function EventDetailsPage() {
                           href={`/events/new?from=${encodeURIComponent(JSON.stringify({
                             title: event.title,
                             eventType: event.eventType,
+                            eventAccessType: event.accessType,
+                            chatMode: event.chatMode,
                             visibility: event.visibility,
                             city: event.city,
                             country: event.country,
@@ -1228,8 +1243,86 @@ export default function EventDetailsPage() {
           </div>
         </section>
 
+        <section className="mx-auto mt-5 w-full max-w-[1220px] px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-[#1b1d21] p-2">
+            {[
+              { key: "details" as const, label: "Details", icon: "info" },
+              { key: "people" as const, label: "People", icon: "groups" },
+              { key: "thread" as const, label: threadTabLabel, icon: threadTabLabel === "Chat" ? "forum" : "campaign" },
+            ].map((tab) => {
+              const selected = activeEventTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveEventTab(tab.key)}
+                  className={cx(
+                    "inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition sm:flex-none sm:px-4",
+                    selected
+                      ? "bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] text-[#071116]"
+                      : "border border-white/10 bg-white/[0.03] text-white/72 hover:bg-white/[0.07] hover:text-white"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[18px]">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <section className="mx-auto mt-5 grid w-full max-w-[1220px] grid-cols-1 gap-5 px-4 sm:px-6 xl:grid-cols-[minmax(0,2fr)_360px] lg:px-8">
           <div className="order-1 space-y-6 xl:order-1">
+            {activeEventTab === "thread" ? (
+              <article className={`${panelClass} p-5 sm:p-6`}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{threadTabLabel}</p>
+                    <h2 className="mt-2 text-[22px] font-bold text-white">
+                      {threadTabLabel === "Chat" ? "Private Group chat" : "Event updates"}
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      {threadTabLabel === "Chat"
+                        ? "Plan your dance life together with the members of this private group."
+                        : "Organisers post broadcast updates for this event thread."}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/messages?thread=${encodeURIComponent(`event:${event.id}`)}`}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] px-4 py-2.5 text-sm font-bold text-[#071116] hover:brightness-110"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">{threadTabLabel === "Chat" ? "forum" : "campaign"}</span>
+                    Open {threadTabLabel}
+                  </Link>
+                </div>
+                {event.chatMode === "broadcast" ? (
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
+                    Broadcast mode: only organisers can post here.
+                  </div>
+                ) : null}
+              </article>
+            ) : null}
+
+            {activeEventTab === "people" ? (
+              <article className={`${panelClass} p-5 sm:p-6`}>
+                <h2 className="text-[22px] font-bold text-white">People</h2>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Joining</p>
+                    <p className="mt-2 text-2xl font-black text-white">{counts.going}</p>
+                  </div>
+                  <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Interested</p>
+                    <p className="mt-2 text-2xl font-black text-white">{counts.interested}</p>
+                  </div>
+                  <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Waitlist</p>
+                    <p className="mt-2 text-2xl font-black text-white">{counts.waitlist}</p>
+                  </div>
+                </div>
+              </article>
+            ) : null}
+
             <article className={`${panelClass} overflow-hidden`}>
               <div className="border-b border-white/8 px-5 py-4 sm:px-6">
                 <h2 className="text-[22px] font-bold text-white">Details</h2>

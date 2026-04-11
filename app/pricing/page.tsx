@@ -185,11 +185,18 @@ export default function PricingPage() {
             <article className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,11,30,0.92),rgba(8,13,19,0.9))] p-5 sm:p-6">
               <h2 className="text-2xl font-black text-white">Why go Plus?</h2>
               <p className="mt-3 text-sm leading-7 text-slate-300">
-                More visibility means more opportunities. Reach more dancers, keep more active chat threads open, create more trips and events, and stand out in the community.
+                More reach, more control. Reach more dancers, keep more active chat threads open, create more trips and events, stand out in the community — and decide exactly who can find you.
               </p>
               <p className="mt-4 text-sm leading-6 text-slate-400">
-                It fits members who want more visibility, 30 monthly connection requests, 30 active chat threads, 10 hosting offers per month, 3 accepted trips per month, up to 5 created trips per month, 5 public or private events per month, and more room for profile photos.
+                Includes 60 connection requests per month, 30 active chat threads, 10 hosting offers, 3 accepted trips, 5 created trips, 5 events, 15 activity requests, more profile photos — and <span className="font-semibold text-white/70">Private mode</span> to hide yourself from Discover and search.
               </p>
+              <div className="mt-5 flex items-start gap-3 rounded-2xl border border-[#0df2f2]/20 bg-[#0df2f2]/[0.06] px-4 py-3">
+                <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px] text-[#0df2f2]" style={{ fontVariationSettings: "'FILL' 1" }}>visibility_off</span>
+                <div>
+                  <p className="text-sm font-semibold text-white">Private mode</p>
+                  <p className="mt-0.5 text-xs leading-5 text-white/55">Enable to disappear from Discover and search.</p>
+                </div>
+              </div>
             </article>
           </section>
 

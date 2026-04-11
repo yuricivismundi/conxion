@@ -187,7 +187,7 @@ export default function PhotoGuidePage() {
               <p className="text-sm font-semibold text-amber-200">Under review</p>
               <p className="mt-1 text-sm text-slate-400">
                 Photos from new accounts are reviewed before becoming publicly visible.
-                If your photo doesn't meet the guidelines above, you'll receive a message
+                If your photo doesn&apos;t meet the guidelines above, you&apos;ll receive a message
                 with instructions to upload a replacement. Most reviews complete within 24 hours.
               </p>
               <Link

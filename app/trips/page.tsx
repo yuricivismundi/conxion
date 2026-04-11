@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
+import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import { FALLBACK_GRADIENT, getTripHeroFallbackUrl, getTripHeroStorageFolderUrl, getTripHeroStorageUrl } from "@/lib/city-hero-images";
 import {
   getCachedCitiesOfCountry,
@@ -13,6 +14,7 @@ import {
   getCountriesAll,
   type CountryEntry,
 } from "@/lib/country-city-client";
+import { TRAVEL_INTENT_REASON_OPTIONS, travelIntentReasonLabel } from "@/lib/trips/join-reasons";
 import { supabase } from "@/lib/supabase/client";
 
 type TripRow = {
@@ -49,7 +51,7 @@ type TripFormState = {
   note: string;
 };
 
-const DEFAULT_TRIP_PURPOSES = ["Holiday Trip", "Dance Festival", "Social Dancing", "Training / Workshops"] as const;
+const DEFAULT_TRIP_PURPOSES = TRAVEL_INTENT_REASON_OPTIONS.map((option) => option.label);
 const TRIPS_PAGE_SIZE = 25;
 
 const EMPTY_TRIP_FORM: TripFormState = {
@@ -57,7 +59,7 @@ const EMPTY_TRIP_FORM: TripFormState = {
   destinationCountry: "",
   startDate: "",
   endDate: "",
-  purpose: "Dance Festival",
+  purpose: "Festival / Event",
   note: "",
 };
 
@@ -79,7 +81,7 @@ function mapTripRows(rows: TripRow[]): TripItem[] {
         destinationCountry: row.destination_country ?? "",
         startDate: row.start_date ?? "",
         endDate: row.end_date ?? "",
-        purpose: row.purpose ?? "Trip",
+        purpose: travelIntentReasonLabel(row.purpose),
         status: row.status ?? "active",
         note: row.note ?? "",
         createdAt: row.created_at ?? null,
@@ -225,7 +227,7 @@ export default function TripsPage() {
     return citiesByCountryIso[selectedCountryIso] ?? getCachedCitiesOfCountry(selectedCountryIso);
   }, [citiesByCountryIso, selectedCountryIso]);
   const customTripPurposes = useMemo(
-    () => trips.map((trip) => trip.purpose).filter((value): value is string => Boolean(value && value !== "Trip")),
+    () => trips.map((trip) => travelIntentReasonLabel(trip.purpose)).filter((value): value is string => Boolean(value && value !== "Trip")),
     [trips]
   );
   const tripPurposeOptions = useMemo(
@@ -298,7 +300,7 @@ export default function TripsPage() {
       destinationCountry: prefill?.destinationCountry ?? "",
       startDate: prefill?.startDate ?? "",
       endDate: prefill?.endDate ?? "",
-      purpose: prefill?.purpose ?? DEFAULT_TRIP_PURPOSES[1],
+      purpose: prefill?.purpose ?? "Festival / Event",
       note: prefill?.note ?? "",
     });
     setCreateError(null);
@@ -472,59 +474,60 @@ export default function TripsPage() {
           archived ? "opacity-80" : "hover:-translate-y-0.5 hover:border-[#00F5FF]/18 hover:shadow-[0_12px_36px_rgba(0,245,255,0.06)]",
         ].join(" ")}
       >
-        <div className="p-3">
-          <div className="relative min-h-[152px] overflow-hidden rounded-[22px]">
-            <div className="absolute inset-0" style={{ backgroundImage: FALLBACK_GRADIENT }} />
-            {(heroUrl || heroStorageFallback || heroFallback) ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={heroUrl || heroStorageFallback || heroFallback}
-                alt={`${trip.destinationCity || "Trip"} hero`}
-                className="absolute inset-0 h-full w-full object-cover"
-                loading="lazy"
-                referrerPolicy="no-referrer"
-                crossOrigin="anonymous"
-                data-fallback-storage={heroStorageFallback || ""}
-                data-fallback={heroFallback || ""}
-                onError={(event) => {
-                  const target = event.currentTarget;
-                  const fallbackStorage = target.dataset.fallbackStorage;
-                  const fallback = target.dataset.fallback;
-                  if (fallbackStorage && target.src !== fallbackStorage) {
-                    target.src = fallbackStorage;
-                    return;
-                  }
-                  if (fallback && target.src !== fallback) {
-                    target.src = fallback;
-                  }
-                }}
-              />
-            ) : null}
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,8,10,0.12),rgba(3,8,10,0.72)_60%,rgba(3,8,10,0.88))]" />
-            <div className="absolute inset-x-3 top-3 flex justify-end">
-              <div className="rounded-full border border-[#00F5FF]/22 bg-[#00F5FF]/12 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#b8fbff] backdrop-blur">
-                {trip.purpose || "Trip"}
-              </div>
-            </div>
-            <div className="absolute inset-x-4 top-[56%] -translate-y-1/2 text-center">
-              <div className="mx-auto max-w-[70%] text-[28px] font-extrabold tracking-tight text-[#9ef7ff] drop-shadow-[0_0_12px_rgba(0,245,255,0.26)]">
-                {trip.destinationCity || "Destination"}
-              </div>
-              {trip.destinationCountry ? (
-                <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.24em] text-white/72">
-                  {trip.destinationCountry}
-                </div>
-              ) : null}
-              <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-3 py-1.5 backdrop-blur">
-                <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">calendar_month</span>
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/90">
-                  {formatDateCompact(trip.startDate)} - {formatDateCompact(trip.endDate)}
-                </span>
-              </div>
+        {/* Hero — full-bleed, no padding, rounded only at top */}
+        <div className="relative h-[172px] overflow-hidden">
+          <div className="absolute inset-0" style={{ backgroundImage: FALLBACK_GRADIENT }} />
+          {(heroUrl || heroStorageFallback || heroFallback) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={heroUrl || heroStorageFallback || heroFallback}
+              alt={`${trip.destinationCity || "Trip"} hero`}
+              className="absolute inset-0 h-full w-full object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
+              data-fallback-storage={heroStorageFallback || ""}
+              data-fallback={heroFallback || ""}
+              onError={(event) => {
+                const target = event.currentTarget;
+                const fallbackStorage = target.dataset.fallbackStorage;
+                const fallback = target.dataset.fallback;
+                if (fallbackStorage && target.src !== fallbackStorage) {
+                  target.src = fallbackStorage;
+                  return;
+                }
+                if (fallback && target.src !== fallback) {
+                  target.src = fallback;
+                }
+              }}
+            />
+          ) : null}
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,8,10,0.08),rgba(3,8,10,0.65)_60%,rgba(3,8,10,0.92))]" />
+          <div className="absolute inset-x-3 top-3 flex justify-end">
+            <div className="rounded-full border border-[#00F5FF]/22 bg-[#00F5FF]/12 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#b8fbff] backdrop-blur">
+              {trip.purpose || "Trip"}
             </div>
           </div>
+          <div className="absolute inset-x-4 bottom-4 text-center">
+            <div className="mx-auto max-w-[80%] text-[28px] font-extrabold tracking-tight text-[#9ef7ff] drop-shadow-[0_0_12px_rgba(0,245,255,0.26)]">
+              {trip.destinationCity || "Destination"}
+            </div>
+            {trip.destinationCountry ? (
+              <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-white/72">
+                {trip.destinationCountry}
+              </div>
+            ) : null}
+            <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-3 py-1.5 backdrop-blur">
+              <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">calendar_month</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/90">
+                {formatDateCompact(trip.startDate)} - {formatDateCompact(trip.endDate)}
+              </span>
+            </div>
+          </div>
+        </div>
 
-          <div className="flex min-w-0 flex-col gap-3 px-1 pb-1 pt-3">
+        <div className="p-3">
+          <div className="flex min-w-0 flex-col gap-3 px-1 pb-1 pt-1">
             <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3">
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/42">Description</div>
               <p className="text-sm leading-6 text-white/72">
@@ -771,6 +774,24 @@ export default function TripsPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
                   <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Destination country *</span>
+                  <div className="sm:hidden">
+                    <SearchableMobileSelect
+                      label="Destination country"
+                      value={tripForm.destinationCountry}
+                      options={countriesAll.map((country) => country.name)}
+                      placeholder="Select country"
+                      searchPlaceholder="Search countries..."
+                      disabled={editingTripRequestCount > 0}
+                      onSelect={(nextCountry) =>
+                        setTripForm((prev) => ({
+                          ...prev,
+                          destinationCountry: nextCountry,
+                          destinationCity: "",
+                        }))
+                      }
+                      buttonClassName="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-left text-sm text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                  </div>
                   <div className="relative">
                     <select
                       value={tripForm.destinationCountry}
@@ -782,7 +803,7 @@ export default function TripsPage() {
                         }))
                       }
                       disabled={editingTripRequestCount > 0}
-                      className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="hidden w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40 sm:block"
                     >
                       <option value="">Select country</option>
                       {countriesAll.map((country) => (
@@ -791,7 +812,7 @@ export default function TripsPage() {
                         </option>
                       ))}
                     </select>
-                    <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
+                    <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 text-[18px] text-white/35 sm:block">
                       expand_more
                     </span>
                   </div>
@@ -799,12 +820,25 @@ export default function TripsPage() {
 
                 <label className="block">
                   <span className="mb-2 block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/55">Destination city *</span>
+                  <div className="sm:hidden">
+                    <SearchableMobileSelect
+                      label="Destination city"
+                      value={tripForm.destinationCity}
+                      options={availableCities}
+                      placeholder={tripForm.destinationCountry ? "Select city" : "Select country first"}
+                      searchPlaceholder="Search cities..."
+                      disabled={!tripForm.destinationCountry || editingTripRequestCount > 0}
+                      emptyMessage={!tripForm.destinationCountry ? "Choose a country first." : "No cities found."}
+                      onSelect={(nextCity) => setTripForm((prev) => ({ ...prev, destinationCity: nextCity }))}
+                      buttonClassName="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-left text-sm text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                  </div>
                   <div className="relative">
                     <select
                       value={tripForm.destinationCity}
                       onChange={(event) => setTripForm((prev) => ({ ...prev, destinationCity: event.target.value }))}
                       disabled={!tripForm.destinationCountry || editingTripRequestCount > 0}
-                      className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="hidden w-full appearance-none rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40 sm:block"
                     >
                       <option value="">{tripForm.destinationCountry ? "Select city" : "Select country first"}</option>
                       {availableCities.map((city) => (
@@ -813,7 +847,7 @@ export default function TripsPage() {
                         </option>
                       ))}
                     </select>
-                    <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
+                    <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 text-[18px] text-white/35 sm:block">
                       expand_more
                     </span>
                   </div>

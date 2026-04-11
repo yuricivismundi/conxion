@@ -5,6 +5,7 @@ import {
   normalizeReferenceContextTag,
   type ReferenceContextTag,
 } from "@/lib/activities/types";
+import { getReferenceEligibility } from "@/lib/references/eligibility";
 
 type UnsafeSupabaseClient = SupabaseClient;
 type SupabaseUserClient = UnsafeSupabaseClient;
@@ -70,10 +71,30 @@ function normalizeContextTag(value: string): ReferenceContextTag {
 
 function normalizeReferenceEntityType(value: string): ReferenceEntityType {
   const key = normalizeReferenceContextTag(value);
-  if (key === "practice" || key === "private_class" || key === "group_class" || key === "workshop") return "sync";
-  if (key === "travel_together" || key === "hosting" || key === "stay_as_guest") return "trip";
-  if (key === "event" || key === "festival" || key === "social_dance" || key === "competition") return "event";
+  if (key === "practice" || key === "private_class") return "sync";
+  if (key === "travelling" || key === "offer_hosting" || key === "request_hosting") return "trip";
+  if (key === "event_festival" || key === "social_dance") return "event";
   return "connection";
+}
+
+function inferSourceTableFromContextTag(contextTag: ReferenceContextTag) {
+  if (contextTag === "practice" || contextTag === "private_class" || contextTag === "social_dance") {
+    return "activities";
+  }
+  if (contextTag === "travelling") return "trip_requests";
+  if (contextTag === "offer_hosting" || contextTag === "request_hosting") return "hosting_requests";
+  if (contextTag === "event_festival") return "events";
+  return "activities";
+}
+
+function familyContextTags(contextTag: ReferenceContextTag) {
+  if (contextTag === "practice" || contextTag === "social_dance") {
+    return ["practice", "social_dance"];
+  }
+  if (contextTag === "private_class") {
+    return ["private_class"];
+  }
+  return [contextTag];
 }
 
 function withinReferenceWindow(value: string | null | undefined) {
@@ -404,28 +425,38 @@ function fallbackValueForColumn(
     connectionId: string;
     recipientId: string;
     contextTag: string;
+    publicCategory: string;
+    referenceFamily: string;
     sentiment: string;
     rating?: number | null;
     referenceBody: string;
     entityType: string;
     entityId: string;
     syncId: string;
+    sourceType: string;
+    sourceId: string;
   }
 ) {
   const syncValue = params.entityType === "sync" ? params.syncId || params.entityId || "" : params.syncId || "";
   const key = column.trim().toLowerCase();
 
   if (key === "connection_id" || key === "connection_request_id") return params.connectionId;
-  if (key === "author_id" || key === "from_user_id" || key === "source_id") return params.meId;
-  if (key === "recipient_id" || key === "to_user_id" || key === "target_id") return params.recipientId;
+  if (key === "author_user_id" || key === "author_id" || key === "from_user_id") return params.meId;
+  if (key === "recipient_user_id" || key === "recipient_id" || key === "to_user_id" || key === "target_id") {
+    return params.recipientId;
+  }
   if (key === "body" || key === "content" || key === "comment" || key === "reference_text" || key === "feedback") {
     return params.referenceBody.trim();
   }
   if (key === "text") return params.referenceBody.trim();
   if (key === "context") return params.contextTag || params.entityType || "connection";
-  if (key === "context_tag") return params.contextTag || params.entityType || "collaboration";
+  if (key === "context_tag") return params.contextTag || params.entityType || "collaborate";
+  if (key === "public_category") return params.publicCategory;
+  if (key === "reference_family") return params.referenceFamily;
   if (key === "entity_type") return params.entityType || "connection";
   if (key === "entity_id") return params.entityId;
+  if (key === "source_type") return params.sourceType;
+  if (key === "source_id") return params.sourceId || null;
   if (key === "sentiment") return params.sentiment;
   if (key === "rating") return params.rating ?? mapSentimentToRating(params.sentiment);
   if (key === "created_at") return new Date().toISOString();
@@ -447,6 +478,10 @@ function applyMissingColumnCompatibilitySwap(
     entityType: string;
     entityId: string;
     syncId: string;
+    publicCategory: string;
+    referenceFamily: string;
+    sourceType: string;
+    sourceId: string;
   }
 ) {
   const key = missingColumn.trim().toLowerCase();
@@ -506,21 +541,6 @@ function applyMissingColumnCompatibilitySwap(
     payload.author_id = params.meId;
     return true;
   }
-  if (key === "source_id" && "source_id" in payload) {
-    delete payload.source_id;
-    payload.author_id = params.meId;
-    return true;
-  }
-  if (key === "author_id" && "source_id" in payload) {
-    delete payload.source_id;
-    payload.from_user_id = params.meId;
-    return true;
-  }
-  if (key === "from_user_id" && "source_id" in payload) {
-    delete payload.source_id;
-    payload.author_id = params.meId;
-    return true;
-  }
   if (key === "recipient_id" && "recipient_id" in payload) {
     delete payload.recipient_id;
     payload.to_user_id = params.recipientId;
@@ -543,6 +563,16 @@ function applyMissingColumnCompatibilitySwap(
   }
   if (key === "to_user_id" && "target_id" in payload) {
     delete payload.target_id;
+    payload.recipient_id = params.recipientId;
+    return true;
+  }
+  if (key === "author_user_id" && "author_user_id" in payload) {
+    delete payload.author_user_id;
+    payload.author_id = params.meId;
+    return true;
+  }
+  if (key === "recipient_user_id" && "recipient_user_id" in payload) {
+    delete payload.recipient_user_id;
     payload.recipient_id = params.recipientId;
     return true;
   }
@@ -597,12 +627,16 @@ function buildReferenceCompatPayload(params: {
   connectionId: string;
   recipientId: string;
   contextTag: string;
+  publicCategory: string;
+  referenceFamily: string;
   sentiment: string;
   rating?: number | null;
   referenceBody: string;
   entityType: string;
   entityId: string;
   syncId: string;
+  sourceType: string;
+  sourceId: string;
 }) {
   const payload: Record<string, unknown> = {};
   const cleanBody = params.referenceBody.trim();
@@ -632,11 +666,17 @@ function buildReferenceCompatPayload(params: {
 
     if (columns.has("context")) payload.context = context;
     if (columns.has("context_tag")) payload.context_tag = context;
+    if (columns.has("public_category")) payload.public_category = params.publicCategory;
+    if (columns.has("reference_family")) payload.reference_family = params.referenceFamily;
     if (columns.has("entity_type")) payload.entity_type = params.entityType;
     if (columns.has("entity_id")) payload.entity_id = params.entityId;
+    if (columns.has("source_type")) payload.source_type = params.sourceType;
+    if (columns.has("source_id")) payload.source_id = params.sourceId;
 
     if (columns.has("sentiment")) payload.sentiment = params.sentiment;
     if (columns.has("rating")) payload.rating = params.rating ?? mapSentimentToRating(params.sentiment);
+    if (columns.has("author_user_id")) payload.author_user_id = params.meId;
+    if (columns.has("recipient_user_id")) payload.recipient_user_id = params.recipientId;
 
     if (columns.has("sync_id") && syncValue) payload.sync_id = syncValue;
   } else {
@@ -646,11 +686,17 @@ function buildReferenceCompatPayload(params: {
     payload.recipient_id = params.recipientId;
     payload.context = context;
     payload.context_tag = params.contextTag || context;
+    payload.public_category = params.publicCategory;
+    payload.reference_family = params.referenceFamily;
     payload.entity_type = params.entityType;
     payload.entity_id = params.entityId;
+    payload.source_type = params.sourceType;
+    payload.source_id = params.sourceId;
     payload.sentiment = params.sentiment;
     payload.body = cleanBody;
     payload.text = cleanBody;
+    payload.author_user_id = params.meId;
+    payload.recipient_user_id = params.recipientId;
     if (syncValue) payload.sync_id = syncValue;
   }
 
@@ -674,12 +720,16 @@ async function insertReferenceCompat(params: {
   connectionId: string;
   recipientId: string;
   contextTag: string;
+  publicCategory: string;
+  referenceFamily: string;
   sentiment: string;
   rating?: number | null;
   referenceBody: string;
   entityType: string;
   entityId: string;
   syncId: string;
+  sourceType: string;
+  sourceId: string;
   legacySyncId?: string;
 }) {
   const columns = await getReferenceColumns(params.supabase);
@@ -689,12 +739,16 @@ async function insertReferenceCompat(params: {
     connectionId: params.connectionId,
     recipientId: params.recipientId,
     contextTag: params.contextTag,
+    publicCategory: params.publicCategory,
+    referenceFamily: params.referenceFamily,
     sentiment: params.sentiment,
     rating: params.rating,
     referenceBody: params.referenceBody,
     entityType: params.entityType,
     entityId: params.entityId,
     syncId: params.syncId,
+    sourceType: params.sourceType,
+    sourceId: params.sourceId,
   });
   if (!payloadResult.ok) {
     return { ok: false as const, error: payloadResult.error };
@@ -771,6 +825,10 @@ async function insertReferenceCompat(params: {
       entityType: params.entityType,
       entityId: params.entityId,
       syncId: payloadResult.syncValue,
+      publicCategory: params.publicCategory,
+      referenceFamily: params.referenceFamily,
+      sourceType: params.sourceType,
+      sourceId: params.sourceId,
     });
     if (changedBySwap) {
       continue;
@@ -781,12 +839,16 @@ async function insertReferenceCompat(params: {
       connectionId: params.connectionId,
       recipientId: params.recipientId,
       contextTag: params.contextTag,
+      publicCategory: params.publicCategory,
+      referenceFamily: params.referenceFamily,
       sentiment: params.sentiment,
       rating: params.rating,
       referenceBody: params.referenceBody,
       entityType: params.entityType,
       entityId: params.entityId,
       syncId: payloadResult.syncValue,
+      sourceType: params.sourceType,
+      sourceId: params.sourceId,
     });
     if (fallbackValue !== undefined && !Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
       payload[missingColumn] = fallbackValue;
@@ -1212,16 +1274,11 @@ async function ensureReferenceContextEligibility(params: {
   contextTag: ReferenceContextTag;
   hasAcceptedConnection: boolean;
 }) {
-  if (params.contextTag === "collaboration" || params.contextTag === "content_video") {
+  if (params.contextTag === "collaborate") {
     return params.hasAcceptedConnection;
   }
 
-  if (
-    params.contextTag === "practice" ||
-    params.contextTag === "private_class" ||
-    params.contextTag === "group_class" ||
-    params.contextTag === "workshop"
-  ) {
+  if (params.contextTag === "practice" || params.contextTag === "private_class") {
     if (params.hasAcceptedConnection) return true;
     return hasCompletedPracticeInteraction({
       supabase: params.supabase,
@@ -1230,7 +1287,7 @@ async function ensureReferenceContextEligibility(params: {
     });
   }
 
-  if (params.contextTag === "travel_together") {
+  if (params.contextTag === "travelling") {
     return hasCompletedTripInteraction({
       supabase: params.supabase,
       meId: params.meId,
@@ -1238,31 +1295,25 @@ async function ensureReferenceContextEligibility(params: {
     });
   }
 
-  if (params.contextTag === "hosting" || params.contextTag === "stay_as_guest") {
+  if (params.contextTag === "offer_hosting" || params.contextTag === "request_hosting") {
     const role = await getCompletedHostingRole({
       supabase: params.supabase,
       meId: params.meId,
       recipientId: params.recipientId,
     });
     return (
-      (params.contextTag === "hosting" && role === "host") ||
-      (params.contextTag === "stay_as_guest" && role === "guest")
+      (params.contextTag === "offer_hosting" && role === "host") ||
+      (params.contextTag === "request_hosting" && role === "guest")
     );
   }
 
-  if (
-    params.contextTag === "event" ||
-    params.contextTag === "festival" ||
-    params.contextTag === "social_dance" ||
-    params.contextTag === "competition"
-  ) {
+  if (params.contextTag === "event_festival" || params.contextTag === "social_dance") {
     const result = await getCompletedEventContext({
       supabase: params.supabase,
       meId: params.meId,
       recipientId: params.recipientId,
     });
     if (!result.attended) return false;
-    if (params.contextTag === "festival") return result.festival;
     return true;
   }
 
@@ -1283,9 +1334,8 @@ export async function POST(req: Request) {
             ? body.entityType
             : typeof body?.context === "string"
               ? body.context
-              : "collaboration";
+              : "collaborate";
     const contextTag = normalizeContextTag(entityTypeRaw);
-    const referenceEntityType = normalizeReferenceEntityType(entityTypeRaw);
     const referenceBody =
       typeof body?.text === "string"
         ? body.text
@@ -1316,6 +1366,18 @@ export async function POST(req: Request) {
 
     const entityIdInput =
       typeof body?.entityId === "string" && body.entityId.trim().length > 0 ? body.entityId.trim() : "";
+    const sourceIdInput =
+      typeof body?.sourceId === "string" && body.sourceId.trim().length > 0
+        ? body.sourceId.trim()
+        : typeof body?.source_id === "string" && body.source_id.trim().length > 0
+          ? body.source_id.trim()
+          : entityIdInput;
+    const sourceTableInput =
+      typeof body?.sourceTable === "string" && body.sourceTable.trim().length > 0
+        ? body.sourceTable.trim()
+        : typeof body?.source_table === "string" && body.source_table.trim().length > 0
+          ? body.source_table.trim()
+          : "";
     const referenceRequestIdInput =
       typeof body?.referenceRequestId === "string" && body.referenceRequestId.trim().length > 0
         ? body.referenceRequestId.trim()
@@ -1347,20 +1409,6 @@ export async function POST(req: Request) {
       requestedConnectionId: connectionIdInput,
     });
 
-    const eligible = await ensureReferenceContextEligibility({
-      supabase,
-      meId: authData.user.id,
-      recipientId,
-      contextTag,
-      hasAcceptedConnection: Boolean(acceptedConnectionId),
-    });
-    if (!eligible) {
-      return NextResponse.json(
-        { ok: false, error: "Reference not allowed for this context yet. Complete the related interaction first." },
-        { status: 400 }
-      );
-    }
-
     // Keep compatibility with legacy schemas requiring connection_id.
     let anyConnectionId = acceptedConnectionId;
     if (!anyConnectionId) {
@@ -1378,25 +1426,41 @@ export async function POST(req: Request) {
       }
     }
 
-    const entityId = entityIdInput || acceptedConnectionId || anyConnectionId || `${contextTag}:${Date.now()}`;
+    let sourceTable = sourceTableInput;
+    let sourceId = sourceIdInput;
+    let referenceRequestConnectionId = "";
+    let promptContextTag = "";
 
-    if (referenceEntityType === "sync") {
-      if (!acceptedConnectionId || !entityIdInput) {
-        return NextResponse.json({ ok: false, error: "sync_reference_not_allowed" }, { status: 400 });
+    if (referenceRequestIdInput) {
+      const promptRes = await supabase
+        .from("reference_requests")
+        .select("id,user_id,peer_user_id,context_tag,source_table,source_id,connection_id,status")
+        .eq("id", referenceRequestIdInput)
+        .eq("user_id", authData.user.id)
+        .eq("peer_user_id", recipientId)
+        .maybeSingle();
+      if (promptRes.error && !isMissingSchemaError(promptRes.error.message)) {
+        return NextResponse.json({ ok: false, error: promptRes.error.message }, { status: 400 });
       }
-
-      const exactSyncEligible = await hasEligibleCompletedSync({
-        supabase,
-        meId: authData.user.id,
-        recipientId,
-        connectionId: acceptedConnectionId,
-        syncId: entityIdInput,
-      });
-      if (!exactSyncEligible) {
-        return NextResponse.json({ ok: false, error: "sync_reference_not_allowed" }, { status: 400 });
+      if (promptRes.data) {
+        const promptRow = promptRes.data as Record<string, unknown>;
+        promptContextTag = pickFirstString(promptRow, ["context_tag"]);
+        sourceTable = sourceTable || pickFirstString(promptRow, ["source_table"]);
+        sourceId = sourceId || pickFirstString(promptRow, ["source_id"]);
+        referenceRequestConnectionId = pickFirstString(promptRow, ["connection_id"]);
       }
     }
 
+    const resolvedContextTag = normalizeContextTag(promptContextTag || contextTag);
+
+    sourceTable = sourceTable || inferSourceTableFromContextTag(resolvedContextTag);
+    sourceId = sourceId || entityIdInput;
+
+    if (!sourceId) {
+      return NextResponse.json({ ok: false, error: "Reference source is missing." }, { status: 400 });
+    }
+
+    const referenceEntityType = normalizeReferenceEntityType(resolvedContextTag);
     if (referenceEntityType === "connection") {
       return NextResponse.json(
         { ok: false, error: "Connection acceptance unlocks chat but does not create references." },
@@ -1404,157 +1468,165 @@ export async function POST(req: Request) {
       );
     }
 
-    const duplicateReferenceId = await findExistingReferenceForPairContext({
+    const eligibility = await getReferenceEligibility({
       supabase,
-      meId: authData.user.id,
-      recipientId,
-      contextTag,
+      authorUserId: authData.user.id,
+      recipientUserId: recipientId,
+      contextTag: resolvedContextTag,
+      sourceTable,
+      sourceId,
     });
-    if (duplicateReferenceId) {
-      return NextResponse.json({ ok: false, error: "duplicate_reference_not_allowed" }, { status: 400 });
+    if (!eligibility.allowed) {
+      return NextResponse.json({ ok: false, error: eligibility.reason ?? "Reference not allowed." }, { status: 400 });
     }
 
-    if (entityIdInput || referenceEntityType === "sync") {
-      const duplicateReferenceIdForEntity = await findExistingReferenceForEntity({
-        supabase,
-        meId: authData.user.id,
-        entityType: referenceEntityType,
-        entityId: entityIdInput || acceptedConnectionId || anyConnectionId,
-      });
-      if (duplicateReferenceIdForEntity) {
-        return NextResponse.json({ ok: false, error: "duplicate_reference_not_allowed" }, { status: 400 });
-      }
-    }
+    const resolvedSourceId = eligibility.sourceId ?? sourceId;
+    const referenceConnectionId = anyConnectionId || referenceRequestConnectionId;
+    let referenceId = "";
 
-    if (acceptedConnectionId) {
+    if (referenceConnectionId) {
       const created = await supabase.rpc("create_reference_v2", {
-        p_connection_id: acceptedConnectionId,
+        p_connection_id: referenceConnectionId,
         p_entity_type: referenceEntityType,
-        p_entity_id: entityIdInput || acceptedConnectionId,
+        p_entity_id: resolvedSourceId,
         p_recipient_id: recipientId,
         p_sentiment: sentiment,
         p_body: referenceBody,
       });
 
       if (!created.error) {
-        const referenceId = typeof created.data === "string" && created.data ? created.data : entityId;
+        referenceId = typeof created.data === "string" && created.data ? created.data : resolvedSourceId;
 
         const contextTagSync = await supabase
           .from("references")
-          .update({ context_tag: contextTag })
+          .update({
+            context_tag: resolvedContextTag,
+            entity_type: referenceEntityType,
+            entity_id: resolvedSourceId,
+            author_user_id: authData.user.id,
+            recipient_user_id: recipientId,
+            public_category: eligibility.publicCategory,
+            reference_family: eligibility.referenceFamily,
+            source_type: eligibility.sourceType,
+            source_id: resolvedSourceId,
+          })
           .eq("id", referenceId);
         if (contextTagSync.error && !isMissingSchemaError(contextTagSync.error.message)) {
           throw contextTagSync.error;
         }
-
-        if (referenceRequestIdInput) {
-          const markByIdRes = await applyReferenceRequestCompletionMatch(
-            supabase.from("reference_requests").update({
-              status: "completed",
-              completed_reference_id: referenceId,
-              updated_at: new Date().toISOString(),
-            }).eq("id", referenceRequestIdInput),
-            {
-              meId: authData.user.id,
-              recipientId,
-              contextTag,
-            }
-          );
-          if (markByIdRes.error && !isMissingSchemaError(markByIdRes.error.message)) {
-            throw markByIdRes.error;
-          }
-        }
-
-        const markRes = await supabase.rpc("cx_mark_reference_request_completed", { p_reference_id: referenceId });
-        if (markRes.error && !isMissingSchemaError(markRes.error.message)) {
-          throw markRes.error;
-        }
-
-        const syncPromptsRes = await supabase.rpc("cx_sync_reference_requests");
-        if (syncPromptsRes.error && !isMissingSchemaError(syncPromptsRes.error.message)) {
-          throw syncPromptsRes.error;
-        }
-        await dispatchReferencePromptEmails({ userId: authData.user.id, limit: 100 });
-
-        return NextResponse.json({
-          ok: true,
-          reference_id: referenceId,
-          context_tag: contextTag,
-          rating,
-          mode: "rpc_reference",
-        });
       }
-
-      if (!isReferenceCompatWriteError(created.error.message)) {
+      if (created.error && !isReferenceCompatWriteError(created.error.message)) {
         return NextResponse.json({ ok: false, error: created.error.message }, { status: 400 });
       }
     }
 
-    const compat = await insertReferenceCompat({
-      supabase,
-      meId: authData.user.id,
-      connectionId: anyConnectionId,
-      recipientId,
-      contextTag,
-      sentiment,
-      rating,
-      referenceBody,
-      entityType: referenceEntityType,
-      entityId,
-      syncId: referenceEntityType === "sync" ? entityIdInput : "",
-    });
-    if (!compat.ok) {
-      return NextResponse.json({ ok: false, error: `compat_insert_failed: ${compat.error}` }, { status: 400 });
-    }
+    if (!referenceId) {
+      const compat = await insertReferenceCompat({
+        supabase,
+        meId: authData.user.id,
+        connectionId: referenceConnectionId,
+        recipientId,
+        contextTag: resolvedContextTag,
+        publicCategory: eligibility.publicCategory,
+        referenceFamily: eligibility.referenceFamily,
+        sentiment,
+        rating,
+        referenceBody,
+        entityType: referenceEntityType,
+        entityId: resolvedSourceId,
+        syncId: referenceEntityType === "sync" ? resolvedSourceId : "",
+        sourceType: eligibility.sourceType,
+        sourceId: resolvedSourceId,
+      });
+      if (!compat.ok) {
+        return NextResponse.json({ ok: false, error: `compat_insert_failed: ${compat.error}` }, { status: 400 });
+      }
+      referenceId = compat.referenceId;
 
-    const compatEntityId = entityIdInput || entityId;
-    const compatNormalize = await supabase
-      .from("references")
-      .update({
-        context_tag: contextTag,
-        entity_type: referenceEntityType,
-        entity_id: compatEntityId,
-      })
-      .eq("id", compat.referenceId);
-    if (compatNormalize.error && !isMissingSchemaError(compatNormalize.error.message)) {
-      throw compatNormalize.error;
-    }
-
-    if (referenceEntityType === "sync" && entityIdInput) {
-      const syncMarker = await supabase
+      const compatNormalize = await supabase
         .from("references")
-        .update({ sync_id: entityIdInput })
+        .update({
+          context_tag: resolvedContextTag,
+          entity_type: referenceEntityType,
+          entity_id: resolvedSourceId,
+          author_user_id: authData.user.id,
+          recipient_user_id: recipientId,
+          public_category: eligibility.publicCategory,
+          reference_family: eligibility.referenceFamily,
+          source_type: eligibility.sourceType,
+          source_id: resolvedSourceId,
+        })
         .eq("id", compat.referenceId);
-      if (
-        syncMarker.error &&
-        !isMissingSchemaError(syncMarker.error.message) &&
-        !isForeignKeyError(syncMarker.error.message)
-      ) {
-        throw syncMarker.error;
+      if (compatNormalize.error && !isMissingSchemaError(compatNormalize.error.message)) {
+        throw compatNormalize.error;
+      }
+
+      if (referenceEntityType === "sync") {
+        const syncMarker = await supabase
+          .from("references")
+          .update({ sync_id: resolvedSourceId })
+          .eq("id", compat.referenceId);
+        if (
+          syncMarker.error &&
+          !isMissingSchemaError(syncMarker.error.message) &&
+          !isForeignKeyError(syncMarker.error.message)
+        ) {
+          throw syncMarker.error;
+        }
       }
     }
 
+    const promptUpdatePayload = {
+      status: "completed",
+      completed_reference_id: referenceId,
+      updated_at: new Date().toISOString(),
+    };
+
     if (referenceRequestIdInput) {
       const markByIdRes = await applyReferenceRequestCompletionMatch(
-        supabase.from("reference_requests").update({
-          status: "completed",
-          completed_reference_id: compat.referenceId,
-          updated_at: new Date().toISOString(),
-        }).eq("id", referenceRequestIdInput),
+        supabase.from("reference_requests").update(promptUpdatePayload).eq("id", referenceRequestIdInput),
         {
           meId: authData.user.id,
           recipientId,
-          contextTag,
+          contextTag: resolvedContextTag,
         }
       );
       if (markByIdRes.error && !isMissingSchemaError(markByIdRes.error.message)) {
         throw markByIdRes.error;
       }
+    } else {
+      const markBySourceRes = await applyReferenceRequestCompletionMatch(
+        supabase
+          .from("reference_requests")
+          .update(promptUpdatePayload)
+          .eq("source_table", sourceTable)
+          .eq("source_id", resolvedSourceId),
+        {
+          meId: authData.user.id,
+          recipientId,
+          contextTag: resolvedContextTag,
+        }
+      );
+      if (markBySourceRes.error && !isMissingSchemaError(markBySourceRes.error.message)) {
+        throw markBySourceRes.error;
+      }
     }
 
-    const markRes = await supabase.rpc("cx_mark_reference_request_completed", { p_reference_id: compat.referenceId });
-    if (markRes.error && !isMissingSchemaError(markRes.error.message)) {
-      throw markRes.error;
+    if (resolvedContextTag === "practice" || resolvedContextTag === "social_dance" || resolvedContextTag === "private_class") {
+      const siblingDismissRes = await supabase
+        .from("reference_requests")
+        .update({
+          status: "dismissed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", authData.user.id)
+        .eq("peer_user_id", recipientId)
+        .eq("status", "pending")
+        .in("context_tag", familyContextTags(resolvedContextTag))
+        .neq("source_id", resolvedSourceId);
+      if (siblingDismissRes.error && !isMissingSchemaError(siblingDismissRes.error.message)) {
+        throw siblingDismissRes.error;
+      }
     }
 
     const syncPromptsRes = await supabase.rpc("cx_sync_reference_requests");
@@ -1565,8 +1637,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      reference_id: compat.referenceId,
-      context_tag: contextTag,
+      reference_id: referenceId,
+      context_tag: resolvedContextTag,
       rating,
       mode: "unified_reference",
     });

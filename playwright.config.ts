@@ -33,5 +33,13 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
       },
     },
+    {
+      name: "iphone-14",
+      use: { ...devices["iPhone 14"] },
+    },
+    {
+      name: "pixel-7",
+      use: { ...devices["Pixel 7"] },
+    },
   ],
 });

@@ -50,7 +50,13 @@ import {
   referenceContextLabel,
   type ReferenceContextTag,
 } from "@/lib/activities/types";
-import { fetchReferencesForMember } from "@/lib/references/read-model";
+import {
+  collapsePublicReferencesByAuthor,
+  fetchReferencesForMember,
+  getInteractionCountsForProfile,
+  getReferenceStatsForProfile,
+  type InteractionCounterItem,
+} from "@/lib/references/read-model";
 import {
   formatGuestGenderPreference,
   formatSleepingArrangement,
@@ -64,8 +70,10 @@ import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
 import { clearVerificationResume, loadVerificationResume } from "@/lib/verification-client";
 import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
 import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-username";
+import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
 import DarkConnectModal from "@/components/DarkConnectModal";
 import { cx } from "@/lib/cx";
+import { getPlanIdFromMeta, getPlanLimits } from "@/lib/billing/limits";
 
 type DanceSkill = { level?: string; verified?: boolean };
 type DanceSkills = Record<string, DanceSkill>;
@@ -109,7 +117,9 @@ type ReferenceItem = {
   direction: "received" | "given";
   sentiment: "positive" | "neutral" | "negative";
   context: ReferenceContextTag;
+  referenceFamily: string;
   entityType: string;
+  sourceId: string | null;
   body: string;
   replyText: string | null;
   createdAt: string;
@@ -299,11 +309,17 @@ function formatRelativeTime(value: string | null | undefined) {
   const diffMs = Date.now() - date.getTime();
   if (diffMs < 60_000) return "Just now";
   const min = Math.floor(diffMs / 60_000);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
   const day = Math.floor(hr / 24);
-  return `${day}d ago`;
+  if (day < 14) return `${day} day${day === 1 ? "" : "s"} ago`;
+  const week = Math.floor(day / 7);
+  if (week < 8) return `${week} week${week === 1 ? "" : "s"} ago`;
+  const month = Math.floor(day / 30);
+  if (month < 12) return `${month} month${month === 1 ? "" : "s"} ago`;
+  const year = Math.floor(day / 365);
+  return `${year} year${year === 1 ? "" : "s"} ago`;
 }
 
 function normalizeSentiment(value: string): "positive" | "neutral" | "negative" {
@@ -535,11 +551,10 @@ const FOLLOW_TRACK_ACTIVITY_DEFAULTS = [
 
 function contextBadge(context: string) {
   const family = referenceContextFamily(context);
-  if (family === "practice") return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
-  if (family === "travel" || family === "festival") return "border-violet-300/30 bg-violet-300/10 text-violet-100";
-  if (family === "event") return "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100";
-  if (family === "hosting") return "border-emerald-300/30 bg-emerald-300/10 text-emerald-100";
-  if (family === "collaboration") return "border-sky-300/30 bg-sky-300/10 text-sky-100";
+  if (family === "practice_social") return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
+  if (family === "teaching") return "border-sky-300/30 bg-sky-300/10 text-sky-100";
+  if (family === "hosting_trip") return "border-violet-300/30 bg-violet-300/10 text-violet-100";
+  if (family === "event_collab") return "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100";
   return "border-white/20 bg-white/[0.05] text-slate-200";
 }
 
@@ -636,105 +651,106 @@ function ProfilePageSkeleton() {
       <Nav />
 
       <main className="mx-auto w-full max-w-[1280px] px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-        <section className="overflow-hidden rounded-[28px] border border-cyan-200/10 bg-[#0b141a]/70 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur">
-          <div className="h-28 bg-[linear-gradient(130deg,rgba(14,116,144,0.32),rgba(192,38,211,0.2))] sm:h-36" />
+        <section className="relative overflow-hidden rounded-[34px] bg-[#181818] shadow-[0_28px_80px_rgba(0,0,0,0.42)]">
+          <div className="h-[96px] bg-[linear-gradient(98deg,#0b1017_0%,#101927_35%,#151f36_68%,#1a1431_100%)] sm:h-[128px]" />
 
-          <div className="px-4 pb-6 sm:px-6 lg:px-8">
-            <div className="-mt-16 flex flex-col gap-5 sm:-mt-20 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex min-w-0 flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:text-left">
-                <div className="h-32 w-32 animate-pulse rounded-full border-4 border-[#071116] bg-white/10 sm:h-40 sm:w-40" />
-                <div className="min-w-0 space-y-3 pb-1">
-                  <div className="h-8 w-48 animate-pulse rounded-full bg-white/10 sm:w-60" />
-                  <div className="h-4 w-28 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-36 animate-pulse rounded-full bg-white/10" />
+          <div className="absolute left-1/2 top-[48px] z-10 h-28 w-28 -translate-x-1/2 animate-pulse rounded-full border-[5px] border-[#171717] bg-white/10 sm:left-8 sm:top-[64px] sm:h-[144px] sm:w-[144px] sm:translate-x-0" />
+
+          <div className="bg-[#171717] px-4 pb-3 pt-[64px] sm:px-8 sm:pb-3 sm:pl-[192px] sm:pt-3">
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="min-w-0 text-center sm:text-left">
+                <div className="h-8 w-52 animate-pulse rounded-full bg-white/10 sm:h-10 sm:w-72" />
+                <div className="mt-2 h-5 w-32 animate-pulse rounded-full bg-white/10" />
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-3 sm:justify-start">
+                  <div className="h-4 w-40 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-16 animate-pulse rounded-full bg-white/10" />
                 </div>
               </div>
 
-              <div className="flex gap-2">
-                <div className="h-11 w-28 animate-pulse rounded-xl border border-white/10 bg-white/[0.05]" />
-                <div className="h-11 w-32 animate-pulse rounded-xl bg-[linear-gradient(90deg,rgba(34,211,238,0.7),rgba(217,70,239,0.7))]" />
+              <div className="hidden items-center gap-3 sm:flex">
+                <div className="h-11 w-32 animate-pulse rounded-full bg-white/[0.08]" />
+                <div className="h-11 w-32 animate-pulse rounded-full bg-[linear-gradient(90deg,rgba(34,211,238,0.65),rgba(217,70,239,0.65))]" />
+              </div>
+            </div>
+
+            <div className="mt-2.5 border-t border-white/[0.05]">
+              <div className="flex gap-5 overflow-hidden pt-2.5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div
+                    key={`tab-skeleton-${index}`}
+                    className="h-5 w-20 animate-pulse rounded bg-white/[0.07]"
+                    style={{ animationDelay: `${index * 80}ms` }}
+                  />
+                ))}
               </div>
             </div>
           </div>
         </section>
 
-        <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div
-              key={`profile-metric-skeleton-${index}`}
-              className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 shadow-[0_10px_30px_rgba(0,0,0,0.22)]"
-            >
-              <div className="h-3 w-20 animate-pulse rounded bg-white/10" />
-              <div className="mt-3 h-8 w-14 animate-pulse rounded bg-white/10" />
-              <div className="mt-2 h-3 w-24 animate-pulse rounded bg-white/10" />
-            </div>
-          ))}
-        </section>
-
         <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,360px)]">
           <section className="space-y-6">
-            <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
-              <div className="h-6 w-40 animate-pulse rounded bg-white/10" />
-              <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                <div className="space-y-3">
-                  <div className="h-4 w-20 animate-pulse rounded bg-white/10" />
-                  <div className="flex flex-wrap gap-2">
-                    {Array.from({ length: 4 }).map((_, index) => (
-                      <div key={`role-skeleton-${index}`} className="h-8 w-24 animate-pulse rounded-full bg-white/[0.07]" />
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="h-4 w-24 animate-pulse rounded bg-white/10" />
-                  <div className="flex flex-wrap gap-2">
-                    {Array.from({ length: 3 }).map((_, index) => (
-                      <div key={`language-skeleton-${index}`} className="h-8 w-20 animate-pulse rounded-full bg-white/[0.07]" />
-                    ))}
-                  </div>
-                </div>
-              </div>
+            <article className="rounded-[2.5rem] bg-[#171717] p-6 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-8">
+              <div className="h-5 w-40 animate-pulse rounded bg-white/10" />
 
-              <div className="mt-6">
-                <div className="h-4 w-28 animate-pulse rounded bg-white/10" />
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {Array.from({ length: 5 }).map((_, index) => (
-                    <div key={`style-skeleton-${index}`} className="h-8 w-24 animate-pulse rounded-full bg-white/[0.07]" />
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-6 border-t border-white/10 pt-5">
-                <div className="h-4 w-16 animate-pulse rounded bg-white/10" />
-                <div className="mt-4 grid grid-cols-2 auto-rows-[136px] gap-3 sm:auto-rows-[168px] lg:grid-cols-4 lg:auto-rows-[178px]">
-                  <div className="col-span-2 row-span-2 animate-pulse rounded-[24px] bg-white/[0.06]" />
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <div key={`media-skeleton-${index}`} className="animate-pulse rounded-[24px] bg-white/[0.06]" />
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <div key={`info-skeleton-${index}`} className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                    <div className="h-3 w-20 animate-pulse rounded bg-white/10" />
-                    <div className="mt-3 h-4 w-28 animate-pulse rounded bg-white/10" />
+              <div className="mt-8 grid gap-8 md:grid-cols-2 xl:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={`overview-column-skeleton-${index}`} className="space-y-4">
+                    <div className="h-4 w-24 animate-pulse rounded bg-white/10" />
+                    <div className="space-y-2.5">
+                      {Array.from({ length: index === 2 ? 2 : 3 }).map((__, lineIndex) => (
+                        <div
+                          key={`overview-column-line-${index}-${lineIndex}`}
+                          className="h-4 animate-pulse rounded bg-white/[0.08]"
+                          style={{ width: `${70 - lineIndex * 10}%` }}
+                        />
+                      ))}
+                    </div>
                   </div>
                 ))}
+              </div>
+
+              <div className="mt-8 h-px bg-white/[0.06]" />
+
+              <div className="mt-8">
+                <div className="h-4 w-28 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div key={`verification-skeleton-${index}`} className="space-y-2">
+                      <div className="h-3 w-20 animate-pulse rounded bg-white/10" />
+                      <div className="h-5 w-24 animate-pulse rounded bg-white/[0.08]" />
+                    </div>
+                  ))}
+                </div>
               </div>
             </article>
           </section>
 
           <aside className="space-y-6">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <article key={`sidebar-skeleton-${index}`} className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
-                <div className="h-5 w-32 animate-pulse rounded bg-white/10" />
-                <div className="mt-4 space-y-3">
-                  <div className="h-4 w-full animate-pulse rounded bg-white/10" />
-                  <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
-                  <div className="h-4 w-3/4 animate-pulse rounded bg-white/10" />
+            <article className="rounded-[2rem] bg-[#171717] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:p-7">
+              <div className="h-5 w-32 animate-pulse rounded bg-white/10" />
+              <div className="mt-6 rounded-[26px] bg-white/[0.05] p-5">
+                <div className="space-y-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div key={`hosting-skeleton-${index}`} className="flex items-center justify-between gap-3">
+                      <div className="h-4 w-24 animate-pulse rounded bg-white/10" />
+                      <div className="h-4 w-16 animate-pulse rounded bg-white/[0.08]" />
+                    </div>
+                  ))}
                 </div>
-              </article>
-            ))}
+              </div>
+            </article>
+
+            <article className="rounded-[2rem] bg-[#171717] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:p-7">
+              <div className="h-5 w-36 animate-pulse rounded bg-white/10" />
+              <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, index) => (
+                  <div key={`analytics-skeleton-${index}`} className="flex flex-col items-center gap-2">
+                    <div className="h-5 w-10 animate-pulse rounded bg-white/[0.08]" />
+                    <div className="h-3 w-16 animate-pulse rounded bg-white/10" />
+                  </div>
+                ))}
+              </div>
+            </article>
           </aside>
         </div>
       </main>
@@ -749,8 +765,8 @@ function mapReferenceRows(rows: unknown[], profileId: string): ReferenceItem[] {
     const row = asRecord(raw);
     const id = pickString(row, ["id"]);
     if (!id || seen.has(id)) return;
-    const authorId = pickString(row, ["author_id", "from_user_id", "source_id"]);
-    const recipientId = pickString(row, ["recipient_id", "to_user_id", "target_id"]);
+    const authorId = pickString(row, ["author_user_id", "author_id", "from_user_id"]);
+    const recipientId = pickString(row, ["recipient_user_id", "recipient_id", "to_user_id", "target_id"]);
     const createdAt = pickString(row, ["created_at", "updated_at"]);
     if (!id || !authorId || !recipientId || !createdAt) return;
     const direction = recipientId === profileId ? "received" : authorId === profileId ? "given" : null;
@@ -758,7 +774,7 @@ function mapReferenceRows(rows: unknown[], profileId: string): ReferenceItem[] {
     seen.add(id);
 
     const sentimentRaw = pickString(row, ["sentiment", "rating"]);
-    const contextRaw = pickString(row, ["context_tag", "context", "entity_type"], "collaboration");
+    const contextRaw = pickString(row, ["context_tag", "context", "entity_type"], "collaborate");
     const normalizedContext = normalizeContext(contextRaw);
     const body = pickString(row, ["text", "body", "feedback", "content"]) || "No additional details provided.";
 
@@ -769,7 +785,9 @@ function mapReferenceRows(rows: unknown[], profileId: string): ReferenceItem[] {
       direction,
       sentiment: normalizeSentiment(sentimentRaw || "neutral"),
       context: normalizedContext,
+      referenceFamily: pickString(row, ["reference_family"], referenceContextFamily(normalizedContext)),
       entityType: normalizedContext,
+      sourceId: pickNullableString(row, ["source_id", "entity_id", "sync_id"]),
       body,
       replyText: pickNullableString(row, ["reply_text"]),
       createdAt,
@@ -876,6 +894,7 @@ function MemberProfilePage() {
   const [viewerVerified, setViewerVerified] = useState(false);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [profileMedia, setProfileMedia] = useState<ProfileMediaItem[]>([]);
+  const [ownerPhotoLimit, setOwnerPhotoLimit] = useState<number>(0);
   const [state, setState] = useState<ConnectionState>({ status: "none" });
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [verificationModalOpen, setVerificationModalOpen] = useState(false);
@@ -896,6 +915,7 @@ function MemberProfilePage() {
   const [requestResponseStats, setRequestResponseStats] = useState<ProfileRequestResponseStats>(EMPTY_PROFILE_REQUEST_RESPONSE_STATS);
   const [acceptedConnections, setAcceptedConnections] = useState<ConnectionLite[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, ProfileListItem>>({});
+  const [interactionCounts, setInteractionCounts] = useState<InteractionCounterItem[]>([]);
   const [viewerAcceptedUserIds, setViewerAcceptedUserIds] = useState<string[]>([]);
   const [tab, setTab] = useState<TabKey>("overview");
   const [avatarLightboxOpen, setAvatarLightboxOpen] = useState(false);
@@ -913,6 +933,7 @@ function MemberProfilePage() {
   const [requestInfoOpen, setRequestInfoOpen] = useState(false);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [teacherInquiryEnabled, setTeacherInquiryEnabled] = useState(false);
+  const [teacherPageAvailable, setTeacherPageAvailable] = useState(false);
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
   const panelSwitchTimerRef = useRef<number | null>(null);
   const toastCounterRef = useRef(0);
@@ -925,6 +946,7 @@ function MemberProfilePage() {
   const canRevealContacts = isSelf || state.status === "accepted";
   const panelLoading = tabTransitionLoading || (supportingPanelsLoading && !(tab === "dance-tools" && isSelf));
   const requestedReferenceConnectionId = searchParams.get("connectionId");
+  const requestedReferencePeerUserId = searchParams.get("userId");
   const requestedTab = useMemo(() => {
     const raw = searchParams.get("tab");
     if (!raw) return null;
@@ -947,25 +969,40 @@ function MemberProfilePage() {
     [profile]
   );
 
-  // Redirect to teacher profile if the teacher has set that as their default view
+  // Resolve whether the teacher page is actually available so profile links stay strict.
   useEffect(() => {
-    if (!isTeacherProfile || !profileUserId || isSelf) return;
-    void supabase
-      .from("teacher_profiles")
-      .select("default_public_view,teacher_profile_enabled,is_public")
-      .eq("user_id", profileUserId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (
-          data?.default_public_view === "teacher" &&
-          data?.teacher_profile_enabled &&
-          data?.is_public
-        ) {
-          router.replace(`/profile/${profileUserId}/teacher`);
-        }
-      });
+    if (!isTeacherProfile || !profileUserId || !profile) {
+      setTeacherPageAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("teacher_profiles")
+          .select("default_public_view,teacher_profile_enabled,is_public,teacher_profile_trial_ends_at")
+          .eq("user_id", profileUserId)
+          .maybeSingle();
+        if (cancelled) return;
+        const teacherViewAllowed = Boolean(
+          data?.is_public &&
+            canUseTeacherProfile({
+              roles: profile.roles,
+              teacherProfileEnabled: data?.teacher_profile_enabled === true,
+              trialEndsAt: typeof data?.teacher_profile_trial_ends_at === "string" ? data.teacher_profile_trial_ends_at : null,
+              isVerified: profile.verified,
+            })
+        );
+        setTeacherPageAvailable(teacherViewAllowed);
+      } catch {
+        if (!cancelled) setTeacherPageAvailable(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileUserId, isTeacherProfile, isSelf]);
+  }, [profile, profileUserId, isTeacherProfile]);
 
   const mobileSettingsLinks = useMemo(
     () =>
@@ -1007,26 +1044,23 @@ function MemberProfilePage() {
       },
       {} as Record<ReferenceContextTag, number>
     );
-    const totals = {
-      total: references.length,
-      received: 0,
-      given: 0,
-      positive: 0,
-      neutral: 0,
-      negative: 0,
-      byContext,
-    };
-
     references.forEach((row) => {
-      totals[row.direction] += 1;
-      totals[row.sentiment] += 1;
-      totals.byContext[row.context] += 1;
+      byContext[row.context] += 1;
     });
 
+    const totals = getReferenceStatsForProfile(
+      references.map((row) => ({
+        authorId: row.authorId,
+        recipientId: row.recipientId,
+        sentiment: row.sentiment,
+        direction: row.direction,
+      }))
+    );
     const trustScore = totals.total > 0 ? Math.round(((totals.positive + totals.neutral) / totals.total) * 100) : 0;
 
     return {
       ...totals,
+      byContext,
       trustScore,
     };
   }, [references]);
@@ -1043,6 +1077,10 @@ function MemberProfilePage() {
         : b.createdAt.localeCompare(a.createdAt)
     );
   }, [referenceContextFilter, referenceDirectionFilter, referenceSortFilter, references]);
+  const visiblePublicReferences = useMemo(
+    () => collapsePublicReferencesByAuthor(filteredReferences),
+    [filteredReferences]
+  );
   const visibleActivities = useMemo(
     () =>
       syncs.filter((item) => {
@@ -1106,13 +1144,13 @@ function MemberProfilePage() {
   }, [profile?.displayName, profile?.username, profileUserId]);
   const shareDisplayUrl = useMemo(() => shareUrl.replace(/^https?:\/\//, ""), [shareUrl]);
   const teacherShareUrl = useMemo(() => {
-    if (!isTeacherProfile || !profileUserId) return "";
+    if (!teacherPageAvailable || !profileUserId) return "";
     const appBase =
       (typeof window !== "undefined" ? normalizePublicAppUrl(window.location.origin) : "") ||
       normalizePublicAppUrl(process.env.NEXT_PUBLIC_APP_URL) ||
       "";
     return `${appBase}/profile/${profileUserId}/teacher`;
-  }, [isTeacherProfile, profileUserId]);
+  }, [profileUserId, teacherPageAvailable]);
 
   const mutualConnectionUserIds = useMemo(() => {
     if (!profileUserId || !meId || meId === profileUserId) return [] as string[];
@@ -1217,6 +1255,79 @@ function MemberProfilePage() {
       metricEvents,
     ]
   );
+
+  const tabBadges: Partial<Record<TabKey, number>> = {
+    references: referenceStats.total > 0 ? referenceStats.total : undefined,
+    trips: activeTrips.length > 0 ? activeTrips.length : undefined,
+    events: eventsTimeline.length > 0 ? eventsTimeline.length : undefined,
+  };
+
+  const overviewLanguageCodes = useMemo(
+    () =>
+      (profile?.languages ?? []).map((language) => {
+        const LANG_ABBR: Record<string, string> = {
+          English: "EN",
+          Spanish: "ES",
+          Italian: "IT",
+          Estonian: "ET",
+          French: "FR",
+          German: "DE",
+          Portuguese: "PT",
+          Russian: "RU",
+          Ukrainian: "UA",
+          Polish: "PL",
+        };
+        return {
+          label: language,
+          code: LANG_ABBR[language] ?? language.slice(0, 2).toUpperCase(),
+        };
+      }),
+    [profile?.languages]
+  );
+
+  const analyticsItems = useMemo(() => {
+    const categoryOrder = [
+      "Practice",
+      "Classes",
+      "Social Dance",
+      "Event / Festival",
+      "Travelling",
+      "Request Hosting",
+      "Offer Hosting",
+      "Collaborate",
+    ] as const;
+
+    const shortLabelByCategory: Record<string, string> = {
+      Practice: "Practice",
+      Classes: "Private lesson",
+      "Social Dance": "Social dance",
+      "Event / Festival": "Event / Festival",
+      Travelling: "Travelling",
+      "Request Hosting": "Request hosting",
+      "Offer Hosting": "Offer hosting",
+      Collaborate: "Collaboration",
+    };
+
+    const iconByCategory: Record<string, string> = {
+      Practice: "sports_martial_arts",
+      Classes: "school",
+      "Social Dance": "nightlife",
+      "Event / Festival": "confirmation_number",
+      Travelling: "flight",
+      "Request Hosting": "bed",
+      "Offer Hosting": "home",
+      Collaborate: "handshake",
+    };
+
+    const countsByCategory = new Map(interactionCounts.map((item) => [item.category, item.count]));
+
+    return categoryOrder.map((category) => ({
+      category,
+      count: countsByCategory.get(category) ?? 0,
+      shortLabel: shortLabelByCategory[category] ?? category,
+      icon: iconByCategory[category] ?? "monitoring",
+    }));
+  }, [interactionCounts]);
 
   useEffect(() => {
     if (visibleTabs.some(([key]) => key === tab)) return;
@@ -1352,10 +1463,9 @@ function MemberProfilePage() {
           is_following: nextFollowing,
           track_activity: nextFollowing ? [...FOLLOW_TRACK_ACTIVITY_DEFAULTS] : [],
         })
-        .eq("id", followContactId)
         .eq("user_id", meId)
-        .select("id")
-        .maybeSingle();
+        .eq("contact_type", "member")
+        .eq("linked_user_id", profileUserId);
 
       if (updateRes.error) {
         setFollowingBusy(false);
@@ -1590,21 +1700,23 @@ function MemberProfilePage() {
     }
     let cancelled = false;
     async function run() {
-      let res = await supabase
+      let res = (await supabase
         .from("dance_contacts")
-        .select("id,is_following")
+        .select("id,is_following,updated_at")
         .eq("user_id", meId)
         .eq("linked_user_id", profileUserId)
-        .limit(1)
-        .maybeSingle();
+        .eq("contact_type", "member")
+        .order("updated_at", { ascending: false })
+        .limit(20)) as { data: unknown[] | null; error: { message: string } | null };
       if (res.error && isColumnMissingMessage(res.error.message)) {
-        res = await supabase
+        res = (await supabase
           .from("dance_contacts")
-          .select("id")
+          .select("id,updated_at")
           .eq("user_id", meId)
           .eq("linked_user_id", profileUserId)
-          .limit(1)
-          .maybeSingle();
+          .eq("contact_type", "member")
+          .order("updated_at", { ascending: false })
+          .limit(20)) as { data: unknown[] | null; error: { message: string } | null };
       }
       if (cancelled) return;
       if (res.error) {
@@ -1612,10 +1724,17 @@ function MemberProfilePage() {
         setContactFollowing(false);
         return;
       }
-      const row = asRecord(res.data);
-      const nextId = pickString(row, ["id"]);
+      const rows = ((Array.isArray(res.data) ? res.data : []) as unknown[])
+        .map((raw) => asRecord(raw))
+        .filter((row) => pickString(row, ["id"]).length > 0)
+        .sort((left, right) => {
+          const leftUpdatedAt = pickString(left, ["updated_at"]);
+          const rightUpdatedAt = pickString(right, ["updated_at"]);
+          return new Date(rightUpdatedAt).getTime() - new Date(leftUpdatedAt).getTime();
+        });
+      const nextId = rows.length > 0 ? pickString(rows[0] ?? {}, ["id"]) : "";
       setFollowContactId(nextId || null);
-      setContactFollowing(row.is_following === true);
+      setContactFollowing(rows.some((row) => row.is_following === true));
     }
     void run();
     return () => {
@@ -1653,6 +1772,7 @@ function MemberProfilePage() {
       setDanceGoalsCount(0);
       setDanceCompetitionsCount(0);
       setProfileMedia([]);
+      setOwnerPhotoLimit(0);
       setRequestResponseStats(EMPTY_PROFILE_REQUEST_RESPONSE_STATS);
       setViewerAcceptedUserIds([]);
       setReferences([]);
@@ -1661,6 +1781,7 @@ function MemberProfilePage() {
       setSyncs([]);
       setAcceptedConnections([]);
       setProfilesById({});
+      setInteractionCounts([]);
       setReferenceAuthors({});
       setPendingReferenceTypes(new Set());
 
@@ -1831,6 +1952,28 @@ function MemberProfilePage() {
         };
 
         setProfile(normalizedProfile);
+
+        // Resolve owner's photo limit from their billing plan
+        if (resolvedProfileId === myUserId) {
+          // Self: read from auth metadata directly (already available)
+          const planId = getPlanIdFromMeta(user.user_metadata ?? {}, normalizedProfile.verified);
+          setOwnerPhotoLimit(getPlanLimits(planId).profilePhotos ?? 0);
+        } else {
+          // Other user: fetch from API (requires service-role)
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData.session?.access_token;
+          if (token) {
+            fetch(`/api/users/photo-limit?userId=${encodeURIComponent(resolvedProfileId)}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+              .then((r) => r.json() as Promise<{ profilePhotos?: number }>)
+              .then((payload) => {
+                if (canCommit()) setOwnerPhotoLimit(payload.profilePhotos ?? 0);
+              })
+              .catch(() => {});
+          }
+        }
+
         initialReady = true;
         setLoading(false);
         setSupportingPanelsLoading(true);
@@ -1861,6 +2004,14 @@ function MemberProfilePage() {
                 markSupportingDataIssue();
               }
               return EMPTY_PROFILE_REQUEST_RESPONSE_STATS;
+            });
+            const interactionCountsPromise = getInteractionCountsForProfile(supabase, resolvedProfileId).catch((countsError) => {
+              const message = countsError instanceof Error ? countsError.message : "Could not load interaction counts.";
+              if (!isSchemaMissingMessage(message)) {
+                console.warn("[profile] interaction counts query failed", message);
+                markSupportingDataIssue();
+              }
+              return [] as InteractionCounterItem[];
             });
             const teacherInquiryAvailabilityPromise = isTeacherRoleProfile
               ? fetch(`/api/teacher-info/public/${encodeURIComponent(resolvedProfileId)}`, { cache: "no-store" })
@@ -1897,6 +2048,7 @@ function MemberProfilePage() {
               memberEventsRes,
               profileMediaRows,
               profileRequestResponseStats,
+              interactionCountRows,
               teacherInquiryAvailable,
               danceCompetitionsCountRes,
               danceGoalsCountRes,
@@ -1919,6 +2071,7 @@ function MemberProfilePage() {
               supabase.from("event_members").select("*").eq("user_id", resolvedProfileId).in("status", ["host", "going", "waitlist"]).limit(500),
               profileMediaPromise,
               requestResponseStatsPromise,
+              interactionCountsPromise,
               teacherInquiryAvailabilityPromise,
               danceCompetitionsCountPromise,
               danceGoalsCountPromise,
@@ -1942,6 +2095,7 @@ function MemberProfilePage() {
             setTeacherInquiryEnabled(teacherInquiryAvailable);
             setProfileMedia(profileMediaRows);
             setRequestResponseStats(profileRequestResponseStats);
+            setInteractionCounts(interactionCountRows);
             if (danceCompetitionsCountRes?.error) {
               if (!isSchemaMissingMessage(danceCompetitionsCountRes.error.message)) {
                 console.warn("[profile] dance competitions count query failed", danceCompetitionsCountRes.error.message);
@@ -1989,7 +2143,7 @@ function MemberProfilePage() {
             if (!pendingPromptsRes.error) {
               for (const raw of ((pendingPromptsRes.data ?? []) as unknown[])) {
                 const row = asRecord(raw);
-                pendingTypes.add(normalizeContext(pickString(row, ["context_tag"], "collaboration")));
+                pendingTypes.add(normalizeContext(pickString(row, ["context_tag"], "collaborate")));
               }
             } else if (!isSchemaMissingMessage(pendingPromptsRes.error.message)) {
               markSupportingDataIssue();
@@ -2338,13 +2492,73 @@ function MemberProfilePage() {
   }
 
   if (!profileUserId || !profile) {
+    const isDeactivated = !error || error.toLowerCase().includes("not found") || error.toLowerCase().includes("deactivated");
     return (
       <div className="min-h-screen bg-[#05070c] text-slate-100">
         <Nav />
-        <main className="mx-auto flex min-h-[60vh] max-w-[1200px] items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
-          <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
-            {error ?? "Profile not found."}
+        <main className="mx-auto flex min-h-[80vh] max-w-[480px] flex-col items-center justify-center px-6 py-16 text-center">
+          {/* Branded illustration */}
+          <div className="relative mb-8 flex items-center justify-center">
+            {/* Outer glow ring */}
+            <div className="absolute h-44 w-44 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(13,242,242,0.08),transparent_70%)]" />
+            <div className="absolute h-32 w-32 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(217,59,255,0.07),transparent_70%)]" />
+            <svg
+              width="112"
+              height="112"
+              viewBox="0 0 112 112"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              {/* Dark circle base */}
+              <circle cx="56" cy="56" r="54" fill="url(#bgGrad)" stroke="url(#strokeGrad)" strokeWidth="1.5" />
+              {/* Silhouette body */}
+              <circle cx="56" cy="40" r="14" fill="url(#figureGrad)" opacity="0.55" />
+              <path d="M28 88c0-15.464 12.536-28 28-28s28 12.536 28 28" fill="url(#figureGrad)" opacity="0.45" />
+              {/* Break / deactivated X mark */}
+              <circle cx="76" cy="76" r="14" fill="#0d0f14" stroke="url(#strokeGrad)" strokeWidth="1.2" />
+              <path d="M71 71l10 10M81 71l-10 10" stroke="url(#xGrad)" strokeWidth="2" strokeLinecap="round" />
+              <defs>
+                <radialGradient id="bgGrad" cx="50%" cy="35%" r="60%">
+                  <stop offset="0%" stopColor="#0d1a22" />
+                  <stop offset="100%" stopColor="#06080d" />
+                </radialGradient>
+                <linearGradient id="strokeGrad" x1="0" y1="0" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#0df2f2" stopOpacity="0.35" />
+                  <stop offset="100%" stopColor="#d93bff" stopOpacity="0.2" />
+                </linearGradient>
+                <linearGradient id="figureGrad" x1="28" y1="30" x2="84" y2="90" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#0df2f2" />
+                  <stop offset="100%" stopColor="#d93bff" />
+                </linearGradient>
+                <linearGradient id="xGrad" x1="71" y1="71" x2="81" y2="81" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#0df2f2" />
+                  <stop offset="100%" stopColor="#d93bff" />
+                </linearGradient>
+              </defs>
+            </svg>
           </div>
+
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/25">
+            {isDeactivated ? "Account unavailable" : "Something went wrong"}
+          </p>
+          <h1 className={cx("text-xl font-bold text-white", isDeactivated ? "mb-8" : "mb-2")}>
+            {isDeactivated ? "This dancer has left the floor" : "Profile not found"}
+          </h1>
+          {!isDeactivated && (
+            <p className="mb-8 text-sm leading-relaxed text-slate-400">
+              {error ?? "We couldn't load this profile. It may no longer exist."}
+            </p>
+          )}
+
+          <Link
+            href="/discover/dancers"
+            className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-bold text-[#040a0f] transition hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ backgroundImage: "linear-gradient(90deg,#0df2f2 0%,#7c3aff 55%,#d93bff 100%)" }}
+          >
+            <span className="material-symbols-outlined text-[16px]">explore</span>
+            Explore dancers
+          </Link>
         </main>
       </div>
     );
@@ -2380,113 +2594,104 @@ function MemberProfilePage() {
           </div>
         ) : null}
 
-        <section className="relative overflow-visible rounded-[28px] border border-cyan-200/10 bg-[#0b141a]/70 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur">
+        <section className="relative overflow-hidden rounded-[34px] bg-[#181818] shadow-[0_28px_80px_rgba(0,0,0,0.42)]">
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="hero-ambient hero-ambient--left" />
             <div className="hero-ambient hero-ambient--right" />
             <div className="hero-noise" />
           </div>
-          <div className="relative h-28 w-full sm:h-36">
-            <div className="absolute inset-0 bg-[linear-gradient(130deg,rgba(14,116,144,0.45),rgba(192,38,211,0.32))]" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.24),transparent_52%)]" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_18%,rgba(232,121,249,0.2),transparent_58%)]" />
+          <div className="relative h-[96px] w-full border-b border-white/[0.04] sm:h-[128px]">
+            <div className="absolute inset-0 bg-[linear-gradient(98deg,#0b1017_0%,#101927_35%,#151f36_68%,#1a1431_100%)]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(34,211,238,0.18),transparent_40%)]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_88%_14%,rgba(217,59,255,0.16),transparent_46%)]" />
             {isTeacherProfile ? (
-              <div className="pointer-events-none absolute inset-y-0 right-4 hidden items-start justify-end pt-3 sm:flex sm:right-6 sm:pt-4 lg:right-8">
-                <TeacherBadge className="w-[190px] sm:w-[280px] lg:w-[360px]" />
+              <div className="absolute right-4 top-3 z-10 sm:right-6 sm:top-4 lg:right-8">
+                <TeacherBadge
+                  className="w-[110px] sm:w-[180px] lg:w-[230px]"
+                  href={teacherPageAvailable && profileUserId ? `/profile/${profileUserId}/teacher` : undefined}
+                />
               </div>
             ) : null}
           </div>
 
-          <div className="relative px-4 pb-6 sm:px-6 lg:px-8">
-            <div className="-mt-16 flex flex-col gap-5 sm:-mt-20 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex min-w-0 flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:text-left">
-                <div className="relative shrink-0">
-                  {isTeacherProfile ? (
-                    <span className="absolute -top-5 left-1/2 z-10 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100 sm:hidden">
-                      Teacher
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAvatarPreviewFailed(false);
-                      setAvatarLightboxOpen(true);
-                    }}
-                    className="group mx-auto flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-[#071116] bg-[#11242c] shadow-[0_12px_36px_rgba(0,0,0,0.5)] transition hover:border-cyan-300/40 sm:mx-0 sm:h-40 sm:w-40"
-                    aria-label="Enlarge profile photo"
-                  >
-                    {profile.avatarUrl ? (
-                      <img
-                        src={profile.avatarUrl}
-                        alt={profile.displayName}
-                        className="h-full w-full rounded-full bg-[#11242c] object-cover object-center transition group-hover:scale-[1.03]"
-                      />
-                    ) : (
-                      <Avatar src={profile.avatarUrl} alt={profile.displayName} size={112} className="h-full w-full rounded-full sm:[width:160px] sm:[height:160px]" />
-                    )}
-                  </button>
-                </div>
+          <div className="absolute left-1/2 top-[48px] z-10 -translate-x-1/2 sm:left-8 sm:top-[64px] sm:translate-x-0">
+            <button
+              type="button"
+              onClick={() => {
+                setAvatarPreviewFailed(false);
+                setAvatarLightboxOpen(true);
+              }}
+              className="group flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full border-[5px] border-[#171717] bg-[#11242c] shadow-[0_18px_46px_rgba(0,0,0,0.46)] transition hover:brightness-105 sm:h-[144px] sm:w-[144px]"
+              aria-label="Enlarge profile photo"
+            >
+              {profile.avatarUrl ? (
+                <img
+                  src={profile.avatarUrl}
+                  alt={profile.displayName}
+                  className="h-full w-full rounded-full bg-[#11242c] object-cover object-center transition group-hover:scale-[1.03]"
+                />
+              ) : (
+                <Avatar src={profile.avatarUrl} alt={profile.displayName} size={112} className="h-full w-full rounded-full sm:[width:144px] sm:[height:144px]" />
+              )}
+            </button>
+          </div>
 
-                <div className="min-w-0 pb-1">
-                  <div className="flex items-center justify-center gap-2 sm:justify-start">
-                    <h1 className="truncate text-2xl font-bold text-white sm:text-3xl">{profile.displayName}</h1>
+          <div className="relative bg-[#171717] px-4 pb-3 pt-[64px] sm:px-8 sm:pb-3 sm:pl-[192px] sm:pt-3">
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="min-w-0 text-center sm:text-left">
+                  <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:justify-start">
+                    <h1 className="truncate text-[1.85rem] font-black tracking-[-0.04em] text-white sm:text-[3rem] sm:leading-none">
+                      {profile.displayName}
+                    </h1>
                     {profile.verified ? (
                       <VerifiedBadge size={20} title={VERIFIED_VIA_PAYMENT_LABEL} />
                     ) : null}
                   </div>
-
                   {profile.username ? (
-                    <p className="mt-1 text-sm font-medium text-cyan-200/90">@{profile.username}</p>
+                    <p className="mt-1 text-base font-bold text-cyan-300/85 sm:text-[1.05rem]">@{profile.username}</p>
                   ) : null}
+                  <div className="mt-1 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-sm text-slate-400 sm:justify-start">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[15px] text-slate-500">location_on</span>
+                      {[profile.city, profile.country].filter(Boolean).join(", ") || "Location not set"}
+                    </span>
+                    {!isSelf && acceptedConnections.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[15px] text-cyan-300">group</span>
+                        {acceptedConnections.length}
+                      </span>
+                    )}
+                  </div>
 
-                  <p className="mt-1 text-sm text-slate-300">
-                    {[profile.city, profile.country].filter(Boolean).join(", ") || "Location not set"}
-                  </p>
-
-                  {isTeacherProfile && profileUserId ? (
-                    <Link
-                      href={`/profile/${profileUserId}/teacher`}
-                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-cyan-300/80 hover:text-cyan-200"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">school</span>
-                      View teacher profile
-                    </Link>
-                  ) : null}
-
-                  {!isSelf && (acceptedConnections.length > 0 || mutualProfiles.length > 0) ? (
-                    <div className="mt-3">
-                      <p className="text-sm font-medium text-slate-200">
-                        {acceptedConnections.length > 0 ? `${acceptedConnections.length} connections` : ""}
-                        {acceptedConnections.length > 0 && mutualProfiles.length > 0 ? " • " : ""}
-                        {mutualProfiles.length > 0 ? `${mutualProfiles.length} mutual` : ""}
+                  {!isSelf && mutualProfiles.length > 0 ? (
+                    <div className="mt-2">
+                      <p className="mb-2 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                        {mutualProfiles.length} mutual
                       </p>
-
-                      {mutualProfiles.length > 0 ? (
-                        <div className="mt-3 flex items-center justify-center sm:justify-start">
-                          {mutualProfiles.slice(0, 8).map((item, index) => (
-                            <div
-                              key={item.userId}
-                              className={cx(
-                                "relative h-10 w-10 overflow-hidden rounded-full border-2 border-[#0b141a] bg-[#13202a] shadow-[0_8px_18px_rgba(0,0,0,0.28)]",
-                                index > 0 ? "-ml-2.5" : ""
-                              )}
-                              title={item.displayName}
-                            >
-                              <Avatar src={item.avatarUrl} alt={item.displayName} size={40} className="h-full w-full rounded-full" />
-                            </div>
-                          ))}
-                          {mutualProfiles.length > 8 ? (
-                            <div className="-ml-2.5 inline-flex h-10 min-w-10 items-center justify-center rounded-full border-2 border-[#0b141a] bg-white/[0.08] px-2 text-[11px] font-semibold text-white/85">
-                              +{mutualProfiles.length - 8}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      <div className="flex items-center justify-center sm:justify-start">
+                        {mutualProfiles.slice(0, 8).map((item, index) => (
+                          <div
+                            key={item.userId}
+                            className={cx(
+                              "relative h-10 w-10 overflow-hidden rounded-full border-2 border-[#171717] bg-[#13202a] shadow-[0_8px_18px_rgba(0,0,0,0.28)]",
+                              index > 0 ? "-ml-2.5" : ""
+                            )}
+                            title={item.displayName}
+                          >
+                            <Avatar src={item.avatarUrl} alt={item.displayName} size={40} className="h-full w-full rounded-full" />
+                          </div>
+                        ))}
+                        {mutualProfiles.length > 8 ? (
+                          <div className="-ml-2.5 inline-flex h-10 min-w-10 items-center justify-center rounded-full border-2 border-[#0b141a] bg-white/[0.08] px-2 text-[11px] font-semibold text-white/85">
+                            +{mutualProfiles.length - 8}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
                   {isSelf ? (
-                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2 sm:hidden">
+                    <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:hidden">
                       <button
                         type="button"
                         onClick={() => void shareProfile()}
@@ -2512,24 +2717,23 @@ function MemberProfilePage() {
                       </button>
                       <Link
                         href="/me/edit"
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        className="inline-flex min-h-10 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
                       >
                         Edit profile
                       </Link>
                     </div>
                   ) : null}
-                </div>
               </div>
 
               {!isSelf ? (
-                <div className="flex flex-col items-start gap-2 sm:items-end">
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                   {state.status === "none" ? (
                     <>
                       <button
                         type="button"
                         onClick={() => setConnectModalOpen(true)}
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
                       >
                         Connect
                       </button>
@@ -2541,7 +2745,7 @@ function MemberProfilePage() {
                       type="button"
                       onClick={() => void cancelRequest()}
                       disabled={busy}
-                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 px-4 py-2.5 text-sm font-semibold text-white/90 hover:bg-black/45 disabled:opacity-60"
+                      className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/20 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/[0.08] disabled:opacity-60"
                     >
                       {busy ? "Cancelling..." : "Cancel request"}
                     </button>
@@ -2553,7 +2757,7 @@ function MemberProfilePage() {
                         type="button"
                         onClick={() => void declineRequest()}
                         disabled={busy}
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 px-4 py-2.5 text-sm font-semibold text-white/90 hover:bg-black/45 disabled:opacity-60"
+                        className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/20 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/[0.08] disabled:opacity-60"
                       >
                         Decline
                       </button>
@@ -2561,7 +2765,7 @@ function MemberProfilePage() {
                         type="button"
                         onClick={() => void acceptRequest()}
                         disabled={busy}
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:opacity-60"
+                        className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:opacity-60"
                       >
                         Accept
                       </button>
@@ -2571,14 +2775,14 @@ function MemberProfilePage() {
                   {state.status === "accepted" ? (
                     <>
                       {!isTeacherProfile ? (
-                        <span className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100">
+                        <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100">
                           Connected
                         </span>
                       ) : null}
                       {state.id !== "self" ? (
                         <Link
                           href={`/messages?thread=${encodeURIComponent(`conn:${state.id}`)}`}
-                          className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                          className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
                         >
                           <span className="material-symbols-outlined text-[16px]">chat_bubble</span>
                           Message
@@ -2587,140 +2791,66 @@ function MemberProfilePage() {
                     </>
                   ) : null}
 
-                  {isTeacherProfile && profileUserId ? (
-                    <Link
-                      href={`/profile/${profileUserId}/teacher`}
-                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/[0.08]"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">school</span>
-                      Teacher page
-                    </Link>
-                  ) : null}
-
                   <button
                     type="button"
                     onClick={(event) => openActionMenu(event, "desktop", "below")}
                     aria-haspopup="menu"
                     aria-expanded={actionMenu?.source === "desktop"}
-                    className="flex items-center justify-center rounded-xl border border-white/20 bg-black/30 px-3 py-2 text-slate-100 hover:bg-black/45"
+                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
                   >
                       <span className="material-symbols-outlined text-[20px]">more_horiz</span>
                   </button>
                   </div>
                 </div>
               ) : (
-                <div className="hidden items-center gap-2 sm:flex">
+                <div className="hidden items-center gap-3 sm:flex">
                   <button
                     type="button"
                     onClick={() => void shareProfile()}
-                    className="rounded-xl border border-white/20 bg-black/30 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-black/45"
+                    className="rounded-full border border-white/15 bg-white/[0.04] px-6 py-3 text-sm font-semibold text-white/90 hover:bg-white/[0.08]"
                   >
                     Share profile
                   </button>
-                  {isTeacherProfile && profileUserId ? (
-                    <Link
-                      href={`/profile/${profileUserId}/teacher`}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/[0.08]"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">school</span>
-                      Teacher page
-                    </Link>
-                  ) : null}
                   <Link
                     href="/me/edit"
-                    className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                    className="rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
                   >
                     Edit profile
                   </Link>
                 </div>
               )}
             </div>
+
+            <div className="mt-2.5 border-t border-white/[0.05]">
+              <div className="no-scrollbar flex gap-5 overflow-x-auto px-1 pt-2.5 sm:px-0 sm:pt-2.5">
+                {visibleTabs.map(([key, label]) => {
+                  const selected = tab === key;
+                  const badge = tabBadges[key];
+                  return (
+                    <button
+                      key={`hero-${key}`}
+                      type="button"
+                      onClick={() => handleTabChange(key)}
+                      className={cx(
+                        "inline-flex shrink-0 items-center gap-1.5 border-b-2 pb-4 min-h-[44px] text-[11px] font-black uppercase tracking-[0.18em] transition",
+                        selected
+                          ? "border-cyan-300 text-cyan-100"
+                          : "border-transparent text-slate-500 hover:text-white"
+                      )}
+                    >
+                      {label}
+                      {badge !== undefined ? (
+                        <span className="rounded bg-white/[0.06] px-1.5 py-px text-[10px] font-black leading-none text-slate-400">
+                          {badge}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </section>
-
-        <section className={cx("no-scrollbar mt-5 flex gap-3 overflow-x-auto sm:grid sm:grid-cols-2 lg:grid-cols-3", isSelf ? "xl:grid-cols-5" : "xl:grid-cols-4")}>
-          {metricCards.map((card, index) => (
-            <button
-              key={card.key}
-              type="button"
-              onClick={() => handleTabChange(card.key as TabKey)}
-              aria-pressed={tab === card.key}
-              style={{ animationDelay: `${index * 70}ms` }}
-              className={cx(
-                "metric-card flex min-h-[108px] min-w-[148px] shrink-0 flex-col items-center justify-center rounded-2xl border px-4 py-4 text-center shadow-[0_10px_30px_rgba(0,0,0,0.22)] transition sm:min-w-0",
-                (card.key === "overview" || card.key === "dance-tools") && "hidden sm:flex",
-                tab === card.key
-                  ? "border-cyan-300/35 bg-[linear-gradient(170deg,rgba(34,211,238,0.18),rgba(232,121,249,0.08))]"
-                  : "border-white/10 bg-[linear-gradient(170deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01))]",
-                animateMetrics ? "metric-card--show" : ""
-              )}
-            >
-              <p className={cx("mb-1 text-xs uppercase tracking-wide", tab === card.key ? "text-cyan-100" : "text-slate-400")}>{card.title}</p>
-              {card.key === "dance-tools" ? (
-                <ul className={cx("mt-0.5 space-y-0.5 text-left text-[11px]", tab === card.key ? "text-cyan-100/80" : "text-slate-400")}>
-                  {card.sub.split("|").map((item) => (
-                    <li key={item} className="flex items-center gap-1">
-                      <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-50" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <>
-                  <p className="text-2xl font-bold text-white">{card.value}</p>
-                  <p className={cx("mt-1 text-[11px]", tab === card.key ? "text-cyan-100/80" : "text-slate-400")}>{card.sub}</p>
-                </>
-              )}
-            </button>
-          ))}
-        </section>
-
-        <div className="mt-6 pb-1">
-          <div className="no-scrollbar flex overflow-x-auto gap-1 sm:hidden">
-            {visibleTabs.map(([key, label]) => {
-              const selected = tab === key;
-              return (
-                <button
-                  key={`mobile-${key}`}
-                  type="button"
-                  onClick={() => handleTabChange(key)}
-                  className={cx(
-                    "shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition",
-                    selected
-                      ? "bg-gradient-to-r from-cyan-300/30 to-fuchsia-400/30 text-cyan-100 border border-cyan-300/35"
-                      : "border border-white/10 bg-black/20 text-slate-300 hover:text-white"
-                  )}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div
-            className="hidden gap-1 rounded-2xl border border-white/10 bg-black/20 p-1 sm:grid"
-            style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
-          >
-            {visibleTabs.map(([key, label]) => {
-                const selected = tab === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => handleTabChange(key)}
-                    className={cx(
-                      "rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                      selected
-                        ? "border-cyan-300/35 bg-gradient-to-r from-cyan-300/20 to-fuchsia-400/20 text-cyan-100"
-                        : "border-transparent text-slate-400 hover:border-white/10 hover:text-white"
-                    )}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-          </div>
-        </div>
 
         <div
           className={cx(
@@ -2753,120 +2883,176 @@ function MemberProfilePage() {
               <div key={tab} className="profile-panel-enter space-y-6">
             {tab === "overview" ? (
               <>
-                <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
-                  <h2 className="mb-4 text-lg font-bold text-white">Profile overview</h2>
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
-                      <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        <span className="material-symbols-outlined text-[16px] text-cyan-300">person</span>
-                        Roles
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {profile.roles.length ? (
-                          profile.roles.map((role) => (
-                            <span key={role} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-slate-200">
-                              {role}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-sm text-slate-400">No roles selected.</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        <span className="material-symbols-outlined text-[16px] text-cyan-300">language</span>
-                        Languages
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {profile.languages.length ? (
-                          profile.languages.map((language) => (
-                            <span key={language} className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs text-slate-300">
-                              {language}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-sm text-slate-400">No languages listed.</span>
-                        )}
-                      </div>
-                    </div>
+                <article className="rounded-[2.5rem] bg-[#171717] p-6 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-8">
+                  <div className="mb-8 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-cyan-300">person_search</span>
+                    <h2 className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-100">Profile overview</h2>
                   </div>
 
-                  <div className="mt-5">
-                    <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      <span className="material-symbols-outlined text-[16px] text-cyan-300">queue_music</span>
-                      Dance styles
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-5">
+                    <div>
+                      <div className="mb-4 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-cyan-300">person_pin</span>
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Roles</h3>
+                      </div>
+                      {profile.roles.length ? (
+                        <div className="flex flex-col gap-2.5">
+                          {profile.roles.map((role) => (
+                            <span
+                              key={role}
+                              className="text-sm font-semibold text-slate-200"
+                            >
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">No roles listed.</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-4 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-cyan-300">language</span>
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Languages</h3>
+                      </div>
+                      {overviewLanguageCodes.length ? (
+                        <div className="flex flex-col gap-2.5">
+                          {overviewLanguageCodes.map((item) => (
+                            <span key={item.label} className="text-sm font-semibold text-slate-200">
+                              {item.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">No languages listed.</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-4 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-fuchsia-300">music_note</span>
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Dance styles</h3>
+                      </div>
+                      <div className="flex flex-col gap-2.5">
                       {skillList.length ? (
                         skillList.map((item) => (
                           <span
                             key={item.style}
-                            className={cx(
-                              "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs",
-                              item.verified
-                                ? "border-cyan-300/35 bg-cyan-300/10 text-cyan-100"
-                                : "border-white/10 bg-white/[0.05] text-slate-200"
-                            )}
+                            className="text-sm font-semibold text-slate-200"
                           >
                             {titleCase(item.style)}
                             {item.level ? <span className="text-slate-300">({formatDanceLevelLabel(item.level)})</span> : null}
-                            {item.verified ? (
-                              <span className="material-symbols-outlined fill-1 text-[12px] text-[#00F5FF]" title="Verified">
-                                verified
-                              </span>
-                            ) : null}
                           </span>
                         ))
                       ) : (
-                        <span className="text-sm text-slate-400">No dance styles listed.</span>
+                        <span className="text-sm text-slate-500">No dance styles listed.</span>
+                      )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-4 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-cyan-300">favorite</span>
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Interest</h3>
+                      </div>
+                      <p className="text-sm font-semibold leading-6 text-slate-200">{primaryInterest ?? "Not shared"}</p>
+                    </div>
+
+                    <div>
+                      <div className="mb-4 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-cyan-300">schedule</span>
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Availability</h3>
+                      </div>
+                      {profile.availability.length ? (
+                        <div className="flex flex-col gap-2.5">
+                          {profile.availability.map((slot) => (
+                            <span key={slot} className="text-sm font-semibold text-slate-200">
+                              {slot}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">Not shared</p>
                       )}
                     </div>
+
                   </div>
 
-                  {profileMedia.length ? (
-                    <div className="mt-5">
-                      <ProfileMediaShowcase
-                        media={profileMedia}
-                        isOwner={isSelf}
-                        onManage={
-                          isSelf
-                            ? () => {
-                                router.push("/me/edit/media");
-                              }
-                            : undefined
-                        }
-                      />
-                    </div>
-                  ) : null}
+                  <div className="mt-8 h-px bg-white/[0.06]" />
 
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                      <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                        <span className="material-symbols-outlined text-[14px] text-cyan-300">favorite</span>
-                        Interest
-                      </p>
-                      <p className="text-sm text-slate-200">{primaryInterest ?? "Not shared"}</p>
+                  <div className="mt-8">
+                    <div className="mb-4 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-cyan-300">verified_user</span>
+                      <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Verification</h3>
                     </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                      <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                        <span className="material-symbols-outlined text-[14px] text-cyan-300">schedule</span>
-                        Availability
-                      </p>
-                      <p className="text-sm text-slate-200">{availabilityLabel ?? "Not shared"}</p>
+                    <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="space-y-1">
+                        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Status</p>
+                        {profile.verified ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-cyan-200">
+                            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                            Verified
+                          </span>
+                        ) : (
+                          <span className="text-sm font-semibold text-slate-300">Not verified</span>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Last login</p>
+                        <p className="text-sm font-bold text-white">{profile.lastSeenAt ? formatRelativeTime(profile.lastSeenAt) : "Not recently active"}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Response rate</p>
+                        <p className="text-sm font-bold text-white">{responseRate}%</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Member since</p>
+                        <p className="text-sm font-bold text-white">{formatMonthYear(profile.createdAt)}</p>
+                      </div>
                     </div>
+                    {isSelf && !profile.verified ? (
+                      <div className="mt-5">
+                        <GetVerifiedButton
+                          className="inline-flex min-h-9 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-xs font-bold text-[#06121a] hover:brightness-110"
+                          returnTo={`/profile/${profile.userId}`}
+                          onError={(message) => pushToast("error", message)}
+                        >
+                          Get verified
+                        </GetVerifiedButton>
+                      </div>
+                    ) : null}
                   </div>
                 </article>
+
+                {profileMedia.length ? (
+                  <div className="pt-2">
+                    <ProfileMediaShowcase
+                      media={profileMedia}
+                      isOwner={isSelf}
+                      ownerPhotoLimit={ownerPhotoLimit}
+                      onManage={
+                        isSelf
+                          ? () => {
+                              router.push("/me/edit?tab=media");
+                            }
+                          : undefined
+                      }
+                    />
+                  </div>
+                ) : null}
 
               </>
             ) : null}
 
             {tab === "references" ? isSelf ? (
-              <ReferencesHubView embedded initialConnectionId={requestedReferenceConnectionId} />
+              <ReferencesHubView embedded initialConnectionId={requestedReferenceConnectionId} initialPeerUserId={requestedReferencePeerUserId} />
             ) : (
               <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-slate-300">
+                  <span className="font-semibold text-white">{referenceStats.total} references</span>
+                  <span className="text-slate-500">from {referenceStats.uniqueMembers} members</span>
+                </div>
                 <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
                   <div className="grid gap-3 md:grid-cols-3">
                     <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -2913,14 +3099,14 @@ function MemberProfilePage() {
                 </div>
 
                 <div className="space-y-3">
-                  {filteredReferences.length === 0 ? (
+                  {visiblePublicReferences.length === 0 ? (
                     <EmptyPanel
                       icon="forum"
                       title="No references for this filter"
                       detail="Try another direction, category, or sort to explore this member's feedback."
                     />
                   ) : (
-                    filteredReferences.map((item) => {
+                    visiblePublicReferences.map((item) => {
                       const counterpartId = item.direction === "given" ? item.recipientId : item.authorId;
                       const counterpartProfile =
                         counterpartId === profileUserId
@@ -2951,7 +3137,7 @@ function MemberProfilePage() {
                                     {item.direction === "given" ? "Given" : "Received"}
                                   </span>
                                 </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                                   <span
                                     className={cx(
                                       "rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase",
@@ -2961,6 +3147,13 @@ function MemberProfilePage() {
                                     {referenceContextLabel(item.context)}
                                   </span>
                                   <span>{formatDate(item.createdAt)}</span>
+                                  {item.hiddenCount > 0 ? (
+                                    <span className="text-slate-500">
+                                      {item.direction === "received"
+                                        ? `+${item.hiddenCount} more from this member`
+                                        : `+${item.hiddenCount} more for this member`}
+                                    </span>
+                                  ) : null}
                                 </div>
                               </div>
                             </div>
@@ -2970,7 +3163,7 @@ function MemberProfilePage() {
                           </div>
 
                           <div className="mt-4 pl-16">
-                            <p className="text-base italic leading-relaxed text-slate-200">
+                            <p className="text-base leading-relaxed text-slate-200">
                               &ldquo;{item.body}&rdquo;
                             </p>
 
@@ -3171,103 +3364,96 @@ function MemberProfilePage() {
 
           {tab === "overview" ? (
           <aside className="space-y-6">
-            <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-300">Member Trust</h3>
-              <div className="space-y-3">
-                <section className="rounded-2xl border border-white/10 bg-black/25 p-3">
-                  <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    <span className="material-symbols-outlined fill-1 text-[15px] text-cyan-300">verified_user</span>
-                    Verification
-                  </p>
-                  <div className="space-y-2 text-xs text-slate-300">
-                    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                      <span className="text-slate-400">Status</span>
-                      {profile.verified ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/35 bg-emerald-300/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-100">
-                          <VerifiedBadge size={14} />
-                          Verified
-                        </span>
-                      ) : isSelf ? (
-                        <GetVerifiedButton
-                          className="inline-flex min-h-8 items-center justify-center rounded-lg bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-1.5 text-[11px] font-semibold text-[#06121a] hover:brightness-110"
-                          returnTo={`/profile/${profile.userId}`}
-                          onError={(message) => pushToast("error", message)}
-                        >
-                          Get verified
-                        </GetVerifiedButton>
-                      ) : (
-                        <span className="font-medium text-slate-400">Not verified</span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                      <span className="text-slate-400">Member since</span>
-                      <span className="font-semibold text-slate-100">{formatMonthYear(profile.createdAt)}</span>
-                    </div>
-                  </div>
-                </section>
+            {showHostingDetails ? (
+              <article className="rounded-[2rem] bg-[#171717] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:p-7">
+                <div className="mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-cyan-300">home</span>
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-cyan-100">Hosting details</h3>
+                </div>
 
-                {showHostingDetails ? (
-                  <section className="rounded-2xl border border-white/10 bg-black/25 p-3">
-                    <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      <span className="material-symbols-outlined text-[15px] text-fuchsia-200">home</span>
-                      Hosting details
-                    </p>
-                    <div className="space-y-2 text-xs text-slate-300">
-                      <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                        <span className="text-slate-400">Status</span>
-                        <span className={cx("font-semibold", hostingAvailable ? "text-emerald-100" : "text-slate-100")}>
-                          {hostingAvailable ? "Accepting guests" : "Not accepting guests"}
-                        </span>
-                      </div>
-                      {hostingAvailable ? (
-                        <>
-                          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                            <span className="text-slate-400">Max guests</span>
-                            <span className="font-semibold text-slate-100">{profile.maxGuests ?? "Not set"}</span>
+                <div className="rounded-[26px] bg-white/[0.05] p-5">
+                  <div className="space-y-4 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-white/45">Status</span>
+                      <span className="text-right font-black text-white">
+                        {hostingAvailable ? "Accepting guests" : "Not accepting guests"}
+                      </span>
+                    </div>
+
+                    {hostingAvailable ? (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-white/45">Max guests</span>
+                          <span className="text-right font-black text-white">{profile.maxGuests ?? "Not set"}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-white/45">Last-minute requests</span>
+                          <span className="text-right font-black text-white">{profile.hostingLastMinuteOk ? "Yes" : "No"}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-white/45">Smoking allowed</span>
+                          <span className="text-right font-black text-white">{profile.hostingSmokingAllowed ? "Yes" : "No"}</span>
+                        </div>
+                        {profile.hostingPreferredGuestGender ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-white/45">Preferred guest</span>
+                            <span className="text-right font-black text-white">{formatGuestGenderPreference(profile.hostingPreferredGuestGender)}</span>
                           </div>
-                          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                            <span className="text-slate-400">Last-minute requests</span>
-                            <span className="font-semibold text-slate-100">{profile.hostingLastMinuteOk ? "Yes" : "No"}</span>
+                        ) : null}
+                        {profile.hostingSleepingArrangement ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-white/45">Space type</span>
+                            <span className="text-right font-black text-white">{formatSleepingArrangement(profile.hostingSleepingArrangement)}</span>
                           </div>
-                          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                            <span className="text-slate-400">Preferred guest gender</span>
-                            <span className="font-semibold text-slate-100">{formatGuestGenderPreference(profile.hostingPreferredGuestGender)}</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { label: "Kid friendly", value: profile.hostingKidFriendly },
-                              { label: "Pet friendly", value: profile.hostingPetFriendly },
-                              { label: "Smoking allowed", value: profile.hostingSmokingAllowed },
-                            ].map((item) => (
-                              <div key={item.label} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                                <p className="text-slate-400">{item.label}</p>
-                                <p className="mt-1 font-semibold text-slate-100">{item.value ? "Yes" : "No"}</p>
-                              </div>
-                            ))}
-                            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                              <p className="text-slate-400">Sleeping arrangement</p>
-                              <p className="mt-1 font-semibold text-slate-100">{formatSleepingArrangement(profile.hostingSleepingArrangement)}</p>
-                            </div>
-                          </div>
-                          {profile.hostingGuestShare ? (
-                            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                              <p className="text-slate-400">What I can share with guests</p>
-                              <p className="mt-1 leading-5 text-slate-100">{profile.hostingGuestShare}</p>
-                            </div>
-                          ) : null}
-                          {profile.hostingTransitAccess ? (
-                            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                              <p className="text-slate-400">Public transportation access</p>
-                              <p className="mt-1 leading-5 text-slate-100">{profile.hostingTransitAccess}</p>
-                            </div>
-                          ) : null}
-                        </>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+
+                  {(profile.hostingGuestShare || profile.hostingTransitAccess) ? (
+                    <div className="mt-5 space-y-4 border-t border-white/[0.06] pt-5">
+                      {profile.hostingGuestShare ? (
+                        <div>
+                          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">About my place</p>
+                          <p className="rounded-2xl bg-white/[0.04] px-4 py-3 text-sm italic leading-6 text-slate-200">
+                            &ldquo;{profile.hostingGuestShare}&rdquo;
+                          </p>
+                        </div>
+                      ) : null}
+                      {profile.hostingTransitAccess ? (
+                        <div>
+                          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">Transit access</p>
+                          <p className="text-sm leading-6 text-slate-300">{profile.hostingTransitAccess}</p>
+                        </div>
                       ) : null}
                     </div>
-                  </section>
+                  ) : null}
+                </div>
+              </article>
+            ) : null}
+
+            {analyticsItems.length > 0 ? (
+              <article className="rounded-[2rem] bg-[#171717] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:p-7">
+                <div className="mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-cyan-300">analytics</span>
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-cyan-100">Analytics activity</h3>
+                </div>
+
+                {analyticsItems.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-4">
+                    {analyticsItems.map((item) => (
+                      <div key={item.category} className="flex flex-col items-center gap-2 text-center">
+                        <div className="flex items-center gap-2 justify-center">
+                          <span className="material-symbols-outlined text-[14px] text-cyan-300">{item.icon}</span>
+                          <span className="text-xl font-black leading-none text-white">{item.count}</span>
+                        </div>
+                        <span className="text-[9px] font-black uppercase tracking-[0.14em] text-white/38">{item.shortLabel}</span>
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
-              </div>
-            </article>
+              </article>
+            ) : null}
 
           </aside>
           ) : null}
@@ -3321,7 +3507,7 @@ function MemberProfilePage() {
                   <div className="flex flex-col gap-3">
                     {/* Social profile */}
                     <div>
-                      {isTeacherProfile && (
+                      {teacherShareUrl && (
                         <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-white/40">Social Profile</p>
                       )}
                       <div className="flex items-center gap-2">
@@ -3339,7 +3525,7 @@ function MemberProfilePage() {
                       </div>
                     </div>
                     {/* Teacher profile — only for teachers */}
-                    {isTeacherProfile && teacherShareUrl && (
+                    {teacherShareUrl && (
                       <div>
                         <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-white/40">Teacher Profile</p>
                         <div className="flex items-center gap-2">

@@ -121,6 +121,13 @@ function AuthCallbackContent() {
         }
 
         setMessage("Preparing your workspace...");
+
+        // Stamp last_seen_at on sign-in (fire-and-forget)
+        void supabase
+          .from("profiles")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("user_id", userId);
+
         const profile = await supabase.from("profiles").select("user_id").eq("user_id", userId).maybeSingle();
         if (profile.error) {
           setMessage("Signed in, but profile lookup failed.");

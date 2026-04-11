@@ -92,14 +92,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: message }, { status });
     }
 
+    const connectionId = typeof data === "string" ? data : null;
+
     await sendAppEmailBestEffort({
       kind: "connection_request_received",
       recipientUserId: targetId,
       actorUserId: requesterId,
-      connectionId: typeof data === "string" ? data : null,
+      connectionId,
     });
 
-    return NextResponse.json({ ok: true, id: data ?? null });
+    // In-app notification so the target can tap through to review the request
+    if (connectionId) {
+      try {
+        const svc = getSupabaseServiceClient() as unknown as {
+          from: (t: string) => { insert: (v: unknown) => Promise<{ error: unknown }> };
+        };
+        await svc.from("notifications").insert({
+          user_id: targetId,
+          actor_id: requesterId,
+          kind: "connection_request_received",
+          type: "connection_request_received",
+          title: "New connection request",
+          body: "Someone sent you a connection request.",
+          link_url: `/messages?tab=requests`,
+          metadata: { connection_id: connectionId },
+        });
+      } catch {
+        // best-effort
+      }
+    }
+
+    return NextResponse.json({ ok: true, id: connectionId ?? null });
   } catch (e: unknown) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Server error" },

@@ -7,6 +7,7 @@ import PaginationControls from "@/components/PaginationControls";
 import { supabase } from "@/lib/supabase/client";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
 import {
+  ACTIVITY_TYPE_ICONS,
   REFERENCE_CONTEXT_TAGS,
   normalizeReferenceContextTag,
   referenceContextFamily,
@@ -15,6 +16,15 @@ import {
   type ReferenceContextTag,
 } from "@/lib/activities/types";
 import { cx } from "@/lib/cx";
+import {
+  getReferenceCooldownDays,
+  getReferenceRuleForCategory,
+  mapReferenceContextTagToPublicCategory,
+  referenceSourceTypeForOrigin,
+  type PublicReferenceCategory,
+  type ReferenceFamily,
+  type ReferenceSourceType,
+} from "@/lib/references/anti-spam";
 type Sentiment = "positive" | "neutral" | "negative";
 type FeedFilter = "received" | "given" | "pending";
 type FeedSort = "latest" | "oldest";
@@ -37,6 +47,7 @@ type CandidateItem = {
   key: string;
   type: ReferenceContextTag;
   entityId: string;
+  sourceTable: string;
   connectionId: string;
   promptId?: string | null;
   recipientId: string;
@@ -55,6 +66,10 @@ type ReferenceItem = {
   sentiment: Sentiment;
   body: string;
   contextTag: ReferenceContextTag;
+  publicCategory: PublicReferenceCategory;
+  referenceFamily: ReferenceFamily;
+  sourceType: ReferenceSourceType | null;
+  sourceId: string | null;
   entityType: string;
   entityId: string | null;
   createdAt: string;
@@ -64,9 +79,10 @@ type ReferenceItem = {
 
 type ReferenceRowDb = {
   id?: string;
+  author_user_id?: string;
   author_id?: string;
   from_user_id?: string;
-  source_id?: string;
+  recipient_user_id?: string;
   recipient_id?: string;
   to_user_id?: string;
   target_id?: string;
@@ -79,6 +95,10 @@ type ReferenceRowDb = {
   reference_text?: string | null;
   context?: string | null;
   context_tag?: string | null;
+  public_category?: string | null;
+  reference_family?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
   entity_type?: string | null;
   entity_id?: string | null;
   sync_id?: string | null;
@@ -153,6 +173,7 @@ type ReferenceRequestRowDb = {
 
 type ReferencesHubViewProps = {
   initialConnectionId?: string | null;
+  initialPeerUserId?: string | null;
   embedded?: boolean;
 };
 
@@ -269,21 +290,30 @@ function mapReferenceRows(rows: ReferenceRowDb[]): ReferenceItem[] {
     return null;
   };
 
-  return rows
-    .map((row) => {
+  const mapped: Array<ReferenceItem | null> = rows.map((row) => {
       const id = row.id ?? "";
-      const authorId = pickText(row, ["author_id", "from_user_id", "source_id"]);
-      const recipientId = pickText(row, ["recipient_id", "to_user_id", "target_id"]);
+      const authorId = pickText(row, ["author_user_id", "author_id", "from_user_id"]);
+      const recipientId = pickText(row, ["recipient_user_id", "recipient_id", "to_user_id", "target_id"]);
       const createdAt = row.created_at ?? "";
       const sentiment = toSentiment(row);
       if (!id || !authorId || !recipientId || !createdAt) return null;
       if (!sentiment) return null;
 
       const body = pickText(row, ["body", "content", "feedback", "comment", "reference_text"]);
-      const contextRaw = pickText(row, ["context_tag", "context", "entity_type"]) || "collaboration";
+      const contextRaw = pickText(row, ["context_tag", "context", "entity_type"]) || "collaborate";
       const contextTag = normalizeReferenceContextTag(contextRaw);
+      const publicCategory =
+        mapReferenceContextTagToPublicCategory(
+          pickText(row, ["public_category"]) || contextRaw || "collaborate"
+        );
+      const referenceFamily =
+        (pickText(row, ["reference_family"]) as ReferenceFamily) || referenceContextFamily(contextTag);
+      const sourceType =
+        (pickNullableText(row, ["source_type"]) as ReferenceSourceType | null) ??
+        referenceSourceTypeForOrigin({ contextTag, sourceTable: "" });
+      const sourceId = pickNullableText(row, ["source_id", "entity_id", "sync_id"]);
       const entityType = pickText(row, ["entity_type", "context"]).toLowerCase() || (row.sync_id ? "sync" : "connection");
-      const entityId = pickNullableText(row, ["entity_id", "sync_id"]);
+      const entityId = pickNullableText(row, ["entity_id", "sync_id", "source_id"]);
       const replyText = pickNullableText(row, ["reply_text", "reply", "response_text", "reply_body"]);
 
       return {
@@ -293,14 +323,20 @@ function mapReferenceRows(rows: ReferenceRowDb[]): ReferenceItem[] {
         sentiment,
         body,
         contextTag,
+        publicCategory,
+        referenceFamily,
+        sourceType,
+        sourceId,
         entityType,
         entityId,
         createdAt,
         replyText,
         editCount: typeof row.edit_count === "number" ? row.edit_count : 0,
       } satisfies ReferenceItem;
-    })
-    .filter((row): row is ReferenceItem => Boolean(row))
+    });
+
+  return mapped
+    .filter((row): row is ReferenceItem => row !== null)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -312,43 +348,38 @@ function sentimentBadge(sentiment: Sentiment) {
 
 function contextTagBadge(contextTag: ReferenceContextTag) {
   const family = referenceContextFamily(contextTag);
-  if (family === "practice") return "border-[#00F5FF]/35 bg-[#00F5FF]/12 text-[#B8FBFF]";
-  if (family === "travel" || family === "festival") return "border-[#FF00FF]/35 bg-[#FF00FF]/12 text-[#FFC6FA]";
-  if (family === "hosting") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
-  if (family === "collaboration") return "border-violet-300/30 bg-violet-400/10 text-violet-100";
+  if (family === "practice_social") return "border-[#00F5FF]/35 bg-[#00F5FF]/12 text-[#B8FBFF]";
+  if (family === "teaching") return "border-sky-300/35 bg-sky-400/12 text-sky-100";
+  if (family === "event_collab") return "border-[#FF00FF]/35 bg-[#FF00FF]/12 text-[#FFC6FA]";
+  if (family === "hosting_trip") return "border-violet-300/35 bg-violet-400/12 text-violet-100";
   return "border-white/20 bg-white/[0.04] text-white/70";
 }
 
 function contextTagIcon(contextTag: ReferenceContextTag) {
-  if (contextTag === "practice") return "fitness_center";
-  if (contextTag === "private_class" || contextTag === "group_class" || contextTag === "workshop") return "school";
-  if (contextTag === "event") return "event";
-  if (contextTag === "festival") return "celebration";
-  if (contextTag === "social_dance") return "music_note";
-  if (contextTag === "travel_together") return "flight";
-  if (contextTag === "hosting") return "home";
-  if (contextTag === "stay_as_guest") return "bed";
-  if (contextTag === "competition") return "emoji_events";
-  if (contextTag === "content_video") return "videocam";
-  return "handshake";
+  return ACTIVITY_TYPE_ICONS[normalizeReferenceContextTag(contextTag)] ?? "handshake";
 }
 
 function familyAccentClass(contextTag: ReferenceContextTag) {
   const family = referenceContextFamily(contextTag);
-  if (family === "practice") return "text-cyan-300";
-  if (family === "travel" || family === "festival") return "text-fuchsia-300";
-  if (family === "hosting") return "text-emerald-300";
-  if (family === "collaboration") return "text-violet-300";
+  if (family === "practice_social") return "text-cyan-300";
+  if (family === "teaching") return "text-sky-300";
+  if (family === "event_collab") return "text-fuchsia-300";
+  if (family === "hosting_trip") return "text-violet-300";
   return "text-white/70";
 }
 
 const REFERENCE_REPLY_MAX_CHARS = 300;
 
 function candidateEntityType(type: ReferenceContextTag) {
-  if (type === "practice" || type === "private_class" || type === "group_class" || type === "workshop") return "sync";
-  if (type === "event" || type === "festival" || type === "social_dance" || type === "competition") return "event";
-  if (type === "travel_together" || type === "hosting" || type === "stay_as_guest") return "trip";
+  if (type === "practice" || type === "private_class") return "sync";
+  if (type === "event_festival" || type === "social_dance") return "event";
+  if (type === "travelling" || type === "offer_hosting" || type === "request_hosting") return "trip";
   return "connection";
+}
+
+function sourceKey(sourceType: string | null | undefined, sourceId: string | null | undefined) {
+  if (!sourceType || !sourceId) return "";
+  return `${sourceType}:${sourceId}`;
 }
 
 function ReferencesHubSkeleton() {
@@ -422,9 +453,10 @@ function ReferencesHubSkeleton() {
   );
 }
 
-export default function ReferencesHubView({ initialConnectionId = null }: ReferencesHubViewProps) {
+export default function ReferencesHubView({ initialConnectionId = null, initialPeerUserId = null }: ReferencesHubViewProps) {
   const router = useRouter();
   const initialConnectionIdValue = (initialConnectionId ?? "").trim();
+  const initialPeerUserIdValue = (initialPeerUserId ?? "").trim();
   const loadRequestIdRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
@@ -437,7 +469,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
   const [candidates, setCandidates] = useState<CandidateItem[]>([]);
   const [selectedCandidateKey, setSelectedCandidateKey] = useState<string>("");
   const [candidateFilter, setCandidateFilter] = useState<CandidateFilter>("all");
-  const [feedFilter, setFeedFilter] = useState<FeedFilter>(initialConnectionIdValue ? "pending" : "received");
+  const [feedFilter, setFeedFilter] = useState<FeedFilter>((initialConnectionIdValue || initialPeerUserIdValue) ? "pending" : "received");
   const [feedContextFilter, setFeedContextFilter] = useState<"all" | ReferenceContextTag>("all");
   const [feedSort, setFeedSort] = useState<FeedSort>("latest");
   const [feedPage, setFeedPage] = useState(1);
@@ -753,16 +785,59 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
       }
       setProfilesById(resolvedProfileMap);
 
-      const authoredEntityKeys = new Set<string>();
-      const authoredPairTypeKeys = new Set<string>();
+      const authoredSourceKeys = new Set<string>();
+      const latestFamilyReferenceByPeer = new Map<string, string>();
       givenRows.forEach((row) => {
-        if (row.contextTag && row.entityId) {
-          authoredEntityKeys.add(`${row.contextTag}:${row.entityId}`);
-        }
-        if (row.contextTag && row.recipientId) {
-          authoredPairTypeKeys.add(`${row.contextTag}:${row.recipientId}`);
+        const key = sourceKey(row.sourceType, row.sourceId);
+        if (key) authoredSourceKeys.add(key);
+        if (row.referenceFamily && row.recipientId) {
+          const familyKey = `${row.referenceFamily}:${row.recipientId}`;
+          const currentLatest = latestFamilyReferenceByPeer.get(familyKey) ?? "";
+          if (!currentLatest || row.createdAt > currentLatest) {
+            latestFamilyReferenceByPeer.set(familyKey, row.createdAt);
+          }
         }
       });
+
+      const isCandidateBlocked = (params: {
+        type: ReferenceContextTag;
+        recipientId: string;
+        sourceTable: string;
+        sourceId: string;
+      }) => {
+        const publicCategory = mapReferenceContextTagToPublicCategory(params.type);
+        const rule = getReferenceRuleForCategory(publicCategory);
+        if (rule.mode === "per_activity") {
+          const candidateSourceKey = sourceKey(
+            referenceSourceTypeForOrigin({ contextTag: params.type, sourceTable: params.sourceTable }),
+            params.sourceId
+          );
+          return Boolean(candidateSourceKey && authoredSourceKeys.has(candidateSourceKey));
+        }
+        const familyKey = `${rule.family}:${params.recipientId}`;
+        const latestFamilyReferenceAt = latestFamilyReferenceByPeer.get(familyKey);
+        if (!latestFamilyReferenceAt) return false;
+        const cooldownDays = getReferenceCooldownDays(publicCategory) ?? 0;
+        const cooldownEnd = new Date(latestFamilyReferenceAt).getTime() + cooldownDays * DAY_MS;
+        return cooldownEnd > Date.now();
+      };
+
+      const candidateDedupeKey = (params: {
+        type: ReferenceContextTag;
+        recipientId: string;
+        sourceTable: string;
+        sourceId: string;
+      }) => {
+        const publicCategory = mapReferenceContextTagToPublicCategory(params.type);
+        const rule = getReferenceRuleForCategory(publicCategory);
+        if (rule.mode === "per_activity") {
+          return (
+            sourceKey(referenceSourceTypeForOrigin({ contextTag: params.type, sourceTable: params.sourceTable }), params.sourceId) ||
+            `${params.type}:${params.recipientId}:${params.sourceId}`
+          );
+        }
+        return `${rule.family}:${params.recipientId}`;
+      };
 
       const nextCandidates: CandidateItem[] = [];
       const dedupe = new Set<string>();
@@ -771,12 +846,13 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
       const promptId = row.id ?? "";
       const peerUserId = row.peer_user_id ?? "";
       const sourceId = row.source_id ?? "";
+      const sourceTable = row.source_table ?? "";
       if (!promptId || !peerUserId || !sourceId) return;
 
-      const type = normalizeReferenceContextTag(row.context_tag ?? "collaboration");
-      if (authoredPairTypeKeys.has(`${type}:${peerUserId}`)) return;
+      const type = normalizeReferenceContextTag(row.context_tag ?? "collaborate");
+      if (isCandidateBlocked({ type, recipientId: peerUserId, sourceTable, sourceId })) return;
 
-      const dedupeKey = `${type}:${peerUserId}`;
+      const dedupeKey = candidateDedupeKey({ type, recipientId: peerUserId, sourceTable, sourceId });
       if (dedupe.has(dedupeKey)) return;
       dedupe.add(dedupeKey);
 
@@ -786,11 +862,11 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
       const dueAt = row.due_at ?? "";
       const expiresAt = row.expires_at ?? addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
       const title =
-        type === "travel_together"
+        type === "travelling"
           ? `Trip completed with ${displayName}`
-          : type === "hosting"
+          : type === "offer_hosting"
           ? `Hosting completed with ${displayName}`
-          : type === "stay_as_guest"
+          : type === "request_hosting"
           ? `Guest stay completed with ${displayName}`
           : `Reference request with ${displayName}`;
       const subtitle = dueAt
@@ -801,6 +877,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         key: dedupeKey,
         type,
         entityId: sourceId,
+        sourceTable,
         connectionId,
         promptId,
         recipientId: peerUserId,
@@ -832,13 +909,20 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
 
         const otherUserId = requesterId === me ? recipientId : requesterId;
         if (!otherUserId || !connectionByOtherUser.has(otherUserId)) return;
-        if (authoredPairTypeKeys.has(`practice:${otherUserId}`)) return;
+        if (isCandidateBlocked({ type: "practice", recipientId: otherUserId, sourceTable: "connection_syncs", sourceId: syncId })) {
+          return;
+        }
 
         const dueAt = addHours(completedAt, 24);
         const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
         if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
 
-        const dedupeKey = `practice:${otherUserId}`;
+        const dedupeKey = candidateDedupeKey({
+          type: "practice",
+          recipientId: otherUserId,
+          sourceTable: "connection_syncs",
+          sourceId: syncId,
+        });
         if (dedupe.has(dedupeKey)) return;
         dedupe.add(dedupeKey);
 
@@ -847,6 +931,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           key: dedupeKey,
           type: "practice",
           entityId: syncId,
+          sourceTable: "connection_syncs",
           connectionId,
           recipientId: otherUserId,
           recipientName: profile?.displayName ?? "Member",
@@ -889,21 +974,29 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           if (!trip) return;
           const connectionId = connectionByOtherUser.get(requesterId);
           if (!connectionId) return;
-          if (authoredPairTypeKeys.has(`travel_together:${requesterId}`)) return;
+          if (isCandidateBlocked({ type: "travelling", recipientId: requesterId, sourceTable: "trip_requests", sourceId: requestId })) {
+            return;
+          }
 
           const dueAt = addHours(trip?.end_date ?? "", 24);
           const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
           if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
 
           const profile = profileMap[requesterId];
-          const dedupeKey = `travel_together:${requesterId}`;
+          const dedupeKey = candidateDedupeKey({
+            type: "travelling",
+            recipientId: requesterId,
+            sourceTable: "trip_requests",
+            sourceId: requestId,
+          });
           if (dedupe.has(dedupeKey)) return;
           dedupe.add(dedupeKey);
 
           nextCandidates.push({
             key: dedupeKey,
-            type: "travel_together",
+            type: "travelling",
             entityId: requestId,
+            sourceTable: "trip_requests",
             connectionId,
             recipientId: requesterId,
             recipientName: profile?.displayName ?? "Member",
@@ -947,21 +1040,29 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         if (!requestId || !tripId || !trip || !ownerId) return;
         const connectionId = connectionByOtherUser.get(ownerId);
         if (!connectionId) return;
-        if (authoredPairTypeKeys.has(`travel_together:${ownerId}`)) return;
+        if (isCandidateBlocked({ type: "travelling", recipientId: ownerId, sourceTable: "trip_requests", sourceId: requestId })) {
+          return;
+        }
 
         const dueAt = addHours(trip.end_date ?? "", 24);
         const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
         if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
 
         const ownerProfile = resolvedProfileMap[ownerId];
-        const dedupeKey = `travel_together:${ownerId}`;
+        const dedupeKey = candidateDedupeKey({
+          type: "travelling",
+          recipientId: ownerId,
+          sourceTable: "trip_requests",
+          sourceId: requestId,
+        });
         if (dedupe.has(dedupeKey)) return;
         dedupe.add(dedupeKey);
 
         nextCandidates.push({
           key: dedupeKey,
-          type: "travel_together",
+          type: "travelling",
           entityId: requestId,
+          sourceTable: "trip_requests",
           connectionId,
           recipientId: ownerId,
           recipientName: ownerProfile?.displayName ?? "Member",
@@ -999,13 +1100,20 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         const iAmHost =
           (requestType === "request_hosting" && recipientUserId === me) ||
           (requestType === "offer_to_host" && senderId === me);
-        const type: ReferenceContextTag = iAmHost ? "hosting" : "stay_as_guest";
+        const type: ReferenceContextTag = iAmHost ? "offer_hosting" : "request_hosting";
 
-        if (authoredPairTypeKeys.has(`${type}:${otherUserId}`)) return;
+        if (isCandidateBlocked({ type, recipientId: otherUserId, sourceTable: "hosting_requests", sourceId: requestId })) {
+          return;
+        }
         const dueAt = addHours(departureDate, 24);
         const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
         if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
-        const dedupeKey = `${type}:${otherUserId}`;
+        const dedupeKey = candidateDedupeKey({
+          type,
+          recipientId: otherUserId,
+          sourceTable: "hosting_requests",
+          sourceId: requestId,
+        });
         if (dedupe.has(dedupeKey)) return;
         dedupe.add(dedupeKey);
 
@@ -1014,6 +1122,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           key: dedupeKey,
           type,
           entityId: requestId,
+          sourceTable: "hosting_requests",
           connectionId,
           recipientId: otherUserId,
           recipientName: profile?.displayName ?? "Member",
@@ -1085,14 +1194,20 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           if (!connectionId) return;
 
           const event = endedEventsById.get(eventId);
-          const contextTag: ReferenceContextTag =
-            event?.title && /festival|congress/i.test(event.title) ? "festival" : "event";
-          if (authoredPairTypeKeys.has(`${contextTag}:${otherUserId}`)) return;
+          const contextTag: ReferenceContextTag = "event_festival";
+          if (isCandidateBlocked({ type: contextTag, recipientId: otherUserId, sourceTable: "events", sourceId: eventId })) {
+            return;
+          }
           const dueAt = addHours(event?.ends_at ?? "", 24);
           const expiresAt = addDays(dueAt, REFERENCE_WRITE_WINDOW_DAYS);
           if (!isActiveReferenceWindow(dueAt, expiresAt)) return;
           const profile = resolvedProfileMap[otherUserId];
-          const dedupeKey = `${contextTag}:${otherUserId}`;
+          const dedupeKey = candidateDedupeKey({
+            type: contextTag,
+            recipientId: otherUserId,
+            sourceTable: "events",
+            sourceId: eventId,
+          });
           if (dedupe.has(dedupeKey)) return;
           dedupe.add(dedupeKey);
 
@@ -1100,6 +1215,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
             key: dedupeKey,
             type: contextTag,
             entityId: eventId,
+            sourceTable: "events",
             connectionId,
             recipientId: otherUserId,
             recipientName: profile?.displayName ?? "Member",
@@ -1124,6 +1240,9 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         if (initialConnectionIdValue) {
           const preferred = nextCandidates.find((item) => item.connectionId === initialConnectionIdValue);
           setSelectedCandidateKey(preferred?.key ?? nextCandidates[0].key);
+        } else if (initialPeerUserIdValue) {
+          const preferred = nextCandidates.find((item) => item.recipientId === initialPeerUserIdValue);
+          setSelectedCandidateKey(preferred?.key ?? nextCandidates[0].key);
         } else {
           setSelectedCandidateKey((prev) => prev || nextCandidates[0].key);
         }
@@ -1139,7 +1258,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
         setLoading(false);
       }
     }
-  }, [initialConnectionIdValue]);
+  }, [initialConnectionIdValue, initialPeerUserIdValue]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- async loader updates state from backend responses. */
   useEffect(() => {
@@ -1172,6 +1291,8 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
           sentiment,
           text: body,
           contextTag: targetCandidate.type,
+          sourceTable: targetCandidate.sourceTable,
+          sourceId: targetCandidate.entityId,
           entityId: targetCandidate.entityId,
         }),
       });
@@ -1482,7 +1603,7 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                         {formatReferenceDeadline(selectedPendingCandidate.expiresAt)}
                       </p>
                       <p className="mt-2 text-sm leading-6 text-white/60">
-                        Once you've both submitted references, they'll be posted to your profiles at the same time. If only one of you submits a reference, it will be posted on {formatLongDate(addDays(new Date().toISOString(), REFERENCE_REVEAL_WINDOW_DAYS))}.
+                        Once you&apos;ve both submitted references, they&apos;ll be posted to your profiles at the same time. If only one of you submits a reference, it will be posted on {formatLongDate(addDays(new Date().toISOString(), REFERENCE_REVEAL_WINDOW_DAYS))}.
                       </p>
                     </div>
 
@@ -1566,11 +1687,13 @@ export default function ReferencesHubView({ initialConnectionId = null }: Refere
                     const reply = replyDraft[item.id] ?? "";
                     const busy = busyReferenceId === item.id;
                     const hoverBorderClass =
-                      referenceContextFamily(item.contextTag) === "practice"
+                      referenceContextFamily(item.contextTag) === "practice_social"
                         ? "hover:border-slate-600"
-                        : referenceContextFamily(item.contextTag) === "travel" || referenceContextFamily(item.contextTag) === "festival"
+                        : referenceContextFamily(item.contextTag) === "event_collab"
                           ? "hover:border-magenta-500/30"
-                          : "hover:border-cyan-400/30";
+                          : referenceContextFamily(item.contextTag) === "hosting_trip"
+                            ? "hover:border-violet-500/30"
+                            : "hover:border-cyan-400/30";
 
                     return (
                       <article

@@ -248,7 +248,7 @@ async function createSyncNotificationCompat(params: {
     p_kind: params.kind,
     p_title: params.title,
     p_body: params.body ?? null,
-    p_link_url: `/connections/${params.connectionId}`,
+    p_link_url: `/messages?thread=conn%3A${params.connectionId}`,
     p_metadata: {
       connection_id: params.connectionId,
       sync_id: params.syncId,
@@ -284,7 +284,7 @@ async function createSyncNotificationCompat(params: {
     kind: params.kind,
     title: params.title,
     body: params.body ?? null,
-    linkUrl: `/connections/${params.connectionId}`,
+    linkUrl: `/messages?thread=conn%3A${params.connectionId}`,
     metadata: {
       connection_id: params.connectionId,
       sync_id: params.syncId,

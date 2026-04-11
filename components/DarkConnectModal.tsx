@@ -85,8 +85,9 @@ export default function DarkConnectModal({
   const [pendingWarning, setPendingWarning] = useState<string | null>(null);
   const [requestsUsed, setRequestsUsed]     = useState<number | null>(null);
   const [requestsLimit, setRequestsLimit]   = useState<number | null>(null);
+  const [isSelf, setIsSelf]                 = useState(false);
 
-  // Reset on open/close
+  // Reset on open/close + self-check
   useEffect(() => {
     if (!open) return;
     setSelectedReason(null);
@@ -94,7 +95,10 @@ export default function DarkConnectModal({
     setMessageOpen(false);
     setError(null);
     setPendingWarning(null);
-  }, [open]);
+    void supabase.auth.getUser().then(({ data }) => {
+      setIsSelf(!!data.user && data.user.id === targetUserId);
+    });
+  }, [open, targetUserId]);
 
   // Pending conflict check
   useEffect(() => {
@@ -169,7 +173,7 @@ export default function DarkConnectModal({
         return;
       }
       if (existing?.status === "pending") {
-        throw new Error("There is already a pending connection request with this member. Open Requests in Messages to continue.");
+        throw new Error("There is already a pending connection request with this member.");
       }
 
       const reasonLabel = REASONS.find((r) => r.id === selectedReason)?.label ?? selectedReason;
@@ -223,15 +227,22 @@ export default function DarkConnectModal({
             "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14",
         }}
       >
-        {/* Close */}
-        <button
-          type="button"
-          onClick={handleClose}
-          className="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors"
-          aria-label="Close"
-        >
-          <span className="material-symbols-outlined text-[18px]">close</span>
-        </button>
+        {/* Top-right cluster: close + counter on same row */}
+        <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-1.5">
+            {requestsLimit !== null && requestsUsed !== null && (
+              <div className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px]">
+                <span className={atLimit ? "font-bold text-rose-400" : requestsUsed >= requestsLimit * 0.8 ? "font-bold text-amber-400" : "font-semibold text-[#0df2f2]"}>
+                  {requestsUsed}/{requestsLimit}
+                </span>
+                <span className="text-white/30">req/mo</span>
+              </div>
+            )}
+            <button type="button" onClick={handleClose} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors" aria-label="Close">
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
+        </div>
 
         {/* Header */}
         <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/[0.07]">
@@ -243,7 +254,7 @@ export default function DarkConnectModal({
                 : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))",
             }}
           />
-          <div className="min-w-0">
+          <div className="min-w-0 pr-20">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
               Start a ConXion with
             </p>
@@ -255,24 +266,15 @@ export default function DarkConnectModal({
         </div>
 
         <div className="px-5 pt-5 pb-4 space-y-4">
-          {/* Pending warning */}
-          {pendingWarning && <PendingRequestBanner message={pendingWarning} />}
-
-          {/* Usage counter */}
-          {requestsLimit !== null && requestsUsed !== null && (
-            <div className="flex items-center justify-between rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2 text-xs">
-              <span className="text-white/35">Requests this month</span>
-              <span className={
-                atLimit
-                  ? "font-bold text-rose-400"
-                  : requestsUsed >= requestsLimit * 0.8
-                    ? "font-bold text-amber-400"
-                    : "font-semibold text-[#0df2f2]"
-              }>
-                {requestsUsed} / {requestsLimit}
-              </span>
+          {/* Self warning */}
+          {isSelf && (
+            <div className="flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3">
+              <span className="material-symbols-outlined shrink-0 text-[16px] text-amber-300">info</span>
+              <p className="text-xs text-amber-200">You can&apos;t send a connection request to yourself.</p>
             </div>
           )}
+          {/* Pending warning */}
+          {pendingWarning && <PendingRequestBanner message={pendingWarning} />}
 
           {/* Intent grid — first 6 in 3-col grid, last 2 centered */}
           <div className="space-y-2.5">
@@ -340,7 +342,7 @@ export default function DarkConnectModal({
         <div className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-4">
           <button
             type="button"
-            disabled={!selectedReason || sending || Boolean(pendingWarning) || atLimit}
+            disabled={!selectedReason || sending || Boolean(pendingWarning) || atLimit || isSelf}
             onClick={() => void handleSend()}
             className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99]"
             style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}

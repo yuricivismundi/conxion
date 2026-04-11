@@ -33,11 +33,10 @@ begin
       v_city := coalesce(nullif(trim(v_row.city), ''), 'Barcelona');
       v_country := coalesce(nullif(trim(v_row.country), ''), 'Spain');
       v_purpose := (
-        case (v_idx % 4)
-          when 0 then 'Dance Festival'
-          when 1 then 'Social Dancing'
-          when 2 then 'Training / Workshops'
-          else 'Holiday Trip'
+        case (v_idx % 3)
+          when 0 then 'Festival / Event'
+          when 1 then 'Dance trip / Holiday'
+          else 'Training & Classes'
         end
       );
 

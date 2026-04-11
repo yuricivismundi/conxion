@@ -345,7 +345,7 @@ export default function ConnectionsFiltersDrawer({
                     commit({ ...local, country: e.target.value, cities: [] });
                     setCityPick("");
                   }}
-                  className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                  className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                 >
                   <option value="" disabled>
                     Select country…
@@ -370,7 +370,7 @@ export default function ConnectionsFiltersDrawer({
                     value={cityPick}
                     onChange={(e) => setCityPick(e.target.value)}
                     disabled={!local.country || cityNames.length === 0 || local.cities.length >= 3}
-                    className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
+                    className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
                   >
                     <option value="">
                       {!local.country
@@ -620,7 +620,7 @@ export default function ConnectionsFiltersDrawer({
                               })
                             }
                             placeholder="Other style (max 24 chars)"
-                            className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                            className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                           />
                         )}
                       </div>
@@ -644,7 +644,7 @@ export default function ConnectionsFiltersDrawer({
               <select
                 value={local.interest ?? ""}
                 onChange={(e) => commit({ ...local, interest: (e.target.value as Interest) || undefined })}
-                className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
               >
                 <option value="">Any interest</option>
                 {INTEREST_OPTIONS.map((i) => (
@@ -698,7 +698,7 @@ export default function ConnectionsFiltersDrawer({
                   value={languagePick}
                   onChange={(e) => setLanguagePick(e.target.value)}
                   disabled={local.languages.length >= 3}
-                  className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
+                  className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
                 >
                   <option value="">{local.languages.length >= 3 ? "Max 3 languages" : "Select a language…"}</option>
                   {LANGUAGES.filter((l) => !local.languages.includes(l)).map((l) => (

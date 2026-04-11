@@ -9,14 +9,14 @@ type RouteParams = {
   params: Promise<{ inquiryId: string }>;
 };
 
-function currentCycleBounds() {
+function currentActivationWindow() {
   const now = new Date();
-  const cycleStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-  const cycleEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 0, 0, 0, 0));
+  const activationEnd = new Date(now);
+  activationEnd.setMonth(activationEnd.getMonth() + 1);
   return {
     nowIso: now.toISOString(),
-    cycleStart: cycleStart.toISOString().slice(0, 10),
-    cycleEnd: cycleEnd.toISOString().slice(0, 10),
+    activationStartIso: now.toISOString(),
+    activationEndIso: activationEnd.toISOString(),
   };
 }
 
@@ -54,7 +54,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       return jsonError("A follow-up message is required before converting this inquiry to chat.", 400);
     }
 
-    const { nowIso, cycleStart, cycleEnd } = currentCycleBounds();
+    const { nowIso, activationStartIso, activationEndIso } = currentActivationWindow();
 
     const participantUpsert = await auth.serviceClient
       .from("thread_participants" as never)
@@ -66,8 +66,8 @@ export async function POST(req: Request, { params }: RouteParams) {
           messaging_state: "active",
           archived_at: null,
           activated_at: nowIso,
-          activation_cycle_start: cycleStart,
-          activation_cycle_end: cycleEnd,
+          activation_cycle_start: activationStartIso,
+          activation_cycle_end: activationEndIso,
           state_changed_at: nowIso,
           last_read_at: nowIso,
         } as never,

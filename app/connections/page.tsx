@@ -34,6 +34,20 @@ import {
   type LinkedMemberOption,
 } from "@/lib/requests/linked-members";
 import { type ProfileInterest } from "@/lib/interests";
+import {
+  TRIP_JOIN_REASON_OPTIONS,
+  type TripJoinReasonKey,
+  tripJoinReasonLabel,
+  travelIntentReasonLabel,
+  TRAVEL_INTENT_REASON_OPTIONS,
+  type TravelIntentReasonKey,
+} from "@/lib/trips/join-reasons";
+import {
+  HOSTING_OFFER_SPACE_TYPE_OPTIONS,
+  isHostingListingOpen,
+  normalizeHostingSleepingArrangement,
+  type HostingSleepingArrangement,
+} from "@/lib/hosting/preferences";
 
 type Tab = "members" | "travellers";
 type DiscoverMode = "dancers" | "travelers" | "hosts";
@@ -62,6 +76,28 @@ const EMPTY_CONNECT_MODAL: ConnectModalState = {
   tripId: null,
 };
 
+// ─── Hosting options ──────────────────────────────────────────────────────────
+type HostingReasonId = TravelIntentReasonKey | HostingSleepingArrangement;
+type HostingReason = { id: HostingReasonId; label: string; icon: string };
+const HOSTING_OFFER_REASON_ICONS: Record<HostingSleepingArrangement, string> = {
+  not_specified: "help",
+  shared_room: "bed",
+  private_room: "home",
+  sofa: "weekend",
+  floor_space: "chair_alt",
+  mixed: "calendar_month",
+};
+const HOSTING_OFFER_REASONS: HostingReason[] = HOSTING_OFFER_SPACE_TYPE_OPTIONS.map((option) => ({
+  id: option.value,
+  label: option.label,
+  icon: HOSTING_OFFER_REASON_ICONS[option.value],
+}));
+const HOSTING_REQUEST_REASONS: HostingReason[] = TRAVEL_INTENT_REASON_OPTIONS.map((option) => ({
+  id: option.key,
+  label: option.label,
+  icon: option.icon,
+}));
+
 type HostingRequestType = "request_hosting" | "offer_to_host";
 
 type HostingModalState = {
@@ -82,6 +118,7 @@ type HostingModalState = {
   linkedMemberUserId: string;
   destinationCity?: string | null;
   destinationCountry?: string | null;
+  reason: TravelIntentReasonKey | HostingSleepingArrangement | null;
 };
 
 const EMPTY_HOSTING_MODAL: HostingModalState = {
@@ -100,6 +137,7 @@ const EMPTY_HOSTING_MODAL: HostingModalState = {
   maxTravellersAllowed: "",
   message: "",
   linkedMemberUserId: "",
+  reason: null,
 };
 
 type TripJoinModalState = {
@@ -114,6 +152,7 @@ type TripJoinModalState = {
   endDate: string | null;
   note: string;
   linkedMemberUserId: string;
+  reason: TripJoinReasonKey | null;
 };
 
 const EMPTY_TRIP_JOIN_MODAL: TripJoinModalState = {
@@ -128,6 +167,7 @@ const EMPTY_TRIP_JOIN_MODAL: TripJoinModalState = {
   endDate: null,
   note: "",
   linkedMemberUserId: "",
+  reason: null,
 };
 
 const SECURE_TEXT_PATTERNS = {
@@ -216,29 +256,23 @@ const LEVEL_SHORT_LABEL: Record<Level, string> = {
 type Interest = ProfileInterest;
 
 type Availability = "Weekdays" | "Weekends" | "DayTime" | "Evenings" | "Travel for Events" | "I'd rather not say";
-const TRIP_PURPOSES = ["Holiday Trip", "Dance Festival", "Social Dancing", "Training / Workshops"] as const;
+const TRIP_PURPOSES = TRAVEL_INTENT_REASON_OPTIONS.map((option) => option.label);
 
 const PURPOSE_META: Record<string, { icon: string; text: string; bg: string; border: string }> = {
-  "Holiday Trip": {
-    icon: "luggage",
+  "Dance trip / Holiday": {
+    icon: "nightlife",
     text: "text-[#00F5FF]",
     bg: "bg-[#00F5FF]/12",
     border: "border-[#00F5FF]/35",
   },
-  "Dance Festival": {
-    icon: "festival",
-    text: "text-[#00F5FF]",
-    bg: "bg-[#00F5FF]/12",
-    border: "border-[#00F5FF]/35",
-  },
-  "Social Dancing": {
-    icon: "groups",
-    text: "text-[#00F5FF]",
-    bg: "bg-[#00F5FF]/12",
-    border: "border-[#00F5FF]/35",
-  },
-  "Training / Workshops": {
+  "Training & Classes": {
     icon: "school",
+    text: "text-[#00F5FF]",
+    bg: "bg-[#00F5FF]/12",
+    border: "border-[#00F5FF]/35",
+  },
+  "Festival / Event": {
+    icon: "celebration",
     text: "text-[#00F5FF]",
     bg: "bg-[#00F5FF]/12",
     border: "border-[#00F5FF]/35",
@@ -286,12 +320,14 @@ function langLabelToCode(label: string): string {
 
 type MemberCard = {
   id: string;
+  username?: string | null;
   name: string;
   city: string;
   country: string;
   memberSince?: string | null;
   verified?: boolean;
   roles: string[];
+  displayRole?: string | null;
   danceSkills: Partial<Record<Style, Level>>;
   otherStyle?: boolean;
   langs?: string[]; // stored as codes in cards (EN/ES/...)
@@ -321,6 +357,7 @@ type SortMode = "recommended" | "newest" | "connections_desc" | "references_desc
 type TripCard = {
   id: string;
   user_id: string;
+  ownerUsername?: string | null;
   destination_country: string;
   destination_city: string;
   start_date: string;
@@ -332,6 +369,7 @@ type TripCard = {
   display_name: string;
   avatar_url: string | null;
   roles: string[];
+  display_role?: string | null;
   languages?: string[];
   refMemberAll?: number;
   refTripAll?: number;
@@ -341,11 +379,13 @@ type TripCard = {
 type ProfileFeedRow = {
   id?: string;
   user_id?: string;
+  username?: string | null;
   display_name?: string | null;
   created_at?: string | null;
   city?: string | null;
   country?: string | null;
   roles?: unknown;
+  display_role?: string | null;
   languages?: unknown;
   avatar_url?: string | null;
   is_verified?: boolean | null;
@@ -368,6 +408,7 @@ type ProfileFeedRow = {
   ref_total_neutral?: number | null;
   ref_total_negative?: number | null;
   is_test?: boolean | null;
+  visibility?: string | null;
 };
 
 type TripRow = {
@@ -385,9 +426,11 @@ type TripRow = {
 type ProfileFeedLiteRow = {
   id?: string;
   user_id?: string;
+  username?: string | null;
   display_name?: string | null;
   avatar_url?: string | null;
   roles?: unknown;
+  display_role?: string | null;
   languages?: unknown;
   ref_member_all?: number | null;
   ref_trip_all?: number | null;
@@ -395,6 +438,11 @@ type ProfileFeedLiteRow = {
 };
 
 const isString = (value: unknown): value is string => typeof value === "string";
+
+const LEGACY_ROLES = new Set(["social dancer / student", "social dancer/student", "organiser"]);
+function stripLegacyRoles(roles: string[]): string[] {
+  return roles.filter((r) => !LEGACY_ROLES.has(r.toLowerCase().trim()));
+}
 
 function normalizeSearchText(value: string) {
   return value
@@ -410,6 +458,19 @@ function errorMessage(e: unknown, fallback: string): string {
     if (typeof msg === "string" && msg.trim().length > 0) return msg;
   }
   return fallback;
+}
+
+function isSampleDiscoverUsername(value: string | null | undefined) {
+  const username = String(value ?? "").trim().toLowerCase();
+  return username.startsWith("sample.dancer.") || username.startsWith("sample.host.");
+}
+
+function isSampleDancerUsername(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase().startsWith("sample.dancer.");
+}
+
+function isSampleHostUsername(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase().startsWith("sample.host.");
 }
 
 function normalizeStyleKeyToUi(styleKey: string): Style | null {
@@ -601,6 +662,7 @@ function ConnectionsPageContent() {
 
   const [uiError, setUiError] = useState<string | null>(null);
   const [uiInfo, setUiInfo] = useState<string | null>(null);
+  const [sampleDiscoverOnly, setSampleDiscoverOnly] = useState(false);
   const [verificationModalOpen, setVerificationModalOpen] = useState(false);
   const [verificationResumePayload, setVerificationResumePayload] = useState<VerificationResumePayload | null>(null);
 
@@ -619,9 +681,21 @@ function ConnectionsPageContent() {
   const [tripJoinError, setTripJoinError] = useState<string | null>(null);
   const [tripLinkedPickerOpen, setTripLinkedPickerOpen] = useState(false);
   const [tripLinkedMemberQuery, setTripLinkedMemberQuery] = useState("");
+  const [tripNoteOpen, setTripNoteOpen] = useState(false);
   const [membersPage, setMembersPage] = useState(1);
   const [travellersPage, setTravellersPage] = useState(1);
   useBodyScrollLock(Boolean(filtersOpen || connectModal.open || hostingModal.open || tripJoinModal.open || verificationModalOpen));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const host = window.location.hostname.toLowerCase();
+    setSampleDiscoverOnly(
+      host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "staging.conxion.social" ||
+        host.includes("git-staging")
+    );
+  }, []);
 
   const closeConnectModal = useCallback(() => {
     setConnectModal(EMPTY_CONNECT_MODAL);
@@ -641,6 +715,7 @@ function ConnectionsPageContent() {
     setTripJoinError(null);
     setTripLinkedPickerOpen(false);
     setTripLinkedMemberQuery("");
+    setTripNoteOpen(false);
   }, []);
 
   const openTripJoinModal = useCallback((params: {
@@ -665,9 +740,11 @@ function ConnectionsPageContent() {
       endDate: params.endDate ?? null,
       note: "",
       linkedMemberUserId: "",
+      reason: null,
     });
     setTripLinkedPickerOpen(false);
     setTripLinkedMemberQuery("");
+    setTripNoteOpen(false);
   }, []);
 
   const openConnect = useCallback((params: {
@@ -733,6 +810,7 @@ function ConnectionsPageContent() {
       linkedMemberUserId: "",
       destinationCity: params.destinationCity ?? null,
       destinationCountry: params.destinationCountry ?? null,
+      reason: null,
     });
     setHostingLinkedPickerOpen(false);
     setHostingLinkedMemberQuery("");
@@ -1493,10 +1571,12 @@ function ConnectionsPageContent() {
 
         const feedSelect = [
           "id",
+          "username",
           "display_name",
           "city",
           "country",
           "roles",
+          "display_role",
           "languages",
           "avatar_url",
           "verified",
@@ -1514,6 +1594,7 @@ function ConnectionsPageContent() {
           "ref_total_neutral",
           "ref_total_negative",
           "is_test",
+          "visibility",
           ...hostFieldsSelect,
         ].join(",");
 
@@ -1522,23 +1603,13 @@ function ConnectionsPageContent() {
         let lastLoadError: unknown = null;
         let hostFieldsOnSource = false;
 
-        let membersQuery = supabase.from("profiles_feed").select(feedSelect).neq("avatar_status", "rejected").limit(200);
-        if (meId) membersQuery = membersQuery.neq("id", meId);
-        const { data: feedData, error: feedError } = await membersQuery;
-        if (!feedError) {
-          rawRows = (feedData ?? []) as ProfileFeedRow[];
-          loadedRows = true;
-          hostFieldsOnSource = true;
-        } else {
-          lastLoadError = feedError;
-        }
-
-        if (!loadedRows) {
+        if (sampleDiscoverOnly) {
           let fallbackQuery = supabase
             .from("profiles")
             .select(
               [
                 "user_id",
+                "username",
                 "display_name",
                 "created_at",
                 "city",
@@ -1556,7 +1627,8 @@ function ConnectionsPageContent() {
                 ...hostFieldsSelect,
               ].join(",")
             )
-            .limit(200);
+            .or("username.ilike.sample.dancer.%,username.ilike.sample.host.%")
+            .limit(40);
           if (meId) fallbackQuery = fallbackQuery.neq("user_id", meId);
           const { data: fallbackData, error: fallbackError } = await fallbackQuery;
           if (!fallbackError) {
@@ -1572,6 +1644,17 @@ function ConnectionsPageContent() {
           } else {
             lastLoadError = fallbackError;
           }
+        } else {
+          let membersQuery = supabase.from("profiles_feed").select(feedSelect).neq("avatar_status", "rejected").limit(200);
+          if (meId) membersQuery = membersQuery.neq("id", meId);
+          const { data: feedData, error: feedError } = await membersQuery;
+          if (!feedError) {
+            rawRows = (feedData ?? []) as ProfileFeedRow[];
+            loadedRows = true;
+            hostFieldsOnSource = true;
+          } else {
+            lastLoadError = feedError;
+          }
         }
 
         if (!loadedRows) {
@@ -1580,6 +1663,7 @@ function ConnectionsPageContent() {
             .select(
               [
                 "user_id",
+                "username",
                 "display_name",
                 "created_at",
                 "city",
@@ -1591,6 +1675,10 @@ function ConnectionsPageContent() {
                 "verified_label",
                 "dance_skills",
                 "has_other_style",
+                "can_host",
+                "hosting_status",
+                "max_guests",
+                "visibility",
               ].join(",")
             )
             .limit(200);
@@ -1605,7 +1693,7 @@ function ConnectionsPageContent() {
               };
             });
             loadedRows = true;
-            hostFieldsOnSource = false;
+            hostFieldsOnSource = true;
           } else {
             lastLoadError = fallbackErrorLite;
           }
@@ -1614,7 +1702,7 @@ function ConnectionsPageContent() {
         if (!loadedRows) {
           let fallbackQueryMinimal = supabase
             .from("profiles")
-            .select("user_id,display_name,created_at,city,country,avatar_url,verified,verified_label")
+            .select("user_id,username,display_name,created_at,city,country,avatar_url,verified,verified_label")
             .limit(200);
           if (meId) fallbackQueryMinimal = fallbackQueryMinimal.neq("user_id", meId);
           const { data: fallbackDataMinimal, error: fallbackErrorMinimal } = await fallbackQueryMinimal;
@@ -1639,6 +1727,7 @@ function ConnectionsPageContent() {
         const mapped: MemberCard[] = rawRows
           .filter((row) => row.is_test !== true)
           .filter((row) => String(row.id ?? row.user_id ?? "") !== (meId ?? ""))
+          .filter((row) => (row as { visibility?: string | null }).visibility !== "private")
           .reduce<MemberCard[]>((acc, row) => {
             const raw = row as ProfileFeedRow;
             const rawId = String(raw.id ?? raw.user_id ?? "");
@@ -1648,12 +1737,13 @@ function ConnectionsPageContent() {
             const city = isNonEmptyString(raw.city) ? raw.city : "";
             const country = isNonEmptyString(raw.country) ? raw.country : "";
 
-            const roles = Array.isArray(raw.roles) ? raw.roles.filter(isNonEmptyString) : [];
+            const roles = Array.isArray(raw.roles) ? stripLegacyRoles(raw.roles.filter(isNonEmptyString)) : [];
             const rawLangs = Array.isArray(raw.languages) ? raw.languages.filter(isNonEmptyString) : [];
             const langsCodes = rawLangs.map(langLabelToCode);
 
             const verified = raw.verified === true;
             const photoUrl = isNonEmptyString(raw.avatar_url) ? raw.avatar_url : undefined;
+            const username = isNonEmptyString(raw.username) ? raw.username.trim().toLowerCase() : null;
 
             // dance_skills from DB is JSON or JSON string; keys lowercased (e.g. "salsa")
             const danceSkills: Partial<Record<Style, Level>> = {};
@@ -1678,14 +1768,18 @@ function ConnectionsPageContent() {
             const hostingStatus = isNonEmptyString(raw.hosting_status) ? raw.hosting_status : undefined;
             const maxGuests = typeof raw.max_guests === "number" ? raw.max_guests : null;
 
+            const displayRole = isNonEmptyString(raw.display_role) ? raw.display_role : (roles[0] ?? null);
+
             acc.push({
               id: rawId,
+              username,
               name,
               city,
               country,
               memberSince: isNonEmptyString(raw.created_at) ? raw.created_at : null,
               verified,
               roles,
+              displayRole,
               danceSkills,
               otherStyle,
               langs: langsCodes,
@@ -1752,13 +1846,30 @@ function ConnectionsPageContent() {
         let trips: TripRow[] = [];
         let loadedTrips = false;
         let lastTripsError: unknown = null;
+        let sampleTripOwnerIds: string[] = [];
 
-        const tripsQuery = supabase
+        if (sampleDiscoverOnly) {
+          const { data: sampleOwners, error: sampleOwnersError } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .or("username.ilike.sample.dancer.%,username.ilike.sample.host.%")
+            .limit(40);
+          if (!sampleOwnersError) {
+            sampleTripOwnerIds = (sampleOwners ?? [])
+              .map((row) => (row as { user_id?: string | null }).user_id ?? "")
+              .filter(isNonEmptyString);
+          } else {
+            lastTripsError = sampleOwnersError;
+          }
+        }
+
+        let tripsQuery = supabase
           .from("trips")
           .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
           .eq("status", "active")
           .gte("end_date", todayIso)
-          .limit(200);
+          .limit(sampleDiscoverOnly ? 40 : 200);
+        if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) tripsQuery = tripsQuery.in("user_id", sampleTripOwnerIds);
         const { data: tripRows, error: tripErr } = await tripsQuery;
         if (!tripErr) {
           trips = (tripRows ?? []) as TripRow[];
@@ -1768,10 +1879,11 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedTrips) {
-          const tripsQueryFallback = supabase
+          let tripsQueryFallback = supabase
             .from("trips")
             .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(200);
+            .limit(sampleDiscoverOnly ? 40 : 200);
+          if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) tripsQueryFallback = tripsQueryFallback.in("user_id", sampleTripOwnerIds);
           const { data: fallbackRows, error: fallbackErr } = await tripsQueryFallback;
           if (!fallbackErr) {
             trips = (fallbackRows ?? []) as TripRow[];
@@ -1782,10 +1894,11 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedTrips) {
-          const tripsQueryLite = supabase
+          let tripsQueryLite = supabase
             .from("trips")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(200);
+            .limit(sampleDiscoverOnly ? 40 : 200);
+          if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) tripsQueryLite = tripsQueryLite.in("user_id", sampleTripOwnerIds);
           const { data: fallbackRowsLite, error: fallbackErrLite } = await tripsQueryLite;
           if (!fallbackErrLite) {
             trips = (fallbackRowsLite ?? []) as TripRow[];
@@ -1796,10 +1909,11 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedTrips) {
-          const travelPlansQuery = supabase
+          let travelPlansQuery = supabase
             .from("travel_plans")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(200);
+            .limit(sampleDiscoverOnly ? 40 : 200);
+          if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) travelPlansQuery = travelPlansQuery.in("user_id", sampleTripOwnerIds);
           const { data: planRows, error: planErr } = await travelPlansQuery;
           if (!planErr) {
             trips = (planRows ?? []) as TripRow[];
@@ -1829,7 +1943,7 @@ function ConnectionsPageContent() {
 
           const { data: feedProfs, error: feedProfErr } = await supabase
             .from("profiles_feed")
-            .select("id,display_name,avatar_url,roles,languages,ref_member_all,ref_trip_all,ref_event_all")
+            .select("id,username,display_name,avatar_url,roles,display_role,languages,ref_member_all,ref_trip_all,ref_event_all")
             .in("id", ids);
           if (!feedProfErr) {
             profileRows = (feedProfs ?? []) as ProfileFeedLiteRow[];
@@ -1841,7 +1955,7 @@ function ConnectionsPageContent() {
           if (!loadedProfiles) {
             const { data: feedProfsLite, error: feedProfErrLite } = await supabase
               .from("profiles_feed")
-              .select("id,display_name,avatar_url,roles,languages")
+              .select("id,username,display_name,avatar_url,roles,display_role,languages")
               .in("id", ids);
             if (!feedProfErrLite) {
               profileRows = (feedProfsLite ?? []) as ProfileFeedLiteRow[];
@@ -1854,7 +1968,7 @@ function ConnectionsPageContent() {
           if (!loadedProfiles) {
             const { data: fallbackProfs, error: fallbackProfErr } = await supabase
               .from("profiles")
-              .select("user_id,display_name,avatar_url,roles,languages,ref_member_all,ref_trip_all,ref_event_all")
+              .select("user_id,username,display_name,avatar_url,roles,display_role,languages,ref_member_all,ref_trip_all,ref_event_all")
               .in("user_id", ids);
             if (!fallbackProfErr) {
               profileRows = (fallbackProfs ?? []).map((row) => {
@@ -1870,7 +1984,7 @@ function ConnectionsPageContent() {
           if (!loadedProfiles) {
             const { data: fallbackProfsLite, error: fallbackProfErrLite } = await supabase
               .from("profiles")
-              .select("user_id,display_name,avatar_url,roles,languages")
+              .select("user_id,username,display_name,avatar_url,roles,display_role,languages")
               .in("user_id", ids);
             if (!fallbackProfErrLite) {
               profileRows = (fallbackProfsLite ?? []).map((row) => {
@@ -1898,17 +2012,19 @@ function ConnectionsPageContent() {
           return {
             id: t.id ?? "",
             user_id: t.user_id ?? "",
+            ownerUsername: isNonEmptyString(p.username) ? p.username.trim().toLowerCase() : null,
             status: (t.status ?? "active") as TripStatus,
             destination_country: t.destination_country ?? "",
             destination_city: t.destination_city ?? "",
             start_date: t.start_date ?? "",
             end_date: t.end_date ?? "",
-            purpose: t.purpose ?? "Trip",
+            purpose: travelIntentReasonLabel(t.purpose),
             reason: t.purpose ?? null,
             created_at: t.created_at ?? null,
             display_name: p.display_name ?? "Unknown",
             avatar_url: p.avatar_url ?? null,
-            roles: Array.isArray(p.roles) ? p.roles.filter(isNonEmptyString) : [],
+            roles: Array.isArray(p.roles) ? stripLegacyRoles(p.roles.filter(isNonEmptyString)) : [],
+            display_role: (() => { const r = Array.isArray(p.roles) ? stripLegacyRoles(p.roles.filter(isNonEmptyString)) : []; return (isNonEmptyString(p.display_role) ? p.display_role : null) ?? r[0] ?? null; })(),
             languages: Array.isArray(p.languages) ? p.languages.filter(isNonEmptyString) : [],
             refMemberAll: typeof p.ref_member_all === "number" ? p.ref_member_all : 0,
             refTripAll: typeof p.ref_trip_all === "number" ? p.ref_trip_all : 0,
@@ -1930,7 +2046,7 @@ function ConnectionsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, sampleDiscoverOnly]);
 
   // Country + City library (same as onboarding)
   const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
@@ -2091,6 +2207,13 @@ function ConnectionsPageContent() {
     let list = dbMembers.slice();
     const memberSearchQuery = normalizeSearchText(memberSearch);
 
+    if (sampleDiscoverOnly) {
+      list = list.filter((m) => {
+        if (discoverMode === "hosts") return isSampleHostUsername(m.username);
+        return isSampleDancerUsername(m.username);
+      });
+    }
+
     if (myCityOnly) {
       if (!myCity) return [];
       const cityLower = myCity.toLowerCase();
@@ -2105,7 +2228,9 @@ function ConnectionsPageContent() {
 
     if (filters.country) list = list.filter((m) => m.country === filters.country);
     if (filters.cities.length) list = list.filter((m) => filters.cities.includes(m.city));
-    if (hiddenMemberIds.length) list = list.filter((m) => !hiddenMemberIds.includes(m.id));
+    if (hiddenMemberIds.length && discoverMode !== "hosts") {
+      list = list.filter((m) => !hiddenMemberIds.includes(m.id));
+    }
 
     if (filters.roles.length) {
       list = list.filter((m) => m.roles.some((r) => filters.roles.includes(r as Role)));
@@ -2141,27 +2266,7 @@ function ConnectionsPageContent() {
     if (filters.verifiedOnly) list = list.filter((m) => !!m.verified);
 
     if (discoverMode === "hosts") {
-      if (hostColumnsAvailable) {
-        list = list.filter((m) => {
-          if (!m.canHost) return false;
-          if (m.maxGuests !== null && typeof m.maxGuests === "number" && m.maxGuests <= 0) return false;
-          const status = (m.hostingStatus ?? "").trim().toLowerCase();
-          if (!status) return true;
-          return ["active", "available", "open", "enabled", "on"].includes(status);
-        });
-      } else {
-        list = list.filter((m) => {
-          const hasHostRole = m.roles.some((role) => ["Organizer", "Studio Owner", "Promoter"].includes(role));
-          const availability = (m.availability ?? "").toLowerCase();
-          const interest = (m.interest ?? "").toLowerCase();
-          const hostSignal =
-            availability.includes("travel") ||
-            interest.includes("accommodation") ||
-            interest.includes("organize") ||
-            interest.includes("host");
-          return hasHostRole || hostSignal;
-        });
-      }
+      list = list.filter((m) => isHostingListingOpen(m.canHost === true, m.hostingStatus));
     }
 
     if (memberSearchQuery) {
@@ -2208,6 +2313,7 @@ function ConnectionsPageContent() {
     discoverMode,
     hostColumnsAvailable,
     memberSearch,
+    sampleDiscoverOnly,
   ]);
 
   useEffect(() => {
@@ -2230,6 +2336,10 @@ function ConnectionsPageContent() {
 
   const filteredTrips = useMemo(() => {
     let list = tripCards.slice();
+
+    if (sampleDiscoverOnly) {
+      list = list.filter((t) => isSampleDiscoverUsername(t.ownerUsername));
+    }
 
     if (myCityOnly) {
       if (!myCity) return [];
@@ -2294,7 +2404,7 @@ function ConnectionsPageContent() {
     else if (sortMode === "city_az") list = list.slice().sort(byCity);
 
     return list;
-  }, [filters, tripCards, sortMode, getTripRecommendationMeta, myCityOnly, myCity, myCountry]);
+  }, [filters, tripCards, sortMode, getTripRecommendationMeta, myCityOnly, myCity, myCountry, sampleDiscoverOnly]);
 
   const totalMembersPages = Math.max(1, Math.ceil(members.length / DISCOVER_PAGE_SIZE));
   const totalTravellersPages = Math.max(1, Math.ceil(filteredTrips.length / DISCOVER_PAGE_SIZE));
@@ -2391,6 +2501,10 @@ function ConnectionsPageContent() {
     () => linkedConnectionOptions.filter((option) => option.userId !== tripJoinModal.targetUserId),
     [linkedConnectionOptions, tripJoinModal.targetUserId]
   );
+  const selectedTripLinkedMember = useMemo(
+    () => tripLinkedMemberOptions.find((option) => option.userId === tripJoinModal.linkedMemberUserId) ?? null,
+    [tripJoinModal.linkedMemberUserId, tripLinkedMemberOptions]
+  );
   const filteredTripLinkedMemberOptions = useMemo(() => {
     const query = tripLinkedMemberQuery.trim().toLowerCase();
     if (!query) return tripLinkedMemberOptions;
@@ -2411,10 +2525,19 @@ function ConnectionsPageContent() {
       return haystack.includes(query);
     });
   }, [hostingLinkedMemberOptions, hostingLinkedMemberQuery]);
+  const selectedHostingLinkedMember = useMemo(
+    () => hostingLinkedMemberOptions.find((option) => option.userId === hostingModal.linkedMemberUserId) ?? null,
+    [hostingLinkedMemberOptions, hostingModal.linkedMemberUserId]
+  );
 
   async function sendTripJoinRequest() {
     if (!tripJoinModal.tripId || !tripJoinModal.targetUserId) {
       setTripJoinError("Missing trip details.");
+      return;
+    }
+
+    if (!tripJoinModal.reason) {
+      setTripJoinError("Choose why you want to join this trip.");
       return;
     }
 
@@ -2440,6 +2563,7 @@ function ConnectionsPageContent() {
         },
         body: JSON.stringify({
           tripId: tripJoinModal.tripId,
+          reason: tripJoinModal.reason,
           note: note || null,
           linkedMemberUserId: tripJoinModal.linkedMemberUserId || null,
         }),
@@ -2467,6 +2591,14 @@ function ConnectionsPageContent() {
   async function sendHostingRequest() {
     if (!hostingModal.targetUserId) {
       setHostingModalError("Missing target host/traveler.");
+      return;
+    }
+    if (hostingModal.requestType === "request_hosting" && !hostingModal.reason) {
+      setHostingModalError("Choose why you need hosting.");
+      return;
+    }
+    if (hostingModal.requestType === "offer_to_host" && !hostingModal.reason) {
+      setHostingModalError("Choose the space type you are offering.");
       return;
     }
     if (!hostingModal.arrivalDate) {
@@ -2526,6 +2658,12 @@ function ConnectionsPageContent() {
           recipientUserId: hostingModal.targetUserId,
           requestType: hostingModal.requestType,
           tripId: hostingModal.tripId,
+          reason:
+            hostingModal.requestType === "request_hosting"
+              ? hostingModal.reason || null
+              : hostingModal.reason
+                ? normalizeHostingSleepingArrangement(hostingModal.reason)
+                : null,
           arrivalDate: hostingModal.arrivalDate,
           departureDate: hostingModal.departureDate,
           arrivalFlexible: hostingModal.arrivalFlexible,
@@ -2857,22 +2995,10 @@ function ConnectionsPageContent() {
                             ) : null}
                           </div>
 
-                          {m.roles.length ? (
-                            <div className="mt-1.5">
-                              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
-                                <MSIcon name="badge" className="text-[15px] text-[#00F5FF]" />
-                                <span>Roles</span>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {m.roles.slice(0, 2).map((r) => (
-                                  <span
-                                    key={r}
-                                    className="text-[11px] font-medium text-white/75"
-                                  >
-                                    {r.charAt(0).toUpperCase() + r.slice(1).toLowerCase()}
-                                  </span>
-                                ))}
-                              </div>
+                          {m.displayRole ? (
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <MSIcon name="badge" className="text-[13px] text-[#00F5FF]" />
+                              <span className="text-[11px] font-medium text-white/75">{m.displayRole}</span>
                             </div>
                           ) : null}
 
@@ -2997,21 +3123,18 @@ function ConnectionsPageContent() {
                                 <span className="font-medium text-white/70">{refTotal}</span>
                                 <span>References</span>
                               </div>
-
                               {refMember > 0 ? (
                                 <div className="flex items-center gap-1.5">
                                   <MSIcon name="person" className="icon-xs text-[#00F5FF]" />
                                   <span className="font-medium text-white/70">{refMember}</span>
                                 </div>
                               ) : null}
-
                               {refTrip > 0 ? (
                                 <div className="flex items-center gap-1.5">
                                   <MSIcon name="flight" className="icon-xs text-[#00F5FF]" />
                                   <span className="font-medium text-white/70">{refTrip}</span>
                                 </div>
                               ) : null}
-
                               {refEvent > 0 ? (
                                 <div className="flex items-center gap-1.5">
                                   <MSIcon name="event_available" className="icon-xs text-[#00F5FF]" />
@@ -3021,19 +3144,12 @@ function ConnectionsPageContent() {
                             </div>
 
                             <div className="mb-2.5 space-y-1.5">
-                              <div className="flex items-center gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                                <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                                <div className="flex gap-2">
-                                  {m.roles.map((r) => (
-                                    <span
-                                      key={r}
-                                      className="whitespace-nowrap text-[11px] font-medium text-white/70"
-                                    >
-                                      {r.charAt(0).toUpperCase() + r.slice(1).toLowerCase()}
-                                    </span>
-                                  ))}
+                              {m.displayRole ? (
+                                <div className="flex items-center gap-1.5">
+                                  <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
+                                  <span className="text-[11px] font-medium text-white/75">{m.displayRole}</span>
                                 </div>
-                              </div>
+                              ) : null}
 
                               <div className="flex items-center gap-2">
                                 <MSIcon name="person_play" className="icon-sm text-[#00F5FF]" />
@@ -3161,50 +3277,35 @@ function ConnectionsPageContent() {
             ) : null}
 
             {loadingTrips ? (
-              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2 xl:grid-cols-3">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div
                     key={`trip-sk-${i}`}
-                    className="connections-card relative overflow-hidden border border-white/10 rounded-3xl bg-[#121212] flex flex-col md:flex-row h-auto md:h-[236px] animate-pulse"
+                    className="connections-card relative h-[330px] overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] animate-pulse xl:h-[320px]"
                   >
-                    <div className="relative w-full md:w-1/2 h-36 md:h-full bg-white/5" />
-                    <div className="flex w-full md:w-1/2 flex-col bg-[#121212] px-3 pt-3 pb-4 md:px-4 md:pt-3 md:pb-4">
-                      <div className="mb-3 flex items-center gap-3">
-                        <div className="h-11 w-11 rounded-lg bg-white/10" />
-                        <div className="space-y-2">
+                    {/* Full-bleed background shimmer */}
+                    <div className="absolute inset-0 bg-white/[0.04]" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+
+                    {/* Top — city name + country + date pill */}
+                    <div className="absolute inset-x-0 top-0 z-10 p-4 md:p-5">
+                      <div className="h-10 w-48 rounded-lg bg-white/10" />
+                      <div className="mt-2 h-3 w-24 rounded bg-white/[0.07]" />
+                      <div className="mt-4 h-8 w-40 rounded-full bg-white/10" />
+                    </div>
+
+                    {/* Bottom footer bar */}
+                    <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-3 border-t border-white/10 px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-white/10" />
+                        <div className="space-y-1.5">
                           <div className="h-3 w-24 rounded bg-white/10" />
-                          <div className="h-5 w-36 rounded bg-white/10" />
+                          <div className="h-2.5 w-16 rounded bg-white/[0.07]" />
                         </div>
                       </div>
-                      <div className="flex items-start gap-3 rounded-2xl p-1.5">
-                        <div className="h-[72px] w-[72px] shrink-0 rounded-[14px] bg-white/10" />
-                        <div className="min-w-0 flex-1 space-y-2 pt-1">
-                          <div className="h-5 w-32 rounded bg-white/10" />
-                          <div className="h-4 w-24 rounded bg-white/10" />
-                          <div className="flex gap-1">
-                            <div className="h-5 w-5 rounded-full bg-white/10" />
-                            <div className="h-5 w-5 rounded-full bg-white/10" />
-                            <div className="h-5 w-5 rounded-full bg-white/10" />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-1 space-y-2">
-                        <div className="h-4 w-40 rounded bg-white/10" />
-                        <div className="flex gap-2">
-                          <div className="h-6 w-24 rounded-md bg-white/10" />
-                          <div className="h-6 w-20 rounded-md bg-white/10" />
-                          <div className="h-6 w-16 rounded-md bg-white/10" />
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="h-5 w-8 rounded-full bg-white/10" />
-                          <div className="h-5 w-8 rounded-full bg-white/10" />
-                        </div>
-                      </div>
-                      <div className="mt-auto pt-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="h-[38px] rounded-full bg-white/10" />
-                          <div className="h-[38px] rounded-full bg-white/10" />
-                        </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="h-9 rounded-full bg-white/10" />
+                        <div className="h-9 rounded-full bg-white/[0.07]" />
                       </div>
                     </div>
                   </div>
@@ -3215,7 +3316,7 @@ function ConnectionsPageContent() {
                 No trips match these filters.
               </div>
             ) : (
-              <div className="animate-fade-in-grid grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+              <div className="animate-fade-in-grid grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2 xl:grid-cols-3">
                 {paginatedTrips.map((t) => {
                   const heroUrl = getTripHeroStorageUrl(t.destination_country);
                   const heroStorageFallback = getTripHeroStorageFolderUrl(t.destination_country);
@@ -3223,162 +3324,150 @@ function ConnectionsPageContent() {
                   const purposeMeta = getPurposeMeta(t.purpose);
 
                   return (
+                    /* ── Immersive Trip Card ── */
                     <div
                       key={t.id}
-                      className="connections-card relative border border-white/10 rounded-3xl bg-[#121212] overflow-hidden flex flex-col md:flex-row h-auto md:h-[236px] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
+                      className="connections-card group relative h-[330px] overflow-hidden rounded-[1.25rem] border border-white/10 transition-all duration-700 hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)] xl:h-[320px]"
                     >
-                      <div className="relative w-full md:w-1/2 h-36 md:h-full overflow-hidden flex items-center justify-center text-center">
-                        <div className="absolute inset-0" style={{ backgroundImage: FALLBACK_GRADIENT }} />
-                        {(heroUrl || heroStorageFallback || heroFallback) ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={heroUrl || heroStorageFallback || heroFallback}
-                              alt={`${t.destination_city ?? "Trip"} hero`}
-                              className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                              crossOrigin="anonymous"
-                              data-fallback-storage={heroStorageFallback || ""}
-                              data-fallback={heroFallback || ""}
-                              onError={(event) => {
-                                const target = event.currentTarget;
-                                const fallbackStorage = target.dataset.fallbackStorage;
-                                const fallback = target.dataset.fallback;
-                                if (fallbackStorage && target.src !== fallbackStorage) {
-                                  target.src = fallbackStorage;
-                                  return;
-                                }
-                                if (fallback && target.src !== fallback) {
-                                  target.src = fallback;
-                                }
-                              }}
-                            />
-                          </>
-                        ) : null}
-                        <div className="absolute inset-0 bg-black/40 md:bg-black/30" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A]/60 via-transparent to-transparent" />
-                        <div className="relative z-10 flex flex-col items-center gap-3 px-4">
-                          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/10 shadow-lg">
-                            <MSIcon name="calendar_month" className="text-[#0dccf2] text-[18px]" />
-                            <span className="text-white text-[12px] md:text-[13px] font-bold tracking-wide uppercase">
+                      {/* ── Background city image ── */}
+                      <div className="absolute inset-0" style={{ backgroundImage: FALLBACK_GRADIENT }} />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={heroUrl || heroStorageFallback || heroFallback || ""}
+                        alt={`${t.destination_city ?? "Trip"} hero`}
+                        className="absolute inset-0 h-full w-full object-cover brightness-[0.65] transition-transform duration-1000 group-hover:scale-105"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        crossOrigin="anonymous"
+                        data-fallback-storage={heroStorageFallback || ""}
+                        data-fallback={heroFallback || ""}
+                        onError={(event) => {
+                          const target = event.currentTarget;
+                          const fallbackStorage = target.dataset.fallbackStorage;
+                          const fallback = target.dataset.fallback;
+                          if (fallbackStorage && target.src !== fallbackStorage) { target.src = fallbackStorage; return; }
+                          if (fallback && target.src !== fallback) { target.src = fallback; }
+                        }}
+                      />
+                      {/* gradient: dark bottom, soft top */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-black/15" />
+
+                      {/* ── Top content ── */}
+                      <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4 md:p-5">
+                        {/* City + country + date */}
+                        <div>
+                          <h2
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/profile/${t.user_id}?fromTrip=${t.id}`); } }}
+                            className="max-w-full break-words text-[34px] font-black leading-[0.95] tracking-tighter text-white drop-shadow-2xl transition-opacity hover:opacity-90 sm:text-4xl xl:text-[32px]"
+                          >
+                            {t.destination_city}
+                          </h2>
+                          <p className="mt-1 truncate text-[10px] font-bold uppercase tracking-[0.28em] text-[#c1fffe] drop-shadow-lg">
+                            {t.destination_country}
+                          </p>
+                          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/45 px-3 py-1.5 shadow-lg backdrop-blur-xl">
+                            <MSIcon name="calendar_today" className="text-[14px] text-[#ff51fa]" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-white">
                               {formatDateCompact(t.start_date)} – {formatDateCompact(t.end_date)}
                             </span>
                           </div>
-                          <div className="flex flex-col items-center rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 px-3 py-2">
-                            <div className="text-3xl md:text-[32px] font-extrabold text-[#0dccf2] tracking-tight drop-shadow-[0_0_10px_rgba(13,204,242,0.3)]">
-                              {t.destination_city}
-                            </div>
-                            <div className="text-white/70 text-[11px] font-light tracking-[0.2em] uppercase mt-1">
-                              {t.destination_country}
-                            </div>
-                          </div>
                         </div>
+
                       </div>
 
-                      <div className="relative z-10 flex w-full flex-col gap-2 bg-[#121212] px-3 pb-4 pt-3 md:w-1/2 md:px-4">
-                        {/* Profile row — purpose label inline top-right, bigger avatar */}
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              router.push(`/profile/${t.user_id}?fromTrip=${t.id}`);
-                            }
-                          }}
-                          className="flex flex-1 items-center gap-3 text-left"
-                        >
-                          <div className="relative shrink-0">
-                            <div className="absolute -inset-2 rounded-[22px] bg-[#d946ef]/20 blur-md" />
+                      {/* ── Bottom glassmorphism footer ── */}
+                      <div
+                        className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-3 border-t border-white/10 px-4 py-3"
+                        style={{ background: "rgba(14,14,14,0.55)", backdropFilter: "blur(24px)" }}
+                      >
+                            {/* Host identity */}
                             <div
-                              className="relative h-[116px] w-[116px] rounded-[22px] bg-cover bg-center ring-1 ring-white/10"
-                              style={{
-                                backgroundImage: t.avatar_url
-                                  ? `url(${t.avatar_url})`
-                                  : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                              }}
-                            />
-                          </div>
-                          <div className="min-w-0 flex flex-col gap-1 justify-center">
-                            <span className={`text-[10px] font-bold uppercase tracking-[0.14em] ${purposeMeta.text}`}>{t.purpose ?? "Trip"}</span>
-                            <span className="truncate text-base font-bold tracking-tight text-white">{t.display_name}</span>
-                            {t.languages?.length ? (
-                              <div className="flex min-w-0 items-center gap-1">
-                                <MSIcon name="public" className="icon-xs text-[#00F5FF]" />
-                                <ScrollRow ariaLabelLeft="Scroll languages left" ariaLabelRight="Scroll languages right">
-                                  {t.languages.map((l) => {
-                                    const code = langLabelToCode(l);
-                                    return (
-                                      <span
-                                        key={l}
-                                        className="flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[7px] font-bold text-white/70"
-                                        title={l}
-                                      >
-                                        {code}
-                                      </span>
-                                    );
-                                  })}
-                                </ScrollRow>
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
+                              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/profile/${t.user_id}?fromTrip=${t.id}`); } }}
+                              className="flex min-w-0 cursor-pointer items-center gap-3"
+                            >
+                              <div className="relative shrink-0">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                {t.avatar_url ? (
+                                  <img
+                                    src={t.avatar_url}
+                                    alt={t.display_name}
+                                    className="h-11 w-11 rounded-full object-cover ring-2 ring-[#c1fffe]/35"
+                                  />
+                                ) : (
+                                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#0dccf2]/30 to-[#d946ef]/30 text-base font-bold text-white ring-2 ring-[#c1fffe]/35">
+                                    {t.display_name.charAt(0).toUpperCase()}
+                                  </div>
+                                )}
                               </div>
-                            ) : null}
-                            <div className="flex min-w-0 items-center gap-0.5">
-                              <MSIcon name="badge" className="icon-sm text-[#00F5FF]" />
-                              <ScrollRow ariaLabelLeft="Scroll roles left" ariaLabelRight="Scroll roles right">
-                                {(t.roles?.length ? t.roles : ["Traveller"]).map((role) => (
-                                  <span
-                                    key={role}
-                                    className="shrink-0 whitespace-nowrap px-2 py-[2px] text-[8px] font-medium uppercase tracking-[0.14em] text-white/70"
-                                  >
-                                    {role}
-                                  </span>
-                                ))}
-                              </ScrollRow>
+                              <div className="min-w-0 flex flex-col gap-[3px]">
+                                <p className="truncate text-sm font-bold leading-tight text-white">{t.display_name}</p>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {(t.display_role ?? t.roles?.[0]) ? (
+                                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
+                                      {t.display_role ?? t.roles[0]}
+                                    </span>
+                                  ) : null}
+                                  {t.languages?.slice(0, 3).map((l) => (
+                                    <span key={l} className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-white/10 text-[7px] font-bold text-white/60" title={l}>
+                                      {langLabelToCode(l)}
+                                    </span>
+                                  ))}
+                                </div>
+                                <span className={`text-[10px] font-semibold uppercase tracking-[0.1em] ${purposeMeta.text}`}>
+                                  {t.purpose ?? "Traveller"}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                        </div>
 
-                        <div className="mt-auto grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openTripJoinModal({
-                                targetUserId: t.user_id,
-                                targetName: t.display_name,
-                                targetPhotoUrl: t.avatar_url ?? null,
-                                tripId: t.id,
-                                destinationCity: t.destination_city,
-                                destinationCountry: t.destination_country,
-                                startDate: t.start_date,
-                                endDate: t.end_date,
-                              })
-                            }
-                            className="flex min-h-[38px] w-full items-center justify-center gap-2 rounded-full border border-[#00F5FF]/35 bg-[#00F5FF]/12 px-4 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#B8FBFF] transition hover:border-[#00F5FF]/55 hover:bg-[#00F5FF]/18 hover:text-white"
-                          >
-                            <MSIcon name="group_add" className="text-[13px] text-[#00F5FF]" />
-                            Join Trip
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openHostingRequest({
-                                targetUserId: t.user_id,
-                                targetName: t.display_name,
-                                targetPhotoUrl: t.avatar_url ?? null,
-                                requestType: "offer_to_host",
-                                tripId: t.id,
-                                prefillArrivalDate: t.start_date,
-                                prefillDepartureDate: t.end_date,
-                                destinationCity: t.destination_city,
-                                destinationCountry: t.destination_country,
-                              })
-                            }
-                            className="w-full min-h-[38px] whitespace-nowrap rounded-full border border-[#FF00FF]/30 bg-[#FF00FF]/10 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#FFC6FA] transition hover:border-[#FF00FF]/50 hover:bg-[#FF00FF]/16 hover:text-white"
-                          >
-                            Offer Hosting
-                          </button>
-                        </div>
+                            {/* Action buttons */}
+                            <div className="grid w-full grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openHostingRequest({
+                                    targetUserId: t.user_id,
+                                    targetName: t.display_name,
+                                    targetPhotoUrl: t.avatar_url ?? null,
+                                    requestType: "offer_to_host",
+                                    tripId: t.id,
+                                    prefillArrivalDate: t.start_date,
+                                    prefillDepartureDate: t.end_date,
+                                    destinationCity: t.destination_city,
+                                    destinationCountry: t.destination_country,
+                                  })
+                                }
+                                className="flex h-10 items-center justify-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-2 text-[9px] font-bold uppercase tracking-widest text-white transition-all hover:bg-white/10"
+                              >
+                                <MSIcon name="home" className="text-[14px]" />
+                                <span>Offer Hosting</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openTripJoinModal({
+                                    targetUserId: t.user_id,
+                                    targetName: t.display_name,
+                                    targetPhotoUrl: t.avatar_url ?? null,
+                                    tripId: t.id,
+                                    destinationCity: t.destination_city,
+                                    destinationCountry: t.destination_country,
+                                    startDate: t.start_date,
+                                    endDate: t.end_date,
+                                  })
+                                }
+                                className="flex h-10 items-center justify-center gap-1.5 rounded-full px-2 text-[9px] font-extrabold uppercase tracking-widest text-[#040a0f] transition-all hover:scale-[1.01] hover:brightness-110 active:scale-[0.99]"
+                                style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
+                              >
+                                <MSIcon name="bolt" className="text-[14px]" />
+                                Join Trip
+                              </button>
+                            </div>
                       </div>
                     </div>
                   );
@@ -3917,139 +4006,174 @@ function ConnectionsPageContent() {
 />
 
       {tripJoinModal.open ? (
-        <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center sm:px-4 sm:py-4">
-          <div className="relative flex w-full max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] shadow-2xl" style={{ maxHeight: "calc(100dvh - 1.5rem)" }}>
-            <button
-              type="button"
-              onClick={closeTripJoinModal}
-              className="absolute right-5 top-5 z-10 text-white/50 transition hover:text-white"
-              aria-label="Close trip request modal"
-            >
-              <MSIcon name="close" className="text-[22px]" />
-            </button>
+        <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
+          <div
+            className="relative w-full max-w-[520px] overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
+            style={{ background: "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14" }}
+          >
+            {/* Top-right cluster */}
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+                {tripRequestsLimit !== null && tripRequestsUsed !== null && (
+                  <div className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px]">
+                    <span className={tripRequestsUsed >= tripRequestsLimit ? "font-bold text-rose-400" : tripRequestsUsed >= tripRequestsLimit * 0.8 ? "font-bold text-amber-400" : "font-semibold text-[#0df2f2]"}>
+                      {tripRequestsUsed}/{tripRequestsLimit}
+                    </span>
+                    <span className="text-white/30">req/mo</span>
+                  </div>
+                )}
+                <button type="button" onClick={closeTripJoinModal} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors" aria-label="Close">
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+            </div>
 
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto overscroll-contain p-6 pb-0 sm:p-8 sm:pb-0">
-              <div className="mb-6 flex items-start gap-4">
-                <div
-                  className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
-                  style={{
-                    backgroundImage: tripJoinModal.targetPhotoUrl
-                      ? `url(${tripJoinModal.targetPhotoUrl})`
-                      : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
-                  }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">Join Trip</p>
-                  <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
-                    {tripJoinModal.targetName}
-                  </h3>
-                </div>
-                <div className="mr-12 shrink-0 flex flex-col items-end gap-2 sm:mr-14">
-                  <button
-                    type="button"
-                    onClick={() => setTripLinkedPickerOpen((prev) => !prev)}
-                    className="inline-flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3.5 text-xs font-semibold text-white transition hover:border-[#00F5FF]/40 hover:text-[#9EFBFF]"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">group_add</span>
-                    Add Member
-                  </button>
-                  {tripRequestsLimit !== null && tripRequestsUsed !== null && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
-                      <span className={`text-[13px] font-black tabular-nums leading-tight ${
-                        tripRequestsUsed >= tripRequestsLimit
-                          ? "text-rose-400"
-                          : tripRequestsUsed >= tripRequestsLimit * 0.8
-                            ? "text-amber-400"
-                            : "text-[#00F5FF]"
-                      }`}>
-                        {tripRequestsUsed}<span className="text-white/25 font-normal"> / {tripRequestsLimit}</span>
-                      </span>
-                    </div>
-                  )}
-                </div>
+            {/* Header */}
+            <div className="flex items-center gap-4 px-6 pt-6 pb-5 border-b border-white/[0.07]">
+              <div
+                className="h-14 w-14 shrink-0 rounded-2xl border border-white/10 bg-cover bg-center"
+                style={{
+                  backgroundImage: tripJoinModal.targetPhotoUrl
+                    ? `url(${tripJoinModal.targetPhotoUrl})`
+                    : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))",
+                }}
+              />
+              <div className="min-w-0 pr-24">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Join trip with</p>
+                <h3 className="truncate text-xl font-extrabold tracking-tight text-white leading-tight">
+                  {tripJoinModal.targetName}
+                </h3>
+                <p className="text-[11px] text-white/35 mt-0.5">Why do you want to join?</p>
               </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="max-h-[min(60svh,480px)] overflow-y-auto overscroll-contain px-5 pt-5 pb-4 space-y-4">
 
               {/* Pending warning */}
-              {tripJoinWarning ? (
-                <PendingRequestBanner
-                  message={tripJoinWarning}
-                  onCtaClick={closeTripJoinModal}
-                  className="mb-4"
-                />
-              ) : null}
+              {tripJoinWarning ? <PendingRequestBanner message={tripJoinWarning} onCtaClick={closeTripJoinModal} /> : null}
 
               {/* Error */}
-              {tripJoinError && (
-                <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
-                  <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">error</span>
-                  <span>{tripJoinError}</span>
+              {tripJoinError ? (
+                <p className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-300">{tripJoinError}</p>
+              ) : null}
+
+              {/* Trip destination + dates info pill — centered */}
+              {(tripJoinModal.destinationCity || tripJoinModal.startDate) && (
+                <div className="flex justify-center">
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2.5">
+                    <span className="material-symbols-outlined text-[14px] text-[#0df2f2] shrink-0">flight</span>
+                    <p className="text-xs text-white/60">
+                      {tripJoinModal.destinationCity ? <span className="font-semibold text-white/90">{tripJoinModal.destinationCity}</span> : null}
+                      {tripJoinModal.destinationCountry ? <span className="text-white/40">, {tripJoinModal.destinationCountry}</span> : null}
+                      {tripJoinModal.startDate ? <span> · {formatDateCompact(tripJoinModal.startDate)}{tripJoinModal.endDate ? ` – ${formatDateCompact(tripJoinModal.endDate)}` : ""}</span> : null}
+                    </p>
+                  </div>
                 </div>
               )}
 
+              {/* Reason grid — uses shared ActivityType values for cross-feature consistency */}
+              <div className="flex flex-wrap justify-center gap-2.5">
+                {TRIP_JOIN_REASON_OPTIONS.map((type) => {
+                  const sel = tripJoinModal.reason === type.key;
+                  return (
+                    <button
+                      key={type.key}
+                      type="button"
+                      onClick={() => setTripJoinModal((prev) => ({ ...prev, reason: sel ? null : type.key }))}
+                      className={`group relative flex w-[calc(33.333%-7px)] flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition-all duration-150 ${
+                        sel
+                          ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
+                          : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
+                      }`}
+                    >
+                      {sel && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />}
+                      <span
+                        className={`material-symbols-outlined text-[22px] transition-colors ${sel ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"}`}
+                        style={{ fontVariationSettings: sel ? "'FILL' 1" : "'FILL' 0" }}
+                      >{type.icon}</span>
+                      <span className={`text-[11px] font-semibold leading-tight transition-colors ${sel ? "text-white" : "text-white/55 group-hover:text-white/80"}`}>
+                        {type.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
 
-              {/* Trip destination + dates */}
-              <div className="mb-5 flex items-center justify-center">
-              <div className="inline-flex items-center gap-6 rounded-2xl border border-white/8 bg-white/[0.03] px-5 py-3">
-                <div className="text-center">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Destination</p>
-                  <p className="mt-0.5 text-sm font-bold text-white">
-                    {tripJoinModal.destinationCity || "Trip"}
-                    {tripJoinModal.destinationCountry ? <span className="ml-1.5 font-normal text-white/50">{tripJoinModal.destinationCountry}</span> : null}
+              {/* Selected intent preview */}
+              {tripJoinModal.reason && (
+                <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2.5">
+                  <span className="material-symbols-outlined text-[14px] text-[#0df2f2] shrink-0">bolt</span>
+                  <p className="text-xs text-white/60">
+                    You want to join for{" "}
+                    <span className="font-semibold text-white/90">
+                      {tripJoinReasonLabel(tripJoinModal.reason)}
+                    </span>
                   </p>
                 </div>
-                {tripJoinModal.startDate && tripJoinModal.endDate ? (
-                  <>
-                    <span className="text-white/20">|</span>
-                    <div className="flex items-center gap-2">
-                      <div className="text-center">
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">From</p>
-                        <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.startDate)}</p>
-                      </div>
-                      <span className="material-symbols-outlined text-[16px] text-white/25">arrow_forward</span>
-                      <div className="text-center">
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">To</p>
-                        <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(tripJoinModal.endDate)}</p>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-              </div>
+              )}
 
-              <div className="mb-5">
-                {tripJoinModal.linkedMemberUserId ? (
-                  <p className="text-xs text-[#9EFBFF]">
-                    Added: {tripLinkedMemberOptions.find((option) => option.userId === tripJoinModal.linkedMemberUserId)?.displayName ?? "Connection"}
-                  </p>
-                ) : null}
+              {/* Optional note */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setTripLinkedPickerOpen((prev) => !prev)}
+                  className={
+                    selectedTripLinkedMember
+                      ? "flex w-full items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
+                      : "flex items-center gap-1.5 text-xs text-white/35 transition-colors hover:text-white/60"
+                  }
+                >
+                  {selectedTripLinkedMember ? (
+                    <>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className="h-10 w-10 shrink-0 rounded-full border border-white/10 bg-cover bg-center"
+                          style={{
+                            backgroundImage: selectedTripLinkedMember.avatarUrl
+                              ? `url(${selectedTripLinkedMember.avatarUrl})`
+                              : "linear-gradient(135deg, rgba(13,204,242,0.22), rgba(217,59,255,0.22))",
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[#0df2f2]">{selectedTripLinkedMember.displayName}</p>
+                        </div>
+                      </div>
+                      <span className={`material-symbols-outlined text-[18px] text-white/35 transition-transform ${tripLinkedPickerOpen ? "rotate-180" : ""}`}>
+                        expand_more
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[14px]">group_add</span>
+                      Add member
+                    </>
+                  )}
+                </button>
+
                 {tripLinkedPickerOpen ? (
-                  <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                  <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 space-y-2">
                     <input
                       type="text"
                       value={tripLinkedMemberQuery}
-                      onChange={(event) => setTripLinkedMemberQuery(event.target.value)}
-                      placeholder="Search connection..."
-                      className="mb-3 w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      onChange={(e) => setTripLinkedMemberQuery(e.target.value)}
+                      placeholder="Search connection…"
+                      className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 transition"
                     />
-                    <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
-                      <button
-                        type="button"
-                        onClick={() => setTripJoinModal((prev) => ({ ...prev, linkedMemberUserId: "" }))}
-                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
-                          !tripJoinModal.linkedMemberUserId
-                            ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                            : "border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white"
-                        }`}
-                      >
-                        <span>No extra member</span>
-                        {!tripJoinModal.linkedMemberUserId ? (
-                          <span className="material-symbols-outlined text-[16px]">check</span>
-                        ) : null}
-                      </button>
+                    <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                      {selectedTripLinkedMember ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTripJoinModal((prev) => ({ ...prev, linkedMemberUserId: "" }));
+                            setTripLinkedPickerOpen(false);
+                            setTripLinkedMemberQuery("");
+                          }}
+                          className="flex w-full items-center justify-between rounded-xl border border-white/[0.07] bg-transparent px-3 py-2 text-left text-sm text-white/60 transition hover:text-white"
+                        >
+                          <span>Remove member</span>
+                          <span className="material-symbols-outlined text-[15px]">close</span>
+                        </button>
+                      ) : null}
                       {filteredTripLinkedMemberOptions.map((option) => {
-                        const subtitle = [option.city, option.country].filter(Boolean).join(", ");
                         const isSelected = tripJoinModal.linkedMemberUserId === option.userId;
                         return (
                           <button
@@ -4060,354 +4184,386 @@ function ConnectionsPageContent() {
                               setTripLinkedPickerOpen(false);
                               setTripLinkedMemberQuery("");
                             }}
-                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${
-                              isSelected
-                                ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                                : "border-white/10 bg-black/20 text-white/80 hover:border-white/20 hover:text-white"
-                            }`}
+                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${isSelected ? "border-[#0df2f2]/30 bg-[#0df2f2]/8 text-white" : "border-white/[0.07] bg-transparent text-white/70 hover:text-white"}`}
                           >
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold">{option.displayName}</span>
-                              {subtitle ? <span className="block truncate text-xs text-white/45">{subtitle}</span> : null}
+                            <span className="flex min-w-0 items-center gap-3">
+                              <span
+                                className="h-9 w-9 shrink-0 rounded-full border border-white/10 bg-cover bg-center"
+                                style={{
+                                  backgroundImage: option.avatarUrl
+                                    ? `url(${option.avatarUrl})`
+                                    : "linear-gradient(135deg, rgba(13,204,242,0.22), rgba(217,59,255,0.22))",
+                                }}
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold">{option.displayName}</span>
+                                {[option.city, option.country].filter(Boolean).join(", ") ? <span className="block truncate text-xs text-white/35">{[option.city, option.country].filter(Boolean).join(", ")}</span> : null}
+                              </span>
                             </span>
-                            {isSelected ? <span className="material-symbols-outlined text-[16px]">check</span> : null}
+                            {isSelected ? <span className="material-symbols-outlined text-[15px] text-[#0df2f2]">check</span> : null}
                           </button>
                         );
                       })}
                       {filteredTripLinkedMemberOptions.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-3 text-sm text-white/45">
-                          No matching connections.
-                        </div>
+                        <p className="px-3 py-3 text-sm text-white/35">No matching connections.</p>
                       ) : null}
                     </div>
                   </div>
                 ) : null}
               </div>
 
-              {/* Note */}
-              <div>
-                <div className="mb-2 text-sm font-semibold text-white">Note</div>
-                <textarea
-                  value={tripJoinModal.note}
-                  onChange={(event) => setTripJoinModal((prev) => ({ ...prev, note: event.target.value }))}
-                  maxLength={500}
-                  rows={4}
-                  placeholder="Add context for your trip request."
-                  className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                />
-                <div className="mt-2 flex items-center justify-between text-[11px]">
-                  <span className={tripRequestMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
-                    No links, emails, social handles, or phone numbers.
-                  </span>
-                  <span className={tripJoinModal.note.length > 480 ? "text-amber-200" : "text-white/45"}>
-                    {tripJoinModal.note.length}/500
-                  </span>
+              {!tripNoteOpen ? (
+                <button type="button" onClick={() => setTripNoteOpen(true)} className="flex items-center gap-1.5 text-xs text-white/35 hover:text-white/60 transition-colors">
+                  <span className="material-symbols-outlined text-[14px]">add</span>
+                  Add a note
+                </button>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Note (optional)</label>
+                    <span className="text-[10px] text-white/25">{tripJoinModal.note.length}/500</span>
+                  </div>
+                  <textarea
+                    autoFocus
+                    value={tripJoinModal.note}
+                    onChange={(e) => setTripJoinModal((prev) => ({ ...prev, note: e.target.value.slice(0, 500) }))}
+                    rows={3}
+                    placeholder="Add context for your trip request…"
+                    className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
+                  />
+                  {tripRequestMessageValidation ? (
+                    <p className="text-[11px] text-[#FFC6FA]">{tripRequestMessageValidation}</p>
+                  ) : (
+                    <p className="text-[11px] text-white/25">No links, emails, social handles, or phone numbers.</p>
+                  )}
                 </div>
-                {tripRequestMessageValidation ? (
-                  <p className="mt-1 text-xs text-[#FFC6FA]">{tripRequestMessageValidation}</p>
-                ) : null}
-              </div>
+              )}
             </div>
 
-            {/* Fixed footer buttons */}
-            <div className="shrink-0 border-t border-white/8 px-6 py-4 sm:px-8">
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeTripJoinModal}
-                  className="h-12 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={tripRequestSending || Boolean(tripRequestMessageValidation) || Boolean(tripJoinWarning)}
-                  onClick={sendTripJoinRequest}
-                  className="h-12 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
-                  style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
-                >
-                  {tripRequestSending ? "Sending…" : "Send trip request"}
-                </button>
-              </div>
+            {/* Flush footer */}
+            <div className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-4">
+              <button
+                type="button"
+                disabled={!tripJoinModal.reason || tripRequestSending || Boolean(tripRequestMessageValidation) || Boolean(tripJoinWarning)}
+                onClick={sendTripJoinRequest}
+                className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99]"
+                style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
+              >
+                {tripRequestSending ? "Sending…" : "Send trip request"}
+              </button>
+              <button
+                type="button"
+                onClick={closeTripJoinModal}
+                className="h-10 w-full rounded-2xl border border-white/[0.07] text-sm font-medium text-white/35 hover:border-white/15 hover:text-white/60 transition-colors"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
       ) : null}
 
       {hostingModal.open ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-4 py-4 backdrop-blur-md sm:items-center">
-          <div className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[640px] overflow-y-auto overscroll-contain rounded-[28px] border border-[#00F5FF]/20 bg-[#121212] p-6 shadow-2xl sm:max-h-[min(92dvh,900px)] sm:p-8">
-            <button
-              type="button"
-              onClick={closeHostingModal}
-              className="absolute right-5 top-5 text-white/50 transition hover:text-white"
-              aria-label="Close hosting request modal"
-            >
-              <MSIcon name="close" className="text-[22px]" />
-            </button>
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
+          <div
+            className="relative flex max-h-[min(92svh,680px)] w-full max-w-[520px] flex-col overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
+            style={{ background: "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14" }}
+          >
+            {/* Top-right cluster: [counter | close] */}
+            <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-1.5">
+                {hostingModal.requestType === "offer_to_host"
+                  ? hostingOffersLimit !== null && hostingOffersUsed !== null && (
+                      <div className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px]">
+                        <span className={hostingOffersUsed >= hostingOffersLimit ? "font-bold text-rose-400" : hostingOffersUsed >= hostingOffersLimit * 0.8 ? "font-bold text-amber-400" : "font-semibold text-[#0df2f2]"}>
+                          {hostingOffersUsed}/{hostingOffersLimit}
+                        </span>
+                        <span className="text-white/30">req/mo</span>
+                      </div>
+                    )
+                  : hostingRequestsLimit !== null && hostingRequestsUsed !== null && (
+                      <div className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.025] px-2.5 py-1 text-[10px]">
+                        <span className={hostingRequestsUsed >= hostingRequestsLimit ? "font-bold text-rose-400" : hostingRequestsUsed >= hostingRequestsLimit * 0.8 ? "font-bold text-amber-400" : "font-semibold text-[#0df2f2]"}>
+                          {hostingRequestsUsed}/{hostingRequestsLimit}
+                        </span>
+                        <span className="text-white/30">req/mo</span>
+                      </div>
+                    )
+                }
+                <button type="button" onClick={closeHostingModal} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 hover:text-white transition-colors" aria-label="Close">
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+            </div>
 
-            <div className="mb-6 flex items-start gap-4">
+            {/* Header */}
+            <div className="flex items-center gap-4 border-b border-white/[0.07] px-6 pb-5 pt-6">
               <div
-                className="h-14 w-14 shrink-0 rounded-2xl border border-[#00F5FF]/45 bg-cover bg-center"
+                className="h-14 w-14 shrink-0 rounded-2xl border border-white/10 bg-cover bg-center"
                 style={{
                   backgroundImage: hostingModal.targetPhotoUrl
                     ? `url(${hostingModal.targetPhotoUrl})`
-                    : "linear-gradient(135deg, rgba(13,204,242,0.35), rgba(217,70,239,0.35))",
+                    : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))",
                 }}
               />
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#00F5FF]">
-                  {hostingModal.requestType === "offer_to_host" ? "Offer hosting" : "Request hosting"}
+              <div className="min-w-0 pr-24">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
+                  {hostingModal.requestType === "offer_to_host" ? "Offer hosting to" : "Request hosting from"}
                 </p>
-                <h3 className="truncate text-[23px] font-extrabold tracking-tight text-white">
+                <h3 className="truncate text-xl font-extrabold tracking-tight text-white leading-tight">
                   {hostingModal.targetName}
                 </h3>
+                <p className="text-[11px] text-white/35 mt-0.5">
+                  {hostingModal.requestType === "offer_to_host" ? "Share your space for their trip" : "Find a place to stay"}
+                </p>
               </div>
-              {hostingModal.requestType === "request_hosting" ? (
-                <div className="mr-12 shrink-0 flex flex-col items-end gap-2 sm:mr-14">
-                  <button
-                    type="button"
-                    onClick={() => setHostingLinkedPickerOpen((prev) => !prev)}
-                    className="inline-flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3.5 text-xs font-semibold text-white transition hover:border-[#00F5FF]/40 hover:text-[#9EFBFF]"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">group_add</span>
-                    Add Member
-                  </button>
-                  {hostingRequestsLimit !== null && hostingRequestsUsed !== null ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Requests</span>
-                      <span
-                        className={`text-[13px] font-black tabular-nums leading-tight ${
-                          hostingRequestsUsed >= hostingRequestsLimit
-                            ? "text-rose-400"
-                            : hostingRequestsUsed >= hostingRequestsLimit * 0.8
-                              ? "text-amber-400"
-                              : "text-[#00F5FF]"
-                        }`}
-                      >
-                        {hostingRequestsUsed}<span className="font-normal text-white/25"> / {hostingRequestsLimit}</span>
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {hostingModal.requestType === "offer_to_host" && hostingOffersLimit !== null && hostingOffersUsed !== null && (
-                <div className="shrink-0 flex items-center gap-1.5">
-                  <span className="text-[9px] font-semibold uppercase tracking-widest text-white/35">Offers</span>
-                  <span className={`text-[13px] font-black tabular-nums leading-tight ${
-                    hostingOffersUsed >= hostingOffersLimit
-                      ? "text-rose-400"
-                      : hostingOffersUsed >= hostingOffersLimit * 0.8
-                        ? "text-amber-400"
-                        : "text-[#00F5FF]"
-                  }`}>
-                    {hostingOffersUsed}<span className="text-white/25 font-normal"> / {hostingOffersLimit}</span>
-                  </span>
-                </div>
-              )}
             </div>
 
-            {/* Pending warning */}
-            {hostingModalWarning ? <PendingRequestBanner message={hostingModalWarning} className="mb-4" /> : null}
+            {/* Scrollable body */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pt-5 pb-4 space-y-4">
 
-            {/* Error */}
-            {hostingModalError && (
-              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
-                <span className="material-symbols-outlined text-[16px] text-rose-400 shrink-0">error</span>
-                <span>{hostingModalError}</span>
-              </div>
-            )}
+              {/* Pending warning */}
+              {hostingModalWarning ? <PendingRequestBanner message={hostingModalWarning} /> : null}
 
-            {hostingModal.requestType === "offer_to_host" ? (
-              <div className="space-y-4">
-                {/* Destination + dates */}
-                <div className="flex items-center justify-center">
-                  <div className="inline-flex items-center gap-6 rounded-2xl border border-white/8 bg-white/[0.03] px-5 py-3">
-                    {(hostingModal.destinationCity || hostingModal.destinationCountry) && (
-                      <>
-                        <div className="text-center">
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Destination</p>
-                          <p className="mt-0.5 text-sm font-bold text-white">
-                            {hostingModal.destinationCity}
-                            {hostingModal.destinationCountry ? <span className="ml-1.5 font-normal text-white/50">{hostingModal.destinationCountry}</span> : null}
-                          </p>
-                        </div>
-                        <span className="text-white/20">|</span>
-                      </>
-                    )}
-                    <div className="text-center">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">From</p>
-                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(hostingModal.arrivalDate)}</p>
-                    </div>
-                    <span className="material-symbols-outlined text-[16px] text-white/25">arrow_forward</span>
-                    <div className="text-center">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">To</p>
-                      <p className="mt-0.5 text-sm font-bold text-[#00F5FF]">{formatDateCompact(hostingModal.departureDate)}</p>
-                    </div>
+              {/* Error */}
+              {hostingModalError ? (
+                <p className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-300">{hostingModalError}</p>
+              ) : null}
+
+              {/* Date/destination summary pill — centered, offer flow only */}
+              {hostingModal.requestType === "offer_to_host" && (hostingModal.destinationCity || hostingModal.arrivalDate) && (
+                <div className="flex justify-center">
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2.5">
+                    <span className="material-symbols-outlined text-[14px] text-[#0df2f2] shrink-0">flight_land</span>
+                    <p className="text-xs text-white/60">
+                      {hostingModal.destinationCity ? <span className="font-semibold text-white/90">{hostingModal.destinationCity} · </span> : null}
+                      {formatDateCompact(hostingModal.arrivalDate)}
+                      {hostingModal.departureDate ? ` – ${formatDateCompact(hostingModal.departureDate)}` : ""}
+                    </p>
                   </div>
                 </div>
+              )}
 
-                  <label className="space-y-1.5">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+              {/* Reason / intent grid */}
+              {(() => {
+                const reasons = hostingModal.requestType === "offer_to_host" ? HOSTING_OFFER_REASONS : HOSTING_REQUEST_REASONS;
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
+                        {hostingModal.requestType === "offer_to_host" ? "Space type" : "Stay context"}
+                      </p>
+                      <span className="text-[10px] text-white/25">
+                        Required
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      {reasons.map((r) => {
+                        const sel = hostingModal.reason === r.id;
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => setHostingModal((prev) => ({ ...prev, reason: sel ? null : r.id }))}
+                            className={`group relative flex flex-col items-center gap-2 rounded-2xl border px-3 py-3.5 text-center transition-all duration-150 ${
+                              sel
+                                ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
+                                : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
+                            }`}
+                          >
+                            {sel && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />}
+                            <span
+                              className={`material-symbols-outlined text-[20px] transition-colors ${sel ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"}`}
+                              style={{ fontVariationSettings: sel ? "'FILL' 1" : "'FILL' 0" }}
+                            >{r.icon}</span>
+                            <span className={`text-[10px] font-semibold leading-tight transition-colors ${sel ? "text-white" : "text-white/55 group-hover:text-white/80"}`}>
+                              {r.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {hostingModal.requestType === "offer_to_host" ? (
+                <>
+                  {/* Max travellers */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
                       Max travellers you can host
-                    </span>
+                    </label>
                     <input
                       type="number"
                       min={1}
                       max={20}
                       value={hostingModal.maxTravellersAllowed}
-                      onChange={(event) => setHostingModal((prev) => ({ ...prev, maxTravellersAllowed: event.target.value }))}
-                      className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      onChange={(e) => setHostingModal((prev) => ({ ...prev, maxTravellersAllowed: e.target.value }))}
                       placeholder="e.g. 2"
+                      className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
                     />
-                  </label>
+                  </div>
 
-                  <div className="pt-3 space-y-2 border-t border-white/8">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
-                        Invite note
-                      </span>
-                      <span className={hostingModal.message.length > 480 ? "text-[11px] text-amber-200" : "text-[11px] text-white/45"}>
-                        {hostingModal.message.length}/500
-                      </span>
-                    </div>
-                    <p className="text-xs text-white/50">
-                      Choose a quick template
-                    </p>
+                  {/* Quick templates */}
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Quick template</p>
                     <div className="flex flex-wrap gap-2">
-                      {HOST_OFFER_TEMPLATES.map((template, index) => (
+                      {HOST_OFFER_TEMPLATES.map((template, i) => (
                         <button
-                          key={`host-offer-template-${index}`}
+                          key={i}
                           type="button"
                           onClick={() => setHostingModal((prev) => ({ ...prev, message: template.text }))}
-                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/70 transition hover:border-[#00F5FF]/40 hover:text-[#00F5FF]"
+                          className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-[#0df2f2]/30 hover:text-white/80"
                         >
                           {template.label}
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Invite note */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Invite note</label>
+                      <span className="text-[10px] text-white/25">{hostingModal.message.length}/500</span>
+                    </div>
                     <textarea
                       value={hostingModal.message}
-                      onChange={(event) => setHostingModal((prev) => ({ ...prev, message: event.target.value }))}
+                      onChange={(e) => setHostingModal((prev) => ({ ...prev, message: e.target.value }))}
                       maxLength={500}
-                      rows={4}
-                      placeholder="Add a short hosting invite."
-                      className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      rows={3}
+                      placeholder="Add a short hosting invite…"
+                      className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
                     />
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className={hostingMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
-                        No links, emails, social handles, or phone numbers.
-                      </span>
-                    </div>
                     {hostingMessageValidation ? (
-                      <p className="text-xs text-[#FFC6FA]">{hostingMessageValidation}</p>
-                    ) : null}
+                      <p className="text-[11px] text-[#FFC6FA]">{hostingMessageValidation}</p>
+                    ) : (
+                      <p className="text-[11px] text-white/25">No links, emails, social handles, or phone numbers.</p>
+                    )}
                   </div>
-              </div>
-            ) : (
+                </>
+              ) : (
                 <>
-                  <style>{`
-                    input[type="date"]::-webkit-calendar-picker-indicator {
-                      filter: invert(1);
-                    }
-                  `}</style>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <style>{`input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1)}`}</style>
+
+                  {/* Arrival / departure */}
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Arrival date</span>
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Arrival</label>
                       <input
                         type="date"
                         value={hostingModal.arrivalDate}
-                        onChange={(event) => setHostingModal((prev) => ({ ...prev, arrivalDate: event.target.value }))}
-                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                        onChange={(e) => setHostingModal((prev) => ({ ...prev, arrivalDate: e.target.value }))}
+                        className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
                       />
                     </div>
-
                     <div className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">Departure date</span>
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Departure</label>
                       <input
                         type="date"
                         value={hostingModal.departureDate}
                         disabled={hostingModal.departureFlexible}
-                        onChange={(event) => setHostingModal((prev) => ({ ...prev, departureDate: event.target.value }))}
-                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:cursor-not-allowed disabled:opacity-40"
+                        onChange={(e) => setHostingModal((prev) => ({ ...prev, departureDate: e.target.value }))}
+                        className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition disabled:cursor-not-allowed disabled:opacity-40"
                       />
-                      <label className="mt-1 flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                      <label className="flex items-center gap-2 text-[11px] text-white/40 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={hostingModal.departureFlexible}
                           disabled={Boolean(hostingModal.departureDate)}
-                          onChange={(event) =>
-                            setHostingModal((prev) => ({ ...prev, departureFlexible: event.target.checked, departureDate: event.target.checked ? "" : prev.departureDate }))
-                          }
-                          className="h-4 w-4 rounded border-white/25 bg-transparent accent-[#00F5FF] disabled:cursor-not-allowed disabled:opacity-40"
+                          onChange={(e) => setHostingModal((prev) => ({ ...prev, departureFlexible: e.target.checked, departureDate: e.target.checked ? "" : prev.departureDate }))}
+                          className="h-3.5 w-3.5 rounded accent-[#0df2f2] disabled:cursor-not-allowed disabled:opacity-40"
                         />
-                        Flexible departure
+                        Flexible
                       </label>
                     </div>
                   </div>
 
-                  <div className="mt-4">
-                    <label className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
-                          Number of travellers
-                        </span>
-                        {hostingModal.targetMaxGuests ? (
-                          <span className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold text-white/50">
-                            <MSIcon name="group" className="text-[12px] text-[#00F5FF]" />
-                            Max {hostingModal.targetMaxGuests}
-                          </span>
-                        ) : null}
-                      </div>
-                      <input
-                        type="number"
-                        min={1}
-                        max={hostingModal.targetMaxGuests ?? 20}
-                        value={hostingModal.travellersCount}
-                        onChange={(event) => {
-                          const cap = hostingModal.targetMaxGuests ?? 20;
-                          setHostingModal((prev) => ({
-                            ...prev,
-                            travellersCount: Math.max(1, Math.min(cap, Number(event.target.value) || 1)),
-                          }));
-                        }}
-                        className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      />
-                    </label>
+                  {/* Number of travellers */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Travellers</label>
+                      {hostingModal.targetMaxGuests ? (
+                        <span className="text-[10px] text-white/30">max {hostingModal.targetMaxGuests}</span>
+                      ) : null}
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={hostingModal.targetMaxGuests ?? 20}
+                      value={hostingModal.travellersCount}
+                      onChange={(e) => {
+                        const cap = hostingModal.targetMaxGuests ?? 20;
+                        setHostingModal((prev) => ({ ...prev, travellersCount: Math.max(1, Math.min(cap, Number(e.target.value) || 1)) }));
+                      }}
+                      className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
+                    />
                   </div>
 
-                  <div className="mt-4">
-                    {hostingModal.linkedMemberUserId ? (
-                      <p className="text-xs text-[#9EFBFF]">
-                        Added: {hostingLinkedMemberOptions.find((option) => option.userId === hostingModal.linkedMemberUserId)?.displayName ?? "Connection"}
-                      </p>
-                    ) : null}
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setHostingLinkedPickerOpen((prev) => !prev)}
+                      className={
+                        selectedHostingLinkedMember
+                          ? "flex w-full items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
+                          : "flex items-center gap-1.5 text-xs text-white/35 transition-colors hover:text-white/60"
+                      }
+                    >
+                      {selectedHostingLinkedMember ? (
+                        <>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span
+                              className="h-10 w-10 shrink-0 rounded-full border border-white/10 bg-cover bg-center"
+                              style={{
+                                backgroundImage: selectedHostingLinkedMember.avatarUrl
+                                  ? `url(${selectedHostingLinkedMember.avatarUrl})`
+                                  : "linear-gradient(135deg, rgba(13,204,242,0.22), rgba(217,59,255,0.22))",
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-[#0df2f2]">{selectedHostingLinkedMember.displayName}</p>
+                            </div>
+                          </div>
+                          <span className={`material-symbols-outlined text-[18px] text-white/35 transition-transform ${hostingLinkedPickerOpen ? "rotate-180" : ""}`}>
+                            expand_more
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[14px]">group_add</span>
+                          Add member
+                        </>
+                      )}
+                    </button>
+
                     {hostingLinkedPickerOpen ? (
-                      <div className={`${hostingModal.linkedMemberUserId ? "mt-3" : ""} rounded-2xl border border-white/8 bg-white/[0.03] p-3`}>
+                      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 space-y-2">
                         <input
                           type="text"
                           value={hostingLinkedMemberQuery}
-                          onChange={(event) => setHostingLinkedMemberQuery(event.target.value)}
-                          placeholder="Search connection..."
-                          className="mb-3 w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                          onChange={(e) => setHostingLinkedMemberQuery(e.target.value)}
+                          placeholder="Search connection…"
+                          className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 transition"
                         />
-                        <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
-                          <button
-                            type="button"
-                            onClick={() => setHostingModal((prev) => ({ ...prev, linkedMemberUserId: "" }))}
-                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
-                              !hostingModal.linkedMemberUserId
-                                ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                                : "border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white"
-                            }`}
-                          >
-                            <span>No extra member</span>
-                            {!hostingModal.linkedMemberUserId ? (
-                              <span className="material-symbols-outlined text-[16px]">check</span>
-                            ) : null}
-                          </button>
+                        <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                          {selectedHostingLinkedMember ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHostingModal((prev) => ({ ...prev, linkedMemberUserId: "" }));
+                                setHostingLinkedPickerOpen(false);
+                                setHostingLinkedMemberQuery("");
+                              }}
+                              className="flex w-full items-center justify-between rounded-xl border border-white/[0.07] bg-transparent px-3 py-2 text-left text-sm text-white/60 transition hover:text-white"
+                            >
+                              <span>Remove member</span>
+                              <span className="material-symbols-outlined text-[15px]">close</span>
+                            </button>
+                          ) : null}
                           {filteredHostingLinkedMemberOptions.map((option) => {
-                            const subtitle = [option.city, option.country].filter(Boolean).join(", ");
                             const isSelected = hostingModal.linkedMemberUserId === option.userId;
                             return (
                               <button
@@ -4418,77 +4574,80 @@ function ConnectionsPageContent() {
                                   setHostingLinkedPickerOpen(false);
                                   setHostingLinkedMemberQuery("");
                                 }}
-                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${
-                                  isSelected
-                                    ? "border-[#00F5FF]/45 bg-[#00F5FF]/12 text-[#B8FBFF]"
-                                    : "border-white/10 bg-black/20 text-white/80 hover:border-white/20 hover:text-white"
-                                }`}
+                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${isSelected ? "border-[#0df2f2]/30 bg-[#0df2f2]/8 text-white" : "border-white/[0.07] bg-transparent text-white/70 hover:text-white"}`}
                               >
-                                <span className="min-w-0">
-                                  <span className="block truncate text-sm font-semibold">{option.displayName}</span>
-                                  {subtitle ? <span className="block truncate text-xs text-white/45">{subtitle}</span> : null}
+                                <span className="flex min-w-0 items-center gap-3">
+                                  <span
+                                    className="h-9 w-9 shrink-0 rounded-full border border-white/10 bg-cover bg-center"
+                                    style={{
+                                      backgroundImage: option.avatarUrl
+                                        ? `url(${option.avatarUrl})`
+                                        : "linear-gradient(135deg, rgba(13,204,242,0.22), rgba(217,59,255,0.22))",
+                                    }}
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-semibold">{option.displayName}</span>
+                                    {[option.city, option.country].filter(Boolean).join(", ") ? <span className="block truncate text-xs text-white/35">{[option.city, option.country].filter(Boolean).join(", ")}</span> : null}
+                                  </span>
                                 </span>
-                                {isSelected ? <span className="material-symbols-outlined text-[16px]">check</span> : null}
+                                {isSelected ? <span className="material-symbols-outlined text-[15px] text-[#0df2f2]">check</span> : null}
                               </button>
                             );
                           })}
                           {filteredHostingLinkedMemberOptions.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-3 text-sm text-white/45">
-                              No matching connections.
-                            </div>
+                            <p className="px-3 py-3 text-sm text-white/35">No matching connections.</p>
                           ) : null}
                         </div>
                       </div>
                     ) : null}
                   </div>
 
-                  <label className="mt-4 block space-y-1.5">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
-                      Optional message
-                    </span>
+                  {/* Optional message */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Message (optional)</label>
+                      <span className="text-[10px] text-white/25">{hostingModal.message.length}/500</span>
+                    </div>
                     <textarea
                       value={hostingModal.message}
-                      onChange={(event) => setHostingModal((prev) => ({ ...prev, message: event.target.value }))}
+                      onChange={(e) => setHostingModal((prev) => ({ ...prev, message: e.target.value }))}
                       maxLength={500}
-                      rows={4}
-                      placeholder="Add context for your request. Keep it short and respectful."
-                      className="w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                      rows={3}
+                      placeholder="Add context for your request…"
+                      className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-white/25 outline-none focus:border-[#0df2f2]/30 focus:bg-white/[0.06] transition"
                     />
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className={hostingMessageValidation ? "text-[#FFC6FA]" : "text-white/45"}>
-                        No links, emails, social handles, or phone numbers.
-                      </span>
-                      <span className={hostingModal.message.length > 480 ? "text-amber-200" : "text-white/45"}>
-                        {hostingModal.message.length}/500
-                      </span>
-                    </div>
                     {hostingMessageValidation ? (
-                      <p className="text-xs text-[#FFC6FA]">{hostingMessageValidation}</p>
-                    ) : null}
-                  </label>
+                      <p className="text-[11px] text-[#FFC6FA]">{hostingMessageValidation}</p>
+                    ) : (
+                      <p className="text-[11px] text-white/25">No links, emails, social handles, or phone numbers.</p>
+                    )}
+                  </div>
                 </>
-            )}
+              )}
+            </div>
 
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            {/* Actions — flush footer */}
+            <div className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-4">
               <button
                 type="button"
-                onClick={closeHostingModal}
-                className="h-11 rounded-full border border-white/20 px-5 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+                disabled={
+                  hostingSending ||
+                  Boolean(hostingMessageValidation) ||
+                  Boolean(hostingModalWarning) ||
+                  !hostingModal.reason
+                }
+                onClick={sendHostingRequest}
+                className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99]"
+                style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
               >
-                Cancel
+                {hostingSending ? "Sending…" : hostingModal.requestType === "offer_to_host" ? "Send host offer" : "Request hosting"}
               </button>
               <button
                 type="button"
-                disabled={hostingSending || Boolean(hostingMessageValidation) || Boolean(hostingModalWarning)}
-                onClick={sendHostingRequest}
-                className="h-11 rounded-full px-5 text-sm font-black uppercase tracking-wide text-[#0A0A0A] disabled:opacity-45"
-                style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%, #FF00FF 100%)" }}
+                onClick={closeHostingModal}
+                className="h-10 w-full rounded-2xl border border-white/[0.07] text-sm font-medium text-white/35 hover:border-white/15 hover:text-white/60 transition-colors"
               >
-                {hostingSending
-                  ? "Sending…"
-                  : hostingModal.requestType === "offer_to_host"
-                  ? "Send host offer"
-                  : "Request hosting"}
+                Cancel
               </button>
             </div>
           </div>

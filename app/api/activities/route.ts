@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
-import { ACTIVITY_TYPES, activityTypeLabel, activityUsesDateRange, isActivityType } from "@/lib/activities/types";
+import {
+  ACTIVITY_TYPES,
+  LINKED_MEMBER_ACTIVITY_TYPES,
+  activityTypeLabel,
+  activityUsesDateRange,
+  parseActivityType,
+} from "@/lib/activities/types";
+import { validatePairActivityMonthlyLimit } from "@/lib/activities/limits";
 import {
   buildLinkedMemberMetadata,
   ensureLinkedMemberPairThread,
@@ -20,13 +27,7 @@ type CreateActivityPayload = {
   linkedMemberUserId?: string | null;
 };
 
-const LINKED_MEMBER_ELIGIBLE_ACTIVITY_TYPES = new Set([
-  "practice",
-  "social_dance",
-  "event",
-  "festival",
-  "travel_together",
-]);
+const LINKED_MEMBER_ELIGIBLE_ACTIVITY_TYPES = new Set(LINKED_MEMBER_ACTIVITY_TYPES);
 
 function parseIsoOrNull(value: unknown) {
   if (typeof value !== "string") return null;
@@ -281,18 +282,19 @@ export async function POST(req: Request) {
     const connectionId = body?.connectionId?.trim() ?? "";
     const recipientUserId = body?.recipientUserId?.trim() ?? "";
     const note = typeof body?.note === "string" ? body.note.trim() : "";
-    const activityType = typeof body?.activityType === "string" ? body.activityType.trim() : "";
+    const rawActivityType = typeof body?.activityType === "string" ? body.activityType.trim() : "";
+    const activityType = parseActivityType(rawActivityType);
     const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
 
-    if ((!requestedThreadId && !connectionId) || !recipientUserId || !activityType) {
+    if ((!requestedThreadId && !connectionId) || !recipientUserId || !rawActivityType) {
       return NextResponse.json(
         { ok: false, error: "threadId or connectionId, recipientUserId, and activityType are required." },
         { status: 400 }
       );
     }
-    if (!isActivityType(activityType)) {
+    if (!activityType) {
       return NextResponse.json(
-        { ok: false, error: `Invalid activityType. Allowed: ${ACTIVITY_TYPES.join(", ")}` },
+        { ok: false, error: `Invalid activityType. Allowed: ${ACTIVITY_TYPES.map(activityTypeLabel).join(", ")}` },
         { status: 400 }
       );
     }
@@ -309,8 +311,10 @@ export async function POST(req: Request) {
 
     const supabaseUser = getSupabaseUserClient(token);
     const service = getSupabaseServiceClient();
-    const userRpc = (fn: string, args?: Record<string, unknown>) =>
-      supabaseUser.rpc(fn, args) as unknown as Promise<{ data: unknown; error: { message?: string } | null }>;
+    const serviceRpc = (fn: string, args?: Record<string, unknown>) =>
+      (service as unknown as {
+        rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      }).rpc(fn, args);
     const { data: authData, error: authErr } = await supabaseUser.auth.getUser(token);
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
@@ -422,6 +426,16 @@ export async function POST(req: Request) {
       );
     }
 
+    const pairLimitCheck = await validatePairActivityMonthlyLimit({
+      serviceClient: service,
+      requesterUserId: authData.user.id,
+      recipientUserId,
+      activityType,
+    });
+    if (!pairLimitCheck.ok) {
+      return NextResponse.json({ ok: false, error: pairLimitCheck.error }, { status: 409 });
+    }
+
     const title = activityTypeLabel(activityType);
     const linkedMember = LINKED_MEMBER_ELIGIBLE_ACTIVITY_TYPES.has(activityType)
       ? await resolveLinkedMember({
@@ -473,7 +487,7 @@ export async function POST(req: Request) {
     const startDate = startAt ? startAt.slice(0, 10) : null;
     const endDate = endAt ? endAt.slice(0, 10) : null;
 
-    const contextRes = await userRpc("cx_upsert_thread_context", {
+    const contextRes = await serviceRpc("cx_upsert_thread_context", {
       p_thread_id: threadId,
       p_source_table: "activities",
       p_source_id: activityId,
@@ -489,15 +503,22 @@ export async function POST(req: Request) {
     });
 
     if (contextRes.error) {
-      return NextResponse.json({ ok: false, error: contextRes.error.message }, { status: 400 });
+      // Rollback: delete the just-inserted activity so it doesn't orphan as a blocking pending entry.
+      await service.from("activities").delete().eq("id", activityId);
+      return NextResponse.json({ ok: false, error: contextRes.error.message ?? "Failed to update thread context." }, { status: 400 });
     }
 
-    await ensureLinkedMemberPairThread({
-      serviceClient: service,
-      actorUserId: authData.user.id,
-      linkedMember,
-      recipientUserId,
-    });
+    // Best-effort: create the linked-member pair thread. Don't fail the whole request if it errors.
+    try {
+      await ensureLinkedMemberPairThread({
+        serviceClient: service,
+        actorUserId: authData.user.id,
+        linkedMember,
+        recipientUserId,
+      });
+    } catch {
+      // Non-critical — the activity and thread context are already created.
+    }
 
     void createActivityNotificationBestEffort({
       service,

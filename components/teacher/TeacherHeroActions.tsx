@@ -76,6 +76,7 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
         open={requestInfoOpen}
         recipientUserId={userId}
         recipientName={displayName}
+        recipientPhotoUrl={avatarUrl}
         onClose={() => setRequestInfoOpen(false)}
         onSubmitted={(msg) => {
           setSuccessMsg(msg);

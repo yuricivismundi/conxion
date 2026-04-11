@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import Nav from "@/components/Nav";
+import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { canManageTeacherInfo } from "@/lib/teacher-info/roles";
+import { isPaymentVerified } from "@/lib/verification";
 import {
   getCachedCitiesOfCountry,
   getCachedCountriesAll,
@@ -238,6 +240,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
+  const [paymentVerified, setPaymentVerified] = useState(false);
 
   // Data
   const [teacherProfile, setTeacherProfile] = useState<TeacherProfileRow | null>(null);
@@ -287,13 +290,13 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
   useEffect(() => {
     if (!error) return;
-    const id = window.setTimeout(() => setError(null), 3000);
+    const id = window.setTimeout(() => setError(null), 6000);
     return () => window.clearTimeout(id);
   }, [error]);
 
   useEffect(() => {
     if (!info) return;
-    const id = window.setTimeout(() => setInfo(null), 3000);
+    const id = window.setTimeout(() => setInfo(null), 6000);
     return () => window.clearTimeout(id);
   }, [info]);
 
@@ -319,7 +322,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
         const profileRes = await supabase
           .from("profiles")
-          .select("user_id,roles")
+          .select("user_id,roles,verified,verified_label")
           .eq("user_id", currentUser.id)
           .maybeSingle();
 
@@ -327,7 +330,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
           throw new Error(profileRes.error?.message ?? "Could not load your profile.");
         }
 
-        const profileRow = profileRes.data as { user_id?: string; roles?: unknown };
+        const profileRow = profileRes.data as { user_id?: string; roles?: unknown; verified?: unknown; verified_label?: unknown };
         const nextRoles: string[] = Array.isArray(profileRow.roles)
           ? profileRow.roles.filter((item): item is string => typeof item === "string")
           : [];
@@ -335,6 +338,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         if (cancelled) return;
         setUserId(currentUser.id);
         setRoles(nextRoles);
+        setPaymentVerified(isPaymentVerified(profileRow));
 
         // Fetch teacher_profiles
         const tpRes = await supabase
@@ -738,6 +742,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     new Date(teacherProfile.teacher_profile_trial_ends_at).getTime() <= Date.now();
   const daysLeft = trialActive ? trialDaysRemaining(teacherProfile?.teacher_profile_trial_ends_at ?? null) : null;
   const defaultView = teacherProfile?.default_public_view ?? "social";
+  const teacherProfileLocked = trialExpired && !paymentVerified;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -784,6 +789,37 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     );
   }
 
+  if (teacherProfileLocked) {
+    return (
+      <div className={embedded ? "" : "min-h-screen bg-[#06070b] text-slate-100"}>
+        {!embedded && <Nav />}
+        <div className="mx-auto max-w-2xl px-4 pb-24 pt-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 text-center sm:p-7">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-fuchsia-200/80">Teacher Profile Locked</p>
+            <h1 className="mt-3 text-2xl font-black text-white">Your teacher page trial has ended</h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Your public profile falls back to the social view until you upgrade. Unlock the teacher page again with Plus.
+            </p>
+            <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+              >
+                Upgrade to Plus
+              </Link>
+              <Link
+                href="/me/edit"
+                className="inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-slate-200 hover:bg-white/[0.08]"
+              >
+                Back to profile settings
+              </Link>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={embedded ? "" : "min-h-screen bg-[#06070b] text-slate-100"}>
       {!embedded && <Nav />}
@@ -821,12 +857,12 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         )}
         {trialExpired && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-            <span>Trial ended. Get verified to continue.</span>
+            <span>Trial ended. Upgrade to Plus to continue.</span>
             <Link
-              href="/me/edit"
+              href="/pricing"
               className="shrink-0 rounded-lg bg-rose-400/20 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-400/30 transition-colors"
             >
-              Get verified
+              Upgrade to Plus
             </Link>
           </div>
         )}
@@ -941,6 +977,23 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
             {/* Country + City */}
             <label className="block">
               <span className="text-xs text-slate-400">Country</span>
+              <div className="mt-1.5 sm:hidden">
+                <SearchableMobileSelect
+                  label="Country"
+                  value={baseCountry}
+                  options={countriesAll.map((country) => country.name)}
+                  placeholder="Select country..."
+                  searchPlaceholder="Search countries..."
+                  onSelect={(nextCountry) => {
+                    setBaseCountry(nextCountry);
+                    setBaseCity("");
+                    setBaseCountryCities([]);
+                    const iso = countriesAll.find((country) => country.name === nextCountry)?.isoCode ?? nextCountry;
+                    void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
+                  }}
+                  buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
+                />
+              </div>
               <select
                 value={baseCountry}
                 onChange={(e) => {
@@ -952,7 +1005,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                     void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
                   }
                 }}
-                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none"
+                className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none sm:block"
               >
                 <option value="">Select country…</option>
                 {countriesAll.map((c) => (
@@ -964,10 +1017,23 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
             {baseCountry && (
               <label className="block">
                 <span className="text-xs text-slate-400">City</span>
+                <div className="mt-1.5 sm:hidden">
+                  <SearchableMobileSelect
+                    label="City"
+                    value={baseCity}
+                    options={baseCountryCities}
+                    placeholder={baseCountryCities.length === 0 ? "Loading..." : "Select city..."}
+                    searchPlaceholder="Search cities..."
+                    disabled={baseCountryCities.length === 0}
+                    emptyMessage="No cities found."
+                    onSelect={(nextCity) => setBaseCity(nextCity)}
+                    buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white disabled:opacity-50"
+                  />
+                </div>
                 <select
                   value={baseCity}
                   onChange={(e) => setBaseCity(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none"
+                  className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none sm:block"
                 >
                   <option value="">{baseCountryCities.length === 0 ? "Loading…" : "Select city…"}</option>
                   {baseCountryCities.map((c) => (
@@ -992,7 +1058,24 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
             {/* Languages */}
             <div className="space-y-1.5">
               <label className="text-xs text-slate-400">Languages taught</label>
-              <div className="flex gap-2">
+              <div className="sm:hidden">
+                <SearchableMobileSelect
+                  label="Language"
+                  value=""
+                  options={LANGUAGES.filter((language) => !languages.includes(language))}
+                  placeholder={languages.length >= 5 ? "Max 5 languages" : "Search languages..."}
+                  searchPlaceholder="Search languages..."
+                  disabled={languages.length >= 5}
+                  emptyMessage="No languages left to add."
+                  onSelect={(nextLanguage) => {
+                    if (!nextLanguage || languages.length >= 5) return;
+                    setLanguages((prev) => [...prev, nextLanguage]);
+                    setLanguagePick("");
+                  }}
+                  buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white disabled:opacity-40"
+                />
+              </div>
+              <div className="hidden gap-2 sm:flex">
                 <select
                   value={languagePick}
                   onChange={(e) => setLanguagePick(e.target.value)}
@@ -1487,6 +1570,22 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-xs text-slate-400">Country</label>
+                    <div className="sm:hidden">
+                      <SearchableMobileSelect
+                        label="Country"
+                        value={eventDraft.country}
+                        options={countriesAll.map((country) => country.name)}
+                        placeholder="Select country..."
+                        searchPlaceholder="Search countries..."
+                        onSelect={(country) => {
+                          setEventDraft((d) => ({ ...d, country, city: "" }));
+                          setEventCities([]);
+                          const iso = countriesAll.find((c) => c.name === country)?.isoCode ?? country;
+                          void getCitiesOfCountry(iso).then(setEventCities).catch(() => {});
+                        }}
+                        buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
+                      />
+                    </div>
                     <select
                       value={eventDraft.country}
                       onChange={(e) => {
@@ -1498,7 +1597,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                           void getCitiesOfCountry(iso).then(setEventCities).catch(() => {});
                         }
                       }}
-                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+                      className="hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 sm:block"
                     >
                       <option value="">Select country…</option>
                       {countriesAll.map((c) => (
@@ -1508,11 +1607,24 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs text-slate-400">City</label>
+                    <div className="sm:hidden">
+                      <SearchableMobileSelect
+                        label="City"
+                        value={eventDraft.city}
+                        options={eventCities}
+                        placeholder={!eventDraft.country ? "Select country first" : eventCities.length === 0 ? "Loading..." : "Select city..."}
+                        searchPlaceholder="Search cities..."
+                        disabled={!eventDraft.country || eventCities.length === 0}
+                        emptyMessage={!eventDraft.country ? "Choose a country first." : "No cities found."}
+                        onSelect={(nextCity) => setEventDraft((d) => ({ ...d, city: nextCity }))}
+                        buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white disabled:opacity-50"
+                      />
+                    </div>
                     <select
                       value={eventDraft.city}
                       onChange={(e) => setEventDraft((d) => ({ ...d, city: e.target.value }))}
                       disabled={!eventDraft.country}
-                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 disabled:opacity-50"
+                      className="hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 disabled:opacity-50 sm:block"
                     >
                       <option value="">
                         {!eventDraft.country ? "Select country first" : eventCities.length === 0 ? "Loading…" : "Select city…"}

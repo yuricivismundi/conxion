@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import OnboardingShell from "@/components/OnboardingShell";
+import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import {
   clearOnboardingDraft,
   type OnboardingDraft,
@@ -171,8 +172,8 @@ export default function OnboardingFinalizePage() {
 
   const canAddMoreLanguages = langs.length < 5;
 
-  function addLang() {
-    const v = langPick;
+  function addLang(nextValue?: Language | "") {
+    const v = nextValue ?? langPick;
     if (!v) return;
     if (!canAddMoreLanguages) return;
     if (langs.includes(v)) return;
@@ -317,7 +318,21 @@ export default function OnboardingFinalizePage() {
           <div className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">Languages</div>
 
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="sm:hidden">
+              <SearchableMobileSelect
+                label="Language"
+                value=""
+                options={LANGUAGES.filter((l) => !langs.includes(l))}
+                placeholder={canAddMoreLanguages ? "Search languages..." : "Max 5 languages"}
+                searchPlaceholder="Search languages..."
+                disabled={!canAddMoreLanguages}
+                emptyMessage="No languages left to add."
+                onSelect={(value) => addLang(value as Language)}
+                buttonClassName="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left text-sm text-[#E0E0E0] outline-none disabled:opacity-50"
+              />
+            </div>
+
+            <div className="hidden flex-col gap-3 sm:flex sm:flex-row sm:items-center">
               <select
                 value={langPick}
                 onChange={(e) => setLangPick((e.target.value as Language) || "")}
@@ -334,7 +349,7 @@ export default function OnboardingFinalizePage() {
 
               <button
                 type="button"
-                onClick={addLang}
+                onClick={() => addLang()}
                 disabled={!canAddMoreLanguages || !langPick}
                 className={
                   !canAddMoreLanguages || !langPick

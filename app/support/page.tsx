@@ -419,7 +419,7 @@ export default function SupportPage() {
               <div className="mt-4">
                 <Link
                   href="/auth"
-                  className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/20"
+                  className="inline-flex min-h-[44px] items-center rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/20"
                 >
                   Sign in
                 </Link>

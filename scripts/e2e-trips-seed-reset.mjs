@@ -27,7 +27,7 @@ function env(name) {
   return process.env[name] || DOTENV[name] || "";
 }
 
-const E2E_TRIP_PURPOSE = "Social Dancing";
+const E2E_TRIP_PURPOSE = "Dance trip / Holiday";
 
 function sanitizeNamespace(raw) {
   return String(raw || "")

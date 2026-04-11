@@ -173,7 +173,7 @@ async function createTripNotificationCompat(params: {
     p_kind: params.kind,
     p_title: params.title,
     p_body: null,
-    p_link_url: `/trips/${params.tripId}`,
+    p_link_url: `/messages?thread=trip%3A${params.tripId}`,
     p_metadata: {
       trip_id: params.tripId,
       request_id: params.requestId,

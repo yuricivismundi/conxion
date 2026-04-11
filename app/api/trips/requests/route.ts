@@ -8,9 +8,11 @@ import {
   mergeLinkedMemberContextMetadata,
   resolveLinkedMember,
 } from "@/lib/requests/linked-members";
+import { normalizeTripJoinReason } from "@/lib/trips/join-reasons";
 
 type CreateTripRequestPayload = {
   tripId?: string;
+  reason?: string | null;
   note?: string | null;
   linkedMemberUserId?: string | null;
 };
@@ -25,7 +27,8 @@ function shouldFallbackTripRequestRpc(message: string) {
     text.includes("not_authenticated") ||
     text.includes("schema cache") ||
     text.includes("on conflict") ||
-    text.includes("row-level security")
+    text.includes("row-level security") ||
+    text.includes("reading 'rest'")
   );
 }
 
@@ -43,22 +46,21 @@ function isTripRequestCompatPayloadError(message: string) {
 function buildFallbackTripRequestPayloads(params: {
   tripId: string;
   requesterId: string;
+  reason: string;
   note: string;
 }) {
-  const fallbackReason = params.note || "Trip join request";
-
   return [
     {
       trip_id: params.tripId,
       requester_id: params.requesterId,
-      reason: fallbackReason,
+      reason: params.reason,
       note: params.note || null,
       status: "pending",
     },
     {
       trip_id: params.tripId,
       requester_id: params.requesterId,
-      reason: fallbackReason,
+      reason: params.reason,
       status: "pending",
     },
     {
@@ -90,7 +92,7 @@ async function createTripRequestNotificationCompat(params: {
     p_kind: "trip_request_received",
     p_title: "New trip request",
     p_body: "You received a new request for your trip.",
-    p_link_url: `/trips/${params.tripId}`,
+    p_link_url: `/messages?thread=trip%3A${params.tripId}`,
     p_metadata: {
       trip_id: params.tripId,
       request_id: params.requestId,
@@ -112,12 +114,19 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => null)) as CreateTripRequestPayload | null;
     const tripId = body?.tripId?.trim() ?? "";
+    const providedReason = typeof body?.reason === "string" ? body.reason.trim() : "";
+    const normalizedReason = providedReason ? normalizeTripJoinReason(providedReason) : null;
     const note = typeof body?.note === "string" ? body.note.trim() : "";
     const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
 
     if (!tripId) {
       return NextResponse.json({ ok: false, error: "tripId is required." }, { status: 400 });
     }
+    if (providedReason && !normalizedReason) {
+      return NextResponse.json({ ok: false, error: "Invalid trip join reason." }, { status: 400 });
+    }
+
+    const tripJoinReason = normalizedReason ?? "festival_event";
 
     const supabase = getSupabaseUserClient(token);
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
@@ -166,14 +175,26 @@ export async function POST(req: Request) {
       const message =
         existingActiveRequest.status === "accepted"
           ? "You already have an active trip request for this trip."
-          : "There is already a pending trip request for this trip. Open Requests in Messages to continue.";
+          : "There is already a pending trip request for this trip.";
       return NextResponse.json({ ok: false, error: message }, { status: 409 });
     }
 
-    const rpcRes = await supabase.rpc("create_trip_request", {
-      p_trip_id: tripId,
-      p_note: note || null,
-    });
+    let rpcRes:
+      | Awaited<ReturnType<typeof supabase.rpc>>
+      | { data: null; error: { message: string } };
+    try {
+      rpcRes = await supabase.rpc("create_trip_request", {
+        p_trip_id: tripId,
+        p_note: note || null,
+      });
+    } catch (rpcError) {
+      rpcRes = {
+        data: null,
+        error: {
+          message: rpcError instanceof Error ? rpcError.message : "Failed to create trip request.",
+        },
+      };
+    }
 
     if (rpcRes.error) {
       if (!shouldFallbackTripRequestRpc(rpcRes.error.message)) {
@@ -189,13 +210,22 @@ export async function POST(req: Request) {
       const insertPayloads = buildFallbackTripRequestPayloads({
         tripId,
         requesterId: authData.user.id,
+        reason: tripJoinReason,
         note,
       });
 
       let inserted = false;
       for (const payload of insertPayloads) {
-        const insertRes = await supabase.from("trip_requests").insert(payload);
+        const insertRes = await supabase
+          .from("trip_requests")
+          .insert(payload)
+          .select("id")
+          .maybeSingle();
         if (!insertRes.error) {
+          const insertedRow = (insertRes.data ?? null) as { id?: string | null } | null;
+          if (typeof insertedRow?.id === "string" && insertedRow.id) {
+            requestId = insertedRow.id;
+          }
           inserted = true;
           break;
         }
@@ -217,51 +247,99 @@ export async function POST(req: Request) {
       requestId = rpcRes.data;
     }
 
-    const requestRes = await service
-      .from("trip_requests")
-      .select("id")
-      .eq("trip_id", tripId)
-      .eq("requester_id", authData.user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (requestRes.error) {
-      return NextResponse.json({ ok: false, error: requestRes.error.message }, { status: 400 });
+    if (!requestId) {
+      try {
+        const requestRes = await service
+          .from("trip_requests")
+          .select("id")
+          .eq("trip_id", tripId)
+          .eq("requester_id", authData.user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!requestRes.error) {
+          const requestRow = (requestRes.data ?? null) as { id?: string } | null;
+          requestId = typeof requestRow?.id === "string" ? requestRow.id : "";
+        } else {
+          console.error("[trip_requests] request lookup failed", {
+            tripId,
+            actorUserId: authData.user.id,
+            error: requestRes.error,
+          });
+        }
+      } catch (requestLookupError) {
+        console.error("[trip_requests] request lookup threw", {
+          tripId,
+          actorUserId: authData.user.id,
+          error: requestLookupError,
+        });
+      }
     }
 
-    const requestRow = (requestRes.data ?? null) as { id?: string } | null;
-
-    requestId = requestId || (typeof requestRow?.id === "string" ? requestRow.id : "");
+    if (requestId) {
+      try {
+        const reasonUpdateRes = await service
+          .from("trip_requests")
+          .update({ reason: tripJoinReason } as never)
+          .eq("id", requestId);
+        if (reasonUpdateRes.error) {
+          console.error("[trip_requests] reason update failed", {
+            requestId,
+            tripId,
+            actorUserId: authData.user.id,
+            error: reasonUpdateRes.error,
+          });
+        }
+      } catch (reasonUpdateError) {
+        console.error("[trip_requests] reason update threw", {
+          requestId,
+          tripId,
+          actorUserId: authData.user.id,
+          error: reasonUpdateError,
+        });
+      }
+    }
 
     if (requestId && ownerId && ownerId !== authData.user.id) {
-      const linkedMember = await resolveLinkedMember({
-        serviceClient: service,
-        actorUserId: authData.user.id,
-        recipientUserId: ownerId,
-        linkedMemberUserId,
-      });
-
-      if (linkedMember) {
-        const linkedUpdateRes = await service
-          .from("trip_requests")
-          .update({ linked_member_user_id: linkedMember.userId } as never)
-          .eq("id", requestId);
-        if (linkedUpdateRes.error) {
-          throw new Error(linkedUpdateRes.error.message);
-        }
-
-        await mergeLinkedMemberContextMetadata({
-          serviceClient: service,
-          sourceTable: "trip_requests",
-          sourceId: requestId,
-          linkedMember,
-        });
-
-        await ensureLinkedMemberPairThread({
+      try {
+        const linkedMember = await resolveLinkedMember({
           serviceClient: service,
           actorUserId: authData.user.id,
-          linkedMember,
           recipientUserId: ownerId,
+          linkedMemberUserId,
+        });
+
+        if (linkedMember) {
+          const linkedUpdateRes = await service
+            .from("trip_requests")
+            .update({ linked_member_user_id: linkedMember.userId } as never)
+            .eq("id", requestId);
+          if (linkedUpdateRes.error) {
+            throw new Error(linkedUpdateRes.error.message);
+          }
+
+          await mergeLinkedMemberContextMetadata({
+            serviceClient: service,
+            sourceTable: "trip_requests",
+            sourceId: requestId,
+            linkedMember,
+          });
+
+          await ensureLinkedMemberPairThread({
+            serviceClient: service,
+            actorUserId: authData.user.id,
+            linkedMember,
+            recipientUserId: ownerId,
+          });
+        }
+      } catch (linkedMemberError) {
+        console.error("[trip_requests] linked member sync failed", {
+          requestId,
+          tripId,
+          actorUserId: authData.user.id,
+          ownerId,
+          linkedMemberUserId,
+          error: linkedMemberError,
         });
       }
     }
@@ -274,12 +352,21 @@ export async function POST(req: Request) {
         tripId,
       });
       if (usedFallback && requestId) {
-        await createTripRequestNotificationCompat({
-          service,
-          userId: ownerId,
-          tripId,
-          requestId,
-        });
+        try {
+          await createTripRequestNotificationCompat({
+            service,
+            userId: ownerId,
+            tripId,
+            requestId,
+          });
+        } catch (notificationError) {
+          console.error("[trip_requests] compat notification failed", {
+            requestId,
+            tripId,
+            userId: ownerId,
+            error: notificationError,
+          });
+        }
       }
     }
 

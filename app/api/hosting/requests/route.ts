@@ -10,11 +10,14 @@ import {
   mergeLinkedMemberContextMetadata,
   resolveLinkedMember,
 } from "@/lib/requests/linked-members";
+import { parseHostingSleepingArrangement } from "@/lib/hosting/preferences";
+import { normalizeTravelIntentReason } from "@/lib/trips/join-reasons";
 
 type CreateHostingPayload = {
   recipientUserId?: string;
   requestType?: "request_hosting" | "offer_to_host";
   tripId?: string | null;
+  reason?: string | null;
   arrivalDate?: string;
   departureDate?: string;
   arrivalFlexible?: boolean;
@@ -59,6 +62,9 @@ export async function POST(req: Request) {
     const recipientUserId = body?.recipientUserId?.trim();
     const requestType = body?.requestType;
     const tripId = typeof body?.tripId === "string" && body.tripId.trim() ? body.tripId.trim() : null;
+    const providedReason = typeof body?.reason === "string" ? body.reason.trim() : "";
+    const normalizedTravelIntentReason = providedReason ? normalizeTravelIntentReason(providedReason) : null;
+    const normalizedHostingSpaceType = providedReason ? parseHostingSleepingArrangement(providedReason) : null;
     const arrivalDate = toDateOnly(body?.arrivalDate);
     const departureDate = toDateOnly(body?.departureDate);
     const arrivalFlexible = Boolean(body?.arrivalFlexible);
@@ -76,6 +82,12 @@ export async function POST(req: Request) {
     }
     if (requestType !== "request_hosting" && requestType !== "offer_to_host") {
       return NextResponse.json({ ok: false, error: "Invalid requestType." }, { status: 400 });
+    }
+    if (requestType === "request_hosting" && providedReason && !normalizedTravelIntentReason) {
+      return NextResponse.json({ ok: false, error: "Invalid hosting reason." }, { status: 400 });
+    }
+    if (requestType === "offer_to_host" && providedReason && !normalizedHostingSpaceType) {
+      return NextResponse.json({ ok: false, error: "Invalid space type." }, { status: 400 });
     }
     if (!arrivalDate) {
       return NextResponse.json({ ok: false, error: "Arrival date is required." }, { status: 400 });
@@ -213,38 +225,59 @@ export async function POST(req: Request) {
     }
 
     const requestId = typeof data === "string" ? data : "";
+    const normalizedReasonToPersist =
+      requestType === "request_hosting" ? normalizedTravelIntentReason : normalizedHostingSpaceType;
+
+    if (requestId && normalizedReasonToPersist) {
+      const reasonUpdateRes = await service
+        .from("hosting_requests")
+        .update({ reason: normalizedReasonToPersist } as never)
+        .eq("id", requestId);
+      if (reasonUpdateRes.error) {
+        await service.from("hosting_requests").delete().eq("id", requestId);
+        throw new Error(reasonUpdateRes.error.message);
+      }
+    }
     if (requestId && requestType === "request_hosting") {
-      const linkedMember = await resolveLinkedMember({
-        serviceClient: service,
-        actorUserId: authData.user.id,
-        recipientUserId,
-        linkedMemberUserId,
-      });
-
-      if (linkedMember) {
-        const linkedUpdateRes = await service
-          .from("hosting_requests")
-          .update({ linked_member_user_id: linkedMember.userId } as never)
-          .eq("id", requestId);
-        if (linkedUpdateRes.error) {
-          // Rollback: delete the just-created request so it doesn't orphan as a
-          // blocking pending entry the requester can't see or cancel.
-          await service.from("hosting_requests").delete().eq("id", requestId);
-          throw new Error(linkedUpdateRes.error.message);
-        }
-
-        await mergeLinkedMemberContextMetadata({
-          serviceClient: service,
-          sourceTable: "hosting_requests",
-          sourceId: requestId,
-          linkedMember,
-        });
-
-        await ensureLinkedMemberPairThread({
+      try {
+        const linkedMember = await resolveLinkedMember({
           serviceClient: service,
           actorUserId: authData.user.id,
-          linkedMember,
           recipientUserId,
+          linkedMemberUserId,
+        });
+
+        if (linkedMember) {
+          const linkedUpdateRes = await service
+            .from("hosting_requests")
+            .update({ linked_member_user_id: linkedMember.userId } as never)
+            .eq("id", requestId);
+          if (linkedUpdateRes.error) {
+            throw new Error(linkedUpdateRes.error.message);
+          }
+
+          await mergeLinkedMemberContextMetadata({
+            serviceClient: service,
+            sourceTable: "hosting_requests",
+            sourceId: requestId,
+            linkedMember,
+          });
+
+          await ensureLinkedMemberPairThread({
+            serviceClient: service,
+            actorUserId: authData.user.id,
+            linkedMember,
+            recipientUserId,
+          });
+        }
+      } catch (linkedMemberError) {
+        console.error("[hosting_requests] linked member sync failed", {
+          requestId,
+          requestType,
+          actorUserId: authData.user.id,
+          recipientUserId,
+          linkedMemberUserId,
+          error: linkedMemberError,
         });
       }
     }

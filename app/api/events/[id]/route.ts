@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeEventAccessType, normalizeEventChatMode } from "@/lib/events/access";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 
 type EventLinkInput = {
@@ -59,6 +60,8 @@ function mapUpdateErrorStatus(message: string) {
     message.includes("title_required") ||
     message.includes("invalid_event_window") ||
     message.includes("invalid_visibility") ||
+    message.includes("invalid_event_access_type") ||
+    message.includes("invalid_chat_mode") ||
     message.includes("invalid_status") ||
     message.includes("invalid_capacity") ||
     message.includes("invalid_cover_url") ||
@@ -66,6 +69,12 @@ function mapUpdateErrorStatus(message: string) {
     message.includes("too_many_styles")
   ) {
     return 400;
+  }
+  if (
+    message.includes("private_group_monthly_limit_reached") ||
+    message.includes("private_group_member_limit_reached")
+  ) {
+    return 409;
   }
   return 500;
 }
@@ -92,7 +101,11 @@ export async function PATCH(
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     const description = typeof body?.description === "string" ? body.description : null;
     const eventType = typeof body?.eventType === "string" ? body.eventType : null;
-    const visibility = typeof body?.visibility === "string" ? body.visibility : null;
+    const eventAccessType = normalizeEventAccessType(
+      typeof body?.eventAccessType === "string" ? body.eventAccessType : null,
+      typeof body?.visibility === "string" ? body.visibility : null
+    );
+    const chatMode = normalizeEventChatMode(typeof body?.chatMode === "string" ? body.chatMode : null, eventAccessType);
     const city = typeof body?.city === "string" ? body.city.trim() : null;
     const country = typeof body?.country === "string" ? body.country.trim() : null;
     const venueName = typeof body?.venueName === "string" ? body.venueName : null;
@@ -149,7 +162,9 @@ export async function PATCH(
       p_description: description,
       p_event_type: eventType,
       p_styles: styles,
-      p_visibility: visibility,
+      p_visibility: eventAccessType === "private_group" ? "private" : "public",
+      p_event_access_type: eventAccessType,
+      p_chat_mode: chatMode,
       p_city: city,
       p_country: country,
       p_venue_name: venueName,

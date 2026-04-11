@@ -28,10 +28,15 @@ function mapActionErrorStatus(message: string) {
   if (message.includes("email_verification_required_for_join") || message.includes("new_account_join_limit_reached")) return 429;
   if (
     message.includes("private_event_requires_request") ||
+    message.includes("request_event_requires_approval") ||
+    message.includes("event_is_request_only") ||
     message.includes("event_is_public") ||
+    message.includes("event_is_not_request") ||
     message.includes("event_not_open") ||
     message.includes("event_hidden") ||
     message.includes("already_joined_or_waitlisted") ||
+    message.includes("private_group_member_limit_reached") ||
+    message.includes("private_group_monthly_limit_reached") ||
     message.includes("invalid_response") ||
     message.includes("request_not_found_or_not_pending") ||
     message.includes("host_cannot_leave_own_event")

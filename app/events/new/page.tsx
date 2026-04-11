@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
+import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import EventCoverCropDialog from "@/components/events/EventCoverCropDialog";
@@ -14,6 +15,14 @@ import {
   getCountriesAll,
   type CountryEntry,
 } from "@/lib/country-city-client";
+import {
+  EVENT_ACCESS_TYPE_OPTIONS,
+  PRIVATE_GROUP_CHAT_MODE_OPTIONS,
+  normalizeEventAccessType,
+  normalizeEventChatMode,
+  type EventAccessType,
+  type EventChatMode,
+} from "@/lib/events/access";
 import { validateEventCoverSourceFile } from "@/lib/events/cover-upload";
 import { buildOsmEmbedUrl, type OsmGeocodeResult } from "@/lib/maps/osm";
 import { supabase } from "@/lib/supabase/client";
@@ -123,7 +132,8 @@ function CreateEventForm() {
   const [title, setTitle] = useState("");
   const [eventType, setEventType] = useState("Social");
   const [stylesInput, setStylesInput] = useState("");
-  const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [eventAccessType, setEventAccessType] = useState<EventAccessType>("public");
+  const [chatMode, setChatMode] = useState<EventChatMode>("broadcast");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const selectedCountryEntry = useMemo(() => resolveCountryEntry(countriesAll, country), [countriesAll, country]);
@@ -156,7 +166,14 @@ function CreateEventForm() {
       const pre = JSON.parse(decodeURIComponent(from)) as Record<string, unknown>;
       if (typeof pre.title === "string") setTitle(`${pre.title} (copy)`);
       if (typeof pre.eventType === "string") setEventType(pre.eventType);
-      if (typeof pre.visibility === "string") setVisibility(pre.visibility as "public" | "private");
+      const nextAccessType = normalizeEventAccessType(
+        typeof pre.eventAccessType === "string" ? pre.eventAccessType : null,
+        typeof pre.visibility === "string" ? pre.visibility : null
+      );
+      setEventAccessType(nextAccessType);
+      setChatMode(
+        normalizeEventChatMode(typeof pre.chatMode === "string" ? pre.chatMode : null, nextAccessType)
+      );
       if (typeof pre.city === "string") setCity(pre.city);
       if (typeof pre.country === "string") setCountry(pre.country);
       if (typeof pre.venueName === "string") setVenueName(pre.venueName);
@@ -167,6 +184,16 @@ function CreateEventForm() {
     } catch { /* ignore malformed param */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (eventAccessType !== "private_group" && chatMode !== "broadcast") {
+      setChatMode("broadcast");
+      return;
+    }
+    if (eventAccessType === "private_group" && chatMode === "none") {
+      setChatMode("discussion");
+    }
+  }, [chatMode, eventAccessType]);
 
   useEffect(() => {
     let cancelled = false;
@@ -396,14 +423,15 @@ function CreateEventForm() {
           description: description.trim(),
           eventType,
           styles,
-          visibility,
+          eventAccessType,
+          chatMode,
           city: city.trim(),
           country: country.trim(),
           venueName: venueName.trim(),
           venueAddress: venueAddress.trim(),
           startsAt,
           endsAt,
-          capacity: hasCapacity && typeof capacity === "number" ? capacity : null,
+          capacity: eventAccessType === "private_group" ? null : hasCapacity && typeof capacity === "number" ? capacity : null,
           coverUrl: coverUrl.trim(),
           links: cleanedLinks,
           status: nextStatus,
@@ -611,30 +639,57 @@ function CreateEventForm() {
                   </select>
                 </label>
 
-                <label className="space-y-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Visibility</span>
-                  <div className="inline-flex w-full rounded-xl border border-white/10 bg-black/20 p-1">
-                    <button
-                      type="button"
-                      onClick={() => setVisibility("public")}
-                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                        visibility === "public" ? "bg-cyan-300 text-[#062328]" : "text-slate-300 hover:text-white"
-                      }`}
-                    >
-                      Public
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVisibility("private")}
-                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                        visibility === "private" ? "bg-cyan-300 text-[#062328]" : "text-slate-300 hover:text-white"
-                      }`}
-                    >
-                      Private
-                    </button>
+                <div className="space-y-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Mode</span>
+                  <div className="grid gap-2">
+                    {EVENT_ACCESS_TYPE_OPTIONS.map((option) => {
+                      const selected = eventAccessType === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setEventAccessType(option.value)}
+                          className={`rounded-xl border px-4 py-3 text-left transition ${
+                            selected
+                              ? "border-cyan-300/35 bg-cyan-300/12 text-white"
+                              : "border-white/10 bg-black/20 text-slate-300 hover:border-white/20 hover:text-white"
+                          }`}
+                        >
+                          <p className="text-sm font-semibold">{option.label}</p>
+                          <p className="mt-1 text-xs text-slate-400">{option.helper}</p>
+                        </button>
+                      );
+                    })}
                   </div>
-                </label>
+                </div>
               </div>
+
+              {eventAccessType === "private_group" ? (
+                <div className="space-y-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Chat mode</span>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {PRIVATE_GROUP_CHAT_MODE_OPTIONS.map((option) => {
+                      const selected = chatMode === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setChatMode(option.value)}
+                          className={`rounded-xl border px-4 py-3 text-left transition ${
+                            selected
+                              ? "border-fuchsia-300/35 bg-fuchsia-400/12 text-white"
+                              : "border-white/10 bg-black/20 text-slate-300 hover:border-white/20 hover:text-white"
+                          }`}
+                        >
+                          <p className="text-sm font-semibold">{option.label}</p>
+                          <p className="mt-1 text-xs text-slate-400">{option.helper}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-cyan-200/85">Plan your dance life together.</p>
+                </div>
+              ) : null}
 
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Styles</span>
@@ -654,6 +709,21 @@ function CreateEventForm() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Country</span>
+                <div className="sm:hidden">
+                  <SearchableMobileSelect
+                    label="Country"
+                    value={country}
+                    options={countryNames}
+                    placeholder="Select country"
+                    searchPlaceholder="Search countries..."
+                    onSelect={(nextCountry) => {
+                      setCountry(nextCountry);
+                      setCity("");
+                      resetLocationSearchState();
+                    }}
+                    buttonClassName="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white"
+                  />
+                </div>
                 <div className="relative">
                   <select
                     value={country}
@@ -662,7 +732,7 @@ function CreateEventForm() {
                       setCity("");
                       resetLocationSearchState();
                     }}
-                    className="w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 pr-11 text-white focus:border-cyan-300/35 focus:outline-none"
+                    className="hidden w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 pr-11 text-white focus:border-cyan-300/35 focus:outline-none sm:block"
                   >
                     <option value="">Select country</option>
                     {countryNames.map((name) => (
@@ -671,13 +741,32 @@ function CreateEventForm() {
                       </option>
                     ))}
                   </select>
-                  <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-500">
+                  <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 text-[20px] text-slate-500 sm:block">
                     expand_more
                   </span>
                 </div>
               </label>
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">City</span>
+                {selectedCountryIso && cityMenuOptions.length > 0 ? (
+                  <div className="sm:hidden">
+                    <SearchableMobileSelect
+                      label="City"
+                      value={city}
+                      options={cityMenuOptions}
+                      placeholder={selectedCountryIso ? "Select or search city" : "Select country first"}
+                      searchPlaceholder="Search cities..."
+                      disabled={!selectedCountryIso}
+                      allowCustomValue
+                      customValueLabel={(value) => `Use "${value}"`}
+                      onSelect={(nextCity) => {
+                        setCity(nextCity);
+                        resetLocationSearchState();
+                      }}
+                      buttonClassName="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white disabled:opacity-55"
+                    />
+                  </div>
+                ) : null}
                 <input
                   value={city}
                   onChange={(event) => {
@@ -686,7 +775,9 @@ function CreateEventForm() {
                   }}
                   list={selectedCountryIso && cityMenuOptions.length > 0 ? "event-city-options" : undefined}
                   disabled={!selectedCountryIso}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none disabled:opacity-55"
+                  className={`w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none disabled:opacity-55 ${
+                    selectedCountryIso && cityMenuOptions.length > 0 ? "hidden sm:block" : ""
+                  }`}
                   placeholder={selectedCountryIso ? "Type or choose city" : "Select country first"}
                 />
                 {selectedCountryIso && cityMenuOptions.length > 0 ? (
@@ -895,29 +986,47 @@ function CreateEventForm() {
             <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-white">Limit attendees</p>
-                  <p className="text-xs text-slate-400">Set max capacity (1 to 2000)</p>
+                  <p className="text-sm font-semibold text-white">
+                    {eventAccessType === "private_group" ? "Private Group limit" : "Limit attendees"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {eventAccessType === "private_group"
+                      ? "Private groups are limited to 25 members."
+                      : "Set max capacity (1 to 2000)"}
+                  </p>
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={hasCapacity}
-                    onChange={(event) => setHasCapacity(event.target.checked)}
-                    className="h-4 w-4 rounded border-white/20 bg-transparent accent-cyan-300"
-                  />
-                  <span className="text-slate-300">Enable</span>
-                </label>
+                {eventAccessType !== "private_group" ? (
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={hasCapacity}
+                      onChange={(event) => setHasCapacity(event.target.checked)}
+                      className="h-4 w-4 rounded border-white/20 bg-transparent accent-cyan-300"
+                    />
+                    <span className="text-slate-300">Enable</span>
+                  </label>
+                ) : (
+                  <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                    25 max
+                  </span>
+                )}
               </div>
-              <input
-                type="number"
-                min={1}
-                max={2000}
-                value={capacity}
-                onChange={(event) => setCapacity(event.target.value ? Number(event.target.value) : "")}
-                disabled={!hasCapacity}
-                placeholder="Enter max capacity"
-                className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 disabled:opacity-50"
-              />
+              {eventAccessType === "private_group" ? (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">
+                  Members can join until the group reaches 25 people.
+                </div>
+              ) : (
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={capacity}
+                  onChange={(event) => setCapacity(event.target.value ? Number(event.target.value) : "")}
+                  disabled={!hasCapacity}
+                  placeholder="Enter max capacity"
+                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 disabled:opacity-50"
+                />
+              )}
             </div>
 
             <div className="space-y-2">

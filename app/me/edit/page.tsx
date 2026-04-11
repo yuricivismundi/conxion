@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import {
@@ -14,10 +15,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Nav from "@/components/Nav";
 import VerifiedBadge from "@/components/VerifiedBadge";
+import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import GetVerifiedButton from "@/components/verification/GetVerifiedButton";
-import ProfileMediaManager from "@/components/profile/ProfileMediaManager";
-import TeacherInfoManager from "@/components/teacher/TeacherInfoManager";
-import TeacherProfilePage from "@/app/me/edit/teacher-profile/page";
 import {
   HOSTING_GUEST_GENDER_OPTIONS,
   HOSTING_SLEEPING_ARRANGEMENT_OPTIONS,
@@ -42,6 +41,30 @@ import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { VERIFIED_VIA_PAYMENT_LABEL } from "@/lib/verification";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
 import { cx } from "@/lib/cx";
+
+function TabPanelLoading({ label }: { label: string }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+      <div className="profile-shimmer h-5 w-40 rounded-md" />
+      <p className="mt-3 text-sm text-slate-400">Loading {label.toLowerCase()}...</p>
+    </div>
+  );
+}
+
+const ProfileMediaManager = dynamic(() => import("@/components/profile/ProfileMediaManager"), {
+  ssr: false,
+  loading: () => <TabPanelLoading label="media" />,
+});
+
+const TeacherInfoManager = dynamic(() => import("@/components/teacher/TeacherInfoManager"), {
+  ssr: false,
+  loading: () => <TabPanelLoading label="teacher services" />,
+});
+
+const TeacherProfilePage = dynamic(() => import("@/app/me/edit/teacher-profile/page"), {
+  ssr: false,
+  loading: () => <TabPanelLoading label="teacher profile" />,
+});
 
 const LEVELS = [
   "Beginner (0–3 months)",
@@ -105,6 +128,7 @@ type Profile = {
   dance_styles: string[] | null;
   dance_skills: Record<string, DanceSkill> | null;
   roles: string[] | null;
+  display_role: string | null;
   languages: string[] | null;
   interests: string[] | null;
   availability: string[] | null;
@@ -141,6 +165,7 @@ type ProfileUpdate = {
   dance_styles: string[];
   dance_skills: Record<string, DanceSkill>;
   roles: string[];
+  display_role: string | null;
   languages: string[];
   interests: string[];
   availability: string[];
@@ -206,6 +231,17 @@ function uniqueOrdered(items: string[]) {
 function mergeKnownWithCurrent(known: readonly string[], current: string[]) {
   const extras = current.filter((item) => !known.includes(item));
   return [...known, ...extras];
+}
+
+// Legacy role values that were split/renamed — strip them on load
+const LEGACY_ROLES_REMOVE = new Set([
+  "social dancer / student",
+  "social dancer/student",
+  "organiser", // British spelling replaced by "Organizer"
+]);
+
+function normalizeLegacyRoles(roles: string[]): string[] {
+  return roles.filter((r) => !LEGACY_ROLES_REMOVE.has(r.toLowerCase().trim()));
 }
 
 function titleCase(value: string) {
@@ -395,6 +431,7 @@ function EditMePage() {
   const [verificationFeatureAvailable, setVerificationFeatureAvailable] = useState(true);
 
   const [roles, setRoles] = useState<string[]>([]);
+  const [displayRole, setDisplayRole] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
   const [availability, setAvailability] = useState<string[]>([]);
 
@@ -629,13 +666,13 @@ function EditMePage() {
 
   useEffect(() => {
     if (!error) return;
-    const timeoutId = window.setTimeout(() => setError(null), 3000);
+    const timeoutId = window.setTimeout(() => setError(null), 6000);
     return () => window.clearTimeout(timeoutId);
   }, [error]);
 
   useEffect(() => {
     if (!verificationNotice) return;
-    const timeoutId = window.setTimeout(() => setVerificationNotice(null), 3000);
+    const timeoutId = window.setTimeout(() => setVerificationNotice(null), 6000);
     return () => window.clearTimeout(timeoutId);
   }, [verificationNotice]);
 
@@ -835,7 +872,8 @@ function EditMePage() {
           Object.keys(nextDanceSkills).find((style) => !CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) ?? "";
         setOtherStyleEnabled(Boolean(existingOtherStyle));
         setCustomStyleDraft(existingOtherStyle);
-        setRoles(nextRoles);
+        setRoles(normalizeLegacyRoles(nextRoles));
+        setDisplayRole(typeof profile.display_role === "string" && profile.display_role ? profile.display_role : null);
         setInterests(nextInterests);
         setAvailability(nextAvailability);
         setLanguages(nextLanguages);
@@ -1084,8 +1122,8 @@ function EditMePage() {
 
   }
 
-  function addLanguage() {
-    const normalized = languageDraft.trim();
+  function addLanguage(nextValue?: string) {
+    const normalized = (nextValue ?? languageDraft).trim();
     if (!normalized) return;
     if (languages.includes(normalized)) {
       setLanguageDraft("");
@@ -1277,6 +1315,7 @@ function EditMePage() {
       dance_styles: Object.keys(sanitizedDanceSkills).sort(styleSort),
       dance_skills: sanitizedDanceSkills,
       roles,
+      display_role: displayRole && roles.includes(displayRole) ? displayRole : (roles[0] ?? null),
       languages,
       interests: normalizeInterests(interests),
       availability,
@@ -1660,6 +1699,20 @@ function EditMePage() {
 
                 <label className="block text-sm font-medium text-slate-300">
                   Country
+                  <div className="mt-1.5 sm:hidden">
+                    <SearchableMobileSelect
+                      label="Country"
+                      value={country}
+                      options={countryNames}
+                      placeholder="Select country"
+                      searchPlaceholder="Search countries..."
+                      onSelect={(nextCountry) => {
+                        setCountry(nextCountry);
+                        setCity("");
+                      }}
+                      buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none"
+                    />
+                  </div>
                   <select
                     value={country}
                     onChange={(event) => {
@@ -1667,7 +1720,7 @@ function EditMePage() {
                       setCountry(nextCountry);
                       setCity("");
                     }}
-                    className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)]"
+                    className="mt-1.5 hidden w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] sm:block"
                   >
                     <option value="">Select country</option>
                     {countryNames.map((name) => (
@@ -1688,19 +1741,34 @@ function EditMePage() {
                       placeholder="Type your city"
                     />
                   ) : (
-                    <select
-                      value={city}
-                      onChange={(event) => setCity(event.target.value)}
-                      disabled={!country}
-                      className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] disabled:opacity-55"
-                    >
-                      <option value="">{country ? "Select city" : "Pick country first"}</option>
-                      {cityOptions.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
+                    <>
+                      <div className="mt-1.5 sm:hidden">
+                        <SearchableMobileSelect
+                          label="City"
+                          value={city}
+                          options={cityOptions}
+                          placeholder={country ? "Select city" : "Pick country first"}
+                          searchPlaceholder="Search cities..."
+                          disabled={!country}
+                          emptyMessage={!country ? "Choose a country first." : "No cities found."}
+                          onSelect={(nextCity) => setCity(nextCity)}
+                          buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none disabled:opacity-55"
+                        />
+                      </div>
+                      <select
+                        value={city}
+                        onChange={(event) => setCity(event.target.value)}
+                        disabled={!country}
+                        className="mt-1.5 hidden w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] disabled:opacity-55 sm:block"
+                      >
+                        <option value="">{country ? "Select city" : "Pick country first"}</option>
+                        {cityOptions.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </>
                   )}
                 </label>
 
@@ -1818,7 +1886,7 @@ function EditMePage() {
                     </label>
 
                     <label className="block text-sm font-medium text-slate-300">
-                      Sleeping arrangement
+                      Space type
                       <select
                         value={hostingSleepingArrangement}
                         onChange={(event) => setHostingSleepingArrangement(normalizeHostingSleepingArrangement(event.target.value))}
@@ -2066,28 +2134,64 @@ function EditMePage() {
               </header>
 
               <div className="mt-5 grid gap-6 xl:grid-cols-3">
-                <div>
-                  <p className="mb-2 text-sm font-medium text-slate-300">Roles</p>
-                  <div className="flex flex-wrap gap-2">
-                    {roleOptions.map((item) => {
-                      const active = roles.includes(item);
-                      return (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => toggleString(roles, setRoles, item)}
-                          className={cx(
-                            "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                            active
-                              ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
-                              : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                          )}
-                        >
-                          {item}
-                        </button>
-                      );
-                    })}
+                <div className="space-y-4">
+                  <div>
+                    <p className="mb-2 text-sm font-medium text-slate-300">Roles</p>
+                    <div className="flex flex-wrap gap-2">
+                      {roleOptions.map((item) => {
+                        const active = roles.includes(item);
+                        return (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => {
+                              toggleString(roles, setRoles, item);
+                              // If deselecting the display role, clear it
+                              if (active && displayRole === item) setDisplayRole(null);
+                            }}
+                            className={cx(
+                              "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                              active
+                                ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
+                                : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                            )}
+                          >
+                            {item}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
+
+                  {roles.length > 1 && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-slate-300">
+                        Display role on cards
+                        <span className="ml-1.5 text-xs text-slate-500">— shown as your primary label</span>
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {roles.map((role) => {
+                          const isPrimary = (displayRole ?? roles[0]) === role;
+                          return (
+                            <button
+                              key={role}
+                              type="button"
+                              onClick={() => setDisplayRole(role)}
+                              className={cx(
+                                "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
+                                isPrimary
+                                  ? "border-fuchsia-400/50 bg-fuchsia-500/15 text-white shadow-[0_0_14px_rgba(217,70,239,0.2)]"
+                                  : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30"
+                              )}
+                            >
+                              {isPrimary && <span className="mr-1 text-fuchsia-300">✓</span>}
+                              {role}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -2166,7 +2270,21 @@ function EditMePage() {
                     <p className="text-xs text-slate-500">Max 5</p>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="sm:hidden">
+                    <SearchableMobileSelect
+                      label="Language"
+                      value=""
+                      options={LANGUAGE_OPTIONS.filter((item) => !languages.includes(item))}
+                      placeholder={languages.length >= 5 ? "Max 5 languages" : "Search languages..."}
+                      searchPlaceholder="Search languages..."
+                      disabled={languages.length >= 5}
+                      emptyMessage="No languages left to add."
+                      onSelect={(value) => addLanguage(value)}
+                      buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none disabled:opacity-50"
+                    />
+                  </div>
+
+                  <div className="hidden gap-2 sm:flex">
                     <input
                       value={languageDraft}
                       onChange={(event) => setLanguageDraft(event.target.value)}
@@ -2181,7 +2299,7 @@ function EditMePage() {
                     </datalist>
                     <button
                       type="button"
-                      onClick={addLanguage}
+                      onClick={() => addLanguage()}
                       disabled={languages.length >= 5 || !languageDraft.trim()}
                       className="rounded-xl border border-cyan-300/35 bg-cyan-300/15 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >

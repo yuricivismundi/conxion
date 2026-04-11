@@ -61,7 +61,7 @@ export default function AppFooter() {
               id="footer-language"
               value={language}
               onChange={(event) => setLanguage(event.target.value as AppLanguage)}
-              className="min-h-10 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 outline-none transition hover:border-white/20"
+              className="h-11 min-h-[44px] rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 outline-none transition hover:border-white/20"
             >
               {options.map((option) => (
                 <option key={option.value} value={option.value}>

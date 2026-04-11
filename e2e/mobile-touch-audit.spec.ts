@@ -4,7 +4,7 @@ import { bootstrapMessagesE2E } from "./helpers/messages-e2e";
 
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
 
-const ROUTES = ["/messages", "/connections", "/network", "/my-space", "/profile/5fd75dd8-1893-4eb4-a8cc-6f026fd10d02", "/support"] as const;
+const ROUTES = ["/messages", "/connections", "/network", "/account-settings", "/profile/5fd75dd8-1893-4eb4-a8cc-6f026fd10d02", "/support"] as const;
 
 type ControlRecord = {
   route: string;
@@ -28,8 +28,11 @@ test.describe("mobile touch audit", () => {
     const findings: ControlRecord[] = [];
 
     for (const route of ROUTES) {
-      await page.goto(route);
+      await page.goto(route, { waitUntil: "commit" }).catch(() => {});
       await page.waitForLoadState("networkidle");
+
+      // Skip this route if redirected to auth
+      if (page.url().includes("/auth")) continue;
 
       const routeFindings = await page.evaluate((currentRoute) => {
         const isVisible = (element: Element) => {

@@ -29,25 +29,6 @@ export default function EventsLoading() {
             </div>
           </div>
 
-          <section className="rounded-2xl border border-cyan-300/20 bg-[radial-gradient(circle_at_top_left,rgba(37,209,244,0.12),transparent_42%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.1),transparent_46%),#101214] p-3">
-            <div className="mb-3 h-5 w-36 animate-pulse rounded bg-white/10" />
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div
-                  key={`events-loading-featured-${index}`}
-                  className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
-                >
-                  <div className="h-44 bg-white/5" />
-                  <div className="space-y-3 p-4">
-                    <div className="h-4 w-24 rounded bg-white/10" />
-                    <div className="h-6 w-4/5 rounded bg-white/10" />
-                    <div className="h-4 w-3/5 rounded bg-white/10" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
           <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, index) => (
               <div
