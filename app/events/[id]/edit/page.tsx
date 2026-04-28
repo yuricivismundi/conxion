@@ -32,21 +32,13 @@ type EventLinkDraft = {
   type: string;
 };
 
-const MIN_DESCRIPTION_LENGTH = 32;
-const MAX_DESCRIPTION_LENGTH = 1600;
-const MAX_TITLE_LENGTH = 96;
+const MIN_TITLE_LENGTH = 8;
+const MAX_TITLE_LENGTH = 120;
+const MIN_DESCRIPTION_LENGTH = 24;
+const MAX_DESCRIPTION_LENGTH = 4000;
 const MAX_VENUE_NAME_LENGTH = 120;
 const MAX_VENUE_ADDRESS_LENGTH = 180;
 const QUICK_DURATION_HOURS = [2, 3, 4, 6];
-
-function fileExtension(file: File) {
-  const fromName = file.name.split(".").pop()?.toLowerCase();
-  if (fromName) return fromName;
-  if (file.type === "image/jpeg") return "jpg";
-  if (file.type === "image/png") return "png";
-  if (file.type === "image/webp") return "webp";
-  return "jpg";
-}
 
 function toIsoOrNull(localDateTime: string) {
   if (!localDateTime) return null;
@@ -129,6 +121,9 @@ export default function EditEventPage() {
   const [stylesInput, setStylesInput] = useState("");
   const [eventAccessType, setEventAccessType] = useState<EventAccessType>("public");
   const [chatMode, setChatMode] = useState<EventChatMode>("broadcast");
+  const [showGuestList, setShowGuestList] = useState(true);
+  const [guestsCanInvite, setGuestsCanInvite] = useState(false);
+  const [approveMessages, setApproveMessages] = useState(false);
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const selectedCountryEntry = useMemo(() => resolveCountryEntry(countriesAll, country), [countriesAll, country]);
@@ -144,6 +139,7 @@ export default function EditEventPage() {
   const [hasCapacity, setHasCapacity] = useState(false);
   const [capacity, setCapacity] = useState<number | "">("");
   const [links, setLinks] = useState<EventLinkDraft[]>([]);
+  const [ticketsUrl, setTicketsUrl] = useState("");
   const [locationResults, setLocationResults] = useState<OsmGeocodeResult[]>([]);
   const [locationSearchBusy, setLocationSearchBusy] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<OsmGeocodeResult | null>(null);
@@ -155,6 +151,14 @@ export default function EditEventPage() {
   const descriptionLength = trimmedDescription.length;
   const locationSearchQuery = [venueName, venueAddress, city, country].map((value) => value.trim()).filter(Boolean).join(", ");
   const cityMenuOptions = useMemo(() => cityOptions.slice(0, 500), [cityOptions]);
+  const visibleAccessOptions = useMemo(
+    () =>
+      eventAccessType === "private_group"
+        ? EVENT_ACCESS_TYPE_OPTIONS
+        : EVENT_ACCESS_TYPE_OPTIONS.filter((option) => option.value !== "private_group"),
+    [eventAccessType]
+  );
+  const hostOnlyMessages = chatMode !== "discussion";
 
   useEffect(() => {
     let cancelled = false;
@@ -211,6 +215,9 @@ export default function EditEventPage() {
         setStylesInput(event.styles.join(", "));
         setEventAccessType(event.accessType);
         setChatMode(event.chatMode);
+        setShowGuestList(event.showGuestList);
+        setGuestsCanInvite(event.guestsCanInvite);
+        setApproveMessages(event.approveMessages);
         setCity(event.city);
         setCountry(event.country);
         setVenueName(event.venueName ?? "");
@@ -226,6 +233,7 @@ export default function EditEventPage() {
             ? event.links.map((item) => ({ label: item.label, url: item.url, type: item.type }))
             : []
         );
+        setTicketsUrl(event.links.find((item) => item.type === "tickets")?.url ?? "");
       } catch (bootstrapError) {
         if (!cancelled) {
           setError(bootstrapError instanceof Error ? bootstrapError.message : "Could not load event editor.");
@@ -273,7 +281,7 @@ export default function EditEventPage() {
   }, [countriesAll, country]);
 
   useEffect(() => {
-    if (eventAccessType !== "private_group" && chatMode !== "broadcast") {
+    if (eventAccessType !== "private_group" && chatMode === "none") {
       setChatMode("broadcast");
       return;
     }
@@ -282,6 +290,12 @@ export default function EditEventPage() {
     }
   }, [chatMode, eventAccessType]);
 
+  useEffect(() => {
+    if (chatMode !== "discussion" && approveMessages) {
+      setApproveMessages(false);
+    }
+  }, [approveMessages, chatMode]);
+
   const isValidWindow = useMemo(() => {
     const start = toIsoOrNull(startsAtLocal);
     const end = toIsoOrNull(endsAtLocal);
@@ -289,6 +303,10 @@ export default function EditEventPage() {
   }, [endsAtLocal, startsAtLocal]);
 
   const canPublish = useMemo(() => {
+    if (eventAccessType === "private_group") {
+      // Groups need title and description for publishing
+      return Boolean(title.trim() && trimmedDescription);
+    }
     return Boolean(
       title.trim() &&
         eventType.trim() &&
@@ -301,11 +319,14 @@ export default function EditEventPage() {
         descriptionLength >= MIN_DESCRIPTION_LENGTH &&
         descriptionLength <= MAX_DESCRIPTION_LENGTH
     );
-  }, [city, country, descriptionLength, endsAtLocal, eventType, isValidWindow, startsAtLocal, title, venueName]);
+  }, [city, country, descriptionLength, endsAtLocal, eventAccessType, eventType, isValidWindow, startsAtLocal, title, trimmedDescription, venueName]);
 
   const canSaveDraft = useMemo(() => {
+    if (eventAccessType === "private_group") {
+      return Boolean(title.trim());
+    }
     return Boolean(title.trim() && city.trim() && country.trim() && startsAtLocal && endsAtLocal && isValidWindow);
-  }, [city, country, endsAtLocal, isValidWindow, startsAtLocal, title]);
+  }, [city, country, endsAtLocal, eventAccessType, isValidWindow, startsAtLocal, title]);
 
   function resetLocationSearchState() {
     setLocationResults([]);
@@ -339,18 +360,18 @@ export default function EditEventPage() {
     setInfo(null);
     setUploadingCover(true);
     try {
-      const ext = fileExtension(preparedFile);
-      const path = `${meId}/event-cover-${crypto.randomUUID()}.${ext}`;
-      const bucket = "avatars";
-
-      const { error: uploadErr } = await supabase.storage.from(bucket).upload(path, preparedFile, { upsert: true });
-      if (uploadErr) throw uploadErr;
-
-      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-      const publicUrl = data.publicUrl;
-      if (!publicUrl) throw new Error("Could not resolve cover URL.");
-
-      setCoverUrl(publicUrl);
+      if (!accessToken) throw new Error("Missing auth session. Please sign in again.");
+      const formData = new FormData();
+      formData.append("file", preparedFile);
+      formData.append("prefix", "event-cover");
+      const res = await fetch("/api/uploads/cover", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const json = (await res.json()) as { ok: boolean; url?: string; error?: string };
+      if (!json.ok || !json.url) throw new Error(json.error ?? "Cover upload failed.");
+      setCoverUrl(json.url);
       setPendingCoverFile(null);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Cover upload failed.";
@@ -379,34 +400,51 @@ export default function EditEventPage() {
     const startsAt = toIsoOrNull(startsAtLocal);
     const endsAt = toIsoOrNull(endsAtLocal);
     const requiresFullPublishFields = nextStatus === "published";
+    const isPrivateGroup = eventAccessType === "private_group";
 
-    if (!title.trim() || !city.trim() || !country.trim() || !startsAt || !endsAt) {
+    if (title.trim().length < MIN_TITLE_LENGTH) {
       setSubmitting(false);
-      setError(
-        requiresFullPublishFields
-          ? "Title, venue, city, country, and valid start/end date-time are required."
-          : "Title, city, country, and valid start/end date-time are required to save a draft."
-      );
+      setError(`Title must be at least ${MIN_TITLE_LENGTH} characters.`);
       return;
     }
-    if (startsAt >= endsAt) {
+    if (title.trim().length > MAX_TITLE_LENGTH) {
       setSubmitting(false);
-      setError("Event end time must be after start time.");
+      setError(`Title must be no more than ${MAX_TITLE_LENGTH} characters.`);
       return;
     }
-    if (requiresFullPublishFields && !venueName.trim()) {
-      setSubmitting(false);
-      setError("Venue name is required before publishing.");
-      return;
+
+    if (isPrivateGroup) {
+      if (requiresFullPublishFields && trimmedDescription.length < MIN_DESCRIPTION_LENGTH) {
+        setSubmitting(false);
+        setError(`Description must be at least ${MIN_DESCRIPTION_LENGTH} characters.`);
+        return;
+      }
+    } else {
+      // Events need full validation
+      if (!city.trim() || !country.trim() || !startsAt || !endsAt) {
+        setSubmitting(false);
+        setError(
+          requiresFullPublishFields
+            ? "Title, venue, city, country, and valid start/end date-time are required."
+            : "Title, city, country, and valid start/end date-time are required to save a draft."
+        );
+        return;
+      }
+      if (startsAt >= endsAt) {
+        setSubmitting(false);
+        setError("Event end time must be after start time.");
+        return;
+      }
+      if (requiresFullPublishFields && !venueName.trim()) {
+        setSubmitting(false);
+        setError("Venue name is required before publishing.");
+        return;
+      }
     }
+
     if (trimmedDescription.length > MAX_DESCRIPTION_LENGTH) {
       setSubmitting(false);
-      setError(`Description must stay under ${MAX_DESCRIPTION_LENGTH} characters.`);
-      return;
-    }
-    if (requiresFullPublishFields && !trimmedDescription) {
-      setSubmitting(false);
-      setError("Description is required before publishing.");
+      setError(`Description must be no more than ${MAX_DESCRIPTION_LENGTH} characters.`);
       return;
     }
     if (requiresFullPublishFields && trimmedDescription.length < MIN_DESCRIPTION_LENGTH) {
@@ -415,13 +453,16 @@ export default function EditEventPage() {
       return;
     }
 
-    const cleanedLinks = links
+    const nonTicketLinks = links
       .map((item) => ({
         label: item.label.trim() || "Link",
         url: item.url.trim(),
         type: item.type.trim() || "link",
       }))
-      .filter((item) => item.url);
+      .filter((item) => item.url && item.type.toLowerCase() !== "tickets");
+    const cleanedLinks = ticketsUrl.trim()
+      ? [...nonTicketLinks, { label: "Tickets", url: ticketsUrl.trim(), type: "tickets" }]
+      : nonTicketLinks;
 
     const styles = stylesInput
       .split(",")
@@ -442,7 +483,7 @@ export default function EditEventPage() {
           eventType,
           styles,
           eventAccessType,
-          chatMode,
+          chatMode: hostOnlyMessages ? "broadcast" : "discussion",
           city: city.trim(),
           country: country.trim(),
           venueName: venueName.trim(),
@@ -453,6 +494,12 @@ export default function EditEventPage() {
           coverUrl: coverUrl.trim(),
           links: cleanedLinks,
           status: nextStatus,
+          settings: {
+            showGuestList,
+            guestsCanInvite,
+            hostOnlyMessages,
+            approveMessages,
+          },
         }),
       });
 
@@ -584,7 +631,7 @@ export default function EditEventPage() {
 
             <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[#091217]">
               {coverUrl ? (
-                <div className="space-y-4 p-4 sm:p-5">
+                <div className="p-4 sm:p-5">
                   <div className="relative h-56 overflow-hidden rounded-[24px] border border-white/10 bg-[#10242a] sm:h-72">
                     <img src={coverUrl} alt="Event cover preview" className="h-full w-full object-cover" />
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-4 py-4">
@@ -592,7 +639,7 @@ export default function EditEventPage() {
                       <p className="text-xs text-slate-200">This leads the event page header and ambient background.</p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={() => coverInputRef.current?.click()}
@@ -641,7 +688,12 @@ export default function EditEventPage() {
                   placeholder="e.g. Midnight Salsa Social"
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
                 />
-                <div className="text-right text-xs text-slate-500">{title.length}/{MAX_TITLE_LENGTH}</div>
+                <div className="flex justify-between text-xs">
+                  <span className={title.trim().length > 0 && title.trim().length < MIN_TITLE_LENGTH ? "text-amber-300" : "text-slate-500"}>
+                    {title.trim().length > 0 && title.trim().length < MIN_TITLE_LENGTH ? `Min ${MIN_TITLE_LENGTH} chars` : ""}
+                  </span>
+                  <span className={title.length > MAX_TITLE_LENGTH ? "text-rose-400" : "text-slate-500"}>{title.length}/{MAX_TITLE_LENGTH}</span>
+                </div>
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -662,26 +714,25 @@ export default function EditEventPage() {
 
                 <div className="space-y-2">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Mode</span>
-                  <div className="grid gap-2">
-                    {EVENT_ACCESS_TYPE_OPTIONS.map((option) => {
-                      const selected = eventAccessType === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setEventAccessType(option.value)}
-                          className={`rounded-xl border px-4 py-3 text-left transition ${
-                            selected
-                              ? "border-cyan-300/35 bg-cyan-300/12 text-white"
-                              : "border-white/10 bg-black/20 text-slate-300 hover:border-white/20 hover:text-white"
-                          }`}
-                        >
-                          <p className="text-sm font-semibold">{option.label}</p>
-                          <p className="mt-1 text-xs text-slate-400">{option.helper}</p>
-                        </button>
-                      );
-                    })}
+                  <div className="relative">
+                    <select
+                      value={eventAccessType}
+                      onChange={(event) => setEventAccessType(event.target.value as EventAccessType)}
+                      className="w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 pr-11 text-white focus:border-cyan-300/35 focus:outline-none"
+                    >
+                      {visibleAccessOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-500">
+                      expand_more
+                    </span>
                   </div>
+                  <p className="text-xs text-slate-400">
+                    {visibleAccessOptions.find((option) => option.value === eventAccessType)?.helper ?? ""}
+                  </p>
                 </div>
               </div>
 
@@ -1005,10 +1056,10 @@ export default function EditEventPage() {
                 className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
               />
               <div className="flex items-center justify-between text-xs">
-                <span className={descriptionLength < MIN_DESCRIPTION_LENGTH ? "text-amber-200" : "text-slate-500"}>
-                  Minimum {MIN_DESCRIPTION_LENGTH} characters
+                <span className={descriptionLength > 0 && descriptionLength < MIN_DESCRIPTION_LENGTH ? "text-amber-200" : "text-slate-500"}>
+                  {descriptionLength > 0 && descriptionLength < MIN_DESCRIPTION_LENGTH ? `Min ${MIN_DESCRIPTION_LENGTH} chars` : ""}
                 </span>
-                <span className="text-slate-500">{description.length}/{MAX_DESCRIPTION_LENGTH}</span>
+                <span className={description.length > MAX_DESCRIPTION_LENGTH ? "text-rose-400" : "text-slate-500"}>{description.length}/{MAX_DESCRIPTION_LENGTH}</span>
               </div>
             </label>
 
@@ -1058,51 +1109,103 @@ export default function EditEventPage() {
               )}
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">External Links</p>
-              {links.map((link, index) => (
-                <div key={`event-link-${index}`} className="grid gap-2 sm:grid-cols-[1fr,1fr,180px,auto]">
-                  <input
-                    value={link.label}
-                    onChange={(event) => {
-                      setLinks((prev) => prev.map((item, i) => (i === index ? { ...item, label: event.target.value } : item)));
-                    }}
-                    placeholder="Label"
-                    className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                  />
-                  <input
-                    value={link.url}
-                    onChange={(event) => {
-                      setLinks((prev) => prev.map((item, i) => (i === index ? { ...item, url: event.target.value } : item)));
-                    }}
-                    placeholder="https://..."
-                    className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                  />
-                  <input
-                    value={link.type}
-                    onChange={(event) => {
-                      setLinks((prev) => prev.map((item, i) => (i === index ? { ...item, type: event.target.value } : item)));
-                    }}
-                    placeholder="tickets"
-                    className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                  />
+            <label className="space-y-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Tickets URL</span>
+              <input
+                value={ticketsUrl}
+                onChange={(event) => setTicketsUrl(event.target.value)}
+                placeholder="https://..."
+                className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
+              />
+              <p className="text-xs text-slate-500">Use this if people should buy tickets or RSVP outside ConXion.</p>
+            </label>
+
+            {/* Event thread settings (non-group events only) */}
+            {eventAccessType !== "private_group" && (
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Only hosts can message</p>
+                    <p className="mt-0.5 text-xs text-slate-400">Turn this off to let guests post one message each in the event thread.</p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setLinks((prev) => prev.filter((_, i) => i !== index))}
-                    className="rounded-xl border border-rose-300/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:bg-rose-500/20"
+                    role="switch"
+                    aria-checked={hostOnlyMessages}
+                    onClick={() => setChatMode((mode) => mode === "discussion" ? "broadcast" : "discussion")}
+                    className={["relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+                      hostOnlyMessages ? "bg-cyan-400" : "bg-white/20"
+                    ].join(" ")}
                   >
-                    Remove
+                    <span className={["pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform",
+                      hostOnlyMessages ? "translate-x-5" : "translate-x-0"
+                    ].join(" ")} />
                   </button>
                 </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => setLinks((prev) => [...prev, { label: "Link", url: "", type: "link" }])}
-                className="rounded-full border border-cyan-300/35 bg-cyan-300/10 px-4 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/20"
-              >
-                + Add link
-              </button>
-            </div>
+
+                {!hostOnlyMessages ? (
+                  <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Approve attendee messages</p>
+                      <p className="mt-0.5 text-xs text-slate-400">Guest messages stay pending until you approve them.</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={approveMessages}
+                      onClick={() => setApproveMessages((value) => !value)}
+                      className={["relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+                        approveMessages ? "bg-cyan-400" : "bg-white/20"
+                      ].join(" ")}
+                    >
+                      <span className={["pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform",
+                        approveMessages ? "translate-x-5" : "translate-x-0"
+                      ].join(" ")} />
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Show guest list</p>
+                    <p className="mt-0.5 text-xs text-slate-400">Members can see who is already joining the event.</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={showGuestList}
+                    onClick={() => setShowGuestList((value) => !value)}
+                    className={["relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+                      showGuestList ? "bg-cyan-400" : "bg-white/20"
+                    ].join(" ")}
+                  >
+                    <span className={["pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform",
+                      showGuestList ? "translate-x-5" : "translate-x-0"
+                    ].join(" ")} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Guests can invite friends</p>
+                    <p className="mt-0.5 text-xs text-slate-400">Joined guests can invite accepted connections from the event page.</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={guestsCanInvite}
+                    onClick={() => setGuestsCanInvite((value) => !value)}
+                    className={["relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+                      guestsCanInvite ? "bg-cyan-400" : "bg-white/20"
+                    ].join(" ")}
+                  >
+                    <span className={["pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform",
+                      guestsCanInvite ? "translate-x-5" : "translate-x-0"
+                    ].join(" ")} />
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-black/20 p-4 sm:p-5">

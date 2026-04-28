@@ -210,7 +210,8 @@ begin
     raise exception 'title_required';
   end if;
 
-  if trim(coalesce(p_city, '')) = '' or trim(coalesce(p_country, '')) = '' then
+  -- Location is required for events, optional for private groups
+  if v_access_type <> 'private_group' and (trim(coalesce(p_city, '')) = '' or trim(coalesce(p_country, '')) = '') then
     raise exception 'location_required';
   end if;
 
@@ -265,6 +266,21 @@ begin
 
     if v_active_count >= v_limit then
       raise exception 'active_event_limit_reached';
+    end if;
+  end if;
+
+  -- Check draft limit for private groups (max 2 drafts)
+  if v_status = 'draft' and v_access_type = 'private_group' then
+    select count(*)::int
+      into v_active_count
+    from public.events e
+    where e.host_user_id = v_me
+      and e.status = 'draft'
+      and e.event_access_type = 'private_group'
+      and coalesce(e.hidden_by_admin, false) = false;
+
+    if v_active_count >= 2 then
+      raise exception 'private_group_draft_limit_reached';
     end if;
   end if;
 

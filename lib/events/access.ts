@@ -50,10 +50,7 @@ export function normalizeEventAccessType(raw: string | null | undefined, legacyV
 
 export function normalizeEventChatMode(raw: string | null | undefined, accessType: EventAccessType): EventChatMode {
   const normalized = (raw ?? "").trim().toLowerCase();
-  if (normalized === "none" || normalized === "broadcast" || normalized === "discussion") {
-    if (accessType !== "private_group" && normalized !== "broadcast") {
-      return "broadcast";
-    }
+  if (normalized === "broadcast" || normalized === "discussion") {
     return normalized;
   }
 
@@ -77,8 +74,8 @@ export function eventAccessTypeShortLabel(accessType: EventAccessType) {
   return "Public";
 }
 
-export function eventThreadTabLabel(accessType: EventAccessType) {
-  return accessType === "private_group" ? "Chat" : "Updates";
+export function eventThreadTabLabel(accessType: EventAccessType, chatMode?: EventChatMode | null) {
+  return accessType === "private_group" || chatMode === "discussion" ? "Chat" : "Updates";
 }
 
 export function isEventDiscoverable(accessType: EventAccessType) {
@@ -92,6 +89,5 @@ export function canPostToEventThread(params: {
   isAdmin?: boolean;
 }) {
   if (params.isAdmin || params.isHost) return true;
-  if (params.accessType !== "private_group") return false;
   return params.chatMode === "discussion";
 }
