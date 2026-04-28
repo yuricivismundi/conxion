@@ -45,23 +45,26 @@ export async function getCitiesOfCountry(countryIso: string): Promise<string[]> 
   if (!iso) return [];
 
   const cached = cachedCitiesByCountryIso.get(iso);
-  if (cached) return cached;
+  // Only use cache if it has actual results (don't serve cached empty arrays)
+  if (cached && cached.length > 0) return cached;
 
   if (!citiesFetchPromises.has(iso)) {
-    const promise = fetch(`/api/geodata/cities/${encodeURIComponent(iso)}`, { cache: "force-cache" })
+    const promise = fetch(`/api/geodata/cities/${encodeURIComponent(iso)}`)
       .then((res) => {
         if (!res.ok) throw new Error("Could not load city list.");
         return res.json() as Promise<{ cities: string[] }>;
       })
       .then((payload) => {
         const cities = payload.cities ?? [];
-        cachedCitiesByCountryIso.set(iso, cities);
+        if (cities.length > 0) {
+          cachedCitiesByCountryIso.set(iso, cities);
+        }
         citiesFetchPromises.delete(iso);
         return cities;
       })
       .catch(() => {
+        // Don't cache empty on failure — allow retry on next call
         citiesFetchPromises.delete(iso);
-        cachedCitiesByCountryIso.set(iso, []);
         return [] as string[];
       });
     citiesFetchPromises.set(iso, promise);

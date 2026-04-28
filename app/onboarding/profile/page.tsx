@@ -50,6 +50,7 @@ export default function OnboardingProfilePage() {
 
   const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
   const [cityNames, setCityNames] = useState<string[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
   const countryNames = useMemo(() => countriesAll.map((c) => c.name), [countriesAll]);
 
   const [meId, setMeId] = useState<string | null>(null);
@@ -322,6 +323,7 @@ export default function OnboardingProfilePage() {
 
     if (!iso) {
       setCityNames([]);
+      setLoadingCities(false);
       return () => {
         cancelled = true;
       };
@@ -330,19 +332,23 @@ export default function OnboardingProfilePage() {
     const cachedCities = getCachedCitiesOfCountry(iso);
     if (cachedCities.length > 0) {
       setCityNames(cachedCities);
+      setLoadingCities(false);
       return () => {
         cancelled = true;
       };
     }
 
+    setLoadingCities(true);
     void getCitiesOfCountry(iso)
       .then((cities) => {
         if (cancelled) return;
         setCityNames(cities);
+        setLoadingCities(false);
       })
       .catch(() => {
         if (cancelled) return;
         setCityNames([]);
+        setLoadingCities(false);
       });
 
     return () => {
@@ -357,6 +363,33 @@ export default function OnboardingProfilePage() {
     roles.length > 0 &&
     usernameStatus.available &&
     !usernameStatus.checking;
+
+  if (!hydrated) {
+    return (
+      <OnboardingShell step={1} title="Setup your profile" subtitle={""}>
+        <div className="mt-6 animate-pulse space-y-6">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-start">
+            <div className="sm:col-span-4">
+              <div className="mx-auto h-40 w-40 rounded-2xl border border-white/10 bg-white/5 sm:h-44 sm:w-44 lg:mx-0 lg:h-48 lg:w-48" />
+            </div>
+            <div className="space-y-4 lg:col-span-8">
+              <div className="h-12 rounded-xl bg-white/5" />
+              <div className="h-16 rounded-xl bg-white/5" />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="h-12 rounded-xl bg-white/5" />
+                <div className="h-12 rounded-xl bg-white/5" />
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-hidden">
+            <div className="h-20 w-[82%] rounded-2xl bg-white/5 sm:w-[55%] md:w-[42%] lg:w-[30%]" />
+            <div className="h-20 w-[82%] rounded-2xl bg-white/5 sm:w-[55%] md:w-[42%] lg:w-[30%]" />
+          </div>
+          <div className="h-14 rounded-2xl bg-white/5" />
+        </div>
+      </OnboardingShell>
+    );
+  }
 
   return (
     <OnboardingShell step={1} title="Setup your profile" subtitle={""}>
@@ -505,44 +538,44 @@ export default function OnboardingProfilePage() {
 
               <div>
                 <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">City</label>
+                <div className="mt-2 sm:hidden">
+                  <SearchableMobileSelect
+                    label="City"
+                    value={city}
+                    options={cityNames}
+                    placeholder={!country ? "Select country first" : loadingCities ? "Loading cities..." : "Select or search city"}
+                    searchPlaceholder="Search cities..."
+                    disabled={!country}
+                    allowCustomValue={Boolean(country)}
+                    customValueLabel={(value) => `Use "${value}"`}
+                    emptyMessage={!country ? "Choose a country first." : loadingCities ? "Loading cities..." : "No cities found."}
+                    onSelect={(nextCity) => setCity(nextCity)}
+                    buttonClassName="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left text-sm text-[#E0E0E0] outline-none disabled:opacity-50"
+                  />
+                </div>
                 {country && cityNames.length === 0 ? (
                   <input
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    placeholder="Type your city…"
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    placeholder={loadingCities ? "Loading cities..." : "Type your city…"}
+                    className="mt-2 hidden w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 sm:block"
                   />
                 ) : (
-                  <>
-                    <div className="mt-2 sm:hidden">
-                      <SearchableMobileSelect
-                        label="City"
-                        value={city}
-                        options={cityNames}
-                        placeholder={!country ? "Select country first" : "Select city..."}
-                        searchPlaceholder="Search cities..."
-                        disabled={!country}
-                        emptyMessage={!country ? "Choose a country first." : "No cities found."}
-                        onSelect={(nextCity) => setCity(nextCity)}
-                        buttonClassName="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left text-sm text-[#E0E0E0] outline-none disabled:opacity-50"
-                      />
-                    </div>
-                    <select
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                      disabled={!country}
-                      className="mt-2 hidden w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50 sm:block"
-                    >
-                      <option value="" disabled>
-                        {!country ? "Select country first" : "Select city…"}
+                  <select
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    disabled={!country}
+                    className="mt-2 hidden w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50 sm:block"
+                  >
+                    <option value="" disabled>
+                      {!country ? "Select country first" : "Select city…"}
+                    </option>
+                    {cityNames.map((n, idx) => (
+                      <option key={`${n}-${idx}`} value={n}>
+                        {n}
                       </option>
-                      {cityNames.map((n, idx) => (
-                        <option key={`${n}-${idx}`} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </>
+                    ))}
+                  </select>
                 )}
               </div>
             </div>

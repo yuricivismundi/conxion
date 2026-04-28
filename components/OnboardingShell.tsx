@@ -26,16 +26,16 @@ export default function OnboardingShell({
     <div className="min-h-screen bg-[#121212] text-[#E0E0E0]">
       {/* Top bar */}
       <header className="sticky top-0 z-50 border-b border-white/5 bg-[#0A0A0A]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2 h-19">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2 h-14">
           {/* Logo (left-most, no extra padding) */}
           <Link href="/" className="select-none flex items-center">
             <Image
               src="/branding/CONXION-3-tight.png"
               alt="ConXion"
-              width={160}
-              height={40}
+              width={120}
+              height={30}
               priority
-              className="h-25 w-auto block"
+              className="h-9 w-auto block"
             />
           </Link>
 

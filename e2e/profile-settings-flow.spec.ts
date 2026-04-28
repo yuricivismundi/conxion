@@ -26,13 +26,19 @@ test("profile settings persist after save + reload", async ({ page, request }) =
   const newDisplayName = `Profile E2E ${Date.now().toString().slice(-6)}`;
   const displayNameInput = page.getByTestId("profile-edit-display-name");
 
+  if (!(await displayNameInput.isVisible().catch(() => false))) {
+    await page.getByTestId("profile-edit-open-info").click();
+    await expect(displayNameInput).toBeVisible({ timeout: 10_000 });
+  }
+
   await displayNameInput.fill(newDisplayName);
   await page.getByTestId("profile-edit-save").click();
 
-  await page.waitForURL(/\/(?:me|my-space\/dashboard)(?:\?.*)?$/, { timeout: 15_000 });
+  await expect(page.getByTestId("profile-edit-open-info")).toBeVisible({ timeout: 15_000 });
 
   await page.goto("/me/edit", { waitUntil: "commit", timeout: 60_000 });
   await page.waitForLoadState("domcontentloaded");
   await expect(page.getByTestId("profile-edit-title")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("profile-edit-open-info").click();
   await expect(page.getByTestId("profile-edit-display-name")).toHaveValue(newDisplayName, { timeout: 10_000 });
 });
