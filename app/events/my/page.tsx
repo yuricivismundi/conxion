@@ -1,9 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+
+const CreateEventModal = dynamic(() => import("@/components/events/CreateEventModal"), { ssr: false });
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
+import ActivityLimitPill from "@/components/activity/ActivityLimitPill";
 import EventHeroImage from "@/components/events/EventHeroImage";
 import { getBillingAccountState } from "@/lib/billing/account-state";
 import { getPlanLimits } from "@/lib/billing/limits";
@@ -30,13 +34,6 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-function summarize(text: string | null | undefined, max = 92) {
-  const value = (text ?? "").trim();
-  if (!value) return "No description provided yet.";
-  if (value.length <= max) return value;
-  return `${value.slice(0, max - 1).trimEnd()}...`;
-}
-
 function eventDateBadgeParts(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return { weekday: "--", month: "--", day: "--" };
@@ -58,30 +55,12 @@ function formatShortDateTime(value: string) {
   }).format(parsed);
 }
 
-function statusTone(status: EventRecord["status"]) {
-  if (status === "draft") return "border-amber-300/35 bg-amber-300/12 text-amber-100";
-  if (status === "cancelled") return "border-rose-300/35 bg-rose-500/12 text-rose-100";
-  return "border-cyan-300/30 bg-cyan-300/12 text-cyan-100";
-}
-
 function relationLabel(relation: MyEventRelation, membership: EventMemberRecord | null | undefined) {
   if (relation === "created") return "Created";
   if (relation === "pending") return "Pending request";
   if (relation === "joining") return membership?.status === "waitlist" ? "Waitlist" : "Joining";
   if (relation === "interested") return "Interested";
   return "Related";
-}
-
-function relationTone(relation: MyEventRelation, membership: EventMemberRecord | null | undefined) {
-  if (relation === "created") return "border-cyan-300/35 bg-cyan-300/14 text-cyan-100";
-  if (relation === "pending") return "border-fuchsia-300/35 bg-fuchsia-400/14 text-fuchsia-100";
-  if (relation === "joining") {
-    return membership?.status === "waitlist"
-      ? "border-amber-300/35 bg-amber-400/14 text-amber-100"
-      : "border-emerald-300/35 bg-emerald-400/14 text-emerald-100";
-  }
-  if (relation === "interested") return "border-cyan-300/35 bg-[linear-gradient(90deg,rgba(34,211,238,0.16),rgba(217,70,239,0.14))] text-cyan-50";
-  return "border-white/10 bg-white/[0.06] text-white/75";
 }
 
 function filterLabel(filter: MyEventsFilter) {
@@ -147,30 +126,33 @@ function sortEvents(a: EventRecord, b: EventRecord, filter: MyEventsFilter, nowM
   return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
 }
 
-function isActiveCreatedEvent(event: EventRecord, meId: string | null, nowMs: number) {
-  return (
-    Boolean(meId) &&
-    event.hostUserId === meId &&
-    event.status === "published" &&
-    !event.hiddenByAdmin &&
-    new Date(event.endsAt).getTime() >= nowMs
-  );
+function isThisUtcMonth(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const now = new Date();
+  return parsed.getUTCFullYear() === now.getUTCFullYear() && parsed.getUTCMonth() === now.getUTCMonth();
+}
+
+function isCreatedThisMonthEvent(event: EventRecord, meId: string | null) {
+  return Boolean(meId) && event.hostUserId === meId && event.status !== "draft" && isThisUtcMonth(event.createdAt);
 }
 
 function EventRelationshipCard({
   event,
   host,
-  relation,
-  membership,
   meId,
   nowMs,
+  className,
+  onDeleteRequest,
+  onEditRequest,
 }: {
   event: EventRecord;
   host: LiteProfile | null;
-  relation: MyEventRelation;
-  membership: EventMemberRecord | null | undefined;
   meId: string | null;
   nowMs: number;
+  className?: string;
+  onDeleteRequest?: (event: EventRecord) => void;
+  onEditRequest?: (eventId: string) => void;
 }) {
   const isHost = Boolean(meId && event.hostUserId === meId);
   const isPast = new Date(event.endsAt).getTime() < nowMs;
@@ -180,7 +162,7 @@ function EventRelationshipCard({
   const primaryHref = isHost && event.status === "draft" ? `/events/${event.id}/edit` : `/events/${event.id}`;
 
   return (
-    <article className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30">
+    <article className={cx("relative flex flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30 cursor-pointer", className)} style={{ height: "280px" }} onClick={(e) => { if ((e.target as HTMLElement).closest("a,button")) return; window.location.href = primaryHref; }}>
       <div className="relative h-[108px] overflow-hidden bg-[#0d141a]">
         <EventHeroImage
           key={`${hero ?? ""}|${fallbackHero ?? ""}`}
@@ -191,22 +173,6 @@ function EventRelationshipCard({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
 
-        <div className="absolute left-3 top-3 flex flex-wrap items-center gap-1.5">
-          {relation ? (
-            <span className={cx("rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide", relationTone(relation, membership))}>
-              {relationLabel(relation, membership)}
-            </span>
-          ) : null}
-          <span className={cx("rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide", statusTone(event.status))}>
-            {event.status}
-          </span>
-        </div>
-
-        <div className="absolute right-3 top-3">
-          <span className="rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-100">
-            {eventAccessTypeShortLabel(event.accessType)}
-          </span>
-        </div>
       </div>
 
       <div className="relative flex flex-1 flex-col p-2">
@@ -222,6 +188,7 @@ function EventRelationshipCard({
           <Link href={primaryHref} className="block">
             <h2 className="line-clamp-2 min-h-[42px] text-[17px] font-bold leading-tight text-white">{event.title}</h2>
           </Link>
+          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/30">{event.eventType}</p>
           <p className="mt-1 text-[12px] font-semibold text-cyan-200/90">{formatEventRange(event.startsAt, event.endsAt)}</p>
           <p className="mt-1 truncate text-[12px] text-slate-400">{[event.venueName, event.city, event.country].filter(Boolean).join(", ")}</p>
           {!isHost && host ? (
@@ -229,22 +196,7 @@ function EventRelationshipCard({
           ) : null}
         </div>
 
-        <p className="mt-3 line-clamp-2 min-h-[38px] text-[13px] leading-[1.35] text-slate-400">
-          {summarize(event.description)}
-        </p>
-
         <div className="mt-3 flex flex-wrap gap-2">
-          <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-semibold text-slate-200">
-            {event.eventType}
-          </span>
-          {event.styles.slice(0, 2).map((style) => (
-            <span
-              key={style}
-              className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-semibold capitalize text-slate-300"
-            >
-              {style}
-            </span>
-          ))}
           {isPast ? (
             <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-semibold text-white/70">
               Past
@@ -252,48 +204,56 @@ function EventRelationshipCard({
           ) : null}
         </div>
 
-        <div className="mt-auto flex gap-2 border-t border-white/10 pt-3">
-          <Link
-            href={primaryHref}
-            className={cx(
-              "inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition",
-              isHost
-                ? "border-cyan-300/35 bg-cyan-300/16 text-cyan-50 hover:bg-cyan-300/24"
-                : "border-white/12 bg-white/[0.05] text-white/90 hover:bg-white/[0.08]"
-            )}
-          >
-            <span className="material-symbols-outlined text-[18px]">{isHost && event.status === "draft" ? "edit" : "open_in_new"}</span>
-            {isHost && event.status === "draft" ? "Continue editing" : "View event"}
-          </Link>
-          {isHost ? (
-            <Link
-              href={`/events/${event.id}/edit`}
-              className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.05] px-4 text-sm font-semibold text-white/90 transition hover:bg-white/[0.08]"
+        {isHost ? (
+          <div className="mt-auto flex gap-2 border-t border-white/10 pt-3">
+            <button
+              type="button"
+              onClick={() => onEditRequest ? onEditRequest(event.id) : (window.location.href = `/events/${event.id}/edit`)}
+              className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-300/16 px-4 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/24"
             >
-              <span className="material-symbols-outlined text-[18px]">tune</span>
-              Edit
-            </Link>
-          ) : null}
-        </div>
+              <span className="material-symbols-outlined text-[18px]">{event.status === "draft" ? "edit" : "tune"}</span>
+              {event.status === "draft" ? "Continue editing" : "Edit"}
+            </button>
+            {onDeleteRequest ? (
+              <button
+                type="button"
+                onClick={() => onDeleteRequest(event)}
+                className="inline-flex min-h-[40px] w-10 shrink-0 items-center justify-center rounded-xl border border-red-400/20 bg-red-400/[0.07] text-red-400 transition hover:bg-red-400/15"
+                title="Delete event"
+              >
+                <span className="material-symbols-outlined text-[18px]">delete</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </article>
   );
 }
 
-export default function MyEventsPage() {
+export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }: { onCanCreate?: (can: boolean) => void; searchQuery?: string } = {}) {
   const router = useRouter();
+  const pathname = usePathname();
+  const embeddedInActivity = pathname?.startsWith("/activity") ?? false;
   const [nowMs] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [actionBusyRequestId, setActionBusyRequestId] = useState<string | null>(null);
+  const [editEventId, setEditEventId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<EventRecord | null>(null);
+  const [deletebusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
   const [createdEventLimit, setCreatedEventLimit] = useState<number | null>(2);
   const [myTab, setMyTab] = useState<"events" | "groups">("events");
-  const [query, setQuery] = useState("");
+  const [internalQuery, setQuery] = useState("");
+  const query = externalQuery !== undefined ? externalQuery : internalQuery;
   const [activeFilter, setActiveFilter] = useState<MyEventsFilter>("all");
+  const [activityJoinView, setActivityJoinView] = useState<"joining" | "interested">("joining");
+  const [activityDraftView, setActivityDraftView] = useState<"drafts" | "past">("drafts");
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [memberships, setMemberships] = useState<EventMemberRecord[]>([]);
   const [requests, setRequests] = useState<EventRequestRecord[]>([]);
@@ -305,7 +265,7 @@ export default function MyEventsPage() {
       setError(null);
       const { data: authData, error: authErr } = await supabase.auth.getUser();
       if (authErr || !authData.user) {
-        router.replace("/auth?next=/events/my");
+        router.replace(embeddedInActivity ? "/auth?next=/activity" : "/auth?next=/events/my");
         return;
       }
 
@@ -408,7 +368,27 @@ export default function MyEventsPage() {
       setRequests(requestRows);
       setIncomingRequests(incomingRequestRows);
       setLoading(false);
-  }, [router]);
+  }, [embeddedInActivity, router]);
+
+  async function confirmDelete() {
+    if (!deleteTarget || !accessToken) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/events/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const json = (await res.json()) as { ok: boolean; error?: string };
+      if (!json.ok) { setDeleteError(json.error ?? "Failed to delete event."); return; }
+      setEvents((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } catch {
+      setDeleteError("Something went wrong. Please try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   useEffect(() => {
     const frame = window.setTimeout(() => {
@@ -444,10 +424,11 @@ export default function MyEventsPage() {
   }, [events, meId, membershipByEvent, requestByEvent]);
 
   const activeCreatedCount = useMemo(() => {
-    return events.filter((event) => isActiveCreatedEvent(event, meId, nowMs)).length;
-  }, [events, meId, nowMs]);
+    return events.filter((event) => isCreatedThisMonthEvent(event, meId)).length;
+  }, [events, meId]);
 
   const activeCreatedLimitReached = createdEventLimit !== null && activeCreatedCount >= createdEventLimit;
+  useEffect(() => { onCanCreate?.(!activeCreatedLimitReached); }, [activeCreatedLimitReached, onCanCreate]);
 
   const incomingPendingRequests = useMemo(
     () => incomingRequests.filter((request) => request.status === "pending"),
@@ -513,6 +494,51 @@ export default function MyEventsPage() {
       .sort((left, right) => sortEvents(left, right, activeFilter, nowMs));
   }, [activeFilter, events, membershipByEvent, nowMs, profilesById, query, relationByEvent]);
 
+  const activityEventRows = useMemo(() => {
+    const queryText = query.trim().toLowerCase();
+    const searched = events
+      .filter((event) => {
+        if (!queryText) return true;
+        const host = profilesById[event.hostUserId];
+        const relation = relationByEvent[event.id];
+        const haystack = [
+          event.title,
+          event.city,
+          event.country,
+          event.venueName ?? "",
+          event.eventType,
+          event.styles.join(" "),
+          host?.displayName ?? "",
+          relationLabel(relation, membershipByEvent[event.id]),
+        ].join(" ").toLowerCase();
+        return haystack.includes(queryText);
+      });
+
+    const bySoonest = (left: EventRecord, right: EventRecord) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime();
+    const byUpdated = (left: EventRecord, right: EventRecord) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+
+    return {
+      created: searched
+        .filter((event) => relationByEvent[event.id] === "created" && event.status !== "draft" && new Date(event.endsAt).getTime() >= nowMs)
+        .sort(bySoonest),
+      joining: searched
+        .filter((event) => relationByEvent[event.id] === "joining" && new Date(event.endsAt).getTime() >= nowMs)
+        .sort(bySoonest),
+      interested: searched
+        .filter((event) => relationByEvent[event.id] === "interested" && new Date(event.endsAt).getTime() >= nowMs)
+        .sort(bySoonest),
+      pending: searched
+        .filter((event) => relationByEvent[event.id] === "pending")
+        .sort(bySoonest),
+      drafts: searched
+        .filter((event) => relationByEvent[event.id] === "created" && event.status === "draft")
+        .sort(byUpdated),
+      past: searched
+        .filter((event) => new Date(event.endsAt).getTime() < nowMs)
+        .sort((left, right) => new Date(right.endsAt).getTime() - new Date(left.endsAt).getTime()),
+    };
+  }, [events, membershipByEvent, nowMs, profilesById, query, relationByEvent]);
+
   async function respondIncomingRequest(requestId: string, eventId: string, action: "accept" | "decline") {
     if (!accessToken) {
       setActionError("Missing auth session. Please sign in again.");
@@ -544,11 +570,94 @@ export default function MyEventsPage() {
     setActionBusyRequestId(null);
   }
 
-  if (loading) {
+  function renderCardRow(rowEvents: EventRecord[], emptyText: string, prependCard?: React.ReactNode) {
+    if (!prependCard && !rowEvents.length) {
+      return <div className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] px-4 py-4 text-sm text-white/45">{emptyText}</div>;
+    }
+    let scrollEl: HTMLDivElement | null = null;
+    const scroll = (dir: "left" | "right") => scrollEl?.scrollBy({ left: dir === "right" ? 300 : -300, behavior: "smooth" });
     return (
-      <div className="min-h-screen bg-[#05070c] text-white">
-        <Nav />
-        <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
+      <div className="relative">
+        <div className="no-scrollbar flex items-stretch gap-3 overflow-x-auto pb-1" ref={(el) => { scrollEl = el; }}>
+          {prependCard}
+          {rowEvents.map((event) => (
+            <EventRelationshipCard
+              key={event.id}
+              event={event}
+              host={profilesById[event.hostUserId] ?? null}
+              meId={meId}
+              nowMs={nowMs}
+              className="w-[286px] shrink-0 sm:w-[304px]"
+              onDeleteRequest={setDeleteTarget}
+              onEditRequest={setEditEventId}
+            />
+          ))}
+        </div>
+        <button type="button" onClick={() => scroll("left")} className="absolute -left-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-[#121212] text-white/50 shadow-lg transition hover:border-white/25 hover:text-white">
+          <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+        </button>
+        <button type="button" onClick={() => scroll("right")} className="absolute -right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-[#121212] text-white/50 shadow-lg transition hover:border-white/25 hover:text-white">
+          <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+        </button>
+      </div>
+    );
+  }
+
+  function renderActivityEventRow(title: string, rowEvents: EventRecord[], emptyText: string, prependCard?: React.ReactNode, headerTrailing?: React.ReactNode) {
+    return (
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-black text-white">{title}</h2>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+            {rowEvents.length}
+          </span>
+          {headerTrailing}
+        </div>
+        {renderCardRow(rowEvents, emptyText, prependCard)}
+      </section>
+    );
+  }
+
+  if (loading) {
+    if (embeddedInActivity) {
+      return (
+        <div className="space-y-7 text-white">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <div className="h-10 w-32 animate-pulse rounded-full bg-white/[0.06]" />
+            <div className="h-10 w-full animate-pulse rounded-full bg-white/[0.06] sm:max-w-[320px]" />
+          </div>
+          {["Created", "Joining", "Pending", "Drafts"].map((section) => (
+            <section key={`activity-events-loading-${section}`} className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-28 animate-pulse rounded-xl bg-white/[0.08]" />
+                <div className="h-6 w-10 animate-pulse rounded-full bg-white/[0.06]" />
+              </div>
+              <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={`activity-events-card-loading-${section}-${index}`} className="w-[286px] shrink-0 overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] sm:w-[304px]">
+                    <div className="h-[108px] animate-pulse bg-white/[0.06]" />
+                    <div className="space-y-3 p-3">
+                      <div className="h-5 w-4/5 animate-pulse rounded bg-white/[0.08]" />
+                      <div className="h-4 w-2/3 animate-pulse rounded bg-white/[0.06]" />
+                      <div className="h-4 w-5/6 animate-pulse rounded bg-white/[0.06]" />
+                      <div className="mt-5 flex gap-2 border-t border-white/10 pt-3">
+                        <div className="h-10 flex-1 animate-pulse rounded-xl bg-white/[0.06]" />
+                        <div className="h-10 flex-1 animate-pulse rounded-xl bg-white/[0.06]" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className={embeddedInActivity ? "text-white" : "min-h-screen bg-[#05070c] text-white"}>
+        {embeddedInActivity ? null : <Nav />}
+        <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8"}>
           <div className="animate-pulse space-y-5">
             <div className="h-20 rounded-[28px] bg-white/[0.04]" />
             <div className="h-28 rounded-[24px] bg-white/[0.04]" />
@@ -576,13 +685,13 @@ export default function MyEventsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#05070c] text-white">
-      <Nav />
+    <div className={embeddedInActivity ? "text-white" : "min-h-screen bg-[#05070c] text-white"}>
+      {embeddedInActivity ? null : <Nav />}
 
-      <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
-        <section className="mb-5 overflow-hidden rounded-[28px] border border-cyan-300/15 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_40%),linear-gradient(180deg,rgba(11,16,22,0.98),rgba(8,10,14,0.99))] p-5 sm:p-6">
+      <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8"}>
+        {!embeddedInActivity ? <section className="mb-5 overflow-hidden rounded-[28px] border border-cyan-300/15 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_40%),linear-gradient(180deg,rgba(11,16,22,0.98),rgba(8,10,14,0.99))] p-5 sm:p-6">
           <div className="mb-2 flex items-center justify-end gap-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/40 sm:text-xs">
-            <span>Events</span>
+            <span>Published this month</span>
             <span className={activeCreatedLimitReached ? "text-amber-300" : "text-cyan-300"}>{activeCreatedCount}</span>
             <span>/{createdEventLimit ?? "Unlimited"}</span>
           </div>
@@ -596,15 +705,27 @@ export default function MyEventsPage() {
               <span className="material-symbols-outlined text-[14px] sm:text-[18px]">arrow_back</span>
               Explore Events
             </Link>
-            <Link
-              href="/events/new"
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-2.5 py-1.5 text-[11px] font-semibold text-cyan-50 hover:bg-cyan-300/30 sm:px-4 sm:py-2 sm:text-sm"
-            >
-              <span className="material-symbols-outlined text-[14px] sm:text-[18px]">add</span>
-              Create Event
-            </Link>
+            {activeCreatedLimitReached ? (
+              <div className="group relative inline-flex shrink-0">
+                <span className="inline-flex cursor-not-allowed items-center gap-1 rounded-full bg-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-white/35 sm:px-4 sm:py-2 sm:text-sm">
+                  <span className="material-symbols-outlined text-[14px] sm:text-[18px]">lock</span>
+                  Create Event
+                </span>
+                <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1a1a2e] border border-white/10 px-3 py-1.5 text-[12px] font-semibold text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                  Upgrade to Plus to create more events
+                </span>
+              </div>
+            ) : (
+              <Link
+                href="/events/new"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-2.5 py-1.5 text-[11px] font-semibold text-cyan-50 hover:bg-cyan-300/30 sm:px-4 sm:py-2 sm:text-sm"
+              >
+                <span className="material-symbols-outlined text-[14px] sm:text-[18px]">add</span>
+                Create Event
+              </Link>
+            )}
           </div>
-        </section>
+        </section> : null}
 
         {error ? (
           <div className="mb-5 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
@@ -616,9 +737,82 @@ export default function MyEventsPage() {
           <div className="mb-5 rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">{actionInfo}</div>
         ) : null}
 
+        {embeddedInActivity ? (
+          <div className="space-y-7">
+            {renderActivityEventRow("Created", activityEventRows.created, "No created events yet.", undefined,
+              <span className="text-[13px] font-semibold text-white/35">
+                Monthly Events <span className={`font-bold ${activeCreatedLimitReached ? "text-amber-300" : "text-cyan-300"}`}>{activeCreatedCount}/{createdEventLimit ?? "∞"}</span>
+              </span>
+            )}
+
+            <section className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-black text-white">Joining</h2>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+                    {activityJoinView === "joining" ? activityEventRows.joining.length : activityEventRows.interested.length}
+                  </span>
+                </div>
+                <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-1">
+                  {(["joining", "interested"] as const).map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      onClick={() => setActivityJoinView(view)}
+                      className={cx(
+                        "rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]",
+                        activityJoinView === view ? "bg-cyan-300/18 text-cyan-50" : "text-white/45 hover:text-white/75"
+                      )}
+                    >
+                      {view === "joining" ? "Joining" : "Interested"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {renderCardRow(
+                activityJoinView === "joining" ? activityEventRows.joining : activityEventRows.interested,
+                activityJoinView === "joining" ? "No joining events yet." : "No interested events yet."
+              )}
+            </section>
+
+            {renderActivityEventRow("Pending", activityEventRows.pending, "No pending event requests.")}
+
+            <section className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-black text-white">Drafts</h2>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+                    {activityDraftView === "drafts" ? activityEventRows.drafts.length : activityEventRows.past.length}
+                  </span>
+                </div>
+                <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-1">
+                  {(["drafts", "past"] as const).map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      onClick={() => setActivityDraftView(view)}
+                      className={cx(
+                        "rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]",
+                        activityDraftView === view ? "bg-cyan-300/18 text-cyan-50" : "text-white/45 hover:text-white/75"
+                      )}
+                    >
+                      {view === "drafts" ? "Drafts" : "Past"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {renderCardRow(
+                activityDraftView === "drafts" ? activityEventRows.drafts : activityEventRows.past,
+                activityDraftView === "drafts" ? "No draft events." : "No past events."
+              )}
+            </section>
+          </div>
+        ) : null}
+
         {/* Tab switch */}
-        <div className="mb-5 border-b border-white/[0.07]">
-          <div className="no-scrollbar flex gap-6 overflow-x-auto px-1">
+        {!embeddedInActivity ? <div className="mb-5 border-b border-white/[0.07]">
+          <div className="flex items-center gap-4 px-1">
+          <div className="no-scrollbar flex flex-1 gap-6 overflow-x-auto">
             {(["events", "groups"] as const).map((tab) => {
               const selected = myTab === tab;
               const label = tab === "events" ? "Events" : "Groups";
@@ -637,9 +831,20 @@ export default function MyEventsPage() {
               );
             })}
           </div>
-        </div>
+          <label className="group relative shrink-0">
+            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search events…"
+              className="h-8 w-40 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[12px] text-white/90 outline-none placeholder:text-white/30 transition focus:border-[#00F5FF]/50 focus:w-56"
+            />
+          </label>
+          </div>
+        </div> : null}
 
-        {myTab === "groups" ? (() => {
+        {!embeddedInActivity && myTab === "groups" ? (() => {
           const groups = events.filter((e) => e.accessType === "private_group");
           const memberCountByEvent: Record<string, number> = {};
           memberships.forEach((m) => { memberCountByEvent[m.eventId] = (memberCountByEvent[m.eventId] ?? 0) + 1; });
@@ -716,12 +921,17 @@ export default function MyEventsPage() {
           );
         })() : null}
 
-        {myTab === "events" ? <>
+        {!embeddedInActivity && myTab === "events" ? <>
 
-        <section className="mb-5 rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(14,18,24,0.98),rgba(9,11,15,0.98))] p-4 sm:p-5">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <label className="group relative hidden w-full max-w-md sm:block">
+        <section
+          className="mb-5 rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(14,18,24,0.98),rgba(9,11,15,0.98))] p-4 sm:p-5 hidden"
+        >
+          <div className={cx("flex flex-col gap-3", embeddedInActivity && "sm:items-end")}>
+            <div className={cx(
+              "flex flex-col gap-3 sm:flex-row",
+              embeddedInActivity ? "sm:items-center sm:justify-end" : "sm:items-end sm:justify-between"
+            )}>
+              <label className={cx("group relative w-full", embeddedInActivity ? "sm:max-w-[320px]" : "hidden max-w-md sm:block")}>
                 <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/35 transition-colors group-focus-within:text-cyan-300">
                   search
                 </span>
@@ -730,17 +940,27 @@ export default function MyEventsPage() {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search your events..."
-                  className="h-12 w-full rounded-2xl border border-white/10 bg-[#1B1B1B] pl-11 pr-4 text-sm text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                  className={cx(
+                    "w-full border border-white/10 text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30",
+                    embeddedInActivity
+                      ? "h-10 rounded-full bg-white/[0.05] pl-10 pr-3 text-[13px]"
+                      : "h-12 rounded-2xl bg-[#1B1B1B] pl-11 pr-4 text-sm"
+                  )}
                 />
               </label>
 
-              <div className="w-full sm:w-[270px]">
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Event type / category</p>
+              <div className={cx("w-full", embeddedInActivity ? "sm:w-[220px]" : "sm:w-[270px]")}>
+                <p className={cx("mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45", embeddedInActivity && "sr-only")}>Event type / category</p>
                 <div className="relative">
                   <select
                     value={activeFilter}
                     onChange={(event) => setActiveFilter((event.target.value as MyEventsFilter) || "all")}
-                    className="w-full appearance-none rounded-2xl border border-white/10 bg-[#1B1B1B] px-4 py-3 pr-10 text-sm font-semibold text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    className={cx(
+                      "w-full appearance-none border border-white/10 px-4 pr-10 font-semibold text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30",
+                      embeddedInActivity
+                        ? "h-10 rounded-full bg-white/[0.05] text-[13px]"
+                        : "rounded-2xl bg-[#1B1B1B] py-3 text-sm"
+                    )}
                   >
                     {([
                       "all",
@@ -884,24 +1104,114 @@ export default function MyEventsPage() {
               </button>
             </div>
           </section>
-        ) : visibleEvents.length > 0 ? (
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {visibleEvents.map((event) => (
-              <EventRelationshipCard
-                key={event.id}
-                event={event}
-                host={profilesById[event.hostUserId] ?? null}
-                relation={relationByEvent[event.id]}
-                membership={membershipByEvent[event.id]}
-                meId={meId}
-                nowMs={nowMs}
-              />
-            ))}
-          </section>
-        ) : null}
+        ) : (
+          <div className="space-y-7">
+            {renderActivityEventRow("Created", activityEventRows.created, "No created events yet.", undefined,
+              <span className="text-[13px] font-semibold text-white/35">
+                Monthly Events <span className={`font-bold ${activeCreatedLimitReached ? "text-amber-300" : "text-cyan-300"}`}>{activeCreatedCount}/{createdEventLimit ?? "∞"}</span>
+              </span>
+            )}
+            <section className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-black text-white">Joining</h2>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+                    {activityJoinView === "joining" ? activityEventRows.joining.length : activityEventRows.interested.length}
+                  </span>
+                </div>
+                <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-1">
+                  {(["joining", "interested"] as const).map((view) => (
+                    <button key={view} type="button" onClick={() => setActivityJoinView(view)}
+                      className={cx("rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]",
+                        activityJoinView === view ? "bg-cyan-300/18 text-cyan-50" : "text-white/45 hover:text-white/75")}>
+                      {view === "joining" ? "Joining" : "Interested"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {renderCardRow(
+                activityJoinView === "joining" ? activityEventRows.joining : activityEventRows.interested,
+                activityJoinView === "joining" ? "No joining events yet." : "No interested events yet."
+              )}
+            </section>
+            {renderActivityEventRow("Pending", activityEventRows.pending, "No pending event requests.")}
+            <section className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-black text-white">Drafts</h2>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+                    {activityDraftView === "drafts" ? activityEventRows.drafts.length : activityEventRows.past.length}
+                  </span>
+                </div>
+                <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-1">
+                  {(["drafts", "past"] as const).map((view) => (
+                    <button key={view} type="button" onClick={() => setActivityDraftView(view)}
+                      className={cx("rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]",
+                        activityDraftView === view ? "bg-cyan-300/18 text-cyan-50" : "text-white/45 hover:text-white/75")}>
+                      {view === "drafts" ? "Drafts" : "Past"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {renderCardRow(
+                activityDraftView === "drafts" ? activityEventRows.drafts : activityEventRows.past,
+                activityDraftView === "drafts" ? "No draft events." : "No past events."
+              )}
+            </section>
+          </div>
+        )}
 
         </> : null}
       </main>
+
+      {/* Delete confirmation modal */}
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="flex w-full max-w-sm flex-col rounded-[28px] border border-white/10 bg-[#0d1117] shadow-2xl">
+            <div className="flex items-start gap-3 border-b border-white/[0.07] px-5 py-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-400/10">
+                <span className="material-symbols-outlined text-[20px] text-red-400">delete</span>
+              </div>
+              <div>
+                <h2 className="text-[15px] font-bold text-white">Delete event?</h2>
+                <p className="mt-0.5 text-[12px] text-white/50">
+                  &ldquo;{deleteTarget.title}&rdquo; will be permanently deleted.
+                </p>
+              </div>
+            </div>
+            {deleteError ? (
+              <p className="mx-5 mt-4 rounded-2xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-[12px] text-red-300">{deleteError}</p>
+            ) : null}
+            <div className="flex gap-2 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => { setDeleteTarget(null); setDeleteError(null); }}
+                disabled={deletebusy}
+                className="flex-1 rounded-2xl border border-white/10 py-2.5 text-sm font-semibold text-white/60 hover:bg-white/[0.04] disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDelete()}
+                disabled={deletebusy}
+                className="flex-1 rounded-2xl bg-red-500 py-2.5 text-sm font-bold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deletebusy ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editEventId ? (
+        <CreateEventModal
+          eventId={editEventId}
+          onClose={() => setEditEventId(null)}
+          onPublished={() => { setEditEventId(null); void loadData(); }}
+          onSaved={() => { setEditEventId(null); void loadData(); }}
+        />
+      ) : null}
     </div>
   );
 }

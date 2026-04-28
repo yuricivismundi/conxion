@@ -8,15 +8,19 @@ import Link from "next/link";
 import TeacherInquiryCard from "@/components/messages/TeacherInquiryCard";
 import Nav from "@/components/Nav";
 import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
+import BookSessionModal from "@/components/teacher/BookSessionModal";
 import ShareInquiryInfoModal from "@/components/teacher/ShareInquiryInfoModal";
 import { supabase } from "@/lib/supabase/client";
 import { getBillingAccountState } from "@/lib/billing/account-state";
 import { getPlanLimits } from "@/lib/billing/limits";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
+import type { GroupChatMode } from "@/lib/groups/model";
 import { fetchProfileMedia } from "@/lib/profile-media/read-model";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
+import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
 import { fetchTeacherInfoBlocks } from "@/lib/teacher-info/read-model";
 import type { TeacherInfoBlock } from "@/lib/teacher-info/types";
+import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
 import {
   ACTIVITY_TYPES,
   ACTIVITY_TYPE_ICONS,
@@ -38,6 +42,7 @@ import {
   type HostingPreferredGuestGender,
   type HostingSleepingArrangement,
 } from "@/lib/hosting/preferences";
+import { isPaymentVerified } from "@/lib/verification";
 import {
   SERVICE_INQUIRY_KIND_LABELS,
   type ServiceInquiryKind,
@@ -49,15 +54,23 @@ import { travelIntentReasonLabel, tripJoinReasonLabel } from "@/lib/trips/join-r
 import {
   canPostToEventThread,
   eventThreadTabLabel,
+  isEventDiscoverable,
   normalizeEventAccessType,
   normalizeEventChatMode,
   type EventAccessType,
   type EventChatMode,
 } from "@/lib/events/access";
+import {
+  mapEventRows,
+  pickEventFallbackHeroUrl,
+  pickEventHeroUrl,
+  type EventRecord,
+} from "@/lib/events/model";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
 
-type ThreadKind = "connection" | "trip" | "direct" | "event";
+type ThreadKind = "connection" | "trip" | "direct" | "event" | "group";
 type FilterTab = "all" | "active" | "pending" | "archived";
+type InboxKindFilter = "all" | "connection" | "event" | "group";
 type MessagingState = "inactive" | "active" | "archived";
 
 type ThreadContextTag =
@@ -115,6 +128,8 @@ type ThreadRow = {
   unreadCount: number;
   badge: string;
   otherUserId?: string | null;
+  eventId?: string | null;
+  groupId?: string | null;
   messagingState?: MessagingState;
   activatedAt?: string | null;
   activationCycleStart?: string | null;
@@ -127,6 +142,7 @@ type ThreadDbRow = {
   connection_id?: string | null;
   trip_id?: string | null;
   event_id?: string | null;
+  group_id?: string | null;
   direct_user_low?: string | null;
   direct_user_high?: string | null;
   last_message_at?: string | null;
@@ -213,6 +229,7 @@ type ActiveThreadMeta = {
   otherUserId: string | null;
   connectionId: string | null;
   tripId: string | null;
+  eventId?: string | null;
   threadId: string | null;
   messagingState?: MessagingState;
   activatedAt?: string | null;
@@ -224,6 +241,9 @@ type ActiveThreadMeta = {
   serviceInquiryRequesterId?: string | null;
   serviceInquiryRecipientId?: string | null;
   serviceInquiryFollowupUsed?: boolean;
+  groupId?: string | null;
+  groupChatMode?: GroupChatMode | null;
+  canPostToGroupThread?: boolean;
   eventAccessType?: EventAccessType | null;
   eventChatMode?: EventChatMode | null;
   canPostToEventThread?: boolean;
@@ -986,6 +1006,7 @@ function threadPreviewFromContext(context: ThreadContextItem) {
 function defaultThreadPreview(kind: ThreadKind) {
   if (kind === "trip") return "Trip thread";
   if (kind === "event") return "Event thread";
+  if (kind === "group") return "Group chat";
   if (kind === "connection") return "No messages yet.";
   return "";
 }
@@ -1037,6 +1058,7 @@ function parseThreadToken(rawToken: string): ParsedThread | null {
   if (rawToken.startsWith("trip:")) return { kind: "trip", id: rawToken.slice(5) };
   if (rawToken.startsWith("direct:")) return { kind: "direct", id: rawToken.slice(7) };
   if (rawToken.startsWith("event:")) return { kind: "event", id: rawToken.slice(6) };
+  if (rawToken.startsWith("group:")) return { kind: "group", id: rawToken.slice(6) };
   return { kind: "connection", id: rawToken };
 }
 
@@ -1046,6 +1068,21 @@ function parseFilterTab(rawTab: string | null): FilterTab | null {
   if (rawTab === "active") return "active";
   if (rawTab === "pending") return "pending";
   if (rawTab === "archived") return "archived";
+  return null;
+}
+
+function normalizeThreadKindFilter(kind: ThreadKind): Exclude<InboxKindFilter, "all"> {
+  if (kind === "event") return "event";
+  if (kind === "group") return "group";
+  return "connection";
+}
+
+function parseInboxKindFilter(rawKind: string | null): InboxKindFilter | null {
+  if (!rawKind) return null;
+  if (rawKind === "all") return "all";
+  if (rawKind === "connection") return "connection";
+  if (rawKind === "event") return "event";
+  if (rawKind === "group") return "group";
   return null;
 }
 
@@ -1182,10 +1219,28 @@ function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[
 }
 
 function shouldIncludeInboxThread(thread: ThreadRow) {
-  if (thread.kind === "event") {
-    return Boolean(thread.hasAcceptedInteraction);
-  }
   return true;
+}
+
+function inboxKindLabel(kind: InboxKindFilter) {
+  if (kind === "connection") return "Connections";
+  if (kind === "event") return "Events";
+  if (kind === "group") return "Groups";
+  return "All types";
+}
+
+function normalizeInboxTabForKind(kind: InboxKindFilter, tab: FilterTab): FilterTab {
+  if (tab === "archived") return "archived";
+  if (kind === "group" && tab === "pending") return "all";
+  return tab;
+}
+
+function eventTypeBadgeClass(eventType: string) {
+  const key = eventType.trim().toLowerCase();
+  if (key.includes("festival") || key.includes("congress")) return "border-fuchsia-300/40 bg-fuchsia-500/15 text-fuchsia-100";
+  if (key.includes("workshop") || key.includes("class")) return "border-cyan-300/40 bg-cyan-500/15 text-cyan-100";
+  if (key.includes("social")) return "border-emerald-300/40 bg-emerald-500/15 text-emerald-100";
+  return "border-white/15 bg-white/[0.06] text-white/75";
 }
 
 function threadContextPriority(context: ThreadContextItem) {
@@ -1356,6 +1411,8 @@ function MessagesPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>(initialTab);
+  const [kindFilter, setKindFilter] = useState<InboxKindFilter>(parseInboxKindFilter(searchParams.get("kind")) ?? "all");
+  const [inboxFilterMenuOpen, setInboxFilterMenuOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeQuery, setComposeQuery] = useState("");
   const [composeConnectionTargets, setComposeConnectionTargets] = useState<ComposeConnectionTarget[]>([]);
@@ -1436,6 +1493,8 @@ function MessagesPageContent() {
   const [shareInquiryBlocks, setShareInquiryBlocks] = useState<TeacherInfoBlock[]>([]);
   const [shareInquiryBusy, setShareInquiryBusy] = useState(false);
   const [shareInquiryError, setShareInquiryError] = useState<string | null>(null);
+  const [chatBookingOpen, setChatBookingOpen] = useState(false);
+  const [chatBookingAvailable, setChatBookingAvailable] = useState(false);
 
   useEffect(() => {
     if (activityDraft.dateMode === "none" && (activityDraft.startAt || activityDraft.endAt)) {
@@ -1528,16 +1587,23 @@ function MessagesPageContent() {
   const [meAvatarUrl, setMeAvatarUrl] = useState<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [clockMs, setClockMs] = useState(Date.now());
+  const [messageSuggestedEvents, setMessageSuggestedEvents] = useState<EventRecord[]>([]);
+  const [messageSuggestedEventsLoading, setMessageSuggestedEventsLoading] = useState(false);
+  const [activeCurrentEvent, setActiveCurrentEvent] = useState<EventRecord | null>(null);
 
   const buildInboxUrl = useCallback(
-    (options?: { tab?: FilterTab | null; threadToken?: string | null }) => {
+    (options?: { tab?: FilterTab | null; threadToken?: string | null; kind?: InboxKindFilter | null }) => {
       const nextParams = new URLSearchParams(searchParams.toString());
       const nextTab = options && "tab" in options ? options.tab ?? "all" : activeTab;
+      const nextKind = options && "kind" in options ? options.kind ?? "all" : kindFilter;
 
       nextParams.delete("mobile");
 
       if (!nextTab || nextTab === "all") nextParams.delete("tab");
       else nextParams.set("tab", nextTab);
+
+      if (!nextKind || nextKind === "all") nextParams.delete("kind");
+      else nextParams.set("kind", nextKind);
 
       if (options && "threadToken" in options) {
         if (options.threadToken) nextParams.set("thread", options.threadToken);
@@ -1547,12 +1613,14 @@ function MessagesPageContent() {
       const qs = nextParams.toString();
       return qs ? `/messages?${qs}` : "/messages";
     },
-    [activeTab, searchParams]
+    [activeTab, kindFilter, searchParams]
   );
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const threadActionsRef = useRef<HTMLDivElement | null>(null);
+  const inboxFilterMenuRef = useRef<HTMLDivElement | null>(null);
+  const suggestedEventsScrollRef = useRef<HTMLDivElement | null>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const localReactionsByThreadRef = useRef<Record<string, Record<string, MessageReactionAggregate[]>>>({});
   const threadDraftsRef = useRef<Record<string, string>>({});
@@ -1829,10 +1897,12 @@ function MessagesPageContent() {
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
-      if (!threadActionsRef.current) return;
       const target = event.target as Node | null;
-      if (target && !threadActionsRef.current.contains(target)) {
+      if (target && threadActionsRef.current && !threadActionsRef.current.contains(target)) {
         setThreadActionsOpen(false);
+      }
+      if (target && inboxFilterMenuRef.current && !inboxFilterMenuRef.current.contains(target)) {
+        setInboxFilterMenuOpen(false);
       }
       const el = target instanceof Element ? target : null;
       if (!el?.closest('[data-thread-row-menu="true"]')) {
@@ -2554,6 +2624,116 @@ function MessagesPageContent() {
         return;
       }
 
+      if (parsed.kind === "group") {
+        const threadRes = await supabase
+          .from("threads")
+          .select("id,thread_type,group_id")
+          .eq("group_id", parsed.id)
+          .maybeSingle();
+        if (threadRes.error) throw new Error(threadRes.error.message);
+        if (isStale()) return;
+        const thread = (threadRes.data ?? null) as (ThreadDbRow & { group_id?: string | null }) | null;
+        if (!thread?.id || thread.thread_type !== "group") throw new Error("Group chat not found.");
+
+        const [memberRes, groupRes, messagesRes] = await Promise.all([
+          supabase
+            .from("thread_participants")
+            .select("last_read_at,messaging_state,activated_at,activation_cycle_start,activation_cycle_end,archived_at")
+            .eq("thread_id", thread.id)
+            .eq("user_id", userId)
+            .maybeSingle(),
+          supabase
+            .from("groups")
+            .select("id,title,city,country,chat_mode,host_user_id")
+            .eq("id", parsed.id)
+            .maybeSingle(),
+          supabase
+            .from("thread_messages")
+            .select("id,sender_id,body,message_type,context_tag,status_tag,metadata,created_at")
+            .eq("thread_id", thread.id)
+            .order("created_at", { ascending: true })
+            .limit(1200),
+        ]);
+        if (messagesRes.error) throw new Error(messagesRes.error.message);
+        if (isStale()) return;
+        if (memberRes.error || !memberRes.data) {
+          throw new Error("You do not have access to this group chat.");
+        }
+
+        const groupRow = (groupRes.data ?? null) as Record<string, unknown> | null;
+        if (!groupRow) throw new Error("Group not found.");
+        const groupTitle = typeof groupRow.title === "string" ? groupRow.title : "Group chat";
+        const groupCity = typeof groupRow.city === "string" ? groupRow.city : "";
+        const groupCountry = typeof groupRow.country === "string" ? groupRow.country : "";
+        const groupChatMode: GroupChatMode = groupRow.chat_mode === "broadcast" ? "broadcast" : "discussion";
+        const isGroupHost = typeof groupRow.host_user_id === "string" && groupRow.host_user_id === userId;
+        const groupComposerCanPost = isGroupHost || groupChatMode === "discussion";
+        const groupLocation = [groupCity, groupCountry].filter(Boolean).join(", ");
+        const meParticipant = memberRes.data as ThreadParticipantDbRow;
+        const contexts = await hydrateContextState(thread.id);
+        if (isStale()) return;
+        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const hasAcceptedInteraction = contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag));
+        setActiveLastReadAt(meParticipant.last_read_at ?? null);
+        setActivePeerLastReadAt(null);
+
+        setActiveMeta({
+          kind: "group",
+          contextTag: primaryContext?.contextTag ?? "regular_chat",
+          statusTag: primaryContext?.statusTag ?? "active",
+          title: groupTitle,
+          subtitle: groupLocation || "Private Group",
+          avatarUrl: null,
+          badge: "Group",
+          otherUserId: null,
+          connectionId: null,
+          tripId: null,
+          eventId: null,
+          threadId: thread.id,
+          messagingState: normalizeMessagingState(meParticipant?.messaging_state, meParticipant?.archived_at ? "archived" : "inactive"),
+          activatedAt: meParticipant?.activated_at ?? null,
+          activationCycleStart: meParticipant?.activation_cycle_start ?? null,
+          activationCycleEnd: meParticipant?.activation_cycle_end ?? null,
+          hasAcceptedInteraction,
+          isRelationshipPending: false,
+          serviceInquiryId: null,
+          serviceInquiryRequesterId: null,
+          serviceInquiryRecipientId: null,
+          serviceInquiryFollowupUsed: false,
+          groupId: parsed.id,
+          groupChatMode,
+          canPostToGroupThread: groupComposerCanPost,
+          eventAccessType: null,
+          eventChatMode: null,
+          canPostToEventThread: undefined,
+        });
+        setActiveMessages(
+          ((messagesRes.data ?? []) as Array<Record<string, unknown>>).map((m) => ({
+            id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
+            senderId: typeof m.sender_id === "string" ? m.sender_id : "",
+            body: typeof m.body === "string" ? m.body : "",
+            messageType: normalizeMessageType(typeof m.message_type === "string" ? m.message_type : null),
+            contextTag: normalizeContextTag(typeof m.context_tag === "string" ? m.context_tag : null),
+            statusTag: normalizeStatusTag(typeof m.status_tag === "string" ? m.status_tag : null, "active"),
+            metadata: parseContextMetadata(m.metadata),
+            createdAt: typeof m.created_at === "string" ? m.created_at : "",
+            status: "sent",
+          }))
+        );
+        await supabase.from("thread_participants").upsert(
+          { thread_id: thread.id, user_id: userId, role: "member", last_read_at: new Date().toISOString() },
+          { onConflict: "thread_id,user_id" }
+        );
+        if (isStale()) return;
+        await loadThreadReactions({
+          kind: "group",
+          threadScopeId: thread.id,
+          viewerId: userId,
+          threadToken: token,
+        });
+        return;
+      }
+
       if (parsed.kind === "event") {
         const threadRes = await supabase
           .from("threads")
@@ -2630,6 +2810,7 @@ function MessagesPageContent() {
           otherUserId: null,
           connectionId: null,
           tripId: null,
+          eventId: parsed.id,
           threadId: thread.id,
           messagingState: normalizeMessagingState(meParticipant?.messaging_state, meParticipant?.archived_at ? "archived" : "inactive"),
           activatedAt: meParticipant?.activated_at ?? null,
@@ -2810,10 +2991,75 @@ function MessagesPageContent() {
           if (!prev || toTime(candidate) > toTime(prev)) acceptedTripUpdatedAtById[id] = candidate;
         });
 
+        const [eventMembershipsRes, groupMembershipsRes, hostedEventsRes, hostedGroupsRes] = await Promise.all([
+          supabase
+            .from("event_members")
+            .select("event_id,status")
+            .eq("user_id", user.id)
+            .in("status", ["host", "going", "waitlist"]),
+          supabase
+            .from("group_members")
+            .select("group_id")
+            .eq("user_id", user.id)
+            .limit(300),
+          supabase
+            .from("events")
+            .select("id")
+            .eq("host_user_id", user.id)
+            .limit(300),
+          supabase
+            .from("groups")
+            .select("id")
+            .eq("host_user_id", user.id)
+            .limit(300),
+        ]);
+
+        const joinedEventIds = Array.from(
+          new Set(
+            [
+              ...((eventMembershipsRes.data ?? []) as Array<Record<string, unknown>>).map((row) =>
+                typeof row.event_id === "string" ? row.event_id : ""
+              ),
+              ...((hostedEventsRes.data ?? []) as Array<Record<string, unknown>>).map((row) =>
+                typeof row.id === "string" ? row.id : ""
+              ),
+            ]
+              .filter(Boolean)
+          )
+        );
+        const joinedGroupIds = Array.from(
+          new Set(
+            [
+              ...((groupMembershipsRes.data ?? []) as Array<Record<string, unknown>>).map((row) =>
+                typeof row.group_id === "string" ? row.group_id : ""
+              ),
+              ...((hostedGroupsRes.data ?? []) as Array<Record<string, unknown>>).map((row) =>
+                typeof row.id === "string" ? row.id : ""
+              ),
+            ]
+              .filter(Boolean)
+          )
+        );
+
+        if (joinedEventIds.length || joinedGroupIds.length) {
+          await Promise.all([
+            ...joinedEventIds.slice(0, 50).map((eventId) =>
+              supabase
+                .rpc("cx_ensure_event_thread", { p_event_id: eventId, p_actor: user.id, p_requester: user.id })
+                .then(() => null, () => null)
+            ),
+            ...joinedGroupIds.slice(0, 50).map((groupId) =>
+              supabase
+                .rpc("cx_ensure_group_thread", { p_group_id: groupId, p_actor: user.id })
+                .then(() => null, () => null)
+            ),
+          ]);
+        }
+
         const threadsRes = await supabase
           .from("threads")
-          .select("id,thread_type,connection_id,trip_id,event_id,direct_user_low,direct_user_high,last_message_at,created_at")
-          .in("thread_type", ["connection", "trip", "direct", "event"])
+          .select("id,thread_type,connection_id,trip_id,event_id,group_id,direct_user_low,direct_user_high,last_message_at,created_at")
+          .in("thread_type", ["connection", "trip", "direct", "event", "group"])
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(500);
 
@@ -2838,6 +3084,9 @@ function MessagesPageContent() {
           const eventThreadIds = Array.from(
             new Set(threadRows.filter((row) => row.thread_type === "event").map((row) => row.event_id ?? "").filter(Boolean))
           );
+          const groupThreadIds = Array.from(
+            new Set(threadRows.filter((row) => row.thread_type === "group").map((row) => row.group_id ?? "").filter(Boolean))
+          );
           const directCounterpartIds = Array.from(
             new Set(
               threadRows
@@ -2856,7 +3105,7 @@ function MessagesPageContent() {
           );
           const allTripIds = Array.from(new Set([...tripIds, ...tripThreadIds, ...acceptedTripIds]));
 
-          const [profilesRes, tripsRes, eventsRes, threadMessagesRes, threadParticipantsRes, threadContextsRes, threadParticipantsAllRes] = await Promise.all([
+          const [profilesRes, tripsRes, eventsRes, groupsRes, threadMessagesRes, threadParticipantsRes, threadContextsRes, threadParticipantsAllRes] = await Promise.all([
             threadOtherUserIds.length
               ? supabase
                   .from("profiles")
@@ -2871,6 +3120,9 @@ function MessagesPageContent() {
               : Promise.resolve({ data: [], error: null }),
             eventThreadIds.length
               ? supabase.from("events").select("id,title,city,country,starts_at").in("id", eventThreadIds)
+              : Promise.resolve({ data: [], error: null }),
+            groupThreadIds.length
+              ? supabase.from("groups").select("id,title,city,country,chat_mode").in("id", groupThreadIds)
               : Promise.resolve({ data: [], error: null }),
             threadIds.length
               ? supabase
@@ -2943,6 +3195,17 @@ function MessagesPageContent() {
               startsAt: typeof row.starts_at === "string" ? row.starts_at : null,
             };
           });
+          const groupsById: Record<string, { title: string; city: string; country: string; chatMode: GroupChatMode }> = {};
+          ((groupsRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+            const id = typeof row.id === "string" ? row.id : "";
+            if (!id) return;
+            groupsById[id] = {
+              title: typeof row.title === "string" ? row.title : "Group chat",
+              city: typeof row.city === "string" ? row.city : "",
+              country: typeof row.country === "string" ? row.country : "",
+              chatMode: row.chat_mode === "broadcast" ? "broadcast" : "discussion",
+            };
+          });
           setComposeTripTargets(buildTripComposeTargets(acceptedTripIds, tripsById, acceptedTripUpdatedAtById));
 
           const lastByThread: Record<string, { body: string; senderId: string; createdAt: string }> = {};
@@ -2994,6 +3257,10 @@ function MessagesPageContent() {
             }
             if (row.thread_type === "event" && row.event_id) {
               tokenByDbThreadId[dbThreadId] = `event:${row.event_id}`;
+              return;
+            }
+            if (row.thread_type === "group" && row.group_id) {
+              tokenByDbThreadId[dbThreadId] = `group:${row.group_id}`;
             }
           });
 
@@ -3083,6 +3350,8 @@ function MessagesPageContent() {
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Connection",
                   otherUserId: connection.other_user_id,
+                  eventId: null,
+                  groupId: null,
                   messagingState: participantState?.messagingState ?? "inactive",
                   activatedAt: participantState?.activatedAt ?? null,
                   activationCycleStart: participantState?.activationCycleStart ?? null,
@@ -3107,6 +3376,8 @@ function MessagesPageContent() {
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Trip",
                   otherUserId: null,
+                  eventId: null,
+                  groupId: null,
                   messagingState: participantState?.messagingState ?? "inactive",
                   activatedAt: participantState?.activatedAt ?? null,
                   activationCycleStart: participantState?.activationCycleStart ?? null,
@@ -3130,6 +3401,8 @@ function MessagesPageContent() {
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Chat",
                   otherUserId,
+                  eventId: null,
+                  groupId: null,
                   messagingState: participantState?.messagingState ?? "inactive",
                   activatedAt: participantState?.activatedAt ?? null,
                   activationCycleStart: participantState?.activationCycleStart ?? null,
@@ -3154,6 +3427,33 @@ function MessagesPageContent() {
                   unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
                   badge: "Event",
                   otherUserId: null,
+                  eventId,
+                  groupId: null,
+                  messagingState: participantState?.messagingState ?? "inactive",
+                  activatedAt: participantState?.activatedAt ?? null,
+                  activationCycleStart: participantState?.activationCycleStart ?? null,
+                  activationCycleEnd: participantState?.activationCycleEnd ?? null,
+                } satisfies ThreadRow;
+              }
+              if (row.thread_type === "group") {
+                const groupId = row.group_id ?? "";
+                const group = groupsById[groupId];
+                const location = [group?.city ?? "", group?.country ?? ""].filter(Boolean).join(", ");
+                const participantState = messagingStateByThread[threadId];
+                return {
+                  threadId: `group:${groupId}`,
+                  dbThreadId: threadId,
+                  kind: "group",
+                  title: group?.title ? `Group: ${group.title}` : "Group chat",
+                  subtitle: location || "Private Group",
+                  avatarUrl: null,
+                  preview: last?.body || "Group chat",
+                  updatedAt,
+                  unreadCount: unreadCountByThread[threadId] ?? (last && last.senderId !== user.id ? 1 : 0),
+                  badge: "Group",
+                  otherUserId: null,
+                  eventId: null,
+                  groupId,
                   messagingState: participantState?.messagingState ?? "inactive",
                   activatedAt: participantState?.activatedAt ?? null,
                   activationCycleStart: participantState?.activationCycleStart ?? null,
@@ -3289,6 +3589,8 @@ function MessagesPageContent() {
                 unreadCount: latest && latest.senderId && latest.senderId !== user.id ? 1 : 0,
                 badge: "Connection",
                 otherUserId: row.other_user_id,
+                eventId: null,
+                groupId: null,
               } satisfies ThreadRow;
             });
 
@@ -3310,6 +3612,8 @@ function MessagesPageContent() {
                 unreadCount: 0,
                 badge: "Trip",
                 otherUserId: null,
+                eventId: null,
+                groupId: null,
               } satisfies ThreadRow;
             });
 
@@ -3360,8 +3664,14 @@ function MessagesPageContent() {
     const parsed = parseThreadToken(requestedThreadToken);
     const knownThread = threads.some((thread) => thread.threadId === requestedThreadToken);
     if (!knownThread && !parsed) return;
+    if (parsed && !searchParams.get("kind")) {
+      setKindFilter((prev) => {
+        const nextKind = normalizeThreadKindFilter(parsed.kind);
+        return prev === nextKind ? prev : nextKind;
+      });
+    }
     setActiveThreadToken((prev) => (prev === requestedThreadToken ? prev : requestedThreadToken));
-  }, [requestedThreadToken, threads]);
+  }, [requestedThreadToken, searchParams, threads]);
 
   useEffect(() => {
     const requestedTab = parseFilterTab(searchParams.get("tab"));
@@ -3369,13 +3679,37 @@ function MessagesPageContent() {
     setActiveTab((prev) => (prev === nextTab ? prev : nextTab));
   }, [searchParams]);
 
+  useEffect(() => {
+    const requestedKind = parseInboxKindFilter(searchParams.get("kind"));
+    const nextKind = requestedKind ?? "all";
+    setKindFilter((prev) => (prev === nextKind ? prev : nextKind));
+  }, [searchParams]);
+
   const selectFilterTab = useCallback(
     (tab: FilterTab) => {
       setActiveTab(tab);
+      setInboxFilterMenuOpen(false);
       router.replace(buildInboxUrl({ tab }), { scroll: false });
     },
     [buildInboxUrl, router]
   );
+
+  const selectKindFilter = useCallback(
+    (kind: InboxKindFilter) => {
+      setKindFilter(kind);
+      setInboxFilterMenuOpen(false);
+      const nextTab = normalizeInboxTabForKind(kind, activeTab === "archived" ? "all" : activeTab);
+      setActiveTab(nextTab);
+      router.replace(buildInboxUrl({ kind, tab: nextTab }), { scroll: false });
+    },
+    [activeTab, buildInboxUrl, router]
+  );
+
+  const selectArchivedFilter = useCallback(() => {
+    setInboxFilterMenuOpen(false);
+    setActiveTab("archived");
+    router.replace(buildInboxUrl({ tab: "archived" }), { scroll: false });
+  }, [buildInboxUrl, router]);
 
   const mobileThreadOpen = Boolean(requestedThreadToken);
 
@@ -3384,6 +3718,8 @@ function MessagesPageContent() {
       setActiveMeta(null);
       setContactSidebar(null);
       setContactSidebarError(null);
+      setChatBookingOpen(false);
+      setChatBookingAvailable(false);
       setActiveMessages([]);
       setThreadError(null);
       setActiveLastReadAt(null);
@@ -3402,6 +3738,7 @@ function MessagesPageContent() {
     setOpenMessageMenuId(null);
     setOpenThreadRowMenuId(null);
     setThreadActionsOpen(false);
+    setChatBookingOpen(false);
     setReplyTo(null);
     setHighlightedMessageId(null);
     setComposerEmojiOpen(false);
@@ -3623,6 +3960,69 @@ function MessagesPageContent() {
       cancelled = true;
     };
   }, [activeMeta?.otherUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targetUserId = activeMeta?.otherUserId;
+    const roles = contactSidebar?.roles ?? [];
+
+    if (!targetUserId || targetUserId === meId || !contactSidebar || !hasTeacherBadgeRole(roles)) {
+      setChatBookingAvailable(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const [teacherProfileRes, availabilityRes] = await Promise.all([
+          supabase
+            .from("teacher_profiles")
+            .select("teacher_profile_enabled,is_public,teacher_profile_trial_ends_at")
+            .eq("user_id", targetUserId)
+            .maybeSingle(),
+          supabase
+            .from("teacher_session_availability")
+            .select("id", { count: "exact", head: true })
+            .eq("teacher_id", targetUserId)
+            .eq("is_available", true)
+            .gte("availability_date", new Date().toISOString().slice(0, 10)),
+        ]);
+
+        if (teacherProfileRes.error) throw new Error(teacherProfileRes.error.message);
+
+        const teacherProfile = teacherProfileRes.data as {
+          teacher_profile_enabled?: boolean;
+          teacher_profile_trial_ends_at?: string | null;
+          is_public?: boolean;
+        } | null;
+
+        const canBook = Boolean(
+          teacherProfile?.is_public === true &&
+            !availabilityRes.error &&
+            (availabilityRes.count ?? 0) > 0 &&
+            canUseTeacherProfile({
+              roles,
+              teacherProfileEnabled: teacherProfile?.teacher_profile_enabled === true,
+              trialEndsAt:
+                typeof teacherProfile?.teacher_profile_trial_ends_at === "string"
+                  ? teacherProfile.teacher_profile_trial_ends_at
+                  : null,
+              isVerified: isPaymentVerified({
+                verified: contactSidebar.verified,
+                verified_label: contactSidebar.verifiedLabel,
+              }),
+            })
+        );
+
+        if (!cancelled) setChatBookingAvailable(canBook);
+      } catch {
+        if (!cancelled) setChatBookingAvailable(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMeta?.otherUserId, contactSidebar, meId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4377,6 +4777,15 @@ function MessagesPageContent() {
     [activePendingContext]
   );
   const activePrimaryContext = activePendingContext ?? activeThreadContexts[0] ?? null;
+  const chatBookingContextLabel = useMemo(() => {
+    const activityContext =
+      activePrimaryContext?.contextTag === "activity"
+        ? activePrimaryContext
+        : activeThreadContexts.find((context) => context.contextTag === "activity") ?? null;
+    if (!activityContext) return null;
+    const activityType = asString(activityContext.metadata.activity_type);
+    return activityType ? `From ${activityTypeLabel(activityType)}` : "From activity";
+  }, [activePrimaryContext, activeThreadContexts]);
   const historicalThreadContexts = useMemo(
     () =>
       activeThreadContexts
@@ -5187,7 +5596,7 @@ function MessagesPageContent() {
   );
   const chatFooterCtaState = useMemo<ChatFooterCtaState | null>(() => {
     if (!activeMeta || serviceInquiryOwnFlowState || interactionBlocked) return null;
-    if (activeMeta.kind === "event") return null;
+    if (activeMeta.kind === "event" || activeMeta.kind === "group") return null;
     if (interactionStatus === "pending") return "pending";
     if (interactionStatus === "accepted" && !chatActivated && activeMeta.threadId) return "start_conversation";
     if (interactionStatus === "none" && activeMeta.otherUserId) return "request_connect";
@@ -5197,6 +5606,9 @@ function MessagesPageContent() {
     if (!activeMeta) return null;
     if (interactionBlocked) {
       return "Messaging is disabled for this thread.";
+    }
+    if (activeMeta.kind === "group") {
+      return activeMeta.canPostToGroupThread === false ? "Only organisers can post in this group thread." : null;
     }
     if (activeMeta.kind === "event" && activeMeta.canPostToEventThread === false) {
       return activeMeta.eventChatMode === "broadcast"
@@ -5387,11 +5799,21 @@ function MessagesPageContent() {
       const isUnread = thread.unreadCount > 0 || Boolean(manualUnreadByThread[thread.threadId]);
       const contextTag = thread.contextTag ?? (thread.kind === "event" ? "event_chat" : thread.kind === "trip" ? "trip_join_request" : "regular_chat");
       const isPendingRelationship = Boolean(thread.isRelationshipPending);
+      const isActiveThread = thread.messagingState === "active" || thread.kind === "event" || thread.kind === "group";
+      const kindMatches =
+        kindFilter === "all"
+          ? true
+          : kindFilter === "event"
+            ? thread.kind === "event"
+          : kindFilter === "group"
+            ? thread.kind === "group"
+            : thread.kind !== "event" && thread.kind !== "group";
 
       if (activeTab === "all" && isArchived) return false;
       if (activeTab === "archived" && !isArchived) return false;
       if (activeTab === "pending" && (!isPendingRelationship || isArchived)) return false;
-      if (activeTab === "active" && (isArchived || isPendingRelationship || thread.messagingState !== "active")) return false;
+      if (activeTab === "active" && (isArchived || isPendingRelationship || !isActiveThread)) return false;
+      if (!kindMatches && thread.threadId !== activeThreadToken) return false;
 
       if (!q) return true;
       const haystack = [
@@ -5419,18 +5841,27 @@ function MessagesPageContent() {
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
       return toTime(b.updatedAt) - toTime(a.updatedAt);
     });
-  }, [activeTab, archivedThreads, manualUnreadByThread, pinnedThreads, query, threads]);
+  }, [activeTab, activeThreadToken, archivedThreads, kindFilter, manualUnreadByThread, pinnedThreads, query, threads]);
+  const kindScopedThreads = useMemo(() => {
+    return threads.filter((thread) => {
+      if (kindFilter === "all") return true;
+      if (kindFilter === "event") return thread.kind === "event";
+      if (kindFilter === "group") return thread.kind === "group";
+      return thread.kind !== "event" && thread.kind !== "group";
+    });
+  }, [kindFilter, threads]);
   const tabCounts = useMemo(() => {
     const counts = { all: 0, active: 0, pending: 0, archived: 0 };
-    for (const thread of threads) {
+    for (const thread of kindScopedThreads) {
       const isArchived = thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]);
       const isPendingRelationship = Boolean(thread.isRelationshipPending);
+      const isActiveThread = thread.messagingState === "active" || thread.kind === "event" || thread.kind === "group";
       if (isArchived) {
         counts.archived += 1;
       } else if (isPendingRelationship) {
         counts.pending += 1;
         counts.all += 1;
-      } else if (thread.messagingState === "active") {
+      } else if (isActiveThread) {
         counts.active += 1;
         counts.all += 1;
       } else {
@@ -5438,7 +5869,57 @@ function MessagesPageContent() {
       }
     }
     return counts;
-  }, [archivedThreads, threads]);
+  }, [archivedThreads, kindScopedThreads]);
+  const kindCounts = useMemo(
+    () => ({
+      all: threads.length,
+      connection: threads.filter((thread) => thread.kind !== "event" && thread.kind !== "group").length,
+      event: threads.filter((thread) => thread.kind === "event").length,
+      group: threads.filter((thread) => thread.kind === "group").length,
+    }),
+    [threads]
+  );
+  const inboxViewTabs = useMemo(() => {
+    if (kindFilter === "event") {
+    return [
+      { key: "all", label: "All" },
+      { key: "active", label: "Joined" },
+      { key: "pending", label: "Requests" },
+    ] as const;
+    }
+    if (kindFilter === "group") {
+    return [
+      { key: "all", label: "All" },
+      { key: "active", label: "Joined" },
+    ] as const;
+  }
+  return [
+    { key: "all", label: "All" },
+    { key: "active", label: "Active" },
+    { key: "pending", label: "Pending" },
+  ] as const;
+}, [kindFilter]);
+  const inboxSectionLabel = useMemo(() => {
+    if (activeTab === "archived") return "Archived";
+    if (kindFilter === "all") return "";
+    return inboxKindLabel(kindFilter);
+  }, [activeTab, kindFilter]);
+  const scrollSuggestedEvents = useCallback((direction: "left" | "right") => {
+    const node = suggestedEventsScrollRef.current;
+    if (!node) return;
+    node.scrollBy({
+      left: direction === "left" ? -360 : 360,
+      behavior: "smooth",
+    });
+  }, []);
+
+  useEffect(() => {
+    const normalizedTab = normalizeInboxTabForKind(kindFilter, activeTab);
+    if (normalizedTab === activeTab) return;
+    setActiveTab(normalizedTab);
+    router.replace(buildInboxUrl({ tab: normalizedTab, kind: kindFilter }), { scroll: false });
+  }, [activeTab, buildInboxUrl, kindFilter, router]);
+
   const archivableActiveThreads = useMemo(
     () =>
       threads.filter(
@@ -5450,6 +5931,81 @@ function MessagesPageContent() {
       ),
     [activeThreadToken, archivedThreads, threads]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMessageSuggestedEvents() {
+      if (activeMeta?.kind !== "event" || !activeMeta.eventId) {
+        setMessageSuggestedEvents([]);
+        setMessageSuggestedEventsLoading(false);
+        setActiveCurrentEvent(null);
+        return;
+      }
+
+      setMessageSuggestedEventsLoading(true);
+      const currentRes = await supabase
+        .from("events")
+        .select("*")
+        .eq("id", activeMeta.eventId)
+        .maybeSingle();
+
+      const currentEvent = mapEventRows(currentRes.data ? [currentRes.data] : [])[0] ?? null;
+      if (!cancelled) setActiveCurrentEvent(currentEvent);
+      const suggestionsRes = await supabase
+        .from("events")
+        .select("*")
+        .neq("id", activeMeta.eventId)
+        .eq("status", "published")
+        .gte("ends_at", new Date().toISOString())
+        .order("starts_at", { ascending: true })
+        .limit(18);
+
+      if (cancelled) return;
+
+      const mapped = mapEventRows((suggestionsRes.data ?? []) as unknown[])
+        .filter((candidate) => candidate.id !== activeMeta.eventId && isEventDiscoverable(candidate.accessType));
+
+      const ranked = mapped
+        .map((candidate) => {
+          let score = 0;
+          if (currentEvent) {
+            if (candidate.city && currentEvent.city && candidate.city.toLowerCase() === currentEvent.city.toLowerCase()) score += 6;
+            if (candidate.country && currentEvent.country && candidate.country.toLowerCase() === currentEvent.country.toLowerCase()) score += 3;
+            const sharedStyles = candidate.styles.filter((style) =>
+              currentEvent.styles.some((currentStyle) => currentStyle.toLowerCase() === style.toLowerCase())
+            );
+            score += sharedStyles.length * 2;
+            if (candidate.eventType.toLowerCase() === currentEvent.eventType.toLowerCase()) score += 1;
+          }
+          return { candidate, score };
+        })
+        .sort((left, right) => {
+          if (right.score !== left.score) return right.score - left.score;
+          return toTime(left.candidate.startsAt) - toTime(right.candidate.startsAt);
+        })
+        .slice(0, 8)
+        .map((entry) => entry.candidate);
+
+      setMessageSuggestedEvents(ranked);
+      setMessageSuggestedEventsLoading(false);
+    }
+
+    void loadMessageSuggestedEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMeta?.eventId, activeMeta?.kind]);
+
+  useEffect(() => {
+    if (loading) return;
+    const activeStillVisible = activeThreadToken ? filtered.some((thread) => thread.threadId === activeThreadToken) : false;
+    if (activeStillVisible) return;
+    const nextThreadToken = filtered[0]?.threadId ?? null;
+    if (nextThreadToken === activeThreadToken) return;
+    setActiveThreadToken(nextThreadToken);
+    router.replace(buildInboxUrl({ threadToken: nextThreadToken }), { scroll: false });
+  }, [activeThreadToken, buildInboxUrl, filtered, loading, router]);
 
   useEffect(() => {
     if (searchParams.get("activity") !== "1") return;
@@ -6053,7 +6609,7 @@ function MessagesPageContent() {
             .eq("connection_id", activeMeta.connectionId)
             .eq("sender_id", meId);
           if (res.error) throw new Error(res.error.message);
-        } else if ((activeMeta?.kind === "trip" || activeMeta?.kind === "direct" || activeMeta?.kind === "event") && activeMeta.threadId) {
+        } else if ((activeMeta?.kind === "trip" || activeMeta?.kind === "direct" || activeMeta?.kind === "event" || activeMeta?.kind === "group") && activeMeta.threadId) {
           const res = await supabase
             .from("thread_messages")
             .delete()
@@ -6088,7 +6644,14 @@ function MessagesPageContent() {
         >
           <div className="flex flex-col gap-4 px-3 pt-4 pb-2 sm:px-4 sm:pt-5">
               <div className="flex items-center justify-between gap-2">
-                <h1 className="text-2xl font-bold leading-tight">Inbox</h1>
+                <div className="flex min-w-0 items-baseline gap-2">
+                  <h1 className="text-2xl font-bold leading-tight">Inbox</h1>
+                  {inboxSectionLabel ? (
+                    <span className="truncate bg-gradient-to-r from-[#6ee7f9] to-[#d946ef] bg-clip-text text-[11px] font-black uppercase tracking-[0.18em] text-transparent">
+                      {inboxSectionLabel}
+                    </span>
+                  ) : null}
+                </div>
                 <div className="flex items-center gap-2">
                   {messagingSummary ? (
                     <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
@@ -6125,12 +6688,7 @@ function MessagesPageContent() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              {([
-                { key: "all", label: "All" },
-                { key: "active", label: "Active" },
-                { key: "pending", label: "Requests" },
-                { key: "archived", label: "Archived" },
-              ] as const).map((tab) => {
+              {inboxViewTabs.map((tab) => {
                 const selected = activeTab === tab.key;
                 return (
                   <button
@@ -6152,7 +6710,65 @@ function MessagesPageContent() {
                   </button>
                 );
               })}
-
+              <div className="relative ml-auto" ref={inboxFilterMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setInboxFilterMenuOpen((prev) => !prev)}
+                  data-testid="thread-filter-menu-button"
+                  className={[
+                    "inline-flex min-h-8 shrink-0 items-center justify-center rounded-full border px-3 py-1 transition-colors",
+                    inboxFilterMenuOpen || kindFilter !== "all" || activeTab === "archived"
+                      ? "border-[#a855f7]/45 bg-[#24182f] text-[#f2d9ff]"
+                      : "border-white/15 bg-white/[0.04] text-[#90cbcb] hover:text-white",
+                  ].join(" ")}
+                  aria-label="Open inbox filters"
+                >
+                  <span className="material-symbols-outlined text-[16px]">tune</span>
+                </button>
+                {inboxFilterMenuOpen ? (
+                  <div
+                    data-testid="thread-filter-menu"
+                    className="absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-white/10 bg-[#11161d] p-2 shadow-2xl"
+                  >
+                    <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Thread type</p>
+                    {([
+                      { key: "all", label: "All types", count: kindCounts.all },
+                      { key: "connection", label: "Connections", count: kindCounts.connection },
+                      { key: "event", label: "Events", count: kindCounts.event },
+                      { key: "group", label: "Groups", count: kindCounts.group },
+                    ] as const).map((option) => {
+                      const selected = kindFilter === option.key && activeTab !== "archived";
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => selectKindFilter(option.key)}
+                          className={[
+                            "flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors",
+                            selected ? "bg-[#24182f] text-[#f2d9ff]" : "text-slate-200 hover:bg-white/[0.05]",
+                          ].join(" ")}
+                        >
+                          <span>{option.label}</span>
+                          <span className="text-[11px] font-bold tabular-nums text-inherit/70">{option.count}</span>
+                        </button>
+                      );
+                    })}
+                    <div className="my-2 h-px bg-white/10" />
+                    <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">View</p>
+                    <button
+                      type="button"
+                      onClick={selectArchivedFilter}
+                      className={[
+                        "flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors",
+                        activeTab === "archived" ? "bg-[#24182f] text-[#f2d9ff]" : "text-slate-200 hover:bg-white/[0.05]",
+                      ].join(" ")}
+                    >
+                      <span>Archived</span>
+                      <span className="text-[11px] font-bold tabular-nums text-inherit/70">{tabCounts.archived}</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -6188,11 +6804,13 @@ function MessagesPageContent() {
                 const isUnread = thread.unreadCount > 0 || Boolean(manualUnreadByThread[thread.threadId]);
                 const rowPreview = toSingleLineText(thread.preview.trim() || thread.subtitle.trim() || "No messages yet.", 84);
                 const activateThread = () => {
+                  const nextKind = normalizeThreadKindFilter(thread.kind);
                   if (activeThreadToken === thread.threadId && typeof window !== "undefined" && !window.matchMedia("(max-width: 767px)").matches) {
                     setOpenThreadRowMenuId(null);
                     return;
                   }
                   setOpenThreadRowMenuId(null);
+                  setKindFilter(nextKind);
                   setManualUnreadByThread((prev) => {
                     if (!prev[thread.threadId]) return prev;
                     const copy = { ...prev };
@@ -6201,11 +6819,11 @@ function MessagesPageContent() {
                   });
                   setThreads((prev) => prev.map((row) => (row.threadId === thread.threadId ? { ...row, unreadCount: 0 } : row)));
                   if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-                    router.push(buildInboxUrl({ threadToken: thread.threadId }), { scroll: false });
+                    router.push(buildInboxUrl({ threadToken: thread.threadId, kind: nextKind }), { scroll: false });
                     return;
                   }
                   setActiveThreadToken(thread.threadId);
-                  router.replace(buildInboxUrl({ threadToken: thread.threadId }), { scroll: false });
+                  router.replace(buildInboxUrl({ threadToken: thread.threadId, kind: nextKind }), { scroll: false });
                 };
                 return (
                   <div
@@ -6531,6 +7149,15 @@ function MessagesPageContent() {
                       className="select-none bg-gradient-to-r from-[#00F5FF] via-[#58E9FF] to-[#FF00FF] bg-clip-text text-[22px] font-black uppercase leading-none tracking-[-0.07em] text-transparent opacity-[0.18] transition-opacity hover:opacity-40 sm:text-[28px]"
                     >
                       Activity
+                    </button>
+                  ) : null}
+                  {activeMeta.otherUserId && chatBookingAvailable ? (
+                    <button
+                      type="button"
+                      onClick={() => setChatBookingOpen(true)}
+                      className="inline-flex items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition-colors hover:bg-cyan-300/16"
+                    >
+                      Book session
                     </button>
                   ) : null}
                   {threadPrefsInLocalMode ? (
@@ -6979,6 +7606,193 @@ function MessagesPageContent() {
                       >
                         {requestActionBusyId === `${activeServiceInquiryContext.id}:decline` ? "Declining…" : "Decline inquiry"}
                       </button>
+                    </div>
+                  ) : null}
+                  {activeMeta.kind === "event" ? (
+                    <div className="space-y-4">
+                      <div className="overflow-hidden rounded-[28px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(8,18,24,0.92),rgba(21,12,33,0.68),rgba(9,11,16,0.98))] shadow-[0_22px_40px_rgba(0,0,0,0.28)]">
+                        <div className="relative h-44 overflow-hidden border-b border-white/10">
+                          {activeCurrentEvent ? (
+                            <>
+                              {pickEventHeroUrl(activeCurrentEvent) || pickEventFallbackHeroUrl(activeCurrentEvent) ? (
+                                <img
+                                  src={pickEventHeroUrl(activeCurrentEvent) || pickEventFallbackHeroUrl(activeCurrentEvent) || ""}
+                                  alt={activeCurrentEvent.title}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#0e2a2f,#1a0d2e)]">
+                                  <span className="material-symbols-outlined text-[42px] text-cyan-200/20">event</span>
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,8,12,0.08),rgba(4,8,12,0.74))]" />
+                              <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${eventTypeBadgeClass(activeCurrentEvent.eventType)}`}>
+                                    {activeCurrentEvent.eventType}
+                                  </span>
+                                  {activeMeta.badge ? (
+                                    <span className="inline-flex items-center rounded-full border border-white/15 bg-black/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/75">
+                                      {activeMeta.badge}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <Link
+                                  href={`/events/${activeCurrentEvent.id}`}
+                                  className="mt-3 block text-2xl font-extrabold leading-tight text-white transition-colors hover:text-cyan-100 sm:text-[28px]"
+                                >
+                                  {activeCurrentEvent.title}
+                                </Link>
+                                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-white/70">
+                                  {(activeCurrentEvent.city || activeCurrentEvent.country) && (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="material-symbols-outlined text-[15px] text-cyan-300/70">location_on</span>
+                                      {[activeCurrentEvent.city, activeCurrentEvent.country].filter(Boolean).join(", ")}
+                                    </span>
+                                  )}
+                                  {activeCurrentEvent.startsAt && (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="material-symbols-outlined text-[15px] text-cyan-300/70">calendar_month</span>
+                                      {new Date(activeCurrentEvent.startsAt).toLocaleDateString("en-GB", {
+                                        day: "numeric",
+                                        month: "short",
+                                        year: "numeric",
+                                      })}
+                                    </span>
+                                  )}
+                                  {activeCurrentEvent.venueName && (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="material-symbols-outlined text-[15px] text-cyan-300/70">place</span>
+                                      {activeCurrentEvent.venueName}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="h-full w-full animate-pulse bg-white/[0.05]" />
+                          )}
+                        </div>
+
+                        <div className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
+                          {activeCurrentEvent?.description ? (
+                            <p className="text-sm leading-6 text-slate-300">{activeCurrentEvent.description}</p>
+                          ) : (
+                            <p className="text-sm leading-6 text-slate-400">
+                              Event details stay visible here so members can read the broadcast context while staying inside the thread.
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              href={`/events/${activeCurrentEvent?.id ?? activeMeta.eventId ?? ""}`}
+                              className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(135deg,#0df2f2,#d93bff)] px-4 py-2 text-xs font-semibold text-[#041316] transition hover:brightness-105"
+                            >
+                              View event
+                              <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                            </Link>
+                            <Link
+                              href="/events"
+                              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 py-2 text-xs font-semibold text-white/80 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                            >
+                              Explore all events
+                              <span className="material-symbols-outlined text-[14px]">east</span>
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+
+                      {(messageSuggestedEventsLoading || messageSuggestedEvents.length > 0) && (
+                        <div className="space-y-3 rounded-[26px] border border-white/10 bg-white/[0.02] px-4 py-4 sm:px-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-300/70">Suggested events</p>
+                              <p className="mt-1 text-sm text-slate-400">Keep browsing without leaving this thread.</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => scrollSuggestedEvents("left")}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-white/[0.03] text-white/70 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                                aria-label="Scroll suggested events left"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">west</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => scrollSuggestedEvents("right")}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-white/[0.03] text-white/70 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                                aria-label="Scroll suggested events right"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">east</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {messageSuggestedEventsLoading ? (
+                            <div className="flex gap-3 overflow-hidden">
+                              {Array.from({ length: 3 }).map((_, index) => (
+                                <div
+                                  key={`thread-suggested-loading-${index}`}
+                                  className="w-[250px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20"
+                                >
+                                  <div className="h-28 animate-pulse bg-white/[0.06]" />
+                                  <div className="space-y-2 p-3">
+                                    <div className="h-4 w-3/4 animate-pulse rounded bg-white/[0.08]" />
+                                    <div className="h-3 w-1/2 animate-pulse rounded bg-white/[0.06]" />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div ref={suggestedEventsScrollRef} className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
+                              {messageSuggestedEvents.map((ev) => (
+                                <Link
+                                  key={ev.id}
+                                  href={`/events/${ev.id}`}
+                                  className="group w-[250px] shrink-0 overflow-hidden rounded-2xl border border-cyan-300/12 bg-[linear-gradient(180deg,rgba(15,16,20,0.96),rgba(10,11,14,0.98))] transition hover:border-cyan-300/30"
+                                >
+                                  <div className="relative h-28 overflow-hidden">
+                                    {pickEventHeroUrl(ev) || pickEventFallbackHeroUrl(ev) ? (
+                                      <img
+                                        src={pickEventHeroUrl(ev) || pickEventFallbackHeroUrl(ev) || ""}
+                                        alt={ev.title}
+                                        className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                                      />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#0e2a2f,#1a0d2e)]">
+                                        <span className="material-symbols-outlined text-[30px] text-cyan-200/20">event</span>
+                                      </div>
+                                    )}
+                                    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,6,10,0.08),rgba(3,6,10,0.72))]" />
+                                    <div className="absolute left-3 top-3">
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] ${eventTypeBadgeClass(ev.eventType)}`}>
+                                        {ev.eventType}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-2 p-3">
+                                    <p className="line-clamp-2 text-sm font-semibold leading-5 text-white">{ev.title}</p>
+                                    <p className="text-[12px] text-slate-400">
+                                      {[ev.city, ev.country].filter(Boolean).join(", ")}
+                                    </p>
+                                    <div className="flex items-center justify-between gap-2 text-[11px] text-cyan-200/80">
+                                      <span>
+                                        {ev.startsAt
+                                          ? new Date(ev.startsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+                                          : "Date TBA"}
+                                      </span>
+                                      <span className="inline-flex items-center gap-1">
+                                        Open
+                                        <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                </Link>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                   {!threadDbSupported && activeMeta.kind === "trip" ? (
@@ -7669,16 +8483,89 @@ function MessagesPageContent() {
               </div>
 
               <aside className="hidden xl:flex w-[340px] shrink-0 flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))]">
-                <div className="cx-scroll h-full overflow-y-auto px-4 py-5 space-y-4">
-                  {contactSidebarLoading || contactSidebarError || contactSidebar ? (
-                    <ContactSidebarPanel
-                      loading={contactSidebarLoading}
-                      error={contactSidebarError}
-                      contact={contactSidebar}
-                    />
+                <div className="cx-scroll h-full overflow-y-auto py-0 space-y-0">
+                  {activeMeta?.kind === "event" ? (
+                    <div className="flex flex-col">
+                      {/* Event hero */}
+                      {activeCurrentEvent ? (
+                        <Link href={`/events/${activeCurrentEvent.id}`} className="block shrink-0">
+                          {pickEventHeroUrl(activeCurrentEvent) ? (
+                            <img
+                              src={pickEventHeroUrl(activeCurrentEvent)!}
+                              alt={activeCurrentEvent.title}
+                              className="h-44 w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-44 w-full items-center justify-center bg-gradient-to-br from-[#0e2a2f] to-[#1a0d2e]">
+                              <span className="material-symbols-outlined text-[48px] text-cyan-200/20">event</span>
+                            </div>
+                          )}
+                        </Link>
+                      ) : (
+                        <div className="h-44 w-full animate-pulse bg-white/[0.05]" />
+                      )}
+
+                      {/* Event details */}
+                      <div className="px-4 pt-3 pb-4 border-b border-white/[0.07]">
+                        {activeCurrentEvent ? (
+                          <>
+                            <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-cyan-300/70">{activeCurrentEvent.eventType}</p>
+                            <Link href={`/events/${activeCurrentEvent.id}`} className="block text-[15px] font-bold leading-snug text-white hover:text-cyan-100 transition-colors">
+                              {activeCurrentEvent.title}
+                            </Link>
+                            <div className="mt-2 space-y-1">
+                              {(activeCurrentEvent.city || activeCurrentEvent.country) && (
+                                <div className="flex items-center gap-1.5 text-[12px] text-white/50">
+                                  <span className="material-symbols-outlined text-[13px] text-cyan-300/60">location_on</span>
+                                  {[activeCurrentEvent.city, activeCurrentEvent.country].filter(Boolean).join(", ")}
+                                </div>
+                              )}
+                              {activeCurrentEvent.startsAt && (
+                                <div className="flex items-center gap-1.5 text-[12px] text-white/50">
+                                  <span className="material-symbols-outlined text-[13px] text-cyan-300/60">calendar_month</span>
+                                  {new Date(activeCurrentEvent.startsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                                </div>
+                              )}
+                              {activeCurrentEvent.venueName && (
+                                <div className="flex items-center gap-1.5 text-[12px] text-white/50">
+                                  <span className="material-symbols-outlined text-[13px] text-cyan-300/60">place</span>
+                                  {activeCurrentEvent.venueName}
+                                </div>
+                              )}
+                            </div>
+                            {activeCurrentEvent.description && (
+                              <p className="mt-2.5 text-[12px] leading-relaxed text-white/40 line-clamp-3">{activeCurrentEvent.description}</p>
+                            )}
+                            <Link
+                              href={`/events/${activeCurrentEvent.id}`}
+                              className="mt-3 inline-flex items-center gap-1 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-200 transition hover:bg-cyan-300/15"
+                            >
+                              View event page
+                              <span className="material-symbols-outlined text-[12px]">arrow_forward</span>
+                            </Link>
+                          </>
+                        ) : (
+                          <div className="space-y-2 animate-pulse">
+                            <div className="h-3 w-16 rounded bg-white/[0.06]" />
+                            <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
+                            <div className="h-3 w-1/2 rounded bg-white/[0.05]" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : contactSidebarLoading || contactSidebarError || contactSidebar ? (
+                    <div className="px-4 py-5">
+                      <ContactSidebarPanel
+                        loading={contactSidebarLoading}
+                        error={contactSidebarError}
+                        contact={contactSidebar}
+                      />
+                    </div>
                   ) : (
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
-                      Member details are available for 1:1 chats.
+                    <div className="px-4 py-5">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
+                        Member details are available for 1:1 chats.
+                      </div>
                     </div>
                   )}
                 </div>
@@ -7796,14 +8683,15 @@ function MessagesPageContent() {
                 const threadId = typeof data === "string" ? data : null;
                 if (!threadId) throw new Error("Failed to open direct thread.");
                 const token = `direct:${threadId}`;
+                setKindFilter("connection");
                 setComposeOpen(false);
                 setComposeQuery("");
                 if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-                  router.push(buildInboxUrl({ threadToken: token }), { scroll: false });
+                  router.push(buildInboxUrl({ threadToken: token, kind: "connection" }), { scroll: false });
                   return;
                 }
                 setActiveThreadToken(token);
-                router.replace(buildInboxUrl({ threadToken: token }), { scroll: false });
+                router.replace(buildInboxUrl({ threadToken: token, kind: "connection" }), { scroll: false });
               } catch (error) {
                 setThreadError(error instanceof Error ? error.message : "Failed to open thread.");
               }
@@ -7811,14 +8699,15 @@ function MessagesPageContent() {
           }}
           onSelectTrip={(target) => {
             const token = `trip:${target.tripId}`;
+            setKindFilter("connection");
             setComposeOpen(false);
             setComposeQuery("");
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-              router.push(buildInboxUrl({ threadToken: token }), { scroll: false });
+              router.push(buildInboxUrl({ threadToken: token, kind: "connection" }), { scroll: false });
               return;
             }
             setActiveThreadToken(token);
-            router.replace(buildInboxUrl({ threadToken: token }), { scroll: false });
+            router.replace(buildInboxUrl({ threadToken: token, kind: "connection" }), { scroll: false });
           }}
         />
       ) : null}
@@ -7832,6 +8721,23 @@ function MessagesPageContent() {
         connectContext={connectRequestModal.connectContext}
         tripId={connectRequestModal.tripId}
       />
+
+      {chatBookingOpen && activeMeta?.otherUserId ? (
+        <BookSessionModal
+          open={chatBookingOpen}
+          mode="chat"
+          teacherUserId={activeMeta.otherUserId}
+          teacherName={activeMeta.title}
+          teacherPhotoUrl={activeMeta.avatarUrl}
+          initialServiceType="private_class"
+          contextLabel={chatBookingContextLabel}
+          onClose={() => setChatBookingOpen(false)}
+          onSubmitted={(message) => {
+            setThreadInfo(message);
+            setChatBookingOpen(false);
+          }}
+        />
+      ) : null}
 
       {activityComposerOpen && activeMeta?.otherUserId ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">

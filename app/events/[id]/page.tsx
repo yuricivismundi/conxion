@@ -8,6 +8,8 @@ import { useParams, useRouter } from "next/navigation";
 import { normalizePublicAppUrl } from "@/lib/public-app-url";
 import Nav from "@/components/Nav";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
+import CreateGroupFromEventModal from "@/components/CreateGroupFromEventModal";
+import { getPlanIdFromMeta, getPlanLimits } from "@/lib/billing/limits";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
 import { buildOsmEmbedUrl, type OsmGeocodeResult } from "@/lib/maps/osm";
 import { supabase } from "@/lib/supabase/client";
@@ -28,7 +30,7 @@ import {
   pickEventFallbackHeroUrl,
   pickEventHeroUrl,
 } from "@/lib/events/model";
-import { eventAccessTypeShortLabel, eventThreadTabLabel } from "@/lib/events/access";
+import { eventAccessTypeShortLabel, eventThreadTabLabel, isEventDiscoverable } from "@/lib/events/access";
 import { cx } from "@/lib/cx";
 
 type EventAction = "join" | "request" | "cancel_request" | "leave" | "interested" | "not_interested";
@@ -199,8 +201,11 @@ export default function EventDetailsPage() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [groupMonthlyLimit, setGroupMonthlyLimit] = useState<number | null>(null);
 
   const [event, setEvent] = useState<EventRecord | null>(null);
+  const [suggestedEvents, setSuggestedEvents] = useState<EventRecord[]>([]);
+  const [suggestedEventsLoading, setSuggestedEventsLoading] = useState(false);
   const [host, setHost] = useState<LiteProfile | null>(null);
   const [members, setMembers] = useState<EventMemberRecord[]>([]);
   const [myMembership, setMyMembership] = useState<EventMemberRecord | null>(null);
@@ -236,6 +241,7 @@ export default function EventDetailsPage() {
   const [responseMenuOpen, setResponseMenuOpen] = useState(false);
   const [inviteBusyUserId, setInviteBusyUserId] = useState<string | null>(null);
   const [activeEventTab, setActiveEventTab] = useState<"details" | "people" | "thread">("details");
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
 
   const shareUrl = useMemo(() => {
@@ -343,6 +349,11 @@ export default function EventDetailsPage() {
       setAccessToken(token);
       setMeId(userId);
       setIsAuthenticated(Boolean(userId));
+      if (authData.user) {
+        const meta = (authData.user.user_metadata ?? {}) as Record<string, unknown>;
+        const planId = getPlanIdFromMeta(meta, Boolean(meta.is_verified));
+        setGroupMonthlyLimit(getPlanLimits(planId).privateGroupsPerMonth);
+      }
 
       const eventRes = userId
         ? await supabase.from("events").select("*").eq("id", eventId).maybeSingle()
@@ -511,6 +522,67 @@ export default function EventDetailsPage() {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSuggestedEvents() {
+      if (!event || event.accessType === "private_group") {
+        if (!cancelled) {
+          setSuggestedEvents([]);
+          setSuggestedEventsLoading(false);
+        }
+        return;
+      }
+
+      setSuggestedEventsLoading(true);
+      try {
+        const nowIso = new Date().toISOString();
+        const res = await supabase
+          .from("events")
+          .select("*")
+          .eq("status", "published")
+          .gte("ends_at", nowIso)
+          .neq("id", event.id)
+          .order("starts_at", { ascending: true })
+          .limit(36);
+        if (cancelled || res.error) {
+          if (!cancelled) setSuggestedEvents([]);
+          return;
+        }
+
+        const currentStyles = new Set(event.styles.map((style) => style.trim().toLowerCase()).filter(Boolean));
+        const suggestions = mapEventRows((res.data ?? []) as unknown[])
+          .filter((candidate) => candidate.id !== event.id && isEventDiscoverable(candidate.accessType))
+          .map((candidate) => {
+            const candidateStyles = candidate.styles.map((style) => style.trim().toLowerCase()).filter(Boolean);
+            const sharedStyles = candidateStyles.filter((style) => currentStyles.has(style)).length;
+            const sameCity = Boolean(event.city && candidate.city && event.city.toLowerCase() === candidate.city.toLowerCase());
+            const sameCountry = Boolean(event.country && candidate.country && event.country.toLowerCase() === candidate.country.toLowerCase());
+            const sameType = candidate.eventType.trim().toLowerCase() === event.eventType.trim().toLowerCase();
+            const score =
+              (sameCity ? 6 : 0) +
+              (sameCountry ? 3 : 0) +
+              sharedStyles * 2 +
+              (sameType ? 1 : 0);
+            return { candidate, score };
+          })
+          .filter(({ score }) => score > 0)
+          .sort((left, right) => right.score - left.score || new Date(left.candidate.startsAt).getTime() - new Date(right.candidate.startsAt).getTime())
+          .slice(0, 3)
+          .map(({ candidate }) => candidate);
+
+        if (!cancelled) setSuggestedEvents(suggestions);
+      } finally {
+        if (!cancelled) setSuggestedEventsLoading(false);
+      }
+    }
+
+    void loadSuggestedEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [event]);
+
   const counts = useMemo(() => {
     let going = 0;
     let waitlist = 0;
@@ -555,6 +627,32 @@ export default function EventDetailsPage() {
   }, [acceptedConnectionUserIds, members, profilesById]);
 
   const isHost = event && meId ? event.hostUserId === meId : false;
+
+  // Attendees list for Create Group modal (going/waitlist/interested, excluding self)
+  const groupModalAttendees = useMemo(() => {
+    return members
+      .filter((m) => ["going", "waitlist", "interested"].includes(m.status) && m.userId !== meId)
+      .map((m) => {
+        const p = profilesById[m.userId];
+        return p ? { userId: m.userId, displayName: p.displayName, avatarUrl: p.avatarUrl ?? null, isAttending: true } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }, [members, profilesById, meId]);
+
+  // Connections list for Create Group modal
+  const attendingUserIds = useMemo(() => new Set(members.map((m) => m.userId)), [members]);
+  const groupModalConnections = useMemo(() => {
+    const seen = new Set<string>();
+    return inviteConnections
+      .filter((c) => c.userId !== meId)
+      .reduce<{ userId: string; displayName: string; avatarUrl: string | null; isAttending: boolean }[]>((acc, c) => {
+        if (!seen.has(c.userId)) {
+          seen.add(c.userId);
+          acc.push({ userId: c.userId, displayName: c.displayName, avatarUrl: c.avatarUrl, isAttending: attendingUserIds.has(c.userId) });
+        }
+        return acc;
+      }, []);
+  }, [inviteConnections, meId, attendingUserIds]);
   const mapsUrl = event ? buildMapsUrl(event) : null;
   const mapEmbedUrl = mapLocation ? buildOsmEmbedUrl(mapLocation.lat, mapLocation.lon) : null;
   const fallbackHeroUrl = event ? pickEventFallbackHeroUrl(event) : null;
@@ -565,7 +663,34 @@ export default function EventDetailsPage() {
   const respondedCount = counts.going + counts.interested + counts.waitlist;
   const requiresApproval = event?.accessType === "request";
   const isPrivateGroup = event?.accessType === "private_group";
-  const threadTabLabel = event ? eventThreadTabLabel(event.accessType) : "Updates";
+  const threadTabLabel = event ? eventThreadTabLabel(event.accessType, event.chatMode) : "Updates";
+  const canInviteConnections = Boolean(
+    event &&
+      (
+        isHost ||
+        (
+          event.guestsCanInvite &&
+          myMembership &&
+          ["host", "going", "waitlist"].includes(myMembership.status)
+        )
+      )
+  );
+  const threadHeading = !event
+    ? "Event updates"
+    : event.accessType === "private_group"
+    ? "Private Group chat"
+    : event.chatMode === "discussion"
+    ? "Event chat"
+    : "Event updates";
+  const threadDescription = !event
+    ? "Organisers post broadcast updates for this event thread."
+    : event.accessType === "private_group"
+    ? "Plan your dance life together with the members of this private group."
+    : event.chatMode === "discussion"
+    ? event.approveMessages
+      ? "Joined guests can post one message each. New messages stay pending until the organiser approves them."
+      : "Joined guests can post one message each in this event thread."
+    : "Organisers post broadcast updates for this event thread.";
 
   useEffect(() => {
     setHeroSrc(preferredHeroUrl);
@@ -811,6 +936,12 @@ export default function EventDetailsPage() {
         if (message.includes("event_not_open")) {
           throw new Error("Only published events can be invited.");
         }
+        if (message.includes("invite_not_allowed") || message.includes("invite_requires_event_membership")) {
+          throw new Error("Only organisers or joined guests with invite access can send invites.");
+        }
+        if (message.includes("already_joined_or_waitlisted")) {
+          throw new Error("This connection already joined the event.");
+        }
         throw rpc.error;
       }
 
@@ -1031,6 +1162,16 @@ export default function EventDetailsPage() {
                       <span className="material-symbols-outlined text-[18px]">share</span>
                       Share
                     </button>
+                    {isAuthenticated && (isHost || currentResponseState === "going" || currentResponseState === "interested" || currentResponseState === "waitlist") ? (
+                      <button
+                        type="button"
+                        onClick={() => setCreateGroupOpen(true)}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-300 hover:bg-cyan-400/20"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">group_add</span>
+                        Create Group
+                      </button>
+                    ) : null}
                     {!isHost ? (
                       <div className="relative">
                         <button
@@ -1183,6 +1324,9 @@ export default function EventDetailsPage() {
                             description: event.description,
                             styles: event.styles,
                             capacity: event.capacity,
+                            showGuestList: event.showGuestList,
+                            guestsCanInvite: event.guestsCanInvite,
+                            approveMessages: event.approveMessages,
                           }))}`}
                           className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#2d3035] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#373a40]"
                         >
@@ -1278,14 +1422,8 @@ export default function EventDetailsPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{threadTabLabel}</p>
-                    <h2 className="mt-2 text-[22px] font-bold text-white">
-                      {threadTabLabel === "Chat" ? "Private Group chat" : "Event updates"}
-                    </h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-300">
-                      {threadTabLabel === "Chat"
-                        ? "Plan your dance life together with the members of this private group."
-                        : "Organisers post broadcast updates for this event thread."}
-                    </p>
+                    <h2 className="mt-2 text-[22px] font-bold text-white">{threadHeading}</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">{threadDescription}</p>
                   </div>
                   <Link
                     href={`/messages?thread=${encodeURIComponent(`event:${event.id}`)}`}
@@ -1298,6 +1436,11 @@ export default function EventDetailsPage() {
                 {event.chatMode === "broadcast" ? (
                   <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
                     Broadcast mode: only organisers can post here.
+                  </div>
+                ) : null}
+                {event.chatMode === "discussion" && event.accessType !== "private_group" ? (
+                  <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">
+                    Attendee chat is enabled. Guests get one message each{event.approveMessages ? ", and new messages require organiser approval." : "."}
                   </div>
                 ) : null}
               </article>
@@ -1328,7 +1471,7 @@ export default function EventDetailsPage() {
                 <h2 className="text-[22px] font-bold text-white">Details</h2>
               </div>
               <div className="space-y-6 px-5 py-5 sm:px-6 sm:py-6">
-                {isAuthenticated ? (
+                {isAuthenticated && (isHost || event.showGuestList) ? (
                   <div className="space-y-3">
                     <p className="text-sm text-slate-400">
                       {respondedCount} responded
@@ -1415,6 +1558,82 @@ export default function EventDetailsPage() {
                 ) : null}
               </div>
             </article>
+
+            {suggestedEventsLoading || suggestedEvents.length > 0 ? (
+              <article className={`${panelClass} p-5 sm:p-6`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
+                    <h3 className="mt-2 text-[22px] font-bold text-white">Keep exploring</h3>
+                  </div>
+                  <Link
+                    href="/events"
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
+                  >
+                    Explore all events
+                  </Link>
+                </div>
+
+                {suggestedEventsLoading ? (
+                  <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <div key={index} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
+                        <div className="h-36 bg-white/[0.05]" />
+                        <div className="space-y-3 p-4">
+                          <div className="h-3 w-20 rounded bg-white/[0.08]" />
+                          <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
+                          <div className="h-4 w-2/3 rounded bg-white/[0.06]" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {suggestedEvents.map((suggested) => {
+                      const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
+                      const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
+                      return (
+                        <Link
+                          key={suggested.id}
+                          href={`/events/${suggested.id}`}
+                          className="group overflow-hidden rounded-2xl border border-white/10 bg-[#202327] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
+                        >
+                          <div className="relative h-36 overflow-hidden bg-[#0f1218]">
+                            {hero ? (
+                              <img
+                                src={hero}
+                                alt={suggested.title}
+                                className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="h-full w-full bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(217,70,239,0.08))]" />
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
+                            <div className="absolute left-3 top-3 flex items-center gap-2">
+                              <span className={cx("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(suggested.eventType))}>
+                                {suggested.eventType}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="space-y-2 p-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                              {new Intl.DateTimeFormat("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              }).format(new Date(suggested.startsAt))}
+                            </p>
+                            <h4 className="line-clamp-2 text-lg font-bold leading-tight text-white">{suggested.title}</h4>
+                            <p className="line-clamp-1 text-sm text-slate-300">{location || "Location announced soon"}</p>
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            ) : null}
 
             <article id="feedback" className={`${panelClass} p-5 sm:p-6`}>
               <h3 className="mb-3 text-lg font-bold text-white">Post-event feedback</h3>
@@ -1628,7 +1847,7 @@ export default function EventDetailsPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl bg-[#202327] p-4">
+                  {(isHost || event.showGuestList) && <div className="rounded-2xl bg-[#202327] p-4">
                     <p className="text-sm font-semibold text-white">People Joining</p>
                     <div className="mt-3 flex items-center gap-3">
                       <div className="flex -space-x-3">
@@ -1661,7 +1880,7 @@ export default function EventDetailsPage() {
                       </div>
                       {visibleAttendees.length === 0 ? <p className="text-sm text-slate-400">No one has joined yet.</p> : null}
                     </div>
-                  </div>
+                  </div>}
 
                   {popularWithFriends.length > 0 ? (
                     <div className="rounded-2xl bg-[#202327] p-4">
@@ -1684,7 +1903,7 @@ export default function EventDetailsPage() {
                     </div>
                   ) : null}
 
-                  {inviteConnections.length > 0 ? (
+                  {inviteConnections.length > 0 && canInviteConnections ? (
                     <div className="rounded-2xl bg-[#202327] p-4">
                       <h4 className="text-sm font-semibold text-white">Invite your connections</h4>
                       <div className="mt-3 space-y-3">
@@ -1894,6 +2113,19 @@ export default function EventDetailsPage() {
           setReportNote("");
         }}
       />
+
+      {event && meId && (
+        <CreateGroupFromEventModal
+          open={createGroupOpen}
+          onClose={() => setCreateGroupOpen(false)}
+          eventId={eventId}
+          eventTitle={event.title}
+          accessToken={accessToken ?? ""}
+          attendees={groupModalAttendees}
+          connections={groupModalConnections}
+          monthlyLimit={groupMonthlyLimit}
+        />
+      )}
 
       {shareDialogOpen && typeof document !== "undefined"
         ? createPortal(
