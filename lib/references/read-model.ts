@@ -5,8 +5,8 @@ import {
 } from "@/lib/references/anti-spam";
 import { normalizeActivityType } from "@/lib/activities/types";
 
-export const REFERENCE_AUTHOR_COLUMNS = ["author_user_id", "author_id", "from_user_id"] as const;
-export const REFERENCE_RECIPIENT_COLUMNS = ["recipient_user_id", "recipient_id", "to_user_id", "target_id"] as const;
+export const REFERENCE_AUTHOR_COLUMNS = ["author_id"] as const;
+export const REFERENCE_RECIPIENT_COLUMNS = ["recipient_id"] as const;
 export const REFERENCE_MEMBER_COLUMNS = [...REFERENCE_AUTHOR_COLUMNS, ...REFERENCE_RECIPIENT_COLUMNS] as const;
 
 export type ReferenceMemberColumn = (typeof REFERENCE_MEMBER_COLUMNS)[number];
@@ -388,12 +388,6 @@ async function deriveInteractionCountsFromLiveData(client: SupabaseClient, membe
 }
 
 export async function getInteractionCountsForProfile(client: SupabaseClient, memberId: string) {
-  try {
-    await client.rpc("cx_refresh_member_interaction_counters", { p_user_id: memberId });
-  } catch {
-    // Best effort only. We still select/fallback below.
-  }
-
   const res = await client
     .from("member_interaction_counters")
     .select("counter_type,count")

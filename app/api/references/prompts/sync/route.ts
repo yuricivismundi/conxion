@@ -37,14 +37,14 @@ export async function POST(req: Request) {
       supabaseUser.rpc("cx_sync_reference_requests"),
     ]);
     if (activitySyncRes.error && !isMissingSchemaError(activitySyncRes.error.message)) {
-      return NextResponse.json({ ok: false, error: activitySyncRes.error.message }, { status: 400 });
+      return NextResponse.json({ ok: false, error: activitySyncRes.error.message });
     }
     if (
       syncRes.error &&
       !isMissingSchemaError(syncRes.error.message) &&
       !isRecoverableSyncError(syncRes.error.message)
     ) {
-      return NextResponse.json({ ok: false, error: syncRes.error.message }, { status: 400 });
+      return NextResponse.json({ ok: false, error: syncRes.error.message });
     }
 
     const email = await dispatchReferencePromptEmails({ userId: authData.user.id, limit: 100 });

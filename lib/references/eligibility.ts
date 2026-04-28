@@ -79,8 +79,8 @@ async function fetchPairReferenceRows(params: {
   recipientUserId: string;
 }) {
   const merged = new Map<string, PairReferenceRow>();
-  const authorColumns = ["author_user_id", "author_id", "from_user_id", "source_id"];
-  const recipientColumns = ["recipient_user_id", "recipient_id", "to_user_id", "target_id"];
+  const authorColumns = ["author_id"];
+  const recipientColumns = ["recipient_id"];
   const select =
     "id,created_at,public_category,reference_family,source_type,source_id,context_tag,entity_id,sync_id";
 

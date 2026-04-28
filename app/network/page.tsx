@@ -12,6 +12,8 @@ import { fetchVisibleConnections } from "@/lib/connections/read-model";
 import { isSchemaMissingError } from "@/lib/growth/types";
 import { supabase } from "@/lib/supabase/client";
 
+const CORE_DANCE_STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
+
 type NetworkTab = "feed" | "connections" | "references" | "following" | "contacts";
 
 type EventActivity = {
@@ -530,6 +532,65 @@ function isColumnMissingError(message: string) {
   return text.includes("column") && text.includes("does not exist");
 }
 
+function contactCardMatchesFilters(
+  card: ContactCard,
+  filters: {
+    needle: string;
+    cityFilter: string;
+    styleFilter: string;
+    styleText: string;
+    roleFilter: string;
+    activityFilter: "all" | TrackActivity;
+  }
+) {
+  if (filters.cityFilter !== "all") {
+    const cityLabel = [card.city, card.country].filter(Boolean).join(", ");
+    if (cityLabel !== filters.cityFilter) return false;
+  }
+
+  if (filters.styleFilter !== "all") {
+    const styles = card.danceStyles.map((s) => s.toLowerCase());
+    if (filters.styleFilter === "other") {
+      const needle = filters.styleText.trim().toLowerCase();
+      if (needle && !styles.some((s) => s.includes(needle))) return false;
+    } else {
+      if (!styles.includes(filters.styleFilter.toLowerCase())) return false;
+    }
+  }
+
+  if (filters.roleFilter !== "all") {
+    const inRoles = card.roles.some((role) => role.toLowerCase() === filters.roleFilter.toLowerCase());
+    const inStatus = card.statusIndicators.some((status) => status.toLowerCase() === filters.roleFilter.toLowerCase());
+    if (!inRoles && !inStatus) return false;
+  }
+
+  if (filters.activityFilter !== "all") {
+    if (filters.activityFilter === "travel_plans" && !card.travelActivity) return false;
+    if (filters.activityFilter === "hosting_availability" && !(card.hostingActivity?.canHost ?? false)) return false;
+    if (filters.activityFilter === "new_references" && card.referenceActivity.recent30d <= 0) return false;
+    if (filters.activityFilter === "competition_results" && card.competitionActivity.total <= 0) return false;
+  }
+
+  if (!filters.needle) return true;
+
+  const haystack = [
+    card.displayName,
+    card.city,
+    card.country,
+    card.notes,
+    card.meetingContext,
+    ...card.tags,
+    ...card.roles,
+    ...card.danceStyles,
+    ...card.statusIndicators,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(filters.needle);
+}
+
 function GenericAvatar() {
   return (
     <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-2xl bg-gradient-to-b from-white/[0.06] to-white/[0.03]">
@@ -543,20 +604,23 @@ function GenericAvatar() {
 
 function useFixedDropdown() {
   const btnRef = useRef<HTMLButtonElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (btnRef.current && btnRef.current.contains(e.target as Node)) return;
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t)) return;
+      if (dropRef.current?.contains(t)) return;
       setOpen(false);
     }
     function handleScroll() { setOpen(false); }
-    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("click", handleClick, true);
     window.addEventListener("scroll", handleScroll, true);
     return () => {
-      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("click", handleClick, true);
       window.removeEventListener("scroll", handleScroll, true);
     };
   }, [open]);
@@ -566,14 +630,15 @@ function useFixedDropdown() {
     setOpen((v) => !v);
   }
 
-  return { btnRef, rect, open, setOpen, toggle };
+  return { btnRef, dropRef, rect, open, setOpen, toggle };
 }
 
-function FixedDropdown({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
+function FixedDropdown({ rect, dropRef, children }: { rect: DOMRect; dropRef: React.RefObject<HTMLDivElement | null>; children: React.ReactNode }) {
   const top = rect.bottom + 6;
   const right = window.innerWidth - rect.right;
   return (
     <div
+      ref={dropRef}
       style={{ position: "fixed", top, right, zIndex: 9999 }}
       className="min-w-[180px] overflow-hidden rounded-2xl border border-white/10 bg-[#111] shadow-2xl"
     >
@@ -595,17 +660,15 @@ function ConnectionCardMenu({
   onUnfollow: () => void;
   onRemove: () => void;
 }) {
-  const { btnRef, rect, open, setOpen, toggle } = useFixedDropdown();
+  const { btnRef, dropRef, rect, open, toggle } = useFixedDropdown();
 
   async function handleUnfollow() {
-    setOpen(false);
     if (!contactId) return;
     onUnfollow();
     await supabase.from("contacts").update({ is_following: false }).eq("id", contactId);
   }
 
   async function handleRemove() {
-    setOpen(false);
     onRemove();
     const { data: authData } = await supabase.auth.getSession();
     const token = authData.session?.access_token;
@@ -629,7 +692,7 @@ function ConnectionCardMenu({
         <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1, fontVariationSettings: "'wght' 700" }}>more_vert</span>
       </button>
       {open && rect ? (
-        <FixedDropdown rect={rect}>
+        <FixedDropdown rect={rect} dropRef={dropRef}>
           {isFollowing ? (
             <button type="button" onClick={() => void handleUnfollow()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
               <span className="material-symbols-outlined text-[16px] text-white/40">person_off</span>
@@ -639,6 +702,41 @@ function ConnectionCardMenu({
           <button type="button" onClick={() => void handleRemove()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-rose-400 hover:bg-white/[0.06]">
             <span className="material-symbols-outlined text-[16px]">link_off</span>
             Remove connection
+          </button>
+        </FixedDropdown>
+      ) : null}
+    </div>
+  );
+}
+
+function FollowingCardMenu({
+  contactId,
+  onUnfollow,
+}: {
+  contactId: string;
+  onUnfollow: () => void;
+}) {
+  const { btnRef, dropRef, rect, open, toggle } = useFixedDropdown();
+  async function handleUnfollow() {
+    onUnfollow();
+    await supabase.from("contacts").update({ is_following: false }).eq("id", contactId);
+  }
+  return (
+    <div className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className="flex h-10 w-6 shrink-0 items-center justify-center text-white/50 transition-colors hover:text-white"
+        aria-label="Following options"
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1, fontVariationSettings: "'wght' 700" }}>more_vert</span>
+      </button>
+      {open && rect ? (
+        <FixedDropdown rect={rect} dropRef={dropRef}>
+          <button type="button" onClick={() => void handleUnfollow()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
+            <span className="material-symbols-outlined text-[16px] text-white/40">person_off</span>
+            Unfollow
           </button>
         </FixedDropdown>
       ) : null}
@@ -659,7 +757,7 @@ function ContactCardMenu({
   onEditNote: () => void;
   onRemove: () => void;
 }) {
-  const { btnRef, rect, open, setOpen, toggle } = useFixedDropdown();
+  const { btnRef, dropRef, rect, open, toggle } = useFixedDropdown();
 
   return (
     <div className="shrink-0">
@@ -673,18 +771,18 @@ function ContactCardMenu({
         <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1, fontVariationSettings: "'wght' 700" }}>more_vert</span>
       </button>
       {open && rect ? (
-        <FixedDropdown rect={rect}>
+        <FixedDropdown rect={rect} dropRef={dropRef}>
           {card.linkedUserId ? (
-            <button type="button" onClick={() => { setOpen(false); onEditContact(); }} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
+            <button type="button" onClick={() => onEditContact()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
               <span className="material-symbols-outlined text-[16px] text-white/40">person_edit</span>
               Edit Contact
             </button>
           ) : null}
-          <button type="button" onClick={() => { setOpen(false); onEditNote(); }} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
+          <button type="button" onClick={() => onEditNote()} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06]">
             <span className="material-symbols-outlined text-[16px] text-white/40">edit_note</span>
             Edit Note
           </button>
-          <button type="button" onClick={() => { setOpen(false); onRemove(); }} disabled={busyContactId === card.id} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-rose-400 hover:bg-white/[0.06] disabled:opacity-60">
+          <button type="button" onClick={() => onRemove()} disabled={busyContactId === card.id} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-rose-400 hover:bg-white/[0.06] disabled:opacity-60">
             <span className="material-symbols-outlined text-[16px]">person_remove</span>
             Remove
           </button>
@@ -713,8 +811,9 @@ function NetworkPageContent() {
   const [followersCount, setFollowersCount] = useState<number>(0);
   const [followerProfiles, setFollowerProfiles] = useState<Array<{ userId: string; displayName: string; avatarUrl: string | null }>>([]);
   const [networkSection, setNetworkSection] = useState<"feed" | "connections" | "following" | "contacts">("feed");
-const [followingListPage, setFollowingListPage] = useState(1);
+  const [followingListPage, setFollowingListPage] = useState(1);
   const [followersListPage, setFollowersListPage] = useState(1);
+  const [followQuery, setFollowQuery] = useState("");
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
 
   const [contacts, setContacts] = useState<ContactRow[]>([]);
@@ -737,13 +836,29 @@ const [followingListPage, setFollowingListPage] = useState(1);
   const [contactsPage, setContactsPage] = useState(1);
   const [connectionCityFilter, setConnectionCityFilter] = useState("all");
   const [connectionStyleFilter, setConnectionStyleFilter] = useState("all");
+  const [connectionStyleText, setConnectionStyleText] = useState("");
   const [connectionRoleFilter, setConnectionRoleFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [styleFilter, setStyleFilter] = useState("all");
+  const [styleText, setStyleText] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [activityFilter, setActivityFilter] = useState<"all" | TrackActivity>("all");
 
   const [editContactId, setEditContactId] = useState<string | null>(null);
+
+  const [feedSearch, setFeedSearch] = useState("");
+
+  // Scroll refs for activity feed rows
+  const scrollFollowingRef = useRef<HTMLDivElement>(null);
+  const scrollTravelRef = useRef<HTMLDivElement>(null);
+  const scrollCityRef = useRef<HTMLDivElement>(null);
+  const scrollEventsRef = useRef<HTMLDivElement>(null);
+  const scrollHostingRef = useRef<HTMLDivElement>(null);
+
+  function scrollRow(ref: React.RefObject<HTMLDivElement | null>, dir: "left" | "right") {
+    if (!ref.current) return;
+    ref.current.scrollBy({ left: dir === "right" ? 280 : -280, behavior: "smooth" });
+  }
   const [editDraft, setEditDraft] = useState<EditDraft>({
     tags: "",
     meetingContext: "",
@@ -1020,10 +1135,9 @@ const [followingListPage, setFollowingListPage] = useState(1);
             const todayIso = new Date().toISOString().slice(0, 10);
             return supabase
               .from("event_members")
-              .select("user_id,event_id,events(id,title,city,country,start_date,end_date)")
+              .select("user_id,event_id,events(id,title,city,country,starts_at,ends_at)")
               .in("user_id", memberIds.slice(0, 200))
               .in("status", ["going", "host", "waitlist"])
-              .gte("events.start_date", todayIso)
               .limit(300);
           })(),
         ]);
@@ -1056,8 +1170,8 @@ const [followingListPage, setFollowingListPage] = useState(1);
         };
 
         const [refsRows, refsGivenRows] = await Promise.all([
-          fetchReferencesByMemberColumns(["recipient_id", "to_user_id", "target_id"]),
-          fetchReferencesByMemberColumns(["author_id", "from_user_id", "source_id"]),
+          fetchReferencesByMemberColumns(["recipient_id"]),
+          fetchReferencesByMemberColumns(["author_id"]),
         ]);
 
         if (cancelled) return;
@@ -1198,7 +1312,7 @@ const [followingListPage, setFollowingListPage] = useState(1);
             const eventRow = asRecord(row.events ?? {});
             const eventId = pickString(eventRow, "id");
             if (!eventId || !userId) continue;
-            const startDate = pickNullableString(eventRow, "start_date");
+            const startDate = pickNullableString(eventRow, "starts_at") ?? pickNullableString(eventRow, "start_date");
             // Skip events without start date or in the past
             if (!startDate) continue;
             if (!eventMap.has(eventId)) {
@@ -1208,7 +1322,7 @@ const [followingListPage, setFollowingListPage] = useState(1);
                 city: pickNullableString(eventRow, "city"),
                 country: pickNullableString(eventRow, "country"),
                 startDate,
-                endDate: pickNullableString(eventRow, "end_date"),
+                endDate: pickNullableString(eventRow, "ends_at") ?? pickNullableString(eventRow, "end_date"),
                 attendees: [],
               });
             }
@@ -1323,11 +1437,14 @@ const [followingListPage, setFollowingListPage] = useState(1);
   }, [connections]);
 
   const connectionStyleOptions = useMemo(() => {
-    const values = new Set<string>();
+    const values = new Set<string>([...CORE_DANCE_STYLES]);
     for (const item of connections) {
-      for (const style of item.profile?.danceStyles ?? []) values.add(style);
+      for (const style of item.profile?.danceStyles ?? []) {
+        const s = style.toLowerCase();
+        if (!CORE_DANCE_STYLES.includes(s as typeof CORE_DANCE_STYLES[number])) values.add(s);
+      }
     }
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
+    return Array.from(values);
   }, [connections]);
 
   const connectionRoleOptions = useMemo(() => {
@@ -1348,11 +1465,14 @@ const [followingListPage, setFollowingListPage] = useState(1);
   }, [contactCards]);
 
   const styleOptions = useMemo(() => {
-    const values = new Set<string>();
+    const values = new Set<string>([...CORE_DANCE_STYLES]);
     for (const contact of contactCards) {
-      for (const style of contact.danceStyles) values.add(style);
+      for (const style of contact.danceStyles) {
+        const s = style.toLowerCase();
+        if (!CORE_DANCE_STYLES.includes(s as typeof CORE_DANCE_STYLES[number])) values.add(s);
+      }
     }
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
+    return Array.from(values);
   }, [contactCards]);
 
   const roleOptions = useMemo(() => {
@@ -1372,7 +1492,13 @@ const [followingListPage, setFollowingListPage] = useState(1);
       if (connectionCityFilter !== "all" && cityLabel !== connectionCityFilter) return false;
 
       if (connectionStyleFilter !== "all") {
-        if (!(profile?.danceStyles ?? []).some((style) => style.toLowerCase() === connectionStyleFilter.toLowerCase())) return false;
+        const styles = (profile?.danceStyles ?? []).map((s) => s.toLowerCase());
+        if (connectionStyleFilter === "other") {
+          const needle = connectionStyleText.trim().toLowerCase();
+          if (needle && !styles.some((s) => s.includes(needle))) return false;
+        } else {
+          if (!styles.includes(connectionStyleFilter.toLowerCase())) return false;
+        }
       }
 
       if (connectionRoleFilter !== "all") {
@@ -1437,48 +1563,9 @@ const [followingListPage, setFollowingListPage] = useState(1);
 
   const filteredContactCards = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return scopedContacts.filter((card) => {
-      if (cityFilter !== "all") {
-        const cityLabel = [card.city, card.country].filter(Boolean).join(", ");
-        if (cityLabel !== cityFilter) return false;
-      }
-
-      if (styleFilter !== "all") {
-        if (!card.danceStyles.some((style) => style.toLowerCase() === styleFilter.toLowerCase())) return false;
-      }
-
-      if (roleFilter !== "all") {
-        const inRoles = card.roles.some((role) => role.toLowerCase() === roleFilter.toLowerCase());
-        const inStatus = card.statusIndicators.some((status) => status.toLowerCase() === roleFilter.toLowerCase());
-        if (!inRoles && !inStatus) return false;
-      }
-
-      if (activityFilter !== "all") {
-        if (activityFilter === "travel_plans" && !card.travelActivity) return false;
-        if (activityFilter === "hosting_availability" && !(card.hostingActivity?.canHost ?? false)) return false;
-        if (activityFilter === "new_references" && card.referenceActivity.recent30d <= 0) return false;
-        if (activityFilter === "competition_results" && card.competitionActivity.total <= 0) return false;
-      }
-
-      if (!needle) return true;
-
-      const haystack = [
-        card.displayName,
-        card.city,
-        card.country,
-        card.notes,
-        card.meetingContext,
-        ...card.tags,
-        ...card.roles,
-        ...card.danceStyles,
-        ...card.statusIndicators,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(needle);
-    });
+    return scopedContacts.filter((card) =>
+      contactCardMatchesFilters(card, { needle, cityFilter, styleFilter, styleText, roleFilter, activityFilter })
+    );
   }, [activityFilter, cityFilter, query, roleFilter, scopedContacts, styleFilter]);
   const totalContactsPages = useMemo(
     () => Math.max(1, Math.ceil(filteredContactCards.length / CONNECTIONS_PAGE_SIZE)),
@@ -1491,6 +1578,8 @@ const [followingListPage, setFollowingListPage] = useState(1);
 
   const hasContactFilters =
     query.trim().length > 0 || cityFilter !== "all" || styleFilter !== "all" || roleFilter !== "all" || activityFilter !== "all";
+  const hasFollowingFilters =
+    followQuery.trim().length > 0 || cityFilter !== "all" || styleFilter !== "all" || roleFilter !== "all" || activityFilter !== "all";
   const hasConnectionFilters =
     query.trim().length > 0 || connectionCityFilter !== "all" || connectionStyleFilter !== "all" || connectionRoleFilter !== "all";
   const activeNotesTooltip =
@@ -1585,6 +1674,14 @@ const [followingListPage, setFollowingListPage] = useState(1);
     setActivityFilter("all");
   }
 
+  function resetFollowingFilters() {
+    setFollowQuery("");
+    setCityFilter("all");
+    setStyleFilter("all");
+    setRoleFilter("all");
+    setActivityFilter("all");
+  }
+
   function resetConnectionFilters() {
     setQuery("");
     setConnectionCityFilter("all");
@@ -1599,6 +1696,10 @@ const [followingListPage, setFollowingListPage] = useState(1);
   useEffect(() => {
     setContactsPage(1);
   }, [networkSection, query, cityFilter, styleFilter, roleFilter, activityFilter]);
+
+  useEffect(() => {
+    setFollowingListPage(1);
+  }, [networkSection, followQuery, cityFilter, styleFilter, roleFilter, activityFilter]);
 
   useEffect(() => {
     if (connectionsPage > totalConnectionsPages) setConnectionsPage(totalConnectionsPages);
@@ -1833,7 +1934,7 @@ const [followingListPage, setFollowingListPage] = useState(1);
                     </h1>
                     <p className="text-[11px] uppercase tracking-widest text-white/40">Your global dance network overview</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-5 sm:grid-cols-5 md:gap-8">
+                  <div className="hidden sm:grid grid-cols-3 gap-5 sm:grid-cols-5 md:gap-8">
                     <div>
                       <p className="font-['Epilogue'] text-2xl font-bold text-[#c1fffe]">{followingCount}</p>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Following</p>
@@ -1857,7 +1958,8 @@ const [followingListPage, setFollowingListPage] = useState(1);
                   </div>
                 </div>
                 {/* Profile-style tabs */}
-                <div className="flex items-end gap-6 overflow-x-auto no-scrollbar">
+                <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
+                <div className="no-scrollbar flex flex-1 items-end gap-4 overflow-x-auto">
                   {([
                     { key: "feed" as const, label: "Feed", count: null },
                     { key: "connections" as const, label: "Connections", count: connectionCount },
@@ -1870,7 +1972,8 @@ const [followingListPage, setFollowingListPage] = useState(1);
                         key={s.key}
                         type="button"
                         onClick={() => setNetworkSection(s.key)}
-                        className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-3 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                        aria-label={s.label}
+                        className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-1 pb-3 pt-2 text-[11px] font-bold uppercase tracking-widest transition-colors ${
                           active
                             ? "border-[#25d1f4] text-white"
                             : "border-transparent text-white/35 hover:text-white/60"
@@ -1884,10 +1987,27 @@ const [followingListPage, setFollowingListPage] = useState(1);
                     );
                   })}
                 </div>
+                <label className="group relative mb-1 shrink-0">
+                  <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
+                  <input
+                    type="text"
+                    value={feedSearch}
+                    onChange={(e) => setFeedSearch(e.target.value)}
+                    placeholder="Search name, city, event…"
+                    className="h-9 w-64 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[12px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50"
+                  />
+                  {feedSearch ? (
+                    <button onClick={() => setFeedSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
+                      <span className="material-symbols-outlined text-[14px]">close</span>
+                    </button>
+                  ) : null}
+                </label>
+              </div>
               </div>
 
               {networkSection === "feed" ? (
               <>
+
               {loading ? (
                 <div className="space-y-8">
                   <div className="h-48 animate-pulse rounded-2xl bg-white/[0.03]" />
@@ -1897,89 +2017,160 @@ const [followingListPage, setFollowingListPage] = useState(1);
                 <>
                   {/* Following activity — top of feed, 2-row carousel */}
                   {!loading ? (() => {
-                    const followedWithActivity = connections.filter((c) => {
-                      if (!c.otherUserId) return false;
-                      const inFollowing = contacts.some((ct) => ct.linkedUserId === c.otherUserId && ct.isFollowing);
-                      return inFollowing && (tripByUser[c.otherUserId] || hostingByUser[c.otherUserId]?.canHost);
+                    const followedUserIds = new Set(
+                      contacts.filter((ct) => ct.isFollowing && ct.linkedUserId).map((ct) => ct.linkedUserId!)
+                    );
+                    // Build activity items from connections that are followed
+                    type ActivityItem = {
+                      key: string;
+                      userId: string;
+                      displayName: string;
+                      avatarUrl: string | null;
+                      kind: "trip" | "event";
+                      label: string;
+                      sub: string;
+                      href: string;
+                    };
+                    const items: ActivityItem[] = [];
+                    // Trips from followed connections
+                    connections.forEach((c) => {
+                      if (!c.otherUserId || !c.profile) return;
+                      if (!followedUserIds.has(c.otherUserId)) return;
+                      const trip = tripByUser[c.otherUserId];
+                      if (!trip) return;
+                      const dateStr = trip.startDate
+                        ? new Date(trip.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+                          (trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")
+                        : "";
+                      items.push({
+                        key: `trip-${c.id}`,
+                        userId: c.otherUserId,
+                        displayName: c.profile.displayName,
+                        avatarUrl: c.profile.avatarUrl,
+                        kind: "trip",
+                        label: `${trip.city}${trip.country ? `, ${trip.country}` : ""}`,
+                        sub: dateStr,
+                        href: `/profile/${c.otherUserId}`,
+                      });
                     });
-                    if (followedWithActivity.length === 0) return null;
+                    // Events: attendees who are followed connections
+                    eventActivities.forEach((ev) => {
+                      const dateStr = ev.startDate
+                        ? new Date(ev.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+                          (ev.endDate && ev.endDate !== ev.startDate ? ` – ${new Date(ev.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")
+                        : "";
+                      ev.attendees.forEach((a) => {
+                        if (!followedUserIds.has(a.userId)) return;
+                        items.push({
+                          key: `ev-${ev.eventId}-${a.userId}`,
+                          userId: a.userId,
+                          displayName: a.displayName,
+                          avatarUrl: a.avatarUrl,
+                          kind: "event",
+                          label: ev.title,
+                          sub: dateStr,
+                          href: `/events/${ev.eventId}`,
+                        });
+                      });
+                    });
+                    const q = feedSearch.toLowerCase().trim();
+                    const filtered = q ? items.filter((it) =>
+                      it.displayName.toLowerCase().includes(q) ||
+                      it.label.toLowerCase().includes(q) ||
+                      it.sub.toLowerCase().includes(q)
+                    ) : items;
+                    if (filtered.length === 0) return null;
+                    const row1 = filtered.slice(0, Math.ceil(filtered.length / 2));
+                    const row2 = filtered.slice(Math.ceil(filtered.length / 2));
+                    const renderActivityCard = (item: ActivityItem) => (
+                      <div key={item.key} className="flex w-[210px] shrink-0 items-center gap-2.5 py-1.5">
+                        <Link href={`/profile/${item.userId}`} className="shrink-0">
+                          <div className="h-9 w-9 rounded-full bg-cover bg-center" style={{ backgroundImage: item.avatarUrl ? `url(${item.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                        </Link>
+                        <div className="min-w-0 flex-1">
+                          <Link href={`/profile/${item.userId}`}>
+                            <p className="truncate text-sm font-semibold text-white leading-tight">{item.displayName}</p>
+                          </Link>
+                          <Link href={item.href} className="group/act block mt-0.5">
+                            <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 group-hover/act:text-[#c1fffe] transition-colors">
+                              <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>
+                                {item.kind === "trip" ? "flight_takeoff" : "calendar_month"}
+                              </span>
+                              <span className="truncate">{item.label}</span>
+                            </p>
+                            {item.sub ? <p className="text-[10px] text-white/40 truncate">{item.sub}</p> : null}
+                          </Link>
+                        </div>
+                      </div>
+                    );
                     return (
                       <div className="space-y-3">
-                        <h2 className="font-['Epilogue'] text-xl font-bold text-white">Following activity</h2>
-                        {(() => {
-                          const row1 = followedWithActivity.slice(0, Math.ceil(followedWithActivity.length / 2));
-                          const row2 = followedWithActivity.slice(Math.ceil(followedWithActivity.length / 2));
-                          const renderCard = (conn: typeof followedWithActivity[0]) => {
-                            const prof = conn.profile!;
-                            const trip = tripByUser[conn.otherUserId];
-                            const hosting = hostingByUser[conn.otherUserId];
-                            return (
-                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[190px] shrink-0 items-center gap-2.5 rounded-xl border border-white/[0.06] bg-[#131313] px-3 py-2.5 hover:border-[#ff51fa]/20 transition-colors">
-                                <div className="h-8 w-8 shrink-0 rounded-full bg-cover bg-center border border-[#ff51fa]/30" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white">{prof.displayName}</p>
-                                  {trip ? (
-                                    <p className="truncate text-[11px] text-[#c1fffe]">✈ {trip.city}{trip.country ? `, ${trip.country}` : ""}</p>
-                                  ) : hosting?.canHost ? (
-                                    <p className="text-[11px] text-white/40">Open for hosting</p>
-                                  ) : null}
-                                </div>
-                              </Link>
-                            );
-                          };
-                          return (
-                            <div className="no-scrollbar overflow-x-auto pb-1">
-                              <div className="flex flex-col gap-2" style={{ width: "max-content" }}>
-                                <div className="flex gap-2">{row1.map(renderCard)}</div>
-                                {row2.length > 0 ? <div className="flex gap-2">{row2.map(renderCard)}</div> : null}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
+                          <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                            <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>groups</span>
+                            Following activity
+                          </h2>
+                          <div className="flex gap-1">
+                            <button onClick={() => scrollRow(scrollFollowingRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollFollowingRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                          </div>
+                        </div>
+                        <div ref={scrollFollowingRef} className="no-scrollbar overflow-x-auto pb-1">
+                          <div className="flex flex-col gap-2" style={{ width: "max-content" }}>
+                            <div className="flex gap-2">{row1.map(renderActivityCard)}</div>
+                            {row2.length > 0 ? <div className="flex gap-2">{row2.map(renderActivityCard)}</div> : null}
+                          </div>
+                        </div>
                       </div>
                     );
                   })() : null}
 
                   {/* Travelling now */}
                   {(() => {
-                    const travellers = connections.filter((c) => c.otherUserId && tripByUser[c.otherUserId] && c.profile);
+                    const q = feedSearch.toLowerCase().trim();
+                    const travellers = connections.filter((c) => {
+                      if (!c.otherUserId || !tripByUser[c.otherUserId] || !c.profile) return false;
+                      if (!q) return true;
+                      const trip = tripByUser[c.otherUserId]!;
+                      return (
+                        c.profile.displayName.toLowerCase().includes(q) ||
+                        trip.city.toLowerCase().includes(q) ||
+                        (trip.country ?? "").toLowerCase().includes(q)
+                      );
+                    });
                     if (travellers.length === 0) return null;
                     return (
                       <div className="space-y-3">
-                        <h2 className="font-['Epilogue'] text-xl font-bold text-white">Travelling now</h2>
-                        <div className="no-scrollbar flex gap-3 overflow-x-auto pb-2">
+                        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
+                          <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                            <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
+                            Travelling now
+                          </h2>
+                          <div className="flex gap-1">
+                            <button onClick={() => scrollRow(scrollTravelRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollTravelRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                          </div>
+                        </div>
+                        <div ref={scrollTravelRef} className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
                           {travellers.slice(0, 12).map((conn) => {
                             const prof = conn.profile!;
                             const trip = tripByUser[conn.otherUserId]!;
                             const dateStr = trip.startDate
-                              ? `${new Date(trip.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}`
+                              ? new Date(trip.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+                                (trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")
                               : "";
                             return (
-                              <div
-                                key={conn.id}
-                                className="group min-w-[180px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/[0.07] bg-[#131313] transition-all hover:-translate-y-1"
-                              >
-                                <div className="relative aspect-square w-full overflow-hidden bg-[#1a1a1a]">
-                                  <div
-                                    className="h-full w-full bg-cover bg-center grayscale transition-all duration-700 group-hover:grayscale-0 group-hover:scale-105"
-                                    style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.15),rgba(255,81,250,0.15))" }}
-                                  />
-                                </div>
-                                <div className="p-3 space-y-1.5">
-                                  <h3 className="font-['Epilogue'] text-sm font-bold text-white truncate">{prof.displayName}</h3>
-                                  <p className="flex items-center gap-1 text-xs font-bold text-[#c1fffe] truncate">
-                                    <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
-                                    {trip.city}{trip.country ? `, ${trip.country}` : ""}
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[200px] shrink-0 items-center gap-2.5 py-1.5 hover:opacity-80 transition-opacity">
+                                <div className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white leading-tight">{prof.displayName}</p>
+                                  <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 mt-0.5">
+                                    <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
+                                    <span className="truncate">{trip.city}{trip.country ? `, ${trip.country}` : ""}</span>
                                   </p>
-                                  {dateStr ? <p className="text-[10px] text-white/30">{dateStr}</p> : null}
-                                  <div className="flex gap-1.5 pt-0.5">
-                                    <Link href={`/profile/${prof.userId}`} className="flex-1 rounded-full bg-[#262626] py-1.5 text-center text-[11px] font-bold text-white hover:bg-white/10 transition-colors">Profile</Link>
-                                    <Link href="/messages?tab=connections" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#00ffff] text-[#004343] hover:scale-105 transition-transform">
-                                      <span className="material-symbols-outlined text-[13px]">chat_bubble</span>
-                                    </Link>
-                                  </div>
+                                  {dateStr ? <p className="text-[10px] text-white/40 truncate">{dateStr}</p> : null}
                                 </div>
-                              </div>
+                              </Link>
                             );
                           })}
                         </div>
@@ -1989,25 +2180,45 @@ const [followingListPage, setFollowingListPage] = useState(1);
 
                   {/* Dancers in your city */}
                   {myCity ? (() => {
+                    const q = feedSearch.toLowerCase().trim();
                     const inCity = connections.filter((c) => {
                       const trip = c.otherUserId ? tripByUser[c.otherUserId] : null;
                       if (!trip) return false;
-                      return trip.city.toLowerCase() === myCity.toLowerCase();
+                      if (trip.city.toLowerCase() !== myCity.toLowerCase()) return false;
+                      if (!q) return true;
+                      return (
+                        (c.profile?.displayName ?? "").toLowerCase().includes(q) ||
+                        trip.city.toLowerCase().includes(q)
+                      );
                     });
                     if (inCity.length === 0) return null;
                     return (
                       <div className="space-y-3">
-                        <h2 className="font-['Epilogue'] text-xl font-bold text-white">Dancers in your city</h2>
-                        <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
+                        <div className="flex items-center justify-between">
+                          <h2 className="font-['Epilogue'] text-xl font-bold text-white">Dancers in your city</h2>
+                          <div className="flex gap-1">
+                            <button onClick={() => scrollRow(scrollCityRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollCityRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                          </div>
+                        </div>
+                        <div ref={scrollCityRef} className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
                           {inCity.slice(0, 12).map((conn) => {
                             const prof = conn.profile!;
                             const trip = tripByUser[conn.otherUserId]!;
+                            const dateStr = trip.startDate
+                              ? new Date(trip.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+                                (trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")
+                              : "";
                             return (
-                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[165px] shrink-0 items-center gap-2.5 rounded-xl border border-[#c1fffe]/15 bg-gradient-to-r from-[#c1fffe]/5 to-transparent p-2.5 hover:border-[#c1fffe]/30 transition-colors">
-                                <div className="h-8 w-8 shrink-0 rounded-full border-2 border-[#c1fffe]/30 bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.3),rgba(255,81,250,0.3))" }} />
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[200px] shrink-0 items-center gap-2.5 py-1.5 hover:opacity-80 transition-opacity">
+                                <div className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white">{prof.displayName}</p>
-                                  <p className="truncate text-[11px] text-[#c1fffe]/70">{trip.city}{trip.country ? `, ${trip.country}` : ""}</p>
+                                  <p className="truncate text-sm font-semibold text-white leading-tight">{prof.displayName}</p>
+                                  <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 mt-0.5">
+                                    <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>location_on</span>
+                                    <span className="truncate">{trip.city}{trip.country ? `, ${trip.country}` : ""}</span>
+                                  </p>
+                                  {dateStr ? <p className="text-[10px] text-white/40 truncate">{dateStr}</p> : null}
                                 </div>
                               </Link>
                             );
@@ -2018,86 +2229,110 @@ const [followingListPage, setFollowingListPage] = useState(1);
                   })() : null}
 
                   {/* Attending Events */}
-                  {eventActivities.length > 0 ? (
+                  {(() => {
+                    const q = feedSearch.toLowerCase().trim();
+                    const filteredEvents = q
+                      ? eventActivities.filter((ev) =>
+                          ev.title.toLowerCase().includes(q) ||
+                          (ev.city ?? "").toLowerCase().includes(q) ||
+                          ev.attendees.some((a) => a.displayName.toLowerCase().includes(q))
+                        )
+                      : eventActivities;
+                    return filteredEvents.length > 0 ? (
                     <div className="space-y-5">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
                         <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
-                          <span className="material-symbols-outlined text-[#ff51fa]" style={{ fontVariationSettings: "'FILL' 1" }}>calendar_month</span>
+                          <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>calendar_month</span>
                           Attending Events
                         </h2>
-                        <Link href="/events" className="text-xs font-bold uppercase tracking-wider text-white/40 hover:text-[#ff51fa] transition-colors">Explore all</Link>
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-1">
+                            <button onClick={() => scrollRow(scrollEventsRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollEventsRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                          </div>
+                          <Link href="/events" className="text-xs font-bold uppercase tracking-wider text-white/40 hover:text-[#ff51fa] transition-colors">Explore all</Link>
+                        </div>
                       </div>
-                      <div className="no-scrollbar flex gap-4 overflow-x-auto pb-2">
-                        {eventActivities.map((ev) => {
+                      <div ref={scrollEventsRef} className="no-scrollbar flex gap-6 overflow-x-auto pb-2">
+                        {filteredEvents.map((ev) => {
                           const dateStr = ev.startDate
                             ? new Date(ev.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                             : "";
                           const endStr = ev.endDate && ev.endDate !== ev.startDate
                             ? `–${new Date(ev.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
                             : "";
+                          const isSoon = ev.startDate && new Date(ev.startDate).getTime() - Date.now() < 14 * 86400_000;
                           return (
-                            <div key={ev.eventId} className="min-w-[290px] shrink-0 snap-start rounded-2xl border border-white/[0.07] bg-[rgba(38,38,38,0.4)] p-5 backdrop-blur-2xl flex flex-col justify-between gap-4">
-                              <div className="space-y-3">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div>
-                                    <h3 className="font-['Epilogue'] text-lg font-bold leading-tight text-white">{ev.title}</h3>
-                                    <p className="mt-1 text-xs font-medium text-[#c1fffe]">{[dateStr, endStr].filter(Boolean).join(" ")}{ev.city ? ` · ${ev.city}` : ""}</p>
-                                  </div>
-                                  {ev.startDate && new Date(ev.startDate).getTime() - Date.now() < 14 * 86400_000 ? (
-                                    <span className="shrink-0 rounded-full bg-[#ff51fa]/20 px-2 py-0.5 text-[10px] font-bold text-[#ff51fa]">SOON</span>
-                                  ) : null}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <div className="flex -space-x-2">
-                                    {ev.attendees.slice(0, 4).map((a) => (
-                                      <div
-                                        key={a.userId}
-                                        title={a.displayName}
-                                        className="h-7 w-7 rounded-full border-2 border-[#131313] bg-cover bg-center"
-                                        style={{ backgroundImage: a.avatarUrl ? `url(${a.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.3),rgba(255,81,250,0.3))" }}
-                                      />
-                                    ))}
-                                  </div>
-                                  <span className="text-xs text-white/40">
-                                    {ev.attendees.length > 4 ? `+${ev.attendees.length - 4} ` : ""}{ev.attendees.length === 1 ? ev.attendees[0].displayName : `${ev.attendees.length} connections going`}
-                                  </span>
-                                </div>
+                            <div key={ev.eventId} className="min-w-[240px] shrink-0 snap-start flex flex-col gap-3 py-1">
+                              <div>
+                                <Link href={`/events/${ev.eventId}`} className="inline-flex items-center gap-2 flex-wrap">
+                                  <h3 className="font-['Epilogue'] text-base font-bold leading-tight text-white hover:text-[#c1fffe] transition-colors">{ev.title}</h3>
+                                  {null}
+                                </Link>
+                                <p className="mt-0.5 text-xs font-medium text-white/50">{[dateStr, endStr].filter(Boolean).join(" ")}{ev.city ? ` · ${ev.city}` : ""}</p>
                               </div>
-                              <div className="flex gap-2">
-                                <Link href={`/events/${ev.eventId}`} className="flex-1 rounded-full bg-[#262626] py-2 text-center text-xs font-bold text-white hover:bg-white/10 transition-colors">View Event</Link>
-                                <button type="button" className="flex-1 rounded-full border border-[#ff51fa]/40 py-2 text-xs font-bold text-[#ff51fa] hover:bg-[#ff51fa]/10 transition-colors">Who&apos;s going</button>
+                              <div className="flex items-center gap-2">
+                                <div className="flex -space-x-1.5">
+                                  {ev.attendees.slice(0, 4).map((a) => (
+                                    <div
+                                      key={a.userId}
+                                      title={a.displayName}
+                                      className="h-6 w-6 rounded-full border border-black/60 bg-cover bg-center"
+                                      style={{ backgroundImage: a.avatarUrl ? `url(${a.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.3),rgba(255,81,250,0.3))" }}
+                                    />
+                                  ))}
+                                </div>
+                                <span className="text-xs text-white/50">
+                                  {ev.attendees.length > 4 ? `+${ev.attendees.length - 4} ` : ""}{ev.attendees.length === 1 ? ev.attendees[0].displayName : `${ev.attendees.length} connections going`}
+                                </span>
                               </div>
                             </div>
                           );
                         })}
                       </div>
                     </div>
-                  ) : null}
+                  ) : null;
+                  })()}
 
                   {/* Hosting */}
                   {(() => {
-                    const hosts = connections.filter((c) => c.otherUserId && hostingByUser[c.otherUserId]?.canHost && c.profile);
+                    const q = feedSearch.toLowerCase().trim();
+                    const hosts = connections.filter((c) => {
+                      if (!c.otherUserId || !hostingByUser[c.otherUserId]?.canHost || !c.profile) return false;
+                      if (!q) return true;
+                      return (
+                        c.profile.displayName.toLowerCase().includes(q) ||
+                        (c.profile.city ?? "").toLowerCase().includes(q) ||
+                        (c.profile.country ?? "").toLowerCase().includes(q)
+                      );
+                    });
                     if (hosts.length === 0) return null;
                     return (
                       <div className="space-y-3">
-                        <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
-                          <span className="material-symbols-outlined text-white/40" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
-                          Hosting available
-                        </h2>
-                        <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
+                        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
+                          <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                            <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
+                            Hosting available
+                          </h2>
+                          <div className="flex gap-1">
+                            <button onClick={() => scrollRow(scrollHostingRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollHostingRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                          </div>
+                        </div>
+                        <div ref={scrollHostingRef} className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
                           {hosts.slice(0, 12).map((conn) => {
                             const prof = conn.profile!;
                             const hosting = hostingByUser[conn.otherUserId]!;
                             return (
-                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[175px] shrink-0 items-center gap-2.5 rounded-xl border border-white/[0.07] bg-[#131313] p-2.5 hover:border-white/20 transition-colors">
-                                <div
-                                  className="h-9 w-9 shrink-0 rounded-lg bg-cover bg-center"
-                                  style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }}
-                                />
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[200px] shrink-0 items-center gap-2.5 py-1.5 hover:opacity-80 transition-opacity">
+                                <div className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white">{prof.displayName}</p>
-                                  <p className="truncate text-[11px] text-white/40">{prof.city}{prof.country ? `, ${prof.country}` : ""}</p>
-                                  {hosting.hostingStatus ? <p className="truncate text-[10px] text-[#c1fffe]/60">{hosting.hostingStatus}</p> : null}
+                                  <p className="truncate text-sm font-semibold text-white leading-tight">{prof.displayName}</p>
+                                  <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 mt-0.5">
+                                    <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
+                                    <span className="truncate">{prof.city ? `${prof.city}${prof.country ? `, ${prof.country}` : ""}` : "Open to host"}</span>
+                                  </p>
+                                  {hosting.hostingStatus ? <p className="text-[10px] text-white/40 truncate">{hosting.hostingStatus}</p> : null}
                                 </div>
                               </Link>
                             );
@@ -2150,29 +2385,29 @@ const [followingListPage, setFollowingListPage] = useState(1);
 
               {networkSection === "connections" ? (
                 <div className="space-y-3">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                    <div className="group relative w-full min-w-0 sm:flex-1 md:max-w-[340px] md:ml-auto">
-                      <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors group-focus-within:text-cyan-300">
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    <div className="group relative min-w-0 flex-1 sm:max-w-[280px]">
+                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500 transition-colors group-focus-within:text-cyan-300">
                         search
                       </span>
                       <input
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
                         placeholder="Search connections..."
-                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-3 pl-12 pr-4 text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
+                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowConnectionFilters((value) => !value)}
-                      className={`inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold transition sm:w-auto ${
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-bold transition ${
                         showConnectionFilters || hasConnectionFilters
                           ? "bg-[#00F5FF] text-[#0A0A0A]"
                           : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
                       }`}
                     >
                       <span className="material-symbols-outlined text-[18px]">tune</span>
-                      Filters
+                      <span className="hidden sm:inline">Filters</span>
                     </button>
                   </div>
 
@@ -2190,18 +2425,29 @@ const [followingListPage, setFollowingListPage] = useState(1);
                           </option>
                         ))}
                       </select>
-                      <select
-                        value={connectionStyleFilter}
-                        onChange={(event) => setConnectionStyleFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
-                      >
-                        <option value="all">All dance styles</option>
-                        {connectionStyleOptions.map((style) => (
-                          <option key={style} value={style}>
-                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="space-y-1.5">
+                        <select
+                          value={connectionStyleFilter}
+                          onChange={(event) => { setConnectionStyleFilter(event.target.value); setConnectionStyleText(""); }}
+                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
+                        >
+                          <option value="all">All dance styles</option>
+                          {connectionStyleOptions.map((style) => (
+                            <option key={style} value={style}>
+                              {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
+                            </option>
+                          ))}
+                          <option value="other">Other…</option>
+                        </select>
+                        {connectionStyleFilter === "other" && (
+                          <input
+                            value={connectionStyleText}
+                            onChange={(e) => setConnectionStyleText(e.target.value)}
+                            placeholder="Search style (e.g. Hip Hop)"
+                            className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                          />
+                        )}
+                      </div>
                       <select
                         value={connectionRoleFilter}
                         onChange={(event) => setConnectionRoleFilter(event.target.value)}
@@ -2229,39 +2475,39 @@ const [followingListPage, setFollowingListPage] = useState(1);
 
               {networkSection === "contacts" ? (
                 <div className="space-y-3">
-                  <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:justify-end">
-                      <div className="group relative w-full min-w-0 sm:flex-1">
-                        <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors group-focus-within:text-cyan-300">
-                          search
-                        </span>
-                        <input
-                          value={query}
-                          onChange={(event) => setQuery(event.target.value)}
-                          placeholder="Search contacts..."
-                          className="w-full rounded-2xl border border-white/10 bg-[#121212] py-3 pl-12 pr-4 text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
-                        />
-                      </div>
-                      {true ? (
-                        <button
-                          type="button"
-                          onClick={() => setShowAddModal(true)}
-                          className="inline-flex h-[52px] w-full items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-6 text-sm font-bold text-[#06121a] hover:brightness-110 sm:w-auto"
-                        >
-                          Add Contact
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => setShowContactFilters((value) => !value)}
-                        className={`inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold transition sm:w-auto ${
-                          showContactFilters || hasContactFilters
-                            ? "bg-[#00F5FF] text-[#0A0A0A]"
-                            : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-[18px]">tune</span>
-                        Filters
-                      </button>
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="group relative min-w-0 flex-1 sm:max-w-[240px]">
+                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500 transition-colors group-focus-within:text-cyan-300">
+                        search
+                      </span>
+                      <input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Search contacts..."
+                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddModal(true)}
+                      className="inline-flex h-[42px] shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-xs font-bold text-[#06121a] hover:brightness-110 sm:px-4 sm:text-sm"
+                    >
+                      <span className="material-symbols-outlined text-[17px] sm:text-[18px]">person_add</span>
+                      <span className="hidden sm:inline">Add Contact</span>
+                      <span className="sm:hidden">Add</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowContactFilters((value) => !value)}
+                      className={`inline-flex h-[42px] shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-bold transition sm:px-4 sm:text-sm ${
+                        showContactFilters || hasContactFilters
+                          ? "bg-[#00F5FF] text-[#0A0A0A]"
+                          : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[18px]">tune</span>
+                      <span className="hidden sm:inline">Filters</span>
+                    </button>
                   </div>
 
                   {showContactFilters ? (
@@ -2278,18 +2524,29 @@ const [followingListPage, setFollowingListPage] = useState(1);
                           </option>
                         ))}
                       </select>
-                      <select
-                        value={styleFilter}
-                        onChange={(event) => setStyleFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All dance styles</option>
-                        {styleOptions.map((style) => (
-                          <option key={style} value={style}>
-                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="space-y-1.5">
+                        <select
+                          value={styleFilter}
+                          onChange={(event) => { setStyleFilter(event.target.value); setStyleText(""); }}
+                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                        >
+                          <option value="all">All dance styles</option>
+                          {styleOptions.map((style) => (
+                            <option key={style} value={style}>
+                              {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
+                            </option>
+                          ))}
+                          <option value="other">Other…</option>
+                        </select>
+                        {styleFilter === "other" && (
+                          <input
+                            value={styleText}
+                            onChange={(e) => setStyleText(e.target.value)}
+                            placeholder="Search style (e.g. Hip Hop)"
+                            className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                          />
+                        )}
+                      </div>
                       <select
                         value={roleFilter}
                         onChange={(event) => setRoleFilter(event.target.value)}
@@ -2402,37 +2659,180 @@ const [followingListPage, setFollowingListPage] = useState(1);
             ) : null}
 
             {networkSection === "following" ? (() => {
-              const FOLLOW_PAGE_SIZE = 20;
-              const followingCards = contactCards.filter((c) => c.isFollowing && c.contactType === "member");
+              const FOLLOW_PAGE_SIZE = 40;
+              const allFollowingCards = contactCards.filter((c) => c.isFollowing && c.contactType === "member");
+              const followQ = followQuery.trim().toLowerCase();
+              const followingCards = allFollowingCards.filter((card) =>
+                contactCardMatchesFilters(card, {
+                  needle: followQ,
+                  cityFilter,
+                  styleFilter,
+                  styleText,
+                  roleFilter,
+                  activityFilter,
+                })
+              );
               const totalFollowingPages = Math.ceil(followingCards.length / FOLLOW_PAGE_SIZE);
               const pagedFollowing = followingCards.slice((followingListPage - 1) * FOLLOW_PAGE_SIZE, followingListPage * FOLLOW_PAGE_SIZE);
               const totalFollowersPages = Math.ceil(followerProfiles.length / FOLLOW_PAGE_SIZE);
               const pagedFollowers = followerProfiles.slice((followersListPage - 1) * FOLLOW_PAGE_SIZE, followersListPage * FOLLOW_PAGE_SIZE);
               return (
-              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
-                {/* Following */}
+              <div className="space-y-8">
+                {/* Following — 4-col grid with search */}
                 <div className="space-y-3">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Following · {followingCount}</p>
+                  {/* Search row */}
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    <div className="group relative min-w-0 flex-1 sm:max-w-[280px]">
+                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500 transition-colors group-focus-within:text-cyan-300">search</span>
+                      <input
+                        value={followQuery}
+                        onChange={(e) => setFollowQuery(e.target.value)}
+                        placeholder="Search following..."
+                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowContactFilters((value) => !value)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-bold transition ${
+                        showContactFilters || hasFollowingFilters
+                          ? "bg-[#00F5FF] text-[#0A0A0A]"
+                          : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[18px]">tune</span>
+                      <span className="hidden sm:inline">Filters</span>
+                    </button>
+                  </div>
+
+                  {showContactFilters ? (
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                      <select
+                        value={cityFilter}
+                        onChange={(event) => setCityFilter(event.target.value)}
+                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                      >
+                        <option value="all">All cities</option>
+                        {cityOptions.map((city) => (
+                          <option key={city} value={city}>
+                            {city}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="space-y-1.5">
+                        <select
+                          value={styleFilter}
+                          onChange={(event) => { setStyleFilter(event.target.value); setStyleText(""); }}
+                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                        >
+                          <option value="all">All dance styles</option>
+                          {styleOptions.map((style) => (
+                            <option key={style} value={style}>
+                              {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
+                            </option>
+                          ))}
+                          <option value="other">Other…</option>
+                        </select>
+                        {styleFilter === "other" && (
+                          <input
+                            value={styleText}
+                            onChange={(e) => setStyleText(e.target.value)}
+                            placeholder="Search style (e.g. Hip Hop)"
+                            className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                          />
+                        )}
+                      </div>
+                      <select
+                        value={roleFilter}
+                        onChange={(event) => setRoleFilter(event.target.value)}
+                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                      >
+                        <option value="all">All roles</option>
+                        {roleOptions.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={activityFilter}
+                        onChange={(event) => setActivityFilter(event.target.value as "all" | TrackActivity)}
+                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                      >
+                        <option value="all">All activity</option>
+                        {TRACK_ACTIVITY_OPTIONS.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={resetFollowingFilters}
+                        disabled={!hasFollowingFilters}
+                        className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-4 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
+                      >
+                        Clear Filters
+                      </button>
+                    </div>
+                  ) : null}
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Following · {allFollowingCards.length}</p>
                   {loading ? (
-                    <div className="space-y-2">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="flex animate-pulse items-center gap-3 rounded-xl bg-white/[0.03] p-3">
-                          <div className="h-9 w-9 shrink-0 rounded-full bg-white/10" />
-                          <div className="h-4 w-32 rounded bg-white/10" />
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <div key={i} className="flex animate-pulse items-center gap-2 py-2.5">
+                          <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-3.5 w-24 rounded bg-white/[0.07]" />
+                            <div className="h-2.5 w-20 rounded bg-white/[0.05]" />
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : followingCards.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-white/10 py-6 text-center text-sm text-white/30">Not following anyone yet.</p>
+                    <p className="rounded-xl border border-dashed border-white/10 py-6 text-center text-sm text-white/30">
+                      {followQ ? "No results found." : "Not following anyone yet."}
+                    </p>
                   ) : (
                     <>
-                      <div className="space-y-1.5">
-                        {pagedFollowing.map((card) => (
-                          <Link key={card.id} href={card.linkedUserId ? `/profile/${card.linkedUserId}` : "#"} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-white/[0.04] transition-colors">
-                            <div className="h-9 w-9 shrink-0 rounded-full border border-white/10 bg-cover bg-center" style={{ backgroundImage: card.avatarUrl ? `url(${card.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
-                            <span className="truncate font-medium text-white/90">{card.displayName}</span>
-                          </Link>
-                        ))}
+                      <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                        {pagedFollowing.map((card) => {
+                          const cityLabel = [card.city, card.country].filter(Boolean).join(", ") || "Location not set";
+                          const roleLabel = card.roles.slice(0, 2).join(" • ") || "Dancer";
+                          const hasLinkedProfile = Boolean(card.linkedUserId);
+                          return (
+                            <div key={card.id} className="flex items-center gap-2 py-2.5">
+                              {hasLinkedProfile ? (
+                                <Link href={`/profile/${encodeURIComponent(card.linkedUserId ?? "")}`} className="shrink-0">
+                                  {card.avatarUrl ? (
+                                    <div className="h-[60px] w-[60px] rounded-2xl bg-cover bg-center" style={{ backgroundImage: `url(${card.avatarUrl})` }} />
+                                  ) : (
+                                    <div className="h-[60px] w-[60px] rounded-2xl overflow-hidden"><GenericAvatar /></div>
+                                  )}
+                                </Link>
+                              ) : card.avatarUrl ? (
+                                <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-cover bg-center" style={{ backgroundImage: `url(${card.avatarUrl})` }} />
+                              ) : (
+                                <div className="h-[60px] w-[60px] shrink-0 rounded-2xl overflow-hidden"><GenericAvatar /></div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                {hasLinkedProfile ? (
+                                  <Link href={`/profile/${encodeURIComponent(card.linkedUserId ?? "")}`}>
+                                    <p className="truncate text-sm font-semibold text-white">{card.displayName}</p>
+                                  </Link>
+                                ) : (
+                                  <p className="truncate text-sm font-semibold text-white">{card.displayName}</p>
+                                )}
+                                <p className="truncate text-[11px] text-[#7FEFF8]/80">{cityLabel}</p>
+                                <p className="truncate text-[10px] text-slate-500">{roleLabel}</p>
+                              </div>
+                              <FollowingCardMenu
+                                contactId={card.id}
+                                onUnfollow={() => setRefreshKey((v) => v + 1)}
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                       {totalFollowingPages > 1 ? (
                         <PaginationControls page={followingListPage} totalPages={totalFollowingPages} totalItems={followingCards.length} pageSize={FOLLOW_PAGE_SIZE} itemLabel="people" onPageChange={setFollowingListPage} />
@@ -2440,15 +2840,19 @@ const [followingListPage, setFollowingListPage] = useState(1);
                     </>
                   )}
                 </div>
+
                 {/* Followers */}
                 <div className="space-y-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Followers · {followersCount}</p>
                   {loading ? (
-                    <div className="space-y-2">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="flex animate-pulse items-center gap-3 rounded-xl bg-white/[0.03] p-3">
-                          <div className="h-9 w-9 shrink-0 rounded-full bg-white/10" />
-                          <div className="h-4 w-32 rounded bg-white/10" />
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <div key={i} className="flex animate-pulse items-center gap-2 py-2.5">
+                          <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-3.5 w-24 rounded bg-white/[0.07]" />
+                            <div className="h-2.5 w-20 rounded bg-white/[0.05]" />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2456,11 +2860,13 @@ const [followingListPage, setFollowingListPage] = useState(1);
                     <p className="rounded-xl border border-dashed border-white/10 py-6 text-center text-sm text-white/30">No followers yet.</p>
                   ) : (
                     <>
-                      <div className="space-y-1.5">
+                      <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                         {pagedFollowers.map((fp) => (
-                          <Link key={fp.userId} href={`/profile/${fp.userId}`} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-white/[0.04] transition-colors">
-                            <div className="h-9 w-9 shrink-0 rounded-full border border-white/10 bg-cover bg-center" style={{ backgroundImage: fp.avatarUrl ? `url(${fp.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
-                            <span className="truncate font-medium text-white/90">{fp.displayName}</span>
+                          <Link key={fp.userId} href={`/profile/${fp.userId}`} className="flex items-center gap-2 py-2.5">
+                            <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-cover bg-center" style={{ backgroundImage: fp.avatarUrl ? `url(${fp.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold text-white">{fp.displayName}</p>
+                            </div>
                           </Link>
                         ))}
                       </div>

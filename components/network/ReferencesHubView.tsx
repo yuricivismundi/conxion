@@ -1840,18 +1840,6 @@ export default function ReferencesHubView({ initialConnectionId = null, initialP
 
                           {(item.replyText || canReply || canEdit) ? (
                             <div className="mt-4 border-t border-white/10 pt-3">
-                              <div className="flex items-center gap-5">
-                                {canReply ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] text-white/60 hover:text-white"
-                                  >
-                                    <span className="material-symbols-outlined text-base">reply</span>
-                                    Reply
-                                  </button>
-                                ) : null}
-                              </div>
-
                               {item.replyText ? (
                                 <div className="relative mt-4 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
                                   <div className="flex gap-4">
