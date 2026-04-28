@@ -2,7 +2,13 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
+import { BLOG_ENABLED } from "@/content/blog/posts";
+import { isEventDiscoverable } from "@/lib/events/access";
+import { mapEventRows, pickEventHeroUrl, type EventRecord } from "@/lib/events/model";
 import { absolutePublicAppUrl, readPublicAppUrl } from "@/lib/public-app-url";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+
+export const dynamic = "force-dynamic";
 
 const appUrl = readPublicAppUrl();
 const logoUrl = absolutePublicAppUrl("/branding/CONXION-2-tight.png?v=14");
@@ -82,73 +88,100 @@ export const metadata: Metadata = {
   },
 };
 
-const pillarCards = [
-  {
-    icon: "person_search",
-    title: "Discover",
-    body: "Find your perfect dance partner or local instructor with intelligent matching.",
-  },
-  {
-    icon: "explore",
-    title: "Travel",
-    body: "Coordinate trips and never dance alone in a new city with community hosts.",
-  },
-  {
-    icon: "auto_graph",
-    title: "Grow",
-    body: "Level up your skills with verified community feedback and global recognition.",
-  },
-];
+type LandingEventCard = {
+  id: string;
+  title: string;
+  city: string;
+  country: string;
+  eventType: string;
+  accessType: EventRecord["accessType"];
+  startsAt: string;
+  heroUrl: string;
+  attendeeCount: number;
+};
 
-const eventShowcase = [
-  {
-    city: "Barcelona",
-    country: "Spain",
-    title: "Barcelona Bachata Festival",
-    date: "Nov 14, 2026",
-    type: "Bachata Festival",
-    attendees: 160,
-    cover: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=1200&auto=format&fit=crop",
-  },
-  {
-    city: "Paris",
-    country: "France",
-    title: "Paris Bachata Festival",
-    date: "Nov 22, 2026",
-    type: "Bachata Festival",
-    attendees: 220,
-    cover: "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=1200&auto=format&fit=crop",
-  },
-  {
-    city: "Berlin",
-    country: "Germany",
-    title: "Berlin Bachata Local Party",
-    date: "Oct 05, 2026",
-    type: "Bachata Local Party",
-    attendees: 95,
-    cover: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?q=80&w=1200&auto=format&fit=crop",
-  },
-  {
-    city: "Rome",
-    country: "Italy",
-    title: "Rome Bachata Local Party",
-    date: "Dec 01, 2026",
-    type: "Bachata Local Party",
-    attendees: 74,
-    cover: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1200&auto=format&fit=crop",
-  },
-  {
-    city: "London",
-    country: "United Kingdom",
-    title: "London Bachata Festival",
-    date: "Nov 08, 2026",
-    type: "Bachata Festival",
-    attendees: 130,
-    cover: "https://images.unsplash.com/photo-1571266028243-d220c9c3b8f5?q=80&w=1200&auto=format&fit=crop",
-  },
-] as const;
+function landingEventTypeBadge(eventType: string) {
+  switch (eventType.toLowerCase()) {
+    case "festival":
+      return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
+    case "workshop":
+    case "masterclass":
+      return "border-emerald-300/35 bg-emerald-400/15 text-emerald-100";
+    case "competition":
+      return "border-amber-300/35 bg-amber-400/15 text-amber-100";
+    case "social":
+    default:
+      return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
+  }
+}
 
-export default function LandingPage() {
+function formatLandingEventDate(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Date TBD";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
+}
+
+async function loadLandingEvents(): Promise<LandingEventCard[]> {
+  try {
+    const service = getSupabaseServiceClient();
+    const nowIso = new Date().toISOString();
+
+    const eventsRes = await service
+      .from("events")
+      .select("*")
+      .eq("status", "published")
+      .gte("ends_at", nowIso)
+      .order("starts_at", { ascending: true })
+      .limit(24);
+
+    if (eventsRes.error) return [];
+
+    const events = mapEventRows((eventsRes.data ?? []) as unknown[])
+      .filter((event) => isEventDiscoverable(event.accessType) && !event.hiddenByAdmin)
+      .slice(0, 4);
+
+    if (!events.length) return [];
+
+    const eventIds = events.map((event) => event.id);
+    const membersRes = await service
+      .from("event_members")
+      .select("event_id,status")
+      .in("event_id", eventIds)
+      .in("status", ["host", "going", "waitlist"]);
+
+    const attendeeCountByEventId: Record<string, number> = {};
+    for (const eventId of eventIds) attendeeCountByEventId[eventId] = 0;
+
+    if (!membersRes.error) {
+      for (const raw of (membersRes.data ?? []) as Array<{ event_id?: string | null }>) {
+        const eventId = typeof raw.event_id === "string" ? raw.event_id : "";
+        if (!eventId) continue;
+        attendeeCountByEventId[eventId] = (attendeeCountByEventId[eventId] ?? 0) + 1;
+      }
+    }
+
+    return events.map((event) => ({
+      id: event.id,
+      title: event.title,
+      city: event.city,
+      country: event.country,
+      eventType: event.eventType,
+      accessType: event.accessType,
+      startsAt: event.startsAt,
+      heroUrl: pickEventHeroUrl(event),
+      attendeeCount: attendeeCountByEventId[event.id] ?? 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export default async function LandingPage() {
+  const landingEvents = await loadLandingEvents();
   return (
     <div className="landing-root bg-[#0A0A0A] text-[#E0E0E0]">
       <Script id="landing-auth-redirect" strategy="beforeInteractive">
@@ -262,6 +295,11 @@ export default function LandingPage() {
           </Link>
 
           <div className="hidden items-center gap-3 md:flex">
+            {BLOG_ENABLED ? (
+              <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/blog">
+                Blog
+              </Link>
+            ) : null}
             <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/auth">
               Log in
             </Link>
@@ -414,20 +452,87 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="border-b border-white/5 bg-[#0A0A0A] px-4 py-14 sm:px-6" id="how-it-works">
-          <div className="mx-auto grid w-full max-w-7xl gap-5 md:grid-cols-3 md:gap-6">
-            {pillarCards.map((pillar) => (
-              <article
-                key={pillar.title}
-                className="rounded-2xl border border-white/5 bg-white/[0.03] p-6 transition hover:border-white/15 hover:bg-white/[0.06]"
-              >
-                <div className="mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-[#00F5FF]/10 text-[#00F5FF]">
-                  <span className="material-symbols-outlined">{pillar.icon}</span>
+        {/* ── Lifecycle Progress Strip ─────────────────────────────── */}
+        <section className="relative z-20 border-b border-white/5 bg-[#0A0A0A] px-4 py-16 sm:px-6" id="how-it-works">
+          <div className="relative mx-auto w-full max-w-7xl">
+              {/* Track backdrop — runs center of col 1 to center of col 6 */}
+              <div className="absolute top-10 h-px bg-white/10" style={{ left: "8.333%", width: "83.334%" }} />
+              {/* Active gradient track */}
+              <div
+                className="absolute top-10 h-px opacity-60"
+                style={{ left: "8.333%", width: "83.334%", background: "linear-gradient(90deg, #00F5FF 0%, #ff51fa 100%)" }}
+              />
+
+              <div className="relative z-10 grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-6">
+                {/* 1 Discovery */}
+                <div className="group flex flex-col items-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50 group-hover:shadow-[0_0_20px_rgba(0,245,255,0.3)]">
+                    <span className="material-symbols-outlined text-3xl text-[#00F5FF]">explore</span>
+                  </div>
+                  <h3 className="mb-2 font-bold text-white">Discovery</h3>
+                  <p className="text-center text-sm leading-relaxed text-white/50">
+                    Explore events, trips, and dancers near you.
+                  </p>
                 </div>
-                <h3 className="text-2xl font-bold text-white">{pillar.title}</h3>
-                <p className="mt-3 text-sm leading-relaxed text-white/60">{pillar.body}</p>
-              </article>
-            ))}
+
+                {/* 2 Connection */}
+                <div className="group flex flex-col items-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50">
+                    <span className="material-symbols-outlined text-3xl text-[#00F5FF]">group</span>
+                  </div>
+                  <h3 className="mb-2 font-bold text-white">Connection</h3>
+                  <p className="text-center text-sm leading-relaxed text-white/50">
+                    Connect by joining or requesting access.
+                  </p>
+                </div>
+
+                {/* 3 Interaction */}
+                <div className="group flex flex-col items-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50">
+                    <span className="material-symbols-outlined text-3xl text-[#00F5FF]">forum</span>
+                  </div>
+                  <h3 className="mb-2 font-bold text-white">Interaction</h3>
+                  <p className="text-center text-sm leading-relaxed text-white/50">
+                    Start conversations and plan together.
+                  </p>
+                </div>
+
+                {/* 4 Activity */}
+                <div className="group flex flex-col items-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#ff51fa]/20 bg-[#1a1a1a] transition-all group-hover:border-[#ff51fa]/50">
+                    <span className="material-symbols-outlined text-3xl text-[#ff51fa]">local_activity</span>
+                  </div>
+                  <h3 className="mb-2 font-bold text-white">Activity</h3>
+                  <p className="text-center text-sm leading-relaxed text-white/50">
+                    Turn connections into real-life experiences.
+                  </p>
+                </div>
+
+                {/* 5 Reference */}
+                <div className="group flex flex-col items-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#ff51fa]/20 bg-[#1a1a1a] transition-all group-hover:border-[#ff51fa]/50">
+                    <span className="material-symbols-outlined text-3xl text-[#ff51fa]">rate_review</span>
+                  </div>
+                  <h3 className="mb-2 font-bold text-white">Reference</h3>
+                  <p className="text-center text-sm leading-relaxed text-white/50">
+                    Share feedback after each interaction.
+                  </p>
+                </div>
+
+                {/* 6 Growth */}
+                <div className="group flex flex-col items-center">
+                  <div
+                    className="mb-6 flex h-20 w-20 items-center justify-center rounded-full shadow-[0_0_30px_rgba(255,81,250,0.4)]"
+                    style={{ background: "linear-gradient(135deg, #00F5FF, #ff51fa)" }}
+                  >
+                    <span className="material-symbols-outlined text-3xl text-[#0A0A0A]">trending_up</span>
+                  </div>
+                  <h3 className="mb-2 font-bold text-white">Growth</h3>
+                  <p className="text-center text-sm leading-relaxed text-white/50">
+                    Grow your network, unlock features, and reach more of the community.
+                  </p>
+                </div>
+              </div>
           </div>
         </section>
 
@@ -436,60 +541,72 @@ export default function LandingPage() {
             <div className="text-center">
               <h2 className="text-4xl font-extrabold text-white md:text-5xl">Built for the global dance community</h2>
               <p className="mx-auto mt-4 max-w-2xl text-white/55">
-                Explore curated event samples from top dance cities.
+                Explore live events from top dance cities.
               </p>
             </div>
 
-            <div className="mt-12 overflow-x-auto pb-2 no-scrollbar">
-              <div className="flex min-w-max gap-5">
-                {eventShowcase.map((event) => (
-                  <article
-                    key={`${event.city}-${event.title}`}
-                    className="group w-[300px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-[#121212] transition hover:border-cyan-300/35"
+            {landingEvents.length > 0 ? (
+              <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+                {landingEvents.map((event) => (
+                  <Link
+                    key={event.id}
+                    href={`/events/${event.id}`}
+                    className="group overflow-hidden rounded-2xl border border-white/10 bg-[#121212] transition hover:border-cyan-300/35"
                   >
                     <div className="relative h-44 overflow-hidden">
                       <img
-                        src={event.cover}
+                        src={event.heroUrl}
                         alt={event.title}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
                       <div className="absolute bottom-3 left-3 right-3">
-                        <span
-                          className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                            event.type.includes("Festival")
-                              ? "border-cyan-300/35 bg-cyan-300/15 text-cyan-100"
-                              : event.type.includes("Party")
-                                ? "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100"
-                                : event.type.includes("Workshop")
-                                ? "border-emerald-300/35 bg-emerald-400/15 text-emerald-100"
-                                : "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100"
-                          }`}
-                        >
-                          {event.type}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${landingEventTypeBadge(event.eventType)}`}>
+                            {event.eventType}
+                          </span>
+                          <span className="rounded-full border border-white/15 bg-black/35 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white/80">
+                            {event.accessType === "request" ? "Request" : "Public"}
+                          </span>
+                        </div>
                         <p className="mt-2 text-lg font-bold text-white">{event.title}</p>
-                        <p className="text-xs text-white/70">{event.city}, {event.country}</p>
+                        <p className="text-xs text-white/70">
+                          {event.city}, {event.country}
+                        </p>
                       </div>
                     </div>
                     <div className="space-y-2 p-4">
                       <div className="flex items-center justify-between text-xs text-white/70">
                         <span className="inline-flex items-center gap-1">
                           <span className="material-symbols-outlined text-[14px] text-cyan-300">calendar_month</span>
-                          {event.date}
+                          {formatLandingEventDate(event.startsAt)}
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <span className="material-symbols-outlined text-[14px] text-cyan-300">group</span>
-                          {event.attendees} attending
+                          {event.attendeeCount} attending
                         </span>
                       </div>
                       <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-200/90">
                         Best of {event.city}
                       </div>
                     </div>
-                  </article>
+                  </Link>
                 ))}
               </div>
+            ) : (
+              <div className="mt-12 rounded-2xl border border-white/10 bg-black/25 px-6 py-10 text-center">
+                <p className="text-base font-semibold text-white">No live events to feature yet.</p>
+                <p className="mt-2 text-sm text-white/55">Explore the full events page to see what gets published next.</p>
+              </div>
+            )}
+
+            <div className="mt-8 flex justify-center">
+              <Link
+                href="/events"
+                className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-7 py-3 text-sm font-extrabold text-black shadow-[0_0_30px_rgba(0,245,255,0.2)] transition hover:opacity-90"
+              >
+                Explore all events
+              </Link>
             </div>
           </div>
         </section>
@@ -511,10 +628,10 @@ export default function LandingPage() {
                   ["report", "Reporting tools"],
                 ].map(([icon, label]) => (
                   <div key={label} className="flex flex-col items-center gap-2">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/5 text-[#00F5FF]">
-                      <span className="material-symbols-outlined">{icon}</span>
+                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/5 text-[#00F5FF]">
+                      <span className="material-symbols-outlined text-[30px]">{icon}</span>
                     </div>
-                    <span className="text-xs font-semibold text-white/80">{label}</span>
+                    <span className="text-sm font-semibold text-white/80">{label}</span>
                   </div>
                 ))}
               </div>
@@ -602,6 +719,13 @@ export default function LandingPage() {
                     Support
                   </Link>
                 </li>
+                {BLOG_ENABLED ? (
+                  <li>
+                    <Link href="/blog" className="transition hover:text-[#00F5FF]">
+                      Blog
+                    </Link>
+                  </li>
+                ) : null}
                 <li>
                   <Link href="/support" className="transition hover:text-[#00F5FF]">
                     Contact

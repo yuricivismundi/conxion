@@ -273,7 +273,7 @@ export default function SupportPage() {
             <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/45">Help Desk</p>
             <h2 className="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">What do you need help with?</h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-200/85">
-              Start with the FAQ topics below for plans, references, hosting, and support. Open the Trust &amp; Safety Guidelines when you need policy detail, and use Support Cases only when moderation or manual review is actually needed.
+              Start with the FAQ topics below for plans, references, hosting, request-linked chat windows, and support. Open the Trust &amp; Safety Guidelines when you need policy detail, and use Support Cases only when moderation or manual review is actually needed.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Link
