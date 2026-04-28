@@ -13,6 +13,7 @@ import EventHeroImage from "@/components/events/EventHeroImage";
 import ReferencesHubView from "@/components/network/ReferencesHubView";
 import ProfileMediaShowcase from "@/components/profile/ProfileMediaShowcase";
 import TeacherBadge from "@/components/profile/TeacherBadge";
+import BookSessionModal from "@/components/teacher/BookSessionModal";
 import RequestInfoModal from "@/components/teacher/RequestInfoModal";
 import { DashboardEmbedModeProvider } from "@/components/dashboard/DashboardEmbedMode";
 import VerifiedBadge from "@/components/VerifiedBadge";
@@ -931,9 +932,11 @@ function MemberProfilePage() {
   const [actionMenu, setActionMenu] = useState<ProfileActionMenuState | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [requestInfoOpen, setRequestInfoOpen] = useState(false);
+  const [bookingOpen, setBookingOpen] = useState(false);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [teacherInquiryEnabled, setTeacherInquiryEnabled] = useState(false);
   const [teacherPageAvailable, setTeacherPageAvailable] = useState(false);
+  const [teacherBookingAvailable, setTeacherBookingAvailable] = useState(false);
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
   const panelSwitchTimerRef = useRef<number | null>(null);
   const toastCounterRef = useRef(0);
@@ -943,6 +946,7 @@ function MemberProfilePage() {
   const isSelf = meId !== null && profileUserId === meId;
   const isTeacherProfile = hasTeacherBadgeRole(profile?.roles);
   const canRequestInfo = !isSelf && isTeacherProfile && teacherInquiryEnabled;
+  const canBookSession = !isSelf && isTeacherProfile && teacherPageAvailable && teacherBookingAvailable;
   const canRevealContacts = isSelf || state.status === "accepted";
   const panelLoading = tabTransitionLoading || (supportingPanelsLoading && !(tab === "dance-tools" && isSelf));
   const requestedReferenceConnectionId = searchParams.get("connectionId");
@@ -973,16 +977,25 @@ function MemberProfilePage() {
   useEffect(() => {
     if (!isTeacherProfile || !profileUserId || !profile) {
       setTeacherPageAvailable(false);
+      setTeacherBookingAvailable(false);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const { data } = await supabase
+        const [{ data }, availabilityRes] = await Promise.all([
+          supabase
           .from("teacher_profiles")
           .select("default_public_view,teacher_profile_enabled,is_public,teacher_profile_trial_ends_at")
           .eq("user_id", profileUserId)
-          .maybeSingle();
+          .maybeSingle(),
+          supabase
+            .from("teacher_session_availability")
+            .select("id", { count: "exact", head: true })
+            .eq("teacher_id", profileUserId)
+            .eq("is_available", true)
+            .gte("availability_date", new Date().toISOString().slice(0, 10)),
+        ]);
         if (cancelled) return;
         const teacherViewAllowed = Boolean(
           data?.is_public &&
@@ -994,8 +1007,12 @@ function MemberProfilePage() {
             })
         );
         setTeacherPageAvailable(teacherViewAllowed);
+        setTeacherBookingAvailable(teacherViewAllowed && !availabilityRes.error && (availabilityRes.count ?? 0) > 0);
       } catch {
-        if (!cancelled) setTeacherPageAvailable(false);
+        if (!cancelled) {
+          setTeacherPageAvailable(false);
+          setTeacherBookingAvailable(false);
+        }
       }
     })();
     return () => {
@@ -2728,6 +2745,16 @@ function MemberProfilePage() {
               {!isSelf ? (
                 <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
                   <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  {canBookSession ? (
+                    <button
+                      type="button"
+                      onClick={() => setBookingOpen(true)}
+                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-5 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/16"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">event_available</span>
+                      Book session
+                    </button>
+                  ) : null}
                   {state.status === "none" ? (
                     <>
                       <button
@@ -3469,6 +3496,16 @@ function MemberProfilePage() {
           />
         ) : null}
 
+        {profileUserId && profile ? (
+          <BookSessionModal
+            open={bookingOpen}
+            teacherUserId={profileUserId}
+            teacherName={profile.displayName}
+            onClose={() => setBookingOpen(false)}
+            onSubmitted={(message) => setInfoFeedback(message)}
+          />
+        ) : null}
+
         <VerificationRequiredDialog
           open={verificationModalOpen}
           resumePayload={profileUserId ? { kind: "profile_hosting_request", profileId: profileUserId } : null}
@@ -3583,6 +3620,19 @@ function MemberProfilePage() {
                     >
                       <span className="material-symbols-outlined text-[16px]">school</span>
                       Request Teaching Info
+                    </button>
+                  ) : null}
+                  {canBookSession ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeActionMenu();
+                        setBookingOpen(true);
+                      }}
+                      className="mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-cyan-100 hover:bg-cyan-300/15"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">event_available</span>
+                      Book Session
                     </button>
                   ) : null}
                   {hostingAvailable ? (

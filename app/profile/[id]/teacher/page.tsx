@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import Nav from "@/components/Nav";
 import { resolveAvatarUrl } from "@/lib/avatar-storage";
 import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
+import TeacherBookingCalendar from "@/components/teacher/TeacherBookingCalendar";
 import TeacherHeroActions from "@/components/teacher/TeacherHeroActions";
 import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
 import { isPaymentVerified } from "@/lib/verification";
@@ -42,6 +43,9 @@ type TeacherProfile = {
   teacher_profile_trial_started_at: string | null;
   teacher_profile_trial_ends_at: string | null;
   is_public: boolean;
+  base_city: string | null;
+  base_address: string | null;
+  base_country: string | null;
   base_school: string | null;
   travel_available: boolean;
   languages: string[] | null;
@@ -71,16 +75,6 @@ type EventTeaching = {
   start_date: string | null;
   end_date: string | null;
   notes: string | null;
-};
-
-type WeeklyAvailabilitySlot = {
-  id: string;
-  weekday: number;
-  start_time: string | null;
-  end_time: string | null;
-  label: string | null;
-  is_flexible: boolean;
-  note: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -184,7 +178,6 @@ export default async function TeacherProfilePage({
     infoBlocksResult,
     regularClassesResult,
     eventTeachingResult,
-    weeklyAvailabilityResult,
     profileMediaResult,
   ] = await Promise.allSettled([
     supabase
@@ -204,12 +197,6 @@ export default async function TeacherProfilePage({
       .eq("user_id", id)
       .eq("is_active", true)
       .order("start_date", { ascending: false, nullsFirst: false }),
-    supabase
-      .from("teacher_weekly_availability")
-      .select("*")
-      .eq("user_id", id)
-      .order("weekday")
-      .order("start_time"),
     supabase
       .from("profile_media")
       .select("*")
@@ -234,11 +221,6 @@ export default async function TeacherProfilePage({
       ? (eventTeachingResult.value.data as EventTeaching[])
       : [];
 
-  const weeklyAvailability: WeeklyAvailabilitySlot[] =
-    weeklyAvailabilityResult.status === "fulfilled" && weeklyAvailabilityResult.value.data
-      ? (weeklyAvailabilityResult.value.data as WeeklyAvailabilitySlot[])
-      : [];
-
   const profileMedia: ProfileMediaItem[] =
     profileMediaResult.status === "fulfilled" && profileMediaResult.value.data
       ? sortProfileMedia(
@@ -258,16 +240,6 @@ export default async function TeacherProfilePage({
   const languages: string[] = Array.isArray(teacherProfile?.languages)
     ? teacherProfile.languages!
     : [];
-
-  // Group availability by weekday (0=Sun … 6=Sat)
-  const availByDay: Record<number, WeeklyAvailabilitySlot[]> = {};
-  for (const slot of weeklyAvailability) {
-    if (!availByDay[slot.weekday]) availByDay[slot.weekday] = [];
-    availByDay[slot.weekday].push(slot);
-  }
-
-  // Ordered Mon–Sun (1,2,3,4,5,6,0)
-  const DISPLAY_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
   return (
     <div className="min-h-screen bg-[#0e0e0e] text-white overflow-x-hidden">
@@ -388,52 +360,18 @@ export default async function TeacherProfilePage({
           videos={profileMedia.filter((m) => m.kind === "video")}
         />
 
-        {/* ── Private Class Availability (weekly availability) ─────────────── */}
-        <div className="bg-zinc-950 p-10 rounded-2xl mb-24">
-          <div className="mb-8">
-            <h2 className="font-black text-4xl tracking-tighter text-white">Private Class Availability</h2>
-            <p className="text-zinc-500 mt-3">Weekly schedule for private sessions.</p>
-          </div>
-          <div className="grid grid-cols-7 gap-3">
-            {DISPLAY_DAY_ORDER.map((dayIndex) => {
-              const slots = availByDay[dayIndex] ?? [];
-              return (
-                <div key={dayIndex} className="flex flex-col gap-2">
-                  <p className="uppercase tracking-widest text-zinc-500 text-[10px] font-bold text-center mb-1">
-                    {WEEKDAY_SHORT[dayIndex]}
-                  </p>
-                  {slots.length === 0 ? (
-                    <div className="h-8 rounded-lg bg-zinc-900/30 border border-transparent" />
-                  ) : (
-                    slots.map((slot) => (
-                      <span
-                        key={slot.id}
-                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold text-center leading-tight ${
-                          slot.is_flexible || slot.label
-                            ? "text-[#c1fffe] bg-[#c1fffe]/5 border border-[#c1fffe]/20"
-                            : "bg-zinc-900/50 text-zinc-400 border border-transparent"
-                        }`}
-                      >
-                        {slot.label ?? (slot.is_flexible ? "Flexible" : formatTime(slot.start_time))}
-                      </span>
-                    ))
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
 
-        {/* ── Weekly Studio Classes ────────────────────────────────────────── */}
+        {/* ── Weekly Classes ──────────────────────────────────────────────── */}
         <section className="mb-24">
           <div className="mb-12">
-            <h2 className="font-black text-4xl tracking-tighter text-white">Weekly Studio Classes</h2>
+            <h2 className="font-black text-4xl tracking-tighter text-white">Weekly Classes</h2>
             <p className="text-zinc-500 mt-3">Ongoing group classes open for enrollment.</p>
           </div>
           {regularClasses.length === 0 ? (
             <div className="border border-white/5 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center gap-3 text-center">
               <span className="material-symbols-outlined text-zinc-700 text-4xl">calendar_month</span>
-              <p className="text-zinc-600 text-sm">No regular classes listed yet.</p>
+              <p className="text-zinc-600 text-sm">No weekly classes listed yet.</p>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
