@@ -176,3 +176,37 @@ body {
 .dark-calendar-input::-webkit-datetime-edit-ampm-field {
   color: #fff;
 }
+
+/* Branding range slider */
+.brand-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #00f5ff 0%, #d946ef 100%);
+  outline: none;
+  cursor: pointer;
+}
+.brand-range:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.brand-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #00f5ff;
+  box-shadow: 0 0 0 3px rgba(0,245,255,0.18);
+  cursor: grab;
+}
+.brand-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #00f5ff;
+  border: none;
+  box-shadow: 0 0 0 3px rgba(0,245,255,0.18);
+  cursor: grab;
+}

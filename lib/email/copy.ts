@@ -143,11 +143,11 @@ export function buildCtaPath(params: AppEmailParams) {
     case "trip_request_accepted":
     case "trip_request_declined":
     case "travel_plan_upcoming":
-      return params.tripId ? `/trips/${params.tripId}` : params.hostingRequestId ? "/trips/hosting" : "/trips";
+      return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : params.hostingRequestId ? "/activity?tab=hosting" : "/activity?tab=trips";
     case "hosting_request_received":
     case "hosting_request_accepted":
     case "hosting_request_declined":
-      return "/trips/hosting";
+      return "/activity?tab=hosting";
     case "sync_proposed":
     case "sync_accepted":
     case "sync_declined":

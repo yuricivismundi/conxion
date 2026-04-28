@@ -35,8 +35,8 @@ const UPGRADE_REASON_CONTENT: Record<UpgradeReason, UpgradeReasonContent> = {
     ctaLabel: "Get verified",
   },
   media_limit_reached: {
-    title: "Add more media to stand out",
-    body: "Upgrade to Plus to add more photos to your profile.",
+    title: "Upgrade to Plus to add more photos to your profile.",
+    body: "",
     recommendedPlan: "pro",
     ctaLabel: "Upgrade to Plus",
   },

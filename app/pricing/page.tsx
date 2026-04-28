@@ -5,12 +5,18 @@ import PlanCard from "@/components/billing/PlanCard";
 import PricingFAQ from "@/components/billing/PricingFAQ";
 import StripeCheckoutDialog from "@/components/billing/StripeCheckoutDialog";
 import Nav from "@/components/Nav";
-import { getBillingAccountState, getMockBillingAccountState } from "@/lib/billing/account-state";
+import { getBillingAccountState, type BillingAccountState } from "@/lib/billing/account-state";
 import { createBillingCheckoutSession } from "@/lib/billing/checkout-client";
 import { getPricingFaqItems } from "@/lib/billing/faq";
 import { getAllPlanDefinitions, type PlanId } from "@/lib/billing/plans";
 import { supabase } from "@/lib/supabase/client";
 import { isPaymentVerified } from "@/lib/verification";
+
+const STARTER_BILLING_STATE: BillingAccountState = {
+  currentPlanId: "starter",
+  isVerified: false,
+  proRenewalLabel: null,
+};
 
 function readCheckoutMessageFromLocation() {
   if (typeof window === "undefined") return null;
@@ -39,7 +45,8 @@ function readCheckoutMessageFromLocation() {
 export default function PricingPage() {
   const plans = useMemo(() => getAllPlanDefinitions(), []);
   const faqItems = useMemo(() => getPricingFaqItems(), []);
-  const [billingState, setBillingState] = useState(getMockBillingAccountState());
+  const [billingState, setBillingState] = useState<BillingAccountState | null>(null);
+  const [billingLoading, setBillingLoading] = useState(true);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(() => readCheckoutMessageFromLocation());
   const [checkoutPlanId, setCheckoutPlanId] = useState<"verified" | "pro" | null>(null);
 
@@ -49,7 +56,13 @@ export default function PricingPage() {
     async function loadBillingState() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData.user;
-      if (!user) return;
+      if (!user) {
+        if (!cancelled) {
+          setBillingState(STARTER_BILLING_STATE);
+          setBillingLoading(false);
+        }
+        return;
+      }
 
       const profileRes = await supabase
         .from("profiles")
@@ -66,9 +79,15 @@ export default function PricingPage() {
           isVerified,
         })
       );
+      setBillingLoading(false);
     }
 
-    void loadBillingState();
+    void loadBillingState().catch(() => {
+      if (!cancelled) {
+        setBillingState(STARTER_BILLING_STATE);
+        setBillingLoading(false);
+      }
+    });
     return () => {
       cancelled = true;
     };
@@ -114,61 +133,83 @@ export default function PricingPage() {
           </section>
 
           <section id="plan-grid" className="mx-auto mt-4 grid gap-5 lg:grid-cols-3">
-            {plans.filter((p) => p.id === "starter" || p.id === "pro").map((plan) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                currentPlanId={billingState.currentPlanId}
-                onSelect={(selectedPlanId) => void handleCheckout(selectedPlanId)}
-              />
-            ))}
-
-            {/* Verified — same size, distinct background */}
-            {(() => {
-              const verifiedPlan = plans.find((p) => p.id === "verified");
-              if (!verifiedPlan) return null;
-              const isVerified = billingState.currentPlanId === "verified" || billingState.isVerified;
-              return (
-                <article className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
-                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(52,211,153,0.14),transparent_68%)]" />
-                  <div className="relative">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-400/70">One-time payment</p>
-                    <h2 className="mt-1 text-2xl font-black tracking-tight text-white">{verifiedPlan.name}</h2>
-                    <p className="mt-2 text-3xl font-black text-white">{verifiedPlan.priceLabel}</p>
-                    <p className="mt-3 max-w-[34ch] text-sm leading-6 text-slate-300">{verifiedPlan.shortDescription}</p>
+            {billingLoading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <article
+                  key={`pricing-skeleton-${index}`}
+                  className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,17,22,0.94),rgba(8,12,18,0.9))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6"
+                >
+                  <div className="animate-pulse space-y-4">
+                    <div className="h-6 w-28 rounded bg-white/10" />
+                    <div className="h-8 w-24 rounded bg-white/10" />
+                    <div className="h-4 w-full rounded bg-white/5" />
+                    <div className="h-4 w-5/6 rounded bg-white/5" />
+                    <div className="space-y-3 pt-4">
+                      <div className="h-24 rounded-2xl border border-white/8 bg-black/20" />
+                      <div className="h-24 rounded-2xl border border-white/8 bg-black/20" />
+                    </div>
+                    <div className="h-12 rounded-2xl bg-white/10" />
                   </div>
-
-                  <div className="relative mt-6 space-y-4">
-                    {verifiedPlan.featureGroups.map((group) => (
-                      <section key={group.title} className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                        <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-white/55">{group.title}</h3>
-                        <ul className="mt-3 space-y-2">
-                          {group.items.map((item) => (
-                            <li key={item} className="flex items-start gap-2 text-sm leading-6 text-slate-200">
-                              <span className="material-symbols-outlined mt-0.5 text-[16px] text-emerald-400">check_circle</span>
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => !isVerified && handleCheckout("verified")}
-                    disabled={isVerified}
-                    className={
-                      isVerified
-                        ? "relative mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-300"
-                        : "relative mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 px-4 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
-                    }
-                  >
-                    {isVerified ? "Verified" : verifiedPlan.ctaLabel}
-                  </button>
                 </article>
-              );
-            })()}
+              ))
+            ) : (
+              <>
+                {plans.filter((p) => p.id === "starter" || p.id === "pro").map((plan) => (
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    currentPlanId={billingState?.currentPlanId}
+                    onSelect={(selectedPlanId) => void handleCheckout(selectedPlanId)}
+                  />
+                ))}
+
+                {(() => {
+                  const verifiedPlan = plans.find((p) => p.id === "verified");
+                  if (!verifiedPlan || !billingState) return null;
+                  const isVerified = billingState.currentPlanId === "verified" || billingState.isVerified;
+                  return (
+                    <article className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
+                      <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(52,211,153,0.14),transparent_68%)]" />
+                      <div className="relative">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-400/70">One-time payment</p>
+                        <h2 className="mt-1 text-2xl font-black tracking-tight text-white">{verifiedPlan.name}</h2>
+                        <p className="mt-2 text-3xl font-black text-white">{verifiedPlan.priceLabel}</p>
+                        <p className="mt-3 max-w-[34ch] text-sm leading-6 text-slate-300">{verifiedPlan.shortDescription}</p>
+                      </div>
+
+                      <div className="relative mt-6 space-y-4">
+                        {verifiedPlan.featureGroups.map((group) => (
+                          <section key={group.title} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-white/55">{group.title}</h3>
+                            <ul className="mt-3 space-y-2">
+                              {group.items.map((item) => (
+                                <li key={item} className="flex items-start gap-2 text-sm leading-6 text-slate-200">
+                                  <span className="material-symbols-outlined mt-0.5 text-[16px] text-emerald-400">check_circle</span>
+                                  <span>{item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => !isVerified && handleCheckout("verified")}
+                        disabled={isVerified}
+                        className={
+                          isVerified
+                            ? "relative mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-300"
+                            : "relative mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 px-4 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        }
+                      >
+                        {isVerified ? "Verified" : verifiedPlan.ctaLabel}
+                      </button>
+                    </article>
+                  );
+                })()}
+              </>
+            )}
           </section>
 
           <section className="mt-8 grid gap-5 lg:grid-cols-2">
