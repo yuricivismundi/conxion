@@ -75,7 +75,7 @@ export default function ComposeDialog({
                     Find Connections
                   </Link>
                   <Link
-                    href="/trips"
+                    href="/activity?tab=trips"
                     className="rounded-full border border-white/20 bg-black/25 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-cyan-300/30 hover:text-cyan-100"
                   >
                     Browse Trips

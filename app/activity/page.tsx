@@ -367,7 +367,7 @@ function ActivityPageContent() {
           </section>
 
           {activeTab === "events" ? <MyEventsPage onCanCreate={setCanCreateAction} searchQuery={eventsSearch} /> : null}
-          {activeTab === "trips" ? <TripsPage /> : null}
+          {activeTab === "trips" ? <TripsPage onCanCreate={setCanCreateAction} /> : null}
           {activeTab === "groups" ? <GroupsPanel onCanCreate={setCanCreateAction} /> : null}
           {activeTab === "hosting" ? <HostingPanel /> : null}
         </div>
@@ -400,7 +400,7 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
     const userId = authData.user.id;
     const billingState = getBillingAccountState({ userMetadata: authData.user.user_metadata });
     setMeId(userId);
-    setGroupLimit(getPlanLimits(billingState.currentPlanId).eventsPerMonth);
+    setGroupLimit(getPlanLimits(billingState.currentPlanId).privateGroupsPerMonth);
 
     // Fetch all group_members rows for this user to find which groups they belong to
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

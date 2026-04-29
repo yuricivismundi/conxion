@@ -179,7 +179,7 @@ export default function Nav({ title }: NavProps) {
     { href: "/messages", label: t("nav.messages"), icon: "chat" },
     { href: "/events", label: t("nav.events"), icon: "calendar_today" },
     { href: "/network", label: t("nav.network"), icon: "hub" },
-    { href: "/trips", label: t("nav.trips"), icon: "travel_explore" },
+    { href: "/activity", label: t("nav.trips"), icon: "travel_explore" },
   ];
 
   async function signOut() {
@@ -199,7 +199,8 @@ export default function Nav({ title }: NavProps) {
     if (pathname?.startsWith("/connections")) return "/discover";
     if (pathname?.startsWith("/messages")) return "/messages";
     if (pathname?.startsWith("/events")) return "/events";
-    if (pathname?.startsWith("/trips")) return "/trips";
+    if (pathname?.startsWith("/activity")) return "/activity";
+    if (pathname?.startsWith("/trips")) return "/activity";
     if (pathname?.startsWith("/dashboard")) return "/account";
     if (pathname?.startsWith("/my-space")) return "/account";
     if (pathname?.startsWith("/dance-space")) return "/account";
