@@ -243,8 +243,9 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [checkoutPlanId, setCheckoutPlanId] = useState<"verified" | "pro" | null>(null);
+  const [previewItem, setPreviewItem] = useState<ProfileMediaItem | null>(null);
   const { open, reason, openForReason, closeUpgradeModal } = useUpgradeModal("media_limit_reached");
-  useBodyScrollLock(Boolean(videoDraft));
+  useBodyScrollLock(Boolean(videoDraft) || Boolean(previewItem));
 
   const counts = useMemo(
     () => countProfileMedia(media, billingPlanId, { avatarPhotoCount }),
@@ -913,8 +914,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
   }
 
   return (
-      <div className={embedded ? "space-y-4" : "space-y-6"}>
-        {!embedded ? (
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
+      {!embedded ? (
         <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
           <Link
             href="/me/edit"
@@ -927,8 +928,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
 
       <section
         className={cx(
-          "min-w-0 border border-white/10 bg-[linear-gradient(145deg,rgba(8,14,18,0.94),rgba(7,18,24,0.78))] shadow-[0_28px_80px_rgba(0,0,0,0.36)]",
-          embedded ? "rounded-[22px] p-4" : "rounded-[26px] p-4 sm:rounded-[30px] sm:p-6"
+          "min-w-0",
+          !embedded && "border border-white/10 bg-[linear-gradient(145deg,rgba(8,14,18,0.94),rgba(7,18,24,0.78))] shadow-[0_28px_80px_rgba(0,0,0,0.36)] rounded-[26px] p-4 sm:rounded-[30px] sm:p-6"
         )}
       >
         {!embedded ? (
@@ -966,9 +967,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                     {uploadingVideo ? "Uploading…" : "Upload video"}
                   </button>
                 ) : (
-                  <div
-                    className="inline-flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/40 cursor-default select-none"
-                  >
+                  <div className="inline-flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/40 cursor-default select-none">
                     Full capacity
                   </div>
                 )}
@@ -979,7 +978,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
             {(() => {
               const isPlus = billingPlanId === "pro";
               const showcaseLimit = isPlus ? 3 : 0;
-              const showcaseUsed = counts.uploadedPhotos; // media photos only, avatar excluded
+              const showcaseUsed = counts.uploadedPhotos;
               const canUploadShowcase = isPlus && showcaseUsed < showcaseLimit;
               return (
                 <div className="rounded-[20px] border border-white/10 bg-black/25 p-3.5">
@@ -1025,26 +1024,8 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
             })()}
 
             {/* Hidden inputs */}
-            <input
-              ref={videoInputRef}
-              type="file"
-              accept={PROFILE_MEDIA_ACCEPTED_VIDEO_MIME_TYPES.join(",")}
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                void handleVideoPicked(file);
-              }}
-            />
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                void handlePhotoPicked(file);
-              }}
-            />
+            <input ref={videoInputRef} type="file" accept={PROFILE_MEDIA_ACCEPTED_VIDEO_MIME_TYPES.join(",")} className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; void handleVideoPicked(file); }} />
+            <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; void handlePhotoPicked(file); }} />
           </div>
         ) : (
           <div className={cx(error || info ? "mt-3" : "mt-5", "grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]")}>
@@ -1142,64 +1123,74 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
         ) : null}
       </section>
 
-      <section className={cx("min-w-0 border border-white/10 bg-[linear-gradient(145deg,rgba(8,14,18,0.94),rgba(7,18,24,0.78))] shadow-[0_28px_80px_rgba(0,0,0,0.34)]", embedded ? "rounded-[24px] p-4" : "rounded-[26px] p-4 sm:rounded-[30px] sm:p-6")}>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <h2 className={cx("font-bold text-white", embedded ? "text-base" : "mt-2 text-xl")}>{embedded ? "Your media" : "Arrange Order"}</h2>
-          {embedded && media.length > 1 ? (
-            <span className="text-[11px] text-slate-500">Drag to reorder</span>
-          ) : null}
-        </div>
+      <section className={cx("min-w-0", !embedded && "border border-white/10 bg-[linear-gradient(145deg,rgba(8,14,18,0.94),rgba(7,18,24,0.78))] shadow-[0_28px_80px_rgba(0,0,0,0.34)] rounded-[26px] p-4 sm:rounded-[30px] sm:p-6")}>
+        {(() => {
+          const isPlus = billingPlanId === "pro";
+          const videoItems = media.filter((m) => m.kind === "video");
+          const photoItems = media.filter((m) => m.kind === "photo");
+          // For non-Plus: videos first, then photos (locked). For Plus: natural order.
+          const orderedMedia = isPlus ? media : [...videoItems, ...photoItems];
+          const emptyPhotoSlots = !isPlus ? Math.max(0, 3 - photoItems.length) : 0;
 
-        {media.length === 0 ? (
-          <div className="mt-5 rounded-[24px] border border-dashed border-white/12 bg-black/20 px-4 py-10 text-center text-sm text-slate-400">
-            Upload your first photo or video to start the row.
-          </div>
-        ) : (
-          <div
-            className={cx(
-              "mt-4",
-              embedded
-                ? "grid grid-cols-3 gap-2"
-                : "-mx-1 flex gap-3 overflow-x-auto overflow-y-visible px-1 pb-3"
-            )}
-          >
-            {uploadingVideo && (
-              <div className={cx(
-                "animate-pulse rounded-[20px] border border-white/10 bg-white/[0.04] flex flex-col items-center justify-center gap-2",
-                embedded ? "aspect-[3/4]" : "h-[220px] w-[160px] shrink-0"
-              )}>
-                <span className="material-symbols-outlined text-[28px] text-white/20 animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
-                <p className="text-[10px] font-semibold text-white/30">Uploading…</p>
+          return (
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h2 className={cx("font-bold text-white", embedded ? "text-base" : "mt-2 text-xl")}>{embedded ? "Your media" : "Arrange Order"}</h2>
+                {embedded && (isPlus ? media.length > 1 : videoItems.length > 1) ? (
+                  <span className="text-[11px] text-slate-500">Drag to reorder</span>
+                ) : null}
               </div>
-            )}
-            {media.map((item, index) => {
-              const poster = mediaPoster(item);
-              const statusBusy = busyId?.endsWith(item.id);
-              const menuOpen = activeMenuId === item.id;
-              const canSetProfilePicture = item.kind === "photo" && item.status === "ready" && Boolean(item.publicUrl);
-              const canSetMain = item.status === "ready" && !item.isPrimary;
+
+
+              {media.length === 0 ? (
+                <div className="mt-5 rounded-[24px] border border-dashed border-white/12 bg-black/20 px-4 py-10 text-center text-sm text-slate-400">
+                  Upload your first photo or video to start the row.
+                </div>
+              ) : (
+                <div
+                  className={cx(
+                    "mt-4",
+                    embedded
+                      ? "grid grid-cols-3 gap-2"
+                      : "-mx-1 flex gap-3 overflow-x-auto overflow-y-visible px-1 pb-3"
+                  )}
+                >
+                  {uploadingVideo && (
+                    <div className={cx(
+                      "animate-pulse rounded-[20px] border border-white/10 bg-white/[0.04] flex flex-col items-center justify-center gap-2",
+                      embedded ? "aspect-[3/4]" : "h-[220px] w-[160px] shrink-0"
+                    )}>
+                      <span className="material-symbols-outlined text-[28px] text-white/20 animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
+                      <p className="text-[10px] font-semibold text-white/30">Uploading…</p>
+                    </div>
+                  )}
+                  {orderedMedia.map((item, index) => {
+                    const isPhotoLocked = item.kind === "photo" && !isPlus;
+                    const poster = mediaPoster(item);
+                    const statusBusy = busyId?.endsWith(item.id);
+                    const menuOpen = activeMenuId === item.id;
+                    const canSetProfilePicture = item.kind === "photo" && item.status === "ready" && Boolean(item.publicUrl);
+                    const canSetMain = item.status === "ready" && !item.isPrimary;
               return (
                 <div
                   key={item.id}
                   data-media-menu-root={item.id}
-                  draggable={media.length > 1 && !Boolean(statusBusy)}
+                  draggable={!isPhotoLocked && media.length > 1 && !Boolean(statusBusy)}
                   onDragStart={(event) => {
-                    if (statusBusy) {
-                      event.preventDefault();
-                      return;
-                    }
+                    if (isPhotoLocked || statusBusy) { event.preventDefault(); return; }
                     setDraggingId(item.id);
                     setDragOverId(item.id);
                     event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData("text/plain", item.id);
                   }}
                   onDragOver={(event) => {
-                    if (!draggingId || draggingId === item.id) return;
+                    if (isPhotoLocked || !draggingId || draggingId === item.id) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
                     setDragOverId(item.id);
                   }}
                   onDrop={(event) => {
+                    if (isPhotoLocked) return;
                     event.preventDefault();
                     const sourceId = event.dataTransfer.getData("text/plain") || draggingId;
                     setDraggingId(null);
@@ -1208,41 +1199,55 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                       void moveItemToIndex(sourceId, index);
                     }
                   }}
-                  onDragEnd={() => {
-                    setDraggingId(null);
-                    setDragOverId(null);
-                  }}
+                  onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
                   className={cx(
                     "relative",
                     embedded ? "w-full min-w-0" : "w-[178px] shrink-0 snap-start sm:w-[206px]"
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActiveMenuId((current) => (current === item.id ? null : item.id));
-                    }}
-                    className={cx(
-                      "absolute z-[4] inline-flex items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/90 backdrop-blur hover:bg-black/70",
-                      embedded ? "right-1.5 top-1.5 h-7 w-7" : "right-3 top-3 h-10 w-10"
-                    )}
-                    aria-label="Open media options"
-                  >
-                    <span className={cx("material-symbols-outlined", embedded ? "text-[14px]" : "text-[18px]")}>edit</span>
-                  </button>
+                  {!isPhotoLocked && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActiveMenuId((current) => (current === item.id ? null : item.id));
+                      }}
+                      className={cx(
+                        "absolute z-[4] inline-flex items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/90 backdrop-blur hover:bg-black/70",
+                        embedded ? "right-1.5 top-1.5 h-7 w-7" : "right-3 top-3 h-10 w-10"
+                      )}
+                      aria-label="Open media options"
+                    >
+                      <span className={cx("material-symbols-outlined", embedded ? "text-[14px]" : "text-[18px]")}>edit</span>
+                    </button>
+                  )}
 
                   <div
                     className={cx(
                       "overflow-hidden border bg-[linear-gradient(150deg,rgba(255,255,255,0.04),rgba(6,10,16,0.94))] shadow-[0_8px_20px_rgba(0,0,0,0.24)] transition",
                       embedded ? "rounded-[16px]" : "rounded-[24px] shadow-[0_16px_38px_rgba(0,0,0,0.24)]",
-                      item.isPrimary ? "border-cyan-300/35" : "border-white/10",
+                      isPhotoLocked ? "border-fuchsia-400/15" : item.isPrimary ? "border-cyan-300/35" : "border-white/10",
                       dragOverId === item.id && draggingId !== item.id ? "border-cyan-300/45" : "",
                       draggingId === item.id ? "opacity-60" : ""
                     )}
                   >
-                    <div className={cx("relative overflow-hidden bg-[#071018]", embedded ? "aspect-square" : "aspect-[4/5]")}>
-                      {poster ? <img src={poster} alt="" className="h-full w-full object-cover" loading="lazy" /> : null}
+                    <div
+                      className={cx("relative overflow-hidden bg-[#071018]", embedded ? "aspect-square" : "aspect-[4/5]", !isPhotoLocked && item.status === "ready" ? "cursor-pointer" : "")}
+                      onClick={() => { if (!isPhotoLocked && item.status === "ready") setPreviewItem(item); }}
+                    >
+                      {poster ? <img src={poster} alt="" className={cx("h-full w-full object-cover", isPhotoLocked ? "blur-sm opacity-30" : "")} loading="lazy" /> : null}
+                      {isPhotoLocked && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/40">
+                          <span className="material-symbols-outlined text-[22px] text-fuchsia-300/70">lock</span>
+                          <button
+                            type="button"
+                            onClick={() => openForReason("media_limit_reached")}
+                            className="rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-2.5 py-1 text-[10px] font-bold text-[#06121a]"
+                          >
+                            Plus only
+                          </button>
+                        </div>
+                      )}
                       {!poster ? (
                         <div className="flex h-full items-center justify-center text-slate-500">
                           <span className="material-symbols-outlined text-[28px]">{item.kind === "video" ? "movie" : "image"}</span>
@@ -1420,9 +1425,12 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                   ) : null}
                 </div>
               );
-            })}
-          </div>
-        )}
+                  })}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </section>
 
       <div className="flex">
@@ -1597,6 +1605,44 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                 {uploadingVideo ? (needsVideoTrim ? "Uploading clip..." : "Uploading video...") : needsVideoTrim ? "Use clip" : "Upload video"}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Media preview lightbox */}
+      {previewItem ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/88 px-4 backdrop-blur-md"
+          onClick={() => setPreviewItem(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewItem(null)}
+            className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/80 hover:bg-black/70"
+            aria-label="Close preview"
+          >
+            <span className="material-symbols-outlined text-[20px]">close</span>
+          </button>
+          <div
+            className="max-h-[90dvh] max-w-[min(90vw,720px)] overflow-hidden rounded-[24px] border border-white/10 shadow-[0_32px_80px_rgba(0,0,0,0.6)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {previewItem.kind === "photo" ? (
+              <img
+                src={previewItem.publicUrl ?? ""}
+                alt=""
+                className="block max-h-[90dvh] w-auto object-contain"
+              />
+            ) : (
+              <video
+                src={previewItem.playbackUrl ?? previewItem.thumbnailUrl ?? ""}
+                poster={previewItem.thumbnailUrl ?? undefined}
+                controls
+                autoPlay
+                playsInline
+                className="block max-h-[90dvh] w-full"
+              />
+            )}
           </div>
         </div>
       ) : null}

@@ -10,9 +10,10 @@ import {
   getCountriesAll,
   type CountryEntry,
 } from "@/lib/country-city-client";
-import { getAvatarStorageUrl, resolveAvatarUrl } from "@/lib/avatar-storage";
+import { resolveAvatarUrl } from "@/lib/avatar-storage";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import Nav from "@/components/Nav";
 import VerifiedBadge from "@/components/VerifiedBadge";
 import SearchableMobileSelect from "@/components/SearchableMobileSelect";
@@ -92,23 +93,23 @@ const AVAILABILITY_OPTIONS = [
   "Weekends",
   "Daytime",
   "Evenings",
-  "Travel for events",
+  "Travel",
   "Rather not say",
 ] as const;
 
 const LANGUAGE_OPTIONS = [
-  "English",
-  "Spanish",
-  "Italian",
-  "Estonian",
-  "French",
-  "German",
-  "Portuguese",
-  "Russian",
-  "Ukrainian",
-  "Polish",
-  "Swedish",
-  "Finnish",
+  "English", "Spanish", "French", "German", "Portuguese", "Italian", "Russian",
+  "Arabic", "Chinese (Mandarin)", "Chinese (Cantonese)", "Japanese", "Korean",
+  "Hindi", "Bengali", "Urdu", "Punjabi", "Tamil", "Telugu", "Marathi",
+  "Turkish", "Dutch", "Polish", "Ukrainian", "Czech", "Slovak", "Romanian",
+  "Hungarian", "Bulgarian", "Serbian", "Croatian", "Bosnian", "Slovenian",
+  "Greek", "Swedish", "Norwegian", "Danish", "Finnish", "Estonian", "Latvian",
+  "Lithuanian", "Albanian", "Macedonian", "Montenegrin",
+  "Hebrew", "Persian (Farsi)", "Pashto", "Kurdish",
+  "Indonesian", "Malay", "Tagalog", "Vietnamese", "Thai", "Khmer", "Burmese",
+  "Swahili", "Amharic", "Yoruba", "Igbo", "Hausa", "Zulu", "Xhosa",
+  "Afrikaans", "Somali",
+  "Georgian", "Armenian", "Azerbaijani", "Kazakh", "Uzbek",
 ] as const;
 
 type DanceSkill = {
@@ -219,6 +220,45 @@ type SnapshotValues = {
 
 type EditProfileTab = "profile" | "media" | "hosting" | "teacher_services" | "teacher_profile";
 
+const PROFILE_EDIT_SELECT = [
+  "user_id",
+  "display_name",
+  "username",
+  "username_updated_at",
+  "username_changed_at",
+  "city",
+  "country",
+  "nationality",
+  "dance_styles",
+  "dance_skills",
+  "roles",
+  "display_role",
+  "languages",
+  "interests",
+  "availability",
+  "instagram_handle",
+  "whatsapp_handle",
+  "youtube_url",
+  "avatar_url",
+  "avatar_path",
+  "verified",
+  "verification_type",
+  "verified_label",
+  "can_host",
+  "hosting_status",
+  "max_guests",
+  "hosting_last_minute_ok",
+  "hosting_preferred_guest_gender",
+  "hosting_kid_friendly",
+  "hosting_pet_friendly",
+  "hosting_smoking_allowed",
+  "hosting_sleeping_arrangement",
+  "hosting_guest_share",
+  "hosting_transit_access",
+  "hosting_notes",
+  "house_rules",
+].join(",");
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
@@ -276,7 +316,9 @@ function isMissingSchemaError(message: string) {
     text.includes("schema cache") ||
     text.includes("does not exist") ||
     text.includes("could not find the table") ||
-    text.includes("relation")
+    text.includes("relation") ||
+    text.includes("not found") ||
+    text.includes("404")
   );
 }
 
@@ -333,11 +375,9 @@ const CROP_FRAME_SIZE = 320;
 const MAX_DISPLAY_NAME_LENGTH = 48;
 const MAX_NATIONALITY_LENGTH = 40;
 const MAX_CUSTOM_STYLE_LENGTH = 32;
-const TOTAL_PROFILE_SECTIONS = 4;
 
 async function makePreviewMatchedCroppedBlob(params: {
   src: string;
-  mime: string;
   preview: { renderWidth: number; renderHeight: number; offsetX: number; offsetY: number };
 }) {
   const image = new window.Image();
@@ -376,9 +416,8 @@ async function makePreviewMatchedCroppedBlob(params: {
   context.clearRect(0, 0, outputSize, outputSize);
   context.drawImage(image, left, top, outWidth, outHeight);
 
-  const mime = params.mime.startsWith("image/") ? params.mime : "image/jpeg";
   const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((value) => resolve(value), mime, 0.92);
+    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92);
   });
 
   if (!blob) throw new Error("Could not create cropped image.");
@@ -399,6 +438,23 @@ function EditMePage() {
   const countryNames = useMemo(() => countriesAll.map((entry) => entry.name), [countriesAll]);
 
   const [meId, setMeId] = useState<string | null>(null);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [sectionSnapshots, setSectionSnapshots] = useState<Record<string, string>>({});
+
+  function openSection(id: string, snapshotData: unknown) {
+    setSectionSnapshots((prev) => ({ ...prev, [id]: JSON.stringify(snapshotData) }));
+    setOpenSections((prev) => ({ ...prev, [id]: true }));
+  }
+  function closeSection(id: string) {
+    setOpenSections((prev) => ({ ...prev, [id]: false }));
+  }
+  function isSectionDirty(id: string, currentData: unknown) {
+    return sectionSnapshots[id] !== JSON.stringify(currentData);
+  }
+  const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null);
+  const [trialExpiredBadge, setTrialExpiredBadge] = useState(false);
+  const [teacherProfileOn, setTeacherProfileOn] = useState<boolean | null>(null);
+  const [inquiriesOn, setInquiriesOn] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveStage, setSaveStage] = useState<"idle" | "saving" | "redirecting">("idle");
@@ -453,20 +509,24 @@ function EditMePage() {
   const [hostingGuestShare, setHostingGuestShare] = useState("");
   const [hostingTransitAccess, setHostingTransitAccess] = useState("");
   const [hostingNotes, setHostingNotes] = useState("");
+  const [showAdditionalHostingInfo, setShowAdditionalHostingInfo] = useState(false);
   const [houseRules, setHouseRules] = useState("");
   const [paymentVerified, setPaymentVerified] = useState(false);
   const rawTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<EditProfileTab>(isValidTab(rawTab) ? rawTab : "profile");
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
+  const [followersCount, setFollowersCount] = useState<number | null>(null);
+  const [followingCount, setFollowingCount] = useState<number | null>(null);
   const [photoOpen, setPhotoOpen] = useState(false);
 
   const [cropSource, setCropSource] = useState<string | null>(null);
-  const [cropMime, setCropMime] = useState("image/jpeg");
   const [cropZoom, setCropZoom] = useState(1);
   const [cropPanX, setCropPanX] = useState(0);
   const [cropPanY, setCropPanY] = useState(0);
   const [cropNaturalSize, setCropNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [cropError, setCropError] = useState<string | null>(null);
   useBodyScrollLock(Boolean(photoOpen || cropSource || saveStage !== "idle"));
 
   const [initialSnapshot, setInitialSnapshot] = useState("");
@@ -571,10 +631,6 @@ function EditMePage() {
     () => selectedStyles.filter((style) => !(danceSkills[style]?.level ?? "").trim()),
     [danceSkills, selectedStyles]
   );
-  const sectionBasicsComplete = normalizedDisplayName.length >= 2 && normalizedCountry.length > 0 && normalizedCity.length > 0;
-  const sectionDanceComplete = selectedStyles.length > 0 && stylesMissingLevel.length === 0;
-  const sectionRolesComplete = roles.length > 0;
-  const sectionContactsComplete = languages.length > 0;
 
   useEffect(() => {
     if (!meId) return;
@@ -641,28 +697,6 @@ function EditMePage() {
     usernameFormat.error,
     usernameFormat.valid,
   ]);
-  const sectionCompletion = useMemo(
-    () => [
-      { id: "basics", label: "Basics", done: sectionBasicsComplete },
-      { id: "dna", label: "Dance DNA", done: sectionDanceComplete },
-      { id: "roles", label: "Roles", done: sectionRolesComplete },
-      { id: "languages", label: "Languages", done: sectionContactsComplete },
-    ],
-    [sectionBasicsComplete, sectionDanceComplete, sectionRolesComplete, sectionContactsComplete]
-  );
-  const completedSections = useMemo(() => sectionCompletion.filter((item) => item.done).length, [sectionCompletion]);
-  const sectionProgressPercent = useMemo(
-    () => Math.round((completedSections / TOTAL_PROFILE_SECTIONS) * 100),
-    [completedSections]
-  );
-  const saveBarMessage =
-    saveStage === "saving"
-      ? "Saving profile..."
-      : saveStage === "redirecting"
-        ? "Saved. Redirecting to account settings..."
-        : hasUnsavedChanges
-          ? "You have unsaved changes."
-          : "All changes saved.";
 
   useEffect(() => {
     if (!error) return;
@@ -680,7 +714,7 @@ function EditMePage() {
     { id: "profile", label: "Profile info" },
     { id: "media", label: "Media" },
     { id: "hosting", label: "Hosting" },
-    { id: "teacher_services", label: "Teacher services" },
+    { id: "teacher_services", label: "Inquiries" },
     { id: "teacher_profile", label: "Teacher profile" },
   ];
 
@@ -714,6 +748,23 @@ function EditMePage() {
       offsetY: cropPanY * maxOffsetY,
     };
   }, [cropNaturalSize, cropPanX, cropPanY, cropSource, cropZoom]);
+  const displayAvatarUrl = localAvatarPreviewUrl ?? avatarUrl;
+
+  function clearBrokenAvatarPreview() {
+    setAvatarUrl(null);
+    setLocalAvatarPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      if (localAvatarPreviewUrl) {
+        URL.revokeObjectURL(localAvatarPreviewUrl);
+      }
+    };
+  }, [localAvatarPreviewUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -790,7 +841,18 @@ function EditMePage() {
 
         setMeId(user.id);
 
-        const profileRes = await supabase.from("profiles").select("*").eq("user_id", user.id).maybeSingle();
+        void (async () => {
+          const [followersRes, followingRes] = await Promise.all([
+            supabase.from("dance_contacts").select("user_id", { count: "exact", head: true }).eq("linked_user_id", user.id).eq("is_following", true).eq("contact_type", "member"),
+            supabase.from("dance_contacts").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("is_following", true).eq("contact_type", "member"),
+          ]);
+          if (!cancelled) {
+            setFollowersCount(followersRes.count ?? 0);
+            setFollowingCount(followingRes.count ?? 0);
+          }
+        })();
+
+        const profileRes = await supabase.from("profiles").select(PROFILE_EDIT_SELECT).eq("user_id", user.id).maybeSingle();
         if (cancelled) return;
 
         if (profileRes.error) {
@@ -803,7 +865,7 @@ function EditMePage() {
           return;
         }
 
-        const profile = profileRes.data as Profile;
+        const profile = (profileRes.data ?? null) as unknown as Profile;
 
         const nextDisplayName = (profile.display_name ?? "").slice(0, MAX_DISPLAY_NAME_LENGTH);
         const nextUsername = normalizeProfileUsernameInput(profile.username ?? suggestProfileUsername(nextDisplayName));
@@ -872,10 +934,11 @@ function EditMePage() {
           Object.keys(nextDanceSkills).find((style) => !CORE_STYLES.includes(style as (typeof CORE_STYLES)[number])) ?? "";
         setOtherStyleEnabled(Boolean(existingOtherStyle));
         setCustomStyleDraft(existingOtherStyle);
-        setRoles(normalizeLegacyRoles(nextRoles));
+        const normalizedRoles = normalizeLegacyRoles(nextRoles);
+        setRoles(normalizedRoles.length > 0 ? normalizedRoles : ["Social Dancer"]);
         setDisplayRole(typeof profile.display_role === "string" && profile.display_role ? profile.display_role : null);
-        setInterests(nextInterests);
-        setAvailability(nextAvailability);
+        setInterests(nextInterests.length > 0 ? nextInterests : ["Social dancing"]);
+        setAvailability(nextAvailability.length > 0 ? nextAvailability : ["Rather not say"]);
         setLanguages(nextLanguages);
         setInstagramHandle(nextInstagram);
         setWhatsappHandle(nextWhatsapp);
@@ -895,24 +958,7 @@ function EditMePage() {
         setHouseRules(nextHouseRules);
         setPaymentVerified(profile?.verified === true);
         setAvatarUrl(nextAvatarUrl);
-
-        const pendingRes = await supabase
-          .from("style_verification_requests")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("status", "pending");
-
-        if (!cancelled) {
-          if (pendingRes.error) {
-            if (isMissingSchemaError(pendingRes.error.message)) {
-              setVerificationFeatureAvailable(false);
-            } else {
-              setError(pendingRes.error.message);
-            }
-          } else {
-            setVerificationFeatureAvailable(true);
-          }
-        }
+        setLocalAvatarPreviewUrl(null);
 
         setInitialSnapshot(
           serializeDraft({
@@ -945,6 +991,63 @@ function EditMePage() {
             avatarUrl: nextAvatarUrl,
           })
         );
+
+        setLoading(false);
+
+        // Fetch teacher profile trial status + on/off states in background.
+        void (async () => {
+          try {
+            const [tpRes, inqRes] = await Promise.all([
+              supabase
+                .from("teacher_profiles")
+                .select("teacher_profile_trial_ends_at, teacher_profile_trial_started_at, teacher_profile_enabled")
+                .eq("user_id", user.id)
+                .maybeSingle(),
+              supabase
+                .from("teacher_info_profile")
+                .select("is_enabled")
+                .eq("user_id", user.id)
+                .maybeSingle(),
+            ]);
+            if (!cancelled) {
+              if (tpRes.data) {
+                const endsAt = tpRes.data.teacher_profile_trial_ends_at as string | null;
+                const startedAt = tpRes.data.teacher_profile_trial_started_at as string | null;
+                if (endsAt) {
+                  const diff = new Date(endsAt).getTime() - Date.now();
+                  if (diff > 0) {
+                    setTrialDaysLeft(Math.ceil(diff / (1000 * 60 * 60 * 24)));
+                  } else if (startedAt) {
+                    setTrialExpiredBadge(true);
+                  }
+                }
+                setTeacherProfileOn(tpRes.data.teacher_profile_enabled === true);
+              }
+              if (inqRes.data) {
+                setInquiriesOn(inqRes.data.is_enabled === true);
+              }
+            }
+          } catch { /* ignore */ }
+        })();
+
+        // Run this in the background so the page becomes interactive immediately.
+        void (async () => {
+          try {
+            const pendingRes = await supabase
+              .from("style_verification_requests")
+              .select("id")
+              .eq("user_id", user.id)
+              .eq("status", "pending")
+              .limit(1);
+            if (!cancelled) {
+              setVerificationFeatureAvailable(!pendingRes.error);
+            }
+          } catch {
+            if (!cancelled) {
+              setVerificationFeatureAvailable(false);
+            }
+          }
+        })();
       } catch (err: unknown) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Could not load your profile.");
@@ -1136,6 +1239,7 @@ function EditMePage() {
 
   async function onRawFilePicked(file: File) {
     setError(null);
+    setCropError(null);
 
     try {
       if (!file.type.startsWith("image/")) throw new Error("Please upload an image.");
@@ -1166,7 +1270,6 @@ function EditMePage() {
         image.src = dataUrl;
       });
 
-      setCropMime(file.type || "image/jpeg");
       setCropZoom(1);
       setCropPanX(0);
       setCropPanY(0);
@@ -1182,30 +1285,47 @@ function EditMePage() {
 
     setUploading(true);
     setError(null);
+    setCropError(null);
+
+    let nextLocalPreviewUrl: string | null = null;
 
     try {
       const blob = await makePreviewMatchedCroppedBlob({
         src: cropSource,
-        mime: cropMime,
         preview: cropPreview,
       });
-      const ext = cropMime.includes("png") ? "png" : cropMime.includes("webp") ? "webp" : "jpg";
-      const path = `${meId}/${crypto.randomUUID()}.${ext}`;
+      const sessionRes = await supabase.auth.getSession();
+      const accessToken = sessionRes.data.session?.access_token?.trim() ?? "";
+      if (!accessToken) throw new Error("Please sign in again.");
 
-      const uploadRes = await supabase.storage.from("avatars").upload(path, blob, {
-        contentType: cropMime,
-        upsert: true,
+      const formData = new FormData();
+      formData.append("file", new File([blob], "avatar.jpg", { type: "image/jpeg" }));
+
+      const uploadResponse = await fetch("/api/profile/avatar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: formData,
       });
-      if (uploadRes.error) throw uploadRes.error;
 
-      const publicUrl = getAvatarStorageUrl(path) ?? supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl;
-      const updateRes = await supabase
-        .from("profiles")
-        .update({ avatar_url: publicUrl, avatar_path: path, avatar_status: "pending" })
-        .eq("user_id", meId);
-      if (updateRes.error) throw updateRes.error;
+      const uploadPayload = (await uploadResponse.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; url?: string }
+        | null;
 
+      if (!uploadResponse.ok || !uploadPayload?.ok || !uploadPayload.url) {
+        throw new Error(uploadPayload?.error?.trim() || "Upload failed.");
+      }
+
+      const publicUrl = uploadPayload.url;
+
+      nextLocalPreviewUrl = URL.createObjectURL(blob);
+      setLocalAvatarPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return nextLocalPreviewUrl;
+      });
       setAvatarUrl(publicUrl);
+      setCropError(null);
       setCropSource(null);
       setCropNaturalSize(null);
 
@@ -1241,10 +1361,117 @@ function EditMePage() {
         })
       );
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      if (nextLocalPreviewUrl) {
+        URL.revokeObjectURL(nextLocalPreviewUrl);
+      }
+      setCropError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
+  }
+
+  async function doSave(): Promise<boolean> {
+    if (!meId) return false;
+    setSaving(true);
+    setSaveStage("saving");
+    setError(null);
+
+    const sanitizedDanceSkills = sanitizeDanceSkillsForSave(danceSkills);
+    const maxGuestsValue = maxGuests.trim();
+    const parsedMaxGuests = maxGuestsValue ? Number(maxGuestsValue) : Number.NaN;
+
+    if (maxGuestsValue && (!Number.isFinite(parsedMaxGuests) || parsedMaxGuests < 0 || parsedMaxGuests > 20)) {
+      setSaving(false);
+      setSaveStage("idle");
+      setError("Max guests must be between 0 and 20.");
+      return false;
+    }
+
+    const payload: ProfileUpdate = {
+      display_name: normalizedDisplayName,
+      username: normalizedUsername,
+      country: normalizedCountry || null,
+      city: normalizedCity,
+      nationality: normalizedNationality || null,
+      dance_styles: Object.keys(sanitizedDanceSkills).sort(styleSort),
+      dance_skills: sanitizedDanceSkills,
+      roles,
+      display_role: displayRole && roles.includes(displayRole) ? displayRole : (roles[0] ?? null),
+      languages,
+      interests: normalizeInterests(interests),
+      availability,
+      instagram_handle: normalizedIg || null,
+      whatsapp_handle: normalizedWa || null,
+      youtube_url: normalizedYt || null,
+      can_host: acceptingHosting,
+      hosting_status: acceptingHosting ? (hostingStatus === "inactive" ? "available" : hostingStatus) : "inactive",
+      max_guests: maxGuestsValue ? parsedMaxGuests : null,
+      hosting_last_minute_ok: hostingLastMinuteOk,
+      hosting_preferred_guest_gender: hostingPreferredGuestGender,
+      hosting_kid_friendly: hostingKidFriendly,
+      hosting_pet_friendly: hostingPetFriendly,
+      hosting_smoking_allowed: hostingSmokingAllowed,
+      hosting_sleeping_arrangement: hostingSleepingArrangement,
+      hosting_guest_share: hostingGuestShare.trim() || null,
+      hosting_transit_access: hostingTransitAccess.trim() || null,
+      hosting_notes: hostingNotes.trim() || null,
+      house_rules: houseRules.trim() || null,
+    };
+
+    try {
+      const updateRes = await supabase.from("profiles").update(payload).eq("user_id", meId);
+      if (updateRes.error) {
+        setError(mapUsernameServerError(updateRes.error.message ?? "Could not save profile."));
+        setSaving(false);
+        setSaveStage("idle");
+        return false;
+      }
+      if (usernameChanged) {
+        setInitialUsername(normalizedUsername);
+        setUsernameUpdatedAt(new Date().toISOString());
+      }
+      setInitialSnapshot(currentSnapshot);
+      setSaving(false);
+      setSaveStage("idle");
+      return true;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save profile.");
+      setSaveStage("idle");
+      setSaving(false);
+      return false;
+    }
+  }
+
+  async function saveProfile(sectionId?: string) {
+    if (!meId) return;
+    if (normalizedDisplayName.length < 2) { setError("Please enter your display name."); return; }
+    const ok = await doSave();
+    if (ok && sectionId) closeSection(sectionId);
+  }
+
+  function cancelSection(id: string) {
+    const snapshot = sectionSnapshots[id];
+    if (snapshot) {
+      try {
+        const data = JSON.parse(snapshot) as Record<string, unknown>;
+        if (id === "info") {
+          if (typeof data.displayName === "string") setDisplayName(data.displayName);
+          if (typeof data.username === "string") setUsername(data.username);
+          if (typeof data.country === "string") setCountry(data.country);
+          if (typeof data.city === "string") setCity(data.city);
+        } else if (id === "dance") {
+          if (data.danceSkills && typeof data.danceSkills === "object") setDanceSkills(data.danceSkills as Record<string, DanceSkill>);
+        } else if (id === "roles") {
+          if (Array.isArray(data.roles)) setRoles(data.roles as string[]);
+          if (Array.isArray(data.interests)) setInterests(data.interests as string[]);
+          if (Array.isArray(data.availability)) setAvailability(data.availability as string[]);
+          setDisplayRole(typeof data.displayRole === "string" ? data.displayRole : null);
+        } else if (id === "langs") {
+          if (Array.isArray(data.languages)) setLanguages(data.languages as string[]);
+        }
+      } catch { /* ignore */ }
+    }
+    closeSection(id);
   }
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
@@ -1291,74 +1518,12 @@ function EditMePage() {
       return;
     }
 
-    setSaving(true);
-    setSaveStage("saving");
-    setError(null);
+    const ok = await doSave();
+    if (!ok) return;
 
-    const sanitizedDanceSkills = sanitizeDanceSkillsForSave(danceSkills);
-    const maxGuestsValue = maxGuests.trim();
-    const parsedMaxGuests = maxGuestsValue ? Number(maxGuestsValue) : Number.NaN;
-
-    if (maxGuestsValue && (!Number.isFinite(parsedMaxGuests) || parsedMaxGuests < 0 || parsedMaxGuests > 20)) {
-      setSaving(false);
-      setSaveStage("idle");
-      setError("Max guests must be between 0 and 20.");
-      return;
-    }
-
-    const payload: ProfileUpdate = {
-      display_name: normalizedDisplayName,
-      username: normalizedUsername,
-      country: normalizedCountry || null,
-      city: normalizedCity,
-      nationality: normalizedNationality || null,
-      dance_styles: Object.keys(sanitizedDanceSkills).sort(styleSort),
-      dance_skills: sanitizedDanceSkills,
-      roles,
-      display_role: displayRole && roles.includes(displayRole) ? displayRole : (roles[0] ?? null),
-      languages,
-      interests: normalizeInterests(interests),
-      availability,
-      instagram_handle: normalizedIg || null,
-      whatsapp_handle: normalizedWa || null,
-      youtube_url: normalizedYt || null,
-      can_host: acceptingHosting,
-      hosting_status: acceptingHosting ? (hostingStatus === "inactive" ? "available" : hostingStatus) : "inactive",
-      max_guests: maxGuestsValue ? parsedMaxGuests : null,
-      hosting_last_minute_ok: hostingLastMinuteOk,
-      hosting_preferred_guest_gender: hostingPreferredGuestGender,
-      hosting_kid_friendly: hostingKidFriendly,
-      hosting_pet_friendly: hostingPetFriendly,
-      hosting_smoking_allowed: hostingSmokingAllowed,
-      hosting_sleeping_arrangement: hostingSleepingArrangement,
-      hosting_guest_share: hostingGuestShare.trim() || null,
-      hosting_transit_access: hostingTransitAccess.trim() || null,
-      hosting_notes: hostingNotes.trim() || null,
-      house_rules: houseRules.trim() || null,
-    };
-
-    try {
-      const updateRes = await supabase.from("profiles").update(payload).eq("user_id", meId);
-
-      if (updateRes.error) {
-        setError(mapUsernameServerError(updateRes.error.message ?? "Could not save profile."));
-        return;
-      }
-
-      setSaveStage("redirecting");
-      if (usernameChanged) {
-        setInitialUsername(normalizedUsername);
-        setUsernameUpdatedAt(new Date().toISOString());
-      }
-      setInitialSnapshot(currentSnapshot);
-      await new Promise((resolve) => window.setTimeout(resolve, 650));
-      router.replace("/account-settings");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Could not save profile.");
-      setSaveStage("idle");
-      setSaving(false);
-      return;
-    }
+    setSaveStage("redirecting");
+    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    setSaveStage("idle");
   }
 
   function handleLeaveToAccountSettings() {
@@ -1422,153 +1587,143 @@ function EditMePage() {
 
       <main className="mx-auto max-w-[1240px] px-4 pb-28 pt-6 sm:px-6 lg:px-8">
         <form onSubmit={save} className="grid min-w-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-          <aside className="min-w-0 xl:self-start">
-            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-5 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Profile preview</p>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (avatarUrl) setPhotoOpen(true);
-                }}
-                className="mt-4 block w-full"
-                title={avatarUrl ? "Open photo" : "Add a photo"}
-              >
-                <div className="relative mx-auto h-52 w-52 overflow-hidden rounded-3xl border border-white/10 bg-black/30 sm:h-64 sm:w-64 lg:h-72 lg:w-72">
-                  {avatarUrl ? (
-                    <Image src={avatarUrl} alt="Profile avatar" fill className="object-cover object-center" sizes="288px" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">No photo yet</div>
-                  )}
-                  {paymentVerified ? (
-                    <div className="absolute right-2.5 top-2.5 drop-shadow-lg">
-                      <VerifiedBadge size={26} title={VERIFIED_VIA_PAYMENT_LABEL} />
-                    </div>
-                  ) : null}
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 py-3 text-left text-xs text-white/85">
-                    Click to enlarge
+          <aside className="min-w-0 xl:self-start flex justify-center xl:block">
+            <div className="w-52 sm:w-64 lg:w-72 overflow-hidden rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
+              <div className="relative mt-0 w-full">
+                <button
+                  type="button"
+                  onClick={() => { if (displayAvatarUrl) setPhotoOpen(true); }}
+                  className="block"
+                  title={displayAvatarUrl ? "Open photo" : "Add a photo"}
+                >
+                  <div className="relative aspect-square w-full overflow-hidden rounded-3xl border border-white/10 bg-black/30">
+                    {displayAvatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={displayAvatarUrl}
+                        alt="Profile avatar"
+                        className="h-full w-full object-cover object-center"
+                        onError={clearBrokenAvatarPreview}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">No photo yet</div>
+                    )}
                   </div>
-                </div>
-              </button>
+                </button>
+                {/* Camera button */}
+                <label className="absolute bottom-2.5 right-2.5 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-[#1a2228]/90 shadow-lg transition hover:bg-[#243040]/90">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void onRawFilePicked(file);
+                    }}
+                  />
+                  {uploading
+                    ? <span className="material-symbols-outlined text-[16px] animate-spin text-white/60">progress_activity</span>
+                    : <span className="material-symbols-outlined text-[16px] text-white/80">photo_camera</span>
+                  }
+                </label>
+              </div>
 
-              <label className="mt-4 inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/35">
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void onRawFilePicked(file);
-                  }}
-                />
-                {uploading ? "Uploading..." : "Upload / replace photo"}
-              </label>
-
-              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Snapshot</p>
-                <div className="mt-3 space-y-3 text-sm text-slate-200">
-                  <div>
-                    <div className="flex min-w-0 items-center gap-2">
+              <div className="mt-4 space-y-2.5 px-4 pb-4">
+                <div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    {meId ? (
+                      <Link href={`/profile/${meId}`} className="min-w-0 break-words text-base font-semibold leading-tight text-white transition hover:text-[#0df2f2]">
+                        {displayName || "Your name"}
+                      </Link>
+                    ) : (
                       <p className="min-w-0 break-words text-base font-semibold leading-tight text-white">{displayName || "Your name"}</p>
-                      {paymentVerified ? <VerifiedBadge size={16} title={VERIFIED_VIA_PAYMENT_LABEL} /> : null}
-                    </div>
-                    <p className="mt-0.5 text-slate-300">{[city, country].filter(Boolean).join(", ") || "City, Country"}</p>
+                    )}
+                    {paymentVerified ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0df2f2]/80">
+                        <VerifiedBadge size={20} title={VERIFIED_VIA_PAYMENT_LABEL} />
+                        Verified
+                      </span>
+                    ) : null}
                   </div>
+                  <p className="mt-0.5 text-sm text-slate-400">{[city, country].filter(Boolean).join(", ") || "City, Country"}</p>
+                  {(followersCount !== null || followingCount !== null) && (
+                    <p className="mt-1 text-[12px] text-white/45">
+                      {followersCount !== null && <><span className="font-semibold text-white/70">{followersCount}</span> followers</>}
+                      {followersCount !== null && followingCount !== null && <span className="mx-1.5 text-white/20">·</span>}
+                      {followingCount !== null && <><span className="font-semibold text-white/70">{followingCount}</span> following</>}
+                    </p>
+                  )}
+                </div>
 
-                  <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3">
-                    <span className="material-symbols-outlined inline-flex h-8 w-8 shrink-0 items-center justify-center self-center leading-none text-[20px] text-cyan-300">badge</span>
-                    <div className="flex min-w-0 flex-wrap gap-1.5">
-                      {(roles.length > 0 ? roles : ["No role yet"]).slice(0, 3).map((role) => (
-                        <span
-                          key={role}
-                          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-[3px] text-[10px] font-medium text-white/75"
-                        >
-                          {role}
-                        </span>
-                      ))}
-                    </div>
+                <div className="grid grid-cols-3 gap-x-3 gap-y-1 pt-1">
+                  <div className="space-y-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-cyan-300/70">badge</span>
+                    {(roles.length > 0 ? roles : ["—"]).slice(0, 4).map((role) => (
+                      <p key={role} className="text-[11px] text-white/65">{role}</p>
+                    ))}
                   </div>
-
-                  <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3">
-                    <span className="material-symbols-outlined inline-flex h-8 w-8 shrink-0 items-center justify-center self-center leading-none text-[20px] text-cyan-300">interests</span>
-                    <div className="flex min-w-0 flex-wrap gap-1.5">
-                      {(selectedStyles.length > 0 ? selectedStyles : ["No style yet"]).slice(0, 4).map((style) => (
-                        <span
-                          key={style}
-                          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-[3px] text-[10px] font-medium uppercase tracking-wider text-white/65"
-                        >
-                          {style}
-                        </span>
-                      ))}
-                    </div>
+                  <div className="space-y-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-fuchsia-300/70">music_note</span>
+                    {(selectedStyles.length > 0 ? selectedStyles : ["—"]).slice(0, 4).map((style) => (
+                      <p key={style} className="text-[11px] capitalize text-white/65">{style}</p>
+                    ))}
                   </div>
-
-                  <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3">
-                    <span className="material-symbols-outlined inline-flex h-8 w-8 shrink-0 items-center justify-center self-center leading-none text-[20px] text-cyan-300">translate</span>
-                    <div className="flex min-w-0 flex-wrap gap-1.5">
-                      {(languages.length > 0 ? languages : ["No language"]).slice(0, 5).map((language) => (
-                        <span
-                          key={language}
-                          className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] px-1.5 text-[9px] font-bold text-white/70"
-                          title={language}
-                        >
-                          {language.slice(0, 2).toUpperCase()}
-                        </span>
-                      ))}
-                    </div>
+                  <div className="space-y-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-cyan-300/70">translate</span>
+                    {(languages.length > 0 ? languages : ["—"]).slice(0, 4).map((lang) => (
+                      <p key={lang} className="text-[11px] text-white/65">{lang}</p>
+                    ))}
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handlePreviewPublic}
-                disabled={saving || uploading}
-                className="mt-4 w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 hover:bg-white/[0.07]"
-              >
-                Preview public profile
-              </button>
-
-              <div className="mt-4 rounded-2xl border border-fuchsia-300/25 bg-fuchsia-500/10 p-4">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-white">Profile verification</p>
-                </div>
-                {paymentVerified ? (
-                  <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-emerald-300/35 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100">
-                    <VerifiedBadge size={18} title={VERIFIED_VIA_PAYMENT_LABEL} />
-                    <span>Verified</span>
-                  </div>
-                ) : (
+              {!paymentVerified && (
+                <div className="mx-4 mb-4 mt-4 border-t border-white/[0.07] pt-4">
                   <GetVerifiedButton
-                    className="mt-4 w-full rounded-xl border border-fuchsia-300/35 bg-gradient-to-r from-cyan-300/25 to-fuchsia-500/25 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+                    className="w-full rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-cyan-400/15 via-fuchsia-500/15 to-purple-500/15 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:brightness-110"
                     returnTo="/me/edit"
                     onError={(message) => setError(message)}
                   >
-                    Get verified
+                    ✦ Get verified
                   </GetVerifiedButton>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </aside>
 
 	          <section className="min-w-0 space-y-6">
               <header className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <h1 className="text-2xl font-extrabold tracking-tight text-white" data-testid="profile-edit-title">
-                    Edit your profile
-                  </h1>
-                  <span
-                    className={cx(
-                      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
-                      acceptingHosting
-                        ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-                        : "border-white/15 bg-white/[0.03] text-slate-300"
+                  <div className="flex flex-wrap items-baseline gap-3">
+                    <h1 className="text-2xl font-extrabold tracking-tight text-white" data-testid="profile-edit-title">
+                      Edit your profile
+                    </h1>
+
+                    {trialExpiredBadge && activeTab === "teacher_profile" && (
+                      <Link href="/me/edit?tab=teacher_profile" className="text-sm text-rose-400 hover:underline">
+                        Trial ended · Upgrade
+                      </Link>
                     )}
-                  >
-                    {acceptingHosting ? "Hosting on" : "Hosting off"}
-                  </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {teacherProfileOn && (
+                      <span className="inline-flex items-center rounded-full border border-cyan-300/35 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                        Teacher on
+                      </span>
+                    )}
+                    {inquiriesOn && (
+                      <span className="inline-flex items-center rounded-full border border-fuchsia-300/35 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-100">
+                        Inquiries on
+                      </span>
+                    )}
+                    {acceptingHosting && (
+                      <span className="inline-flex items-center rounded-full border border-emerald-300/35 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                        Hosting on
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="relative flex max-w-full gap-1 overflow-x-auto border-b border-white/10 px-1 no-scrollbar">
                   {editTabs.map((tab) => {
                     const active = activeTab === tab.id;
                     return (
@@ -1582,13 +1737,21 @@ function EditMePage() {
                           router.replace(url.pathname + url.search, { scroll: false });
                         }}
                         className={cx(
-                          "rounded-full border px-4 py-2 text-sm font-semibold transition",
-                          active
-                            ? "border-cyan-300/40 bg-cyan-300/14 text-cyan-100"
-                            : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                          "relative min-h-11 shrink-0 whitespace-nowrap px-3 pb-3 pt-2 text-xs font-bold uppercase tracking-wider transition",
+                          active ? "text-white" : "text-white/40 hover:text-white/65"
                         )}
                       >
-                        {tab.label}
+                        <span className="flex items-center gap-1.5">
+                          {tab.label}
+                          {tab.id === "teacher_profile" && trialDaysLeft != null && (
+                            <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-amber-300">
+                              {trialDaysLeft}d left
+                            </span>
+                          )}
+                        </span>
+                        {active && (
+                          <span className="absolute bottom-0 left-0 right-0 h-[2px] rounded-full bg-cyan-400" />
+                        )}
                       </button>
                     );
                   })}
@@ -1600,7 +1763,7 @@ function EditMePage() {
                 className={cx(
                   activeTab === "media"
                     ? "space-y-3"
-                    : "rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7"
+                    : cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.info ? "p-6 sm:p-7" : "px-5 py-3.5")
                 )}
               >
 
@@ -1610,7 +1773,39 @@ function EditMePage() {
               </div>
 
               {activeTab === "profile" ? (
-              <div className={cx("grid gap-4 lg:grid-cols-2", error || verificationNotice ? "mt-6" : "")}>
+              <>
+              {/* Basic info section header */}
+              <div className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">person</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Basic Info</h2>
+                  {!openSections.info && (
+                    <p className="truncate text-sm">
+                      <span className="font-medium text-[#0df2f2]/80">{displayName || "—"}</span>
+                      <span className="mx-1.5 text-white/20">·</span>
+                      <span className="text-fuchsia-300/60">@{normalizedUsername || "—"}</span>
+                      <span className="mx-1.5 text-white/20">·</span>
+                      <span className="text-white/50">{[country, city].filter(Boolean).join(", ") || "—"}</span>
+                    </p>
+                  )}
+                </div>
+                {openSections.info ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button type="button" onClick={() => cancelSection("info")} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-white/50 transition hover:bg-white/[0.05]">Cancel</button>
+                    <button type="button" onClick={() => void saveProfile("info")} disabled={saving || !isSectionDirty("info", { displayName, username, country, city })} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-[#0df2f2]/80 transition hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed">Save</button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => openSection("info", { displayName, username, country, city })}
+                    className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-white/40 transition hover:bg-white/[0.05] hover:text-white/70"
+                    data-testid="profile-edit-open-info"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">edit</span>
+                  </button>
+                )}
+              </div>
+              {openSections.info && (
+              <div className={cx("grid gap-4 lg:grid-cols-2", error || verificationNotice ? "mt-2" : "mt-2")}>
                 <label className="block text-sm font-medium text-slate-300">
                   Display name
                   <input
@@ -1648,9 +1843,7 @@ function EditMePage() {
                     />
                   </div>
                   <div className="mt-1 space-y-1 text-xs">
-                    <p className="text-slate-500">Your username is part of your public profile link.</p>
-                    <p className="text-cyan-200/85">conxion.social/u/{normalizedUsername || suggestedUsername || "your.name"}</p>
-                    <p className="text-slate-500">You can change your username once every 30 days.</p>
+                    <p className="text-white/35">conxion.social/u/{normalizedUsername || suggestedUsername || "your.name"} · 1 change allowed every 30 days</p>
                     {usernameAvailability.checking ? <p className="text-slate-400">Checking username...</p> : null}
                     {!usernameAvailability.checking && usernameError ? <p className="text-rose-300">{usernameError}</p> : null}
                     {!usernameAvailability.checking && !usernameError && usernameCooldownMessage ? (
@@ -1683,96 +1876,86 @@ function EditMePage() {
                   </div>
                 </label>
 
-                <label className="block text-sm font-medium text-slate-300">
-                  Nationality (optional)
-                  <input
-                    value={nationality}
-                    onChange={(event) => setNationality(event.target.value.slice(0, MAX_NATIONALITY_LENGTH))}
-                    maxLength={MAX_NATIONALITY_LENGTH}
-                    className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                    placeholder="e.g. Mexican"
-                  />
-                  <div className="mt-1 text-right text-xs text-slate-500">
-                    {nationalityLength}/{MAX_NATIONALITY_LENGTH}
-                  </div>
-                </label>
-
-                <label className="block text-sm font-medium text-slate-300">
-                  Country
-                  <div className="mt-1.5 sm:hidden">
-                    <SearchableMobileSelect
-                      label="Country"
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="block text-sm font-medium text-slate-300">
+                    Country
+                    <div className="mt-1.5 sm:hidden">
+                      <SearchableMobileSelect
+                        label="Country"
+                        value={country}
+                        options={countryNames}
+                        placeholder="Select country"
+                        searchPlaceholder="Search countries..."
+                        onSelect={(nextCountry) => {
+                          setCountry(nextCountry);
+                          setCity("");
+                        }}
+                        buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none"
+                      />
+                    </div>
+                    <select
                       value={country}
-                      options={countryNames}
-                      placeholder="Select country"
-                      searchPlaceholder="Search countries..."
-                      onSelect={(nextCountry) => {
+                      onChange={(event) => {
+                        const nextCountry = event.target.value;
                         setCountry(nextCountry);
                         setCity("");
                       }}
-                      buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none"
-                    />
-                  </div>
-                  <select
-                    value={country}
-                    onChange={(event) => {
-                      const nextCountry = event.target.value;
-                      setCountry(nextCountry);
-                      setCity("");
-                    }}
-                    className="mt-1.5 hidden w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] sm:block"
-                  >
-                    <option value="">Select country</option>
-                    {countryNames.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                      className="mt-1.5 hidden w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] sm:block"
+                    >
+                      <option value="">Select country</option>
+                      {countryNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-                <label className="block text-sm font-medium text-slate-300">
-                  City
-                  {country && cityOptions.length === 0 ? (
-                    <input
-                      value={city}
-                      onChange={(event) => setCity(event.target.value)}
-                      className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      placeholder="Type your city"
-                    />
-                  ) : (
-                    <>
-                      <div className="mt-1.5 sm:hidden">
-                        <SearchableMobileSelect
-                          label="City"
-                          value={city}
-                          options={cityOptions}
-                          placeholder={country ? "Select city" : "Pick country first"}
-                          searchPlaceholder="Search cities..."
-                          disabled={!country}
-                          emptyMessage={!country ? "Choose a country first." : "No cities found."}
-                          onSelect={(nextCity) => setCity(nextCity)}
-                          buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none disabled:opacity-55"
-                        />
-                      </div>
-                      <select
+                  <label className="block text-sm font-medium text-slate-300">
+                    City
+                    {country && cityOptions.length === 0 ? (
+                      <input
                         value={city}
                         onChange={(event) => setCity(event.target.value)}
-                        disabled={!country}
-                        className="mt-1.5 hidden w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] disabled:opacity-55 sm:block"
-                      >
-                        <option value="">{country ? "Select city" : "Pick country first"}</option>
-                        {cityOptions.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                    </>
-                  )}
-                </label>
+                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="Type your city"
+                      />
+                    ) : (
+                      <>
+                        <div className="mt-1.5 sm:hidden">
+                          <SearchableMobileSelect
+                            label="City"
+                            value={city}
+                            options={cityOptions}
+                            placeholder={country ? "Select city" : "Pick country first"}
+                            searchPlaceholder="Search cities..."
+                            disabled={!country}
+                            emptyMessage={!country ? "Choose a country first." : "No cities found."}
+                            onSelect={(nextCity) => setCity(nextCity)}
+                            buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none disabled:opacity-55"
+                          />
+                        </div>
+                        <select
+                          value={city}
+                          onChange={(event) => setCity(event.target.value)}
+                          disabled={!country}
+                          className="mt-1.5 hidden w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)] disabled:opacity-55 sm:block"
+                        >
+                          <option value="">{country ? "Select city" : "Pick country first"}</option>
+                          {cityOptions.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                  </label>
+                </div>
 
               </div>
+              )}
+              </>
               ) : activeTab === "media" ? (
                 <div className={cx("min-w-0", error || verificationNotice ? "mt-3" : "")}>
                   <ProfileMediaManager embedded />
@@ -1783,157 +1966,75 @@ function EditMePage() {
 
             {activeTab === "hosting" ? (
             <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
-              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Hosting preferences</h2>
-                </div>
-              </header>
-
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Accepting hosting</p>
-                      <p className="mt-1 text-sm text-slate-400">Turn this on to appear in Hosting and receive guest requests.</p>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={acceptingHosting}
-                      onClick={() => {
-                        const nextAcceptingHosting = !acceptingHosting;
-                        setAcceptingHosting(nextAcceptingHosting);
-                        setHostingStatus((prev) => (nextAcceptingHosting ? (prev === "inactive" ? "available" : prev) : "inactive"));
-                      }}
-                      className={cx(
-                        "inline-flex min-h-11 items-center gap-3 rounded-full border px-3 py-2 text-sm font-semibold transition",
-                        acceptingHosting
-                          ? "border-cyan-300/45 bg-cyan-300/15 text-cyan-100"
-                          : "border-white/15 bg-white/[0.04] text-slate-300"
-                      )}
-                    >
-                      <span
-                        className={cx(
-                          "relative inline-flex h-6 w-11 rounded-full transition",
-                          acceptingHosting ? "bg-cyan-300/65" : "bg-white/15"
-                        )}
-                      >
-                        <span
-                          className={cx(
-                            "absolute top-0.5 h-5 w-5 rounded-full bg-white transition",
-                            acceptingHosting ? "left-[22px]" : "left-0.5"
-                          )}
-                        />
-                      </span>
-                      {acceptingHosting ? "On" : "Off"}
-                    </button>
+              <div className="space-y-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Accepting hosting</p>
+                    <p className="mt-0.5 text-xs text-slate-400">Turn this on to appear in Hosting and receive guest requests.</p>
                   </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={acceptingHosting}
+                    aria-label="Accepting hosting"
+                    onClick={() => {
+                      const nextAcceptingHosting = !acceptingHosting;
+                      setAcceptingHosting(nextAcceptingHosting);
+                      setHostingStatus((prev) => (nextAcceptingHosting ? (prev === "inactive" ? "available" : prev) : "inactive"));
+                    }}
+                    className="shrink-0"
+                  >
+                    <span className={cx("relative inline-flex h-7 w-12 rounded-full transition", acceptingHosting ? "bg-cyan-300/65" : "bg-white/15")}>
+                      <span className={cx("absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all", acceptingHosting ? "left-6" : "left-1")} />
+                    </span>
+                  </button>
                 </div>
 
                 {acceptingHosting ? (
                   <>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Listing status
-                      <select
-                        value={hostingStatus}
-                        onChange={(event) => setHostingStatus(event.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      >
-                        <option value="available">Available</option>
-                        <option value="paused">Paused</option>
-                        <option value="inactive">Hidden</option>
-                      </select>
-                    </label>
+                    {/* Main fields — 3-col grid */}
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <label className="block text-sm font-medium text-slate-300">
+                        Max guests
+                        <input
+                          type="number"
+                          min={0}
+                          max={20}
+                          value={maxGuests}
+                          onChange={(event) => setMaxGuests(event.target.value)}
+                          className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                          placeholder="e.g. 2"
+                        />
+                      </label>
 
-                    <label className="block text-sm font-medium text-slate-300">
-                      Max guests
-                      <input
-                        type="number"
-                        min={0}
-                        max={20}
-                        value={maxGuests}
-                        onChange={(event) => setMaxGuests(event.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                        placeholder="e.g. 2"
-                      />
-                    </label>
+                      <label className="block text-sm font-medium text-slate-300">
+                        Preferred guest gender
+                        <select
+                          value={hostingPreferredGuestGender}
+                          onChange={(event) => setHostingPreferredGuestGender(normalizeHostingPreferredGuestGender(event.target.value))}
+                          className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        >
+                          {HOSTING_GUEST_GENDER_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="block text-sm font-medium text-slate-300">
-                      Last-minute requests
-                      <select
-                        value={hostingLastMinuteOk ? "yes" : "no"}
-                        onChange={(event) => setHostingLastMinuteOk(event.target.value === "yes")}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      >
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </label>
-
-                    <label className="block text-sm font-medium text-slate-300">
-                      Preferred guest gender
-                      <select
-                        value={hostingPreferredGuestGender}
-                        onChange={(event) => setHostingPreferredGuestGender(normalizeHostingPreferredGuestGender(event.target.value))}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      >
-                        {HOSTING_GUEST_GENDER_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="block text-sm font-medium text-slate-300">
-                      Space type
-                      <select
-                        value={hostingSleepingArrangement}
-                        onChange={(event) => setHostingSleepingArrangement(normalizeHostingSleepingArrangement(event.target.value))}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      >
-                        {HOSTING_SLEEPING_ARRANGEMENT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
-                      <button
-                        type="button"
-                        onClick={() => setHostingKidFriendly((prev) => !prev)}
-                        className={cx(
-                          "rounded-xl border px-4 py-3 text-left text-sm font-medium transition",
-                          hostingKidFriendly ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/20 text-slate-300"
-                        )}
-                      >
-                        Kid friendly: {hostingKidFriendly ? "Yes" : "No"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHostingPetFriendly((prev) => !prev)}
-                        className={cx(
-                          "rounded-xl border px-4 py-3 text-left text-sm font-medium transition",
-                          hostingPetFriendly ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/20 text-slate-300"
-                        )}
-                      >
-                        Pet friendly: {hostingPetFriendly ? "Yes" : "No"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHostingSmokingAllowed((prev) => !prev)}
-                        className={cx(
-                          "rounded-xl border px-4 py-3 text-left text-sm font-medium transition",
-                          hostingSmokingAllowed ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/20 text-slate-300"
-                        )}
-                      >
-                        Smoking allowed: {hostingSmokingAllowed ? "Yes" : "No"}
-                      </button>
+                      <label className="block text-sm font-medium text-slate-300">
+                        Space type
+                        <select
+                          value={hostingSleepingArrangement}
+                          onChange={(event) => setHostingSleepingArrangement(normalizeHostingSleepingArrangement(event.target.value))}
+                          className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        >
+                          {HOSTING_SLEEPING_ARRANGEMENT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
 
-                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
+                    <label className="block text-sm font-medium text-slate-300">
                       What I can share with guests
                       <textarea
                         value={hostingGuestShare}
@@ -1944,7 +2045,7 @@ function EditMePage() {
                       />
                     </label>
 
-                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
+                    <label className="block text-sm font-medium text-slate-300">
                       Public transportation access
                       <textarea
                         value={hostingTransitAccess}
@@ -1955,27 +2056,61 @@ function EditMePage() {
                       />
                     </label>
 
-                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
-                      Hosting notes
-                      <textarea
-                        value={hostingNotes}
-                        onChange={(event) => setHostingNotes(event.target.value.slice(0, 500))}
-                        rows={4}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                        placeholder="Tell guests what to expect from your space."
-                      />
-                    </label>
-
-                    <label className="block text-sm font-medium text-slate-300 sm:col-span-2">
-                      House rules
-                      <textarea
-                        value={houseRules}
-                        onChange={(event) => setHouseRules(event.target.value.slice(0, 500))}
-                        rows={4}
-                        className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                        placeholder="Share the important rules guests should know before they request hosting."
-                      />
-                    </label>
+                    {/* Additional information collapsible */}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAdditionalHostingInfo((v) => !v)}
+                        className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm font-medium text-slate-300 hover:bg-black/30"
+                      >
+                        <span>Additional information</span>
+                        <span className="material-symbols-outlined text-[18px] text-white/40">{showAdditionalHostingInfo ? "expand_less" : "expand_more"}</span>
+                      </button>
+                      {showAdditionalHostingInfo && (
+                        <div className="mt-3 space-y-4">
+                          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+                            <label className="block text-sm font-medium text-slate-300">
+                              Kid friendly
+                              <select value={hostingKidFriendly ? "yes" : "no"} onChange={(e) => setHostingKidFriendly(e.target.value === "yes")} className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-3 py-3 text-white outline-none hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35">
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                              </select>
+                            </label>
+                            <label className="block text-sm font-medium text-slate-300">
+                              Pet friendly
+                              <select value={hostingPetFriendly ? "yes" : "no"} onChange={(e) => setHostingPetFriendly(e.target.value === "yes")} className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-3 py-3 text-white outline-none hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35">
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                              </select>
+                            </label>
+                            <label className="block text-sm font-medium text-slate-300">
+                              Smoking
+                              <select value={hostingSmokingAllowed ? "yes" : "no"} onChange={(e) => setHostingSmokingAllowed(e.target.value === "yes")} className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-3 py-3 text-white outline-none hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35">
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                              </select>
+                            </label>
+                            <label className="block text-sm font-medium text-slate-300">
+                              Last-minute
+                              <select value={hostingLastMinuteOk ? "yes" : "no"} onChange={(e) => setHostingLastMinuteOk(e.target.value === "yes")} className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-3 py-3 text-white outline-none hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35">
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                              </select>
+                            </label>
+                          </div>
+                          <label className="block text-sm font-medium text-slate-300">
+                            House rules
+                            <textarea
+                              value={houseRules}
+                              onChange={(event) => setHouseRules(event.target.value.slice(0, 500))}
+                              rows={4}
+                              className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                              placeholder="Share the important rules guests should know before they request hosting."
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </div>
                   </>
                 ) : null}
               </div>
@@ -1983,349 +2118,269 @@ function EditMePage() {
             ) : null}
 
             {activeTab === "profile" ? (
-            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
-              <header className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Dance DNA</h2>
-                  <p className="mt-1 text-sm text-slate-300">Select your styles, set your level, and request verification.</p>
+            <div className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.dance ? "p-6 sm:p-7" : "px-5 py-3.5")}>
+              <header className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">music_note</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Dance Style</h2>
+                  {!openSections.dance && selectedStyles.length > 0 && (
+                    <p className="truncate text-sm">
+                      <span className="text-white/50">{selectedStyles.map(titleCase).join(", ")}</span>
+                    </p>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={cx(
-                      "rounded-full border px-3 py-1 text-xs font-semibold",
-                      sectionDanceComplete
-                        ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-                        : "border-white/15 bg-white/[0.03] text-slate-300"
-                    )}
-                  >
-                    {sectionDanceComplete ? "✓ Ready" : "In progress"}
-                  </span>
-                  <span className="rounded-full border border-white/15 bg-white/[0.03] px-3 py-1 text-xs text-slate-300">
-                    {selectedStyles.length} selected
-                  </span>
-                </div>
+                {openSections.dance ? (
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => cancelSection("dance")} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-white/50 transition hover:bg-white/[0.05]">Cancel</button>
+                    <button type="button" onClick={() => void saveProfile("dance")} disabled={saving || !isSectionDirty("dance", { danceSkills })} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-[#0df2f2]/80 transition hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed">Save</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => openSection("dance", { danceSkills })} className="flex items-center justify-center rounded-lg p-1.5 text-white/40 transition hover:bg-white/[0.05] hover:text-white/70">
+                    <span className="material-symbols-outlined text-[16px]">edit</span>
+                  </button>
+                )}
               </header>
 
-              <div className="mt-5 flex flex-wrap gap-2">
+              {openSections.dance && <div className="mt-5 space-y-0.5">
                 {CORE_STYLES.map((style) => {
                   const active = !!danceSkills[style];
+                  const skill = danceSkills[style] ?? {};
+                  const isVerified = skill.verified === true;
                   return (
-                    <button
-                      key={style}
-                      type="button"
-                      onClick={() => toggleStyle(style)}
-                      className={cx(
-                        "rounded-full border px-4 py-2 text-sm font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                        active
-                          ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
-                          : "border-white/15 bg-black/20 text-slate-200 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                      )}
-                    >
-                      {titleCase(style)}
-                    </button>
+                    <div key={style} className="rounded-xl hover:bg-white/[0.025]">
+                      <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          checked={active}
+                          onChange={() => toggleStyle(style)}
+                          className="h-4 w-4 shrink-0 accent-cyan-300"
+                        />
+                        <span className={cx("text-sm", active ? "font-medium text-white" : "text-slate-300")}>
+                          {titleCase(style)}
+                          {isVerified && <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-emerald-300/80"><VerifiedBadge size={10} /> Verified</span>}
+                        </span>
+                        {active && (
+                          <select
+                            value={skill.level ?? ""}
+                            onChange={(e) => { e.stopPropagation(); setStyleLevel(style, e.target.value); }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded-lg border border-white/15 bg-black/30 px-2.5 py-1.5 text-xs text-white/80 outline-none hover:border-white/30 focus:border-cyan-300/60"
+                          >
+                            <option value="">— level —</option>
+                            {LEVELS.map((level) => (
+                              <option key={level} value={level}>{level}</option>
+                            ))}
+                          </select>
+                        )}
+                      </label>
+                    </div>
                   );
                 })}
-                <button
-                  type="button"
-                  onClick={toggleOtherStyle}
-                  className={cx(
-                    "rounded-full border px-4 py-2 text-sm font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                    otherStyleEnabled
-                      ? "border-fuchsia-300/45 bg-fuchsia-500/12 text-white shadow-[0_0_14px_rgba(217,70,239,0.2)]"
-                      : "border-white/15 bg-black/20 text-slate-200 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                  )}
-                >
-                  Other
-                </button>
-              </div>
-
-              {otherStyleEnabled ? (
-                <>
-                  <div className="mt-4">
+                <div className="rounded-xl hover:bg-white/[0.025]">
+                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5">
                     <input
-                      value={customStyleDraft}
-                      onChange={(event) => onOtherStyleNameChange(event.target.value)}
-                      maxLength={MAX_CUSTOM_STYLE_LENGTH}
-                      className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      placeholder="Other style name"
+                      type="checkbox"
+                      checked={otherStyleEnabled}
+                      onChange={toggleOtherStyle}
+                      className="h-4 w-4 shrink-0 accent-fuchsia-400"
                     />
-                  </div>
-                  <div className="mt-1 text-right text-xs text-slate-500">
-                    {customStyleLength}/{MAX_CUSTOM_STYLE_LENGTH}
-                  </div>
-                </>
-              ) : null}
-
-              {selectedStyles.length > 0 ? (
-                <div className="mt-5 space-y-3">
-                  {selectedStyles.map((style) => {
-                    const skill = danceSkills[style] ?? {};
-                    const isVerified = skill.verified === true;
-                    return (
-                      <article key={style} className="rounded-2xl border border-white/10 bg-black/25 p-4 sm:p-5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-base font-semibold text-white">{titleCase(style)}</p>
-                            {isVerified ? (
-                              <div className="mt-1 flex items-center gap-2 text-xs text-emerald-200">
-                                <VerifiedBadge size={14} />
-                                <span>Level verified</span>
-                              </div>
-                            ) : (
-                              <p className="mt-1 text-xs text-slate-400">Not verified</p>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => toggleStyle(style)}
-                            className="rounded-lg border border-white/15 px-3 py-1 text-xs text-slate-300 hover:bg-white/[0.06]"
-                          >
-                            Remove
-                          </button>
-                        </div>
-
-                        <div className="mt-4">
-                          <label className="block text-sm font-medium text-slate-300">
-                            Level
-                            <select
-                              value={skill.level ?? ""}
-                              onChange={(event) => setStyleLevel(style, event.target.value)}
-                              className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none transition-all duration-150 ease-out hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 focus:shadow-[0_0_16px_rgba(34,211,238,0.18)]"
-                            >
-                              <option value="">Select level</option>
-                              {LEVELS.map((level) => (
-                                <option key={level} value={level}>
-                                  {level}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-                      </article>
-                    );
-                  })}
+                    <span className={cx("flex-1 text-sm", otherStyleEnabled ? "font-medium text-white" : "text-slate-300")}>Other</span>
+                  </label>
+                  {otherStyleEnabled && (
+                    <div className="px-3 pb-3">
+                      <input
+                        value={customStyleDraft}
+                        onChange={(event) => onOtherStyleNameChange(event.target.value)}
+                        maxLength={MAX_CUSTOM_STYLE_LENGTH}
+                        className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
+                        placeholder="Style name"
+                      />
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <p className="mt-5 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-400">
-                  Select at least one dance style to continue.
-                </p>
-              )}
+                {selectedStyles.length === 0 && (
+                  <p className="mt-2 rounded-xl border border-amber-300/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-200/70">
+                    Select at least one dance style — required.
+                  </p>
+                )}
+              </div>}
             </div>
             ) : null}
 
             {activeTab === "profile" ? (
-            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
-              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Roles & preferences</h2>
-                  <p className="mt-1 text-sm text-slate-300">Define how people can collaborate with you.</p>
-                </div>
-                <span
-                  className={cx(
-                    "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
-                    sectionRolesComplete
-                      ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-                      : "border-white/15 bg-white/[0.03] text-slate-300"
+            <div className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.roles ? "p-6 sm:p-7" : "px-5 py-3.5")}>
+              <header className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">interests</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Roles & preferences</h2>
+                  {!openSections.roles && roles.length > 0 && (
+                    <p className="truncate text-sm text-white/50">
+                      {[(displayRole ?? roles[0]), interests[0], availability[0]].filter(Boolean).join(", ") || "—"}
+                    </p>
                   )}
-                >
-                  {sectionRolesComplete ? "✓ Ready" : "In progress"}
-                </span>
+                </div>
+                {openSections.roles ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button type="button" onClick={() => cancelSection("roles")} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-white/50 transition hover:bg-white/[0.05]">Cancel</button>
+                    <button type="button" onClick={() => void saveProfile("roles")} disabled={saving || !isSectionDirty("roles", { roles, displayRole, interests, availability })} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-[#0df2f2]/80 transition hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed">Save</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => openSection("roles", { roles, displayRole, interests, availability })} className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-white/40 transition hover:bg-white/[0.05] hover:text-white/70">
+                    <span className="material-symbols-outlined text-[16px]">edit</span>
+                  </button>
+                )}
               </header>
 
-              <div className="mt-5 grid gap-6 xl:grid-cols-3">
-                <div className="space-y-4">
-                  <div>
-                    <p className="mb-2 text-sm font-medium text-slate-300">Roles</p>
-                    <div className="flex flex-wrap gap-2">
-                      {roleOptions.map((item) => {
-                        const active = roles.includes(item);
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => {
+              {openSections.roles && <div className="mt-5 grid gap-x-8 gap-y-5 sm:grid-cols-3">
+                <div>
+                  <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-white/45">Roles</p>
+                  <div className="space-y-1.5">
+                    {roleOptions.map((item) => {
+                      const active = roles.includes(item);
+                      const isPrimary = active && (displayRole ?? roles[0]) === item;
+                      return (
+                        <label key={item} className="flex cursor-pointer items-center gap-2.5 py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => {
                               toggleString(roles, setRoles, item);
-                              // If deselecting the display role, clear it
                               if (active && displayRole === item) setDisplayRole(null);
                             }}
-                            className={cx(
-                              "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                              active
-                                ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
-                                : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                            )}
-                          >
-                            {item}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {roles.length > 1 && (
-                    <div>
-                      <p className="mb-2 text-sm font-medium text-slate-300">
-                        Display role on cards
-                        <span className="ml-1.5 text-xs text-slate-500">— shown as your primary label</span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {roles.map((role) => {
-                          const isPrimary = (displayRole ?? roles[0]) === role;
-                          return (
+                            className="h-4 w-4 shrink-0 cursor-pointer rounded border-white/20 bg-black/30 accent-cyan-400"
+                          />
+                          <span className={cx("text-sm", active ? "text-white" : "text-white/55")}>{item}</span>
+                          {active && (
                             <button
-                              key={role}
                               type="button"
-                              onClick={() => setDisplayRole(role)}
-                              className={cx(
-                                "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                                isPrimary
-                                  ? "border-fuchsia-400/50 bg-fuchsia-500/15 text-white shadow-[0_0_14px_rgba(217,70,239,0.2)]"
-                                  : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30"
-                              )}
+                              title={isPrimary ? "Display role" : "Set as display role"}
+                              onClick={() => setDisplayRole(item)}
+                              className={cx("ml-auto text-[10px] font-semibold transition", isPrimary ? "text-fuchsia-300" : "text-white/20 hover:text-white/50")}
                             >
-                              {isPrimary && <span className="mr-1 text-fuchsia-300">✓</span>}
-                              {role}
+                              {isPrimary ? "★ display" : "☆"}
                             </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {roles.length === 0 && <p className="mt-1.5 text-[11px] text-amber-300/70">Select at least one role</p>}
                 </div>
 
                 <div>
-                  <p className="mb-2 text-sm font-medium text-slate-300">Interests</p>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-white/45">Interests</p>
+                  <div className="space-y-1.5">
                     {interestOptions.map((item) => {
                       const active = interests.includes(item);
                       return (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => toggleString(interests, setInterests, item)}
-                          className={cx(
-                            "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                            active
-                              ? "border-fuchsia-300/45 bg-fuchsia-500/12 text-white shadow-[0_0_14px_rgba(217,70,239,0.2)]"
-                              : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                          )}
-                        >
-                          {item}
-                        </button>
+                        <label key={item} className="flex cursor-pointer items-center gap-2.5 py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => toggleString(interests, setInterests, item)}
+                            className="h-4 w-4 shrink-0 cursor-pointer rounded border-white/20 bg-black/30 accent-fuchsia-400"
+                          />
+                          <span className={cx("text-sm", active ? "text-white" : "text-white/55")}>{item}</span>
+                        </label>
                       );
                     })}
                   </div>
+                  {interests.length === 0 && <p className="mt-1.5 text-[11px] text-amber-300/70">Select at least one interest</p>}
                 </div>
 
                 <div>
-                  <p className="mb-2 text-sm font-medium text-slate-300">Availability</p>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-white/45">Availability</p>
+                  <div className="space-y-1.5">
                     {availabilityOptions.map((item) => {
                       const active = availability.includes(item);
                       return (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => toggleString(availability, setAvailability, item)}
-                          className={cx(
-                            "rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 ease-out hover:-translate-y-[1px] active:scale-[0.98]",
-                            active
-                              ? "border-cyan-300/45 bg-cyan-300/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.2)]"
-                              : "border-white/15 bg-black/20 text-slate-300 hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                          )}
-                        >
-                          {item}
-                        </button>
+                        <label key={item} className="flex cursor-pointer items-center gap-2.5 py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => toggleString(availability, setAvailability, item)}
+                            className="h-4 w-4 shrink-0 cursor-pointer rounded border-white/20 bg-black/30 accent-cyan-400"
+                          />
+                          <span className={cx("text-sm", active ? "text-white" : "text-white/55")}>{item}</span>
+                        </label>
                       );
                     })}
                   </div>
+                  {availability.length === 0 && <p className="mt-1.5 text-[11px] text-amber-300/70">Select at least one option</p>}
                 </div>
-              </div>
+              </div>}
             </div>
             ) : null}
 
             {activeTab === "profile" ? (
-            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
-              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Languages</h2>
-                </div>
-                <span
-                  className={cx(
-                    "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
-                    sectionContactsComplete
-                      ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-                      : "border-white/15 bg-white/[0.03] text-slate-300"
+            <div className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.langs ? "p-6 sm:p-7" : "px-5 py-3.5")}>
+              <header className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">translate</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Languages</h2>
+                  {!openSections.langs && languages.length > 0 && (
+                    <p className="truncate text-sm text-white/50">
+                      {languages.slice(0, 3).join(", ")}{languages.length > 3 ? ` +${languages.length - 3}` : ""}
+                    </p>
                   )}
-                >
-                  {sectionContactsComplete ? "✓ Ready" : "Optional"}
-                </span>
+                </div>
+                {openSections.langs ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button type="button" onClick={() => cancelSection("langs")} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-white/50 transition hover:bg-white/[0.05]">Cancel</button>
+                    <button type="button" onClick={() => void saveProfile("langs")} disabled={saving || !isSectionDirty("langs", { languages })} className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-[#0df2f2]/80 transition hover:bg-white/[0.05] disabled:opacity-35 disabled:cursor-not-allowed">Save</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => openSection("langs", { languages })} className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-white/40 transition hover:bg-white/[0.05] hover:text-white/70">
+                    <span className="material-symbols-outlined text-[16px]">edit</span>
+                  </button>
+                )}
               </header>
 
-              <div className="mt-5">
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-medium text-slate-300">Languages</p>
-                    <p className="text-xs text-slate-500">Max 5</p>
-                  </div>
-
-                  <div className="sm:hidden">
-                    <SearchableMobileSelect
-                      label="Language"
-                      value=""
-                      options={LANGUAGE_OPTIONS.filter((item) => !languages.includes(item))}
-                      placeholder={languages.length >= 5 ? "Max 5 languages" : "Search languages..."}
-                      searchPlaceholder="Search languages..."
-                      disabled={languages.length >= 5}
-                      emptyMessage="No languages left to add."
-                      onSelect={(value) => addLanguage(value)}
-                      buttonClassName="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-left text-sm text-white outline-none disabled:opacity-50"
-                    />
-                  </div>
-
-                  <div className="hidden gap-2 sm:flex">
-                    <input
-                      value={languageDraft}
-                      onChange={(event) => setLanguageDraft(event.target.value)}
-                      list="language-options"
-                      className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
-                      placeholder="Add language"
-                    />
-                    <datalist id="language-options">
-                      {LANGUAGE_OPTIONS.map((item) => (
-                        <option key={item} value={item} />
-                      ))}
-                    </datalist>
-                    <button
-                      type="button"
-                      onClick={() => addLanguage()}
-                      disabled={languages.length >= 5 || !languageDraft.trim()}
-                      className="rounded-xl border border-cyan-300/35 bg-cyan-300/15 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Add
-                    </button>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {languages.length > 0 ? (
-                      languages.map((item) => (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => setLanguages((prev) => prev.filter((value) => value !== item))}
-                            className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white hover:bg-white/[0.08]"
-                            title="Remove"
-                          >
-                          {item} <span className="text-slate-400">×</span>
-                        </button>
-                      ))
-                    ) : (
-                      <p className="text-sm text-slate-400">No languages selected.</p>
-                    )}
-                  </div>
+              {openSections.langs && <div className="mt-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-slate-300">Languages spoken</p>
+                  <p className="text-xs text-slate-500">{languages.length}/5</p>
                 </div>
-              </div>
+                <div className="flex gap-2">
+                  <input
+                    value={languageDraft}
+                    onChange={(event) => setLanguageDraft(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addLanguage(); } }}
+                    list="language-options-list"
+                    disabled={languages.length >= 5}
+                    className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 disabled:opacity-50"
+                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Type to search languages…"}
+                    autoComplete="off"
+                  />
+                  <datalist id="language-options-list">
+                    {LANGUAGE_OPTIONS.filter((item) => !languages.includes(item)).map((item) => (
+                      <option key={item} value={item} />
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    onClick={() => addLanguage()}
+                    disabled={languages.length >= 5 || !languageDraft.trim()}
+                    className="rounded-xl border border-cyan-300/35 bg-cyan-300/15 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {languages.length > 0 ? (
+                    languages.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => setLanguages((prev) => prev.filter((v) => v !== item))}
+                        className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white hover:bg-white/[0.08]"
+                        title="Remove"
+                      >
+                        {item} <span className="text-slate-400">×</span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-slate-400">No languages selected.</p>
+                  )}
+                </div>
+              </div>}
             </div>
             ) : null}
 
@@ -2333,60 +2388,6 @@ function EditMePage() {
 
             {activeTab === "teacher_profile" ? <TeacherProfilePage embedded /> : null}
 
-            {activeTab === "profile" ? (
-            <div className="mt-2 rounded-2xl border border-white/10 bg-[#0d161b]/95 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.45)] backdrop-blur-md">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="w-full max-w-xl">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm text-slate-300">{saveBarMessage}</p>
-                    <span className="text-xs font-medium text-slate-300">
-                      {completedSections}/{TOTAL_PROFILE_SECTIONS} sections ready
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-500 transition-[width] duration-300 ease-out"
-                      style={{ width: `${sectionProgressPercent}%` }}
-                    />
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {sectionCompletion.map((item) => (
-                      <span
-                        key={item.id}
-                        className={cx(
-                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                          item.done
-                            ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-                            : "border-white/15 bg-white/[0.03] text-slate-400"
-                        )}
-                      >
-                        {item.done ? "✓ " : ""}
-                        {item.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={handleLeaveToAccountSettings}
-                    disabled={saving || uploading}
-                    className="w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 hover:bg-white/[0.08] sm:w-auto"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving || uploading || !hasUnsavedChanges}
-                    className="w-full rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-5 py-2.5 text-sm font-bold text-[#071018] shadow-[0_0_18px_rgba(34,211,238,0.22)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                    data-testid="profile-edit-save"
-                  >
-                    {saving ? "Saving..." : "Save changes"}
-                  </button>
-                </div>
-              </div>
-            </div>
-            ) : null}
 
             {activeTab === "hosting" ? (
             <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:justify-end">
@@ -2412,7 +2413,7 @@ function EditMePage() {
         </form>
       </main>
 
-      {photoOpen && avatarUrl ? (
+      {photoOpen && displayAvatarUrl ? (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/85 px-4 py-4 sm:items-center" onClick={() => setPhotoOpen(false)}>
           <div className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden" onClick={(event) => event.stopPropagation()}>
             <button
@@ -2423,7 +2424,8 @@ function EditMePage() {
               Close
             </button>
             <div className="relative h-[min(75vh,calc(100dvh-6rem))] overflow-hidden rounded-2xl border border-white/15 bg-black">
-              <Image src={avatarUrl} alt="Profile avatar enlarged" fill className="object-contain" sizes="1200px" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={displayAvatarUrl} alt="Profile avatar enlarged" className="h-full w-full object-contain" onError={clearBrokenAvatarPreview} />
             </div>
           </div>
         </div>
@@ -2446,7 +2448,7 @@ function EditMePage() {
               {saveStage === "saving" ? "Saving your profile" : "Profile saved"}
             </h3>
             <p className="mt-2 text-sm text-slate-300">
-              {saveStage === "saving" ? "Syncing changes across your profile..." : "Taking you to account settings..."}
+              {saveStage === "saving" ? "Syncing changes across your profile..." : "Your changes have been saved."}
             </p>
             <div className="mt-6 flex items-center justify-center gap-2">
               <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-300" />
@@ -2467,6 +2469,12 @@ function EditMePage() {
             <div className="min-h-0 overflow-y-auto overscroll-contain p-5">
             <h3 className="text-lg font-bold text-white">Crop avatar</h3>
             <p className="mt-1 text-sm text-slate-300">Adjust zoom and position, then confirm your square profile image.</p>
+
+            {cropError ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                {cropError}
+              </div>
+            ) : null}
 
             <div className="mt-4 flex justify-center">
               <div className="relative h-[320px] w-[320px] overflow-hidden rounded-2xl border border-white/15 bg-black">
@@ -2527,6 +2535,7 @@ function EditMePage() {
                 onClick={() => {
                   setCropSource(null);
                   setCropNaturalSize(null);
+                  setCropError(null);
                 }}
                 className="rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white/85 hover:bg-white/[0.08]"
               >

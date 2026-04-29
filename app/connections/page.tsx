@@ -368,6 +368,7 @@ type TripCard = {
   created_at?: string | null;
   display_name: string;
   avatar_url: string | null;
+  verified?: boolean;
   roles: string[];
   display_role?: string | null;
   languages?: string[];
@@ -429,6 +430,8 @@ type ProfileFeedLiteRow = {
   username?: string | null;
   display_name?: string | null;
   avatar_url?: string | null;
+  is_verified?: boolean | null;
+  verified?: boolean | null;
   roles?: unknown;
   display_role?: string | null;
   languages?: unknown;
@@ -458,19 +461,6 @@ function errorMessage(e: unknown, fallback: string): string {
     if (typeof msg === "string" && msg.trim().length > 0) return msg;
   }
   return fallback;
-}
-
-function isSampleDiscoverUsername(value: string | null | undefined) {
-  const username = String(value ?? "").trim().toLowerCase();
-  return username.startsWith("sample.dancer.") || username.startsWith("sample.host.");
-}
-
-function isSampleDancerUsername(value: string | null | undefined) {
-  return String(value ?? "").trim().toLowerCase().startsWith("sample.dancer.");
-}
-
-function isSampleHostUsername(value: string | null | undefined) {
-  return String(value ?? "").trim().toLowerCase().startsWith("sample.host.");
 }
 
 function normalizeStyleKeyToUi(styleKey: string): Style | null {
@@ -662,7 +652,6 @@ function ConnectionsPageContent() {
 
   const [uiError, setUiError] = useState<string | null>(null);
   const [uiInfo, setUiInfo] = useState<string | null>(null);
-  const [sampleDiscoverOnly, setSampleDiscoverOnly] = useState(false);
   const [verificationModalOpen, setVerificationModalOpen] = useState(false);
   const [verificationResumePayload, setVerificationResumePayload] = useState<VerificationResumePayload | null>(null);
 
@@ -685,17 +674,6 @@ function ConnectionsPageContent() {
   const [membersPage, setMembersPage] = useState(1);
   const [travellersPage, setTravellersPage] = useState(1);
   useBodyScrollLock(Boolean(filtersOpen || connectModal.open || hostingModal.open || tripJoinModal.open || verificationModalOpen));
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const host = window.location.hostname.toLowerCase();
-    setSampleDiscoverOnly(
-      host === "localhost" ||
-        host === "127.0.0.1" ||
-        host === "staging.conxion.social" ||
-        host.includes("git-staging")
-    );
-  }, []);
 
   const closeConnectModal = useCallback(() => {
     setConnectModal(EMPTY_CONNECT_MODAL);
@@ -877,7 +855,6 @@ function ConnectionsPageContent() {
   }, [openHostingRequest, searchParams, viewerVerified]);
 
   const [dbMembers, setDbMembers] = useState<MemberCard[]>([]);
-  const [hostColumnsAvailable, setHostColumnsAvailable] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [tripCards, setTripCards] = useState<TripCard[]>([]);
@@ -1601,61 +1578,6 @@ function ConnectionsPageContent() {
         let rawRows: ProfileFeedRow[] = [];
         let loadedRows = false;
         let lastLoadError: unknown = null;
-        let hostFieldsOnSource = false;
-
-        if (sampleDiscoverOnly) {
-          let fallbackQuery = supabase
-            .from("profiles")
-            .select(
-              [
-                "user_id",
-                "username",
-                "display_name",
-                "created_at",
-                "city",
-                "country",
-                "roles",
-                "languages",
-                "avatar_url",
-                "verified",
-                "verified_label",
-                "dance_skills",
-                "has_other_style",
-                "connections_count",
-                "interests",
-                "availability",
-                ...hostFieldsSelect,
-              ].join(",")
-            )
-            .or("username.ilike.sample.dancer.%,username.ilike.sample.host.%")
-            .limit(40);
-          if (meId) fallbackQuery = fallbackQuery.neq("user_id", meId);
-          const { data: fallbackData, error: fallbackError } = await fallbackQuery;
-          if (!fallbackError) {
-            rawRows = (fallbackData ?? []).map((row) => {
-              const raw = row as ProfileFeedRow;
-              return {
-                ...raw,
-                id: raw.id ?? raw.user_id ?? "",
-              };
-            });
-            loadedRows = true;
-            hostFieldsOnSource = true;
-          } else {
-            lastLoadError = fallbackError;
-          }
-        } else {
-          let membersQuery = supabase.from("profiles_feed").select(feedSelect).neq("avatar_status", "rejected").limit(200);
-          if (meId) membersQuery = membersQuery.neq("id", meId);
-          const { data: feedData, error: feedError } = await membersQuery;
-          if (!feedError) {
-            rawRows = (feedData ?? []) as ProfileFeedRow[];
-            loadedRows = true;
-            hostFieldsOnSource = true;
-          } else {
-            lastLoadError = feedError;
-          }
-        }
 
         if (!loadedRows) {
           let fallbackQueryLite = supabase
@@ -1678,7 +1600,6 @@ function ConnectionsPageContent() {
                 "can_host",
                 "hosting_status",
                 "max_guests",
-                "visibility",
               ].join(",")
             )
             .limit(200);
@@ -1693,7 +1614,6 @@ function ConnectionsPageContent() {
               };
             });
             loadedRows = true;
-            hostFieldsOnSource = true;
           } else {
             lastLoadError = fallbackErrorLite;
           }
@@ -1715,14 +1635,12 @@ function ConnectionsPageContent() {
               };
             });
             loadedRows = true;
-            hostFieldsOnSource = false;
           } else {
             lastLoadError = fallbackErrorMinimal;
           }
         }
 
         if (!loadedRows) throw (lastLoadError ?? new Error("members_source_unavailable"));
-        if (canCommit()) setHostColumnsAvailable(hostFieldsOnSource);
 
         const mapped: MemberCard[] = rawRows
           .filter((row) => row.is_test !== true)
@@ -1828,7 +1746,6 @@ function ConnectionsPageContent() {
         if (canCommit()) {
           setMembersError(errorMessage(e, "Failed to load members from database."));
           setDbMembers([]);
-          setHostColumnsAvailable(false);
         }
       } finally {
         if (canCommit()) setLoadingMembers(false);
@@ -1846,30 +1763,13 @@ function ConnectionsPageContent() {
         let trips: TripRow[] = [];
         let loadedTrips = false;
         let lastTripsError: unknown = null;
-        let sampleTripOwnerIds: string[] = [];
-
-        if (sampleDiscoverOnly) {
-          const { data: sampleOwners, error: sampleOwnersError } = await supabase
-            .from("profiles")
-            .select("user_id")
-            .or("username.ilike.sample.dancer.%,username.ilike.sample.host.%")
-            .limit(40);
-          if (!sampleOwnersError) {
-            sampleTripOwnerIds = (sampleOwners ?? [])
-              .map((row) => (row as { user_id?: string | null }).user_id ?? "")
-              .filter(isNonEmptyString);
-          } else {
-            lastTripsError = sampleOwnersError;
-          }
-        }
 
         let tripsQuery = supabase
           .from("trips")
           .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
           .eq("status", "active")
           .gte("end_date", todayIso)
-          .limit(sampleDiscoverOnly ? 40 : 200);
-        if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) tripsQuery = tripsQuery.in("user_id", sampleTripOwnerIds);
+          .limit(200);
         const { data: tripRows, error: tripErr } = await tripsQuery;
         if (!tripErr) {
           trips = (tripRows ?? []) as TripRow[];
@@ -1882,8 +1782,7 @@ function ConnectionsPageContent() {
           let tripsQueryFallback = supabase
             .from("trips")
             .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(sampleDiscoverOnly ? 40 : 200);
-          if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) tripsQueryFallback = tripsQueryFallback.in("user_id", sampleTripOwnerIds);
+            .limit(200);
           const { data: fallbackRows, error: fallbackErr } = await tripsQueryFallback;
           if (!fallbackErr) {
             trips = (fallbackRows ?? []) as TripRow[];
@@ -1897,8 +1796,7 @@ function ConnectionsPageContent() {
           let tripsQueryLite = supabase
             .from("trips")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(sampleDiscoverOnly ? 40 : 200);
-          if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) tripsQueryLite = tripsQueryLite.in("user_id", sampleTripOwnerIds);
+            .limit(200);
           const { data: fallbackRowsLite, error: fallbackErrLite } = await tripsQueryLite;
           if (!fallbackErrLite) {
             trips = (fallbackRowsLite ?? []) as TripRow[];
@@ -1912,8 +1810,7 @@ function ConnectionsPageContent() {
           let travelPlansQuery = supabase
             .from("travel_plans")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(sampleDiscoverOnly ? 40 : 200);
-          if (sampleDiscoverOnly && sampleTripOwnerIds.length > 0) travelPlansQuery = travelPlansQuery.in("user_id", sampleTripOwnerIds);
+            .limit(200);
           const { data: planRows, error: planErr } = await travelPlansQuery;
           if (!planErr) {
             trips = (planRows ?? []) as TripRow[];
@@ -1941,34 +1838,11 @@ function ConnectionsPageContent() {
           let loadedProfiles = false;
           let lastProfilesError: unknown = null;
 
-          const { data: feedProfs, error: feedProfErr } = await supabase
-            .from("profiles_feed")
-            .select("id,username,display_name,avatar_url,roles,display_role,languages,ref_member_all,ref_trip_all,ref_event_all")
-            .in("id", ids);
-          if (!feedProfErr) {
-            profileRows = (feedProfs ?? []) as ProfileFeedLiteRow[];
-            loadedProfiles = true;
-          } else {
-            lastProfilesError = feedProfErr;
-          }
-
-          if (!loadedProfiles) {
-            const { data: feedProfsLite, error: feedProfErrLite } = await supabase
-              .from("profiles_feed")
-              .select("id,username,display_name,avatar_url,roles,display_role,languages")
-              .in("id", ids);
-            if (!feedProfErrLite) {
-              profileRows = (feedProfsLite ?? []) as ProfileFeedLiteRow[];
-              loadedProfiles = true;
-            } else {
-              lastProfilesError = feedProfErrLite;
-            }
-          }
-
+          // profiles_feed view removed — query profiles directly
           if (!loadedProfiles) {
             const { data: fallbackProfs, error: fallbackProfErr } = await supabase
               .from("profiles")
-              .select("user_id,username,display_name,avatar_url,roles,display_role,languages,ref_member_all,ref_trip_all,ref_event_all")
+              .select("user_id,username,display_name,avatar_url,roles,languages")
               .in("user_id", ids);
             if (!fallbackProfErr) {
               profileRows = (fallbackProfs ?? []).map((row) => {
@@ -1984,7 +1858,7 @@ function ConnectionsPageContent() {
           if (!loadedProfiles) {
             const { data: fallbackProfsLite, error: fallbackProfErrLite } = await supabase
               .from("profiles")
-              .select("user_id,username,display_name,avatar_url,roles,display_role,languages")
+              .select("user_id,username,display_name,avatar_url,roles,languages")
               .in("user_id", ids);
             if (!fallbackProfErrLite) {
               profileRows = (fallbackProfsLite ?? []).map((row) => {
@@ -2023,6 +1897,7 @@ function ConnectionsPageContent() {
             created_at: t.created_at ?? null,
             display_name: p.display_name ?? "Unknown",
             avatar_url: p.avatar_url ?? null,
+            verified: p.verified === true || p.is_verified === true,
             roles: Array.isArray(p.roles) ? stripLegacyRoles(p.roles.filter(isNonEmptyString)) : [],
             display_role: (() => { const r = Array.isArray(p.roles) ? stripLegacyRoles(p.roles.filter(isNonEmptyString)) : []; return (isNonEmptyString(p.display_role) ? p.display_role : null) ?? r[0] ?? null; })(),
             languages: Array.isArray(p.languages) ? p.languages.filter(isNonEmptyString) : [],
@@ -2046,7 +1921,7 @@ function ConnectionsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [router, sampleDiscoverOnly]);
+  }, [router]);
 
   // Country + City library (same as onboarding)
   const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
@@ -2207,13 +2082,6 @@ function ConnectionsPageContent() {
     let list = dbMembers.slice();
     const memberSearchQuery = normalizeSearchText(memberSearch);
 
-    if (sampleDiscoverOnly) {
-      list = list.filter((m) => {
-        if (discoverMode === "hosts") return isSampleHostUsername(m.username);
-        return isSampleDancerUsername(m.username);
-      });
-    }
-
     if (myCityOnly) {
       if (!myCity) return [];
       const cityLower = myCity.toLowerCase();
@@ -2311,9 +2179,7 @@ function ConnectionsPageContent() {
     sortMode,
     getMemberRecommendationMeta,
     discoverMode,
-    hostColumnsAvailable,
     memberSearch,
-    sampleDiscoverOnly,
   ]);
 
   useEffect(() => {
@@ -2336,10 +2202,6 @@ function ConnectionsPageContent() {
 
   const filteredTrips = useMemo(() => {
     let list = tripCards.slice();
-
-    if (sampleDiscoverOnly) {
-      list = list.filter((t) => isSampleDiscoverUsername(t.ownerUsername));
-    }
 
     if (myCityOnly) {
       if (!myCity) return [];
@@ -2376,6 +2238,7 @@ function ConnectionsPageContent() {
     }
 
     if (filters.tripPurpose) list = list.filter((t) => (t.purpose ?? "") === filters.tripPurpose);
+    if (filters.verifiedOnly) list = list.filter((t) => !!t.verified);
 
     const from = (filters.tripDateFrom ?? "").trim();
     const to = (filters.tripDateTo ?? "").trim();
@@ -2404,7 +2267,7 @@ function ConnectionsPageContent() {
     else if (sortMode === "city_az") list = list.slice().sort(byCity);
 
     return list;
-  }, [filters, tripCards, sortMode, getTripRecommendationMeta, myCityOnly, myCity, myCountry, sampleDiscoverOnly]);
+  }, [filters, tripCards, sortMode, getTripRecommendationMeta, myCityOnly, myCity, myCountry]);
 
   const totalMembersPages = Math.max(1, Math.ceil(members.length / DISCOVER_PAGE_SIZE));
   const totalTravellersPages = Math.max(1, Math.ceil(filteredTrips.length / DISCOVER_PAGE_SIZE));
@@ -2435,6 +2298,7 @@ function ConnectionsPageContent() {
     } else {
       if (filters.tripPurpose) n += 1;
       if ((filters.tripDateFrom ?? "").trim() || (filters.tripDateTo ?? "").trim()) n += 1;
+      if (filters.verifiedOnly) n += 1;
     }
     return n;
   }, [filters, tab]);
@@ -2817,7 +2681,7 @@ function ConnectionsPageContent() {
                 <select
                   value={sortMode}
                   onChange={(e) => setSortMode(e.target.value as SortMode)}
-                  className="appearance-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 pr-8 text-sm text-white/85 outline-none transition hover:border-white/25 focus:border-[#00F5FF]/50"
+                  className="appearance-none bg-transparent pr-5 text-sm text-white/85 outline-none cursor-pointer"
                 >
                   <option value="recommended">Recommended</option>
                   <option value="newest">Newest</option>
@@ -2826,7 +2690,7 @@ function ConnectionsPageContent() {
                   {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
                   {tab === "members" ? <option value="references_desc">Most references</option> : null}
                 </select>
-                <MSIcon name="expand_more" className="pointer-events-none absolute right-2.5 top-2.5 text-[16px] text-white/45" />
+                <MSIcon name="expand_more" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[16px] text-white/45" />
               </div>
 
               {tab === "members" || tab === "travellers" ? (
@@ -3508,10 +3372,7 @@ function ConnectionsPageContent() {
 
             <div className="flex-1 overflow-y-auto px-6 py-6 pb-36 space-y-7">
               <section className="space-y-4 md:hidden">
-                <div className="flex items-center gap-2 text-[#00F5FF]">
-                  <MSIcon name="tune" className="text-[20px]" />
-                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">View</h3>
-                </div>
+                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">View</h3>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-sm font-semibold text-white/90">Sort by</label>
@@ -3574,10 +3435,7 @@ function ConnectionsPageContent() {
               </section>
 
               <section className="space-y-4">
-                <div className="flex items-center gap-2 text-[#00F5FF]">
-                  <MSIcon name="location_on" className="text-[20px]" />
-                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Location</h3>
-                </div>
+                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Location</h3>
 
                 <div>
                   <label className="text-sm font-semibold text-white/90">Country</label>
@@ -3663,55 +3521,65 @@ function ConnectionsPageContent() {
               </section>
 
               <section className="space-y-4">
-                <div className="flex items-center gap-2 text-[#00F5FF]">
-                  <MSIcon name="swap_horiz" className="text-[20px]" />
-                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Role Preference</h3>
+                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Role Preference</h3>
+                <div className="flex flex-wrap gap-2">
+                  {ROLE_OPTIONS.map((role) => {
+                    const selected = filters.roles.includes(role);
+                    return (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() =>
+                          setFilters((p) => ({
+                            ...p,
+                            roles: selected ? p.roles.filter((r) => r !== role) : [...p.roles, role],
+                          }))
+                        }
+                        className="inline-flex items-center gap-1.5 transition"
+                      >
+                        <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
+                          {selected ? <MSIcon name="check" className="text-[11px]" /> : null}
+                        </span>
+                        <span className={`text-sm font-semibold ${selected ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{role}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-                <p className="text-[11px] text-white/45">Tap one or multiple roles to filter.</p>
-                <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-2">
-                  {ROLE_OPTIONS.map((role) => (
-                    (() => {
-                      const selected = filters.roles.includes(role);
+              </section>
+
+              {tab === "travellers" ? (
+                <section className="space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Trip Reason</h3>
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {TRIP_PURPOSES.map((purpose) => {
+                      const selected = filters.tripPurpose === purpose;
                       return (
                         <button
-                          key={role}
+                          key={purpose}
                           type="button"
                           onClick={() =>
                             setFilters((p) => ({
                               ...p,
-                              roles: selected ? p.roles.filter((r) => r !== role) : [...p.roles, role],
+                              tripPurpose: p.tripPurpose === purpose ? undefined : purpose,
                             }))
                           }
-                          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                            selected
-                              ? "border-[#00F5FF]/60 bg-[#00F5FF]/15 text-[#00F5FF]"
-                              : "border-white/10 bg-white/[0.01] text-white/60 hover:border-white/30 hover:text-white"
-                          }`}
+                          className="inline-flex items-center gap-1.5 transition"
                         >
-                          <span
-                            className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
-                              selected ? "border-[#00F5FF]/70 bg-[#00F5FF] text-[#0A0A0A]" : "border-white/20"
-                            }`}
-                          >
-                            {selected ? <MSIcon name="check" className="text-[12px]" /> : null}
+                          <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
+                            {selected ? <MSIcon name="check" className="text-[11px]" /> : null}
                           </span>
-                          <span>{role}</span>
+                          <span className={`text-sm font-semibold ${selected ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{purpose}</span>
                         </button>
                       );
-                    })()
-                  ))}
-                </div>
-              </section>
+                    })}
+                  </div>
+                </section>
+              ) : null}
 
               <section className="space-y-4">
-                <div className="flex items-center gap-2 text-[#00F5FF]">
-                  <MSIcon name="verified" className="text-[20px]" />
-                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">References</h3>
-                </div>
-                <p className="text-[11px] text-white/45">Filter by whether a member or traveller already has reference history.</p>
-                <div className="flex flex-wrap gap-2">
+                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">References</h3>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
                   {[
-                    { key: "all", label: "All" },
                     { key: "has", label: "Has references" },
                     { key: "none", label: "No references" },
                   ].map((option) => {
@@ -3729,13 +3597,12 @@ function ConnectionsPageContent() {
                             references: option.key === "all" ? undefined : (option.key as "has" | "none"),
                           }))
                         }
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                          selected
-                            ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                            : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                        }`}
+                        className="inline-flex items-center gap-1.5 transition"
                       >
-                        {option.label}
+                        <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
+                          {selected ? <MSIcon name="check" className="text-[11px]" /> : null}
+                        </span>
+                        <span className={`text-sm font-semibold ${selected ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{option.label}</span>
                       </button>
                     );
                   })}
@@ -3744,23 +3611,15 @@ function ConnectionsPageContent() {
 
               {tab === "members" ? (
                 <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <MSIcon name="rebase_edit" className="text-[20px]" />
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Dance Styles &amp; Level</h3>
-                  </div>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Dance Styles &amp; Level</h3>
 
-                  <div className="space-y-3">
+                  <div className="flex flex-wrap gap-x-4 gap-y-3">
                     {STYLE_OPTIONS.map((style) => {
                       const levelsForStyle = filters.styleLevels[style] ?? [];
                       const enabled = Object.prototype.hasOwnProperty.call(filters.styleLevels, style);
                       const selectedLevel = levelsForStyle[0] ?? null;
                       return (
-                        <div
-                          key={style}
-                          className={`rounded-xl border p-4 ${
-                            enabled ? "border-white/15 bg-white/[0.03]" : "border-white/10 bg-transparent"
-                          }`}
-                        >
+                        <div key={style} className="flex flex-col gap-2">
                           <button
                             type="button"
                             onClick={() =>
@@ -3771,20 +3630,15 @@ function ConnectionsPageContent() {
                                 return { ...p, styleLevels: next };
                               })
                             }
-                            className="flex w-full items-center gap-3 text-left"
+                            className="inline-flex items-center gap-1.5 transition text-left"
                           >
-                            <span
-                              className={`flex h-6 w-6 items-center justify-center rounded-md border ${
-                                enabled ? "border-[#00F5FF] bg-[#00F5FF]" : "border-white/20 bg-transparent"
-                              }`}
-                            >
-                              {enabled ? <MSIcon name="check" className="text-[16px] text-[#0A0A0A]" /> : null}
+                            <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${enabled ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
+                              {enabled ? <MSIcon name="check" className="text-[11px]" /> : null}
                             </span>
-                            <span className={`text-sm font-semibold ${enabled ? "text-white" : "text-white/55"}`}>{style}</span>
+                            <span className={`text-sm font-semibold ${enabled ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{style}</span>
                           </button>
-
                           {enabled ? (
-                            <div className="mt-3 grid grid-cols-3 gap-2">
+                            <div className="flex gap-1">
                               {LEVELS.map((level) => (
                                 <button
                                   key={`${style}-${level}`}
@@ -3797,10 +3651,10 @@ function ConnectionsPageContent() {
                                       return { ...p, styleLevels: next };
                                     })
                                   }
-                                  className={`rounded-lg border py-1.5 text-[10px] font-bold uppercase tracking-wider transition ${
+                                  className={`rounded border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition ${
                                     selectedLevel === level
                                       ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]"
-                                      : "border-white/15 text-white/55 hover:border-white/30"
+                                      : "border-white/15 text-white/45 hover:border-white/30"
                                   }`}
                                 >
                                   {LEVEL_SHORT_LABEL[level]}
@@ -3817,40 +3671,7 @@ function ConnectionsPageContent() {
 
               {tab === "travellers" ? (
                 <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <MSIcon name="travel_explore" className="text-[20px]" />
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Trip Reason</h3>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {TRIP_PURPOSES.map((purpose) => (
-                      <button
-                        key={purpose}
-                        type="button"
-                        onClick={() =>
-                          setFilters((p) => ({
-                            ...p,
-                            tripPurpose: p.tripPurpose === purpose ? undefined : purpose,
-                          }))
-                        }
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                          filters.tripPurpose === purpose
-                            ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                            : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                        }`}
-                      >
-                        {purpose}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-
-              {tab === "travellers" ? (
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <MSIcon name="public" className="text-[20px]" />
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Languages</h3>
-                  </div>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Languages</h3>
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-semibold text-white/90">Search languages</label>
                     <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
@@ -3896,71 +3717,80 @@ function ConnectionsPageContent() {
                       ))}
                     </div>
                   ) : null}
+
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.verifiedOnly}
+                      onChange={(e) => setFilters((p) => ({ ...p, verifiedOnly: e.target.checked }))}
+                      className="h-4 w-4 rounded border-white/20 bg-transparent accent-[#00F5FF]"
+                    />
+                    <span className={`text-sm font-semibold transition ${filters.verifiedOnly ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>
+                      Verified only
+                    </span>
+                  </label>
                 </section>
               ) : null}
 
               {tab === "members" ? (
                 <section className="border-t border-white/10 pt-6 space-y-4">
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-white/50">Languages</div>
-                    <div className="mt-3 flex items-center justify-between">
-                      <label className="text-sm font-semibold text-white/90">Search languages</label>
-                      <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
-                        {filters.langs.length}
-                      </span>
-                    </div>
-                    <input
-                      value={languageQuery}
-                      onChange={(e) => setLanguageQuery(e.target.value)}
-                      placeholder="Search languages..."
-                      className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/85 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                    />
-                    {filters.langs.length ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {filters.langs.map((lang) => (
-                          <button
-                            key={`selected-lang-${lang}`}
-                            type="button"
-                            onClick={() =>
-                              setFilters((p) => ({ ...p, langs: p.langs.filter((l) => l !== lang) }))
-                            }
-                            className="flex items-center gap-1 rounded-full border border-[#00F5FF]/40 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#00F5FF]"
-                          >
-                            {lang}
-                            <MSIcon name="cancel" className="text-[14px]" />
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    {languageSuggestions.length ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {languageSuggestions.map((lang, idx) => (
-                          <button
-                            key={`suggestion-lang-${lang}-${idx}`}
-                            type="button"
-                            onClick={() =>
-                              setFilters((p) => ({ ...p, langs: [...p.langs, lang] }))
-                            }
-                            className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold text-white/70 transition hover:border-[#00F5FF]/50 hover:text-[#00F5FF]"
-                          >
-                            {lang}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                    <span>
-                      <span className="block text-xs font-bold uppercase tracking-wider text-white/75">Verified only</span>
-                      <span className="mt-0.5 block text-[11px] text-white/45">Only show verified members</span>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Languages</h3>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-semibold text-white/90">Search languages</label>
+                    <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
+                      {filters.langs.length}
                     </span>
+                  </div>
+                  <input
+                    value={languageQuery}
+                    onChange={(e) => setLanguageQuery(e.target.value)}
+                    placeholder="Search languages..."
+                    className="w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/85 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                  />
+                  {filters.langs.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {filters.langs.map((lang) => (
+                        <button
+                          key={`selected-lang-${lang}`}
+                          type="button"
+                          onClick={() =>
+                            setFilters((p) => ({ ...p, langs: p.langs.filter((l) => l !== lang) }))
+                          }
+                          className="flex items-center gap-1 rounded-full border border-[#00F5FF]/40 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#00F5FF]"
+                        >
+                          {lang}
+                          <MSIcon name="cancel" className="text-[14px]" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {languageSuggestions.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {languageSuggestions.map((lang, idx) => (
+                        <button
+                          key={`suggestion-lang-${lang}-${idx}`}
+                          type="button"
+                          onClick={() =>
+                            setFilters((p) => ({ ...p, langs: [...p.langs, lang] }))
+                          }
+                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold text-white/70 transition hover:border-[#00F5FF]/50 hover:text-[#00F5FF]"
+                        >
+                          {lang}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <label className="flex items-center gap-3 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={filters.verifiedOnly}
                       onChange={(e) => setFilters((p) => ({ ...p, verifiedOnly: e.target.checked }))}
-                      className="h-5 w-5 rounded border-white/20 bg-transparent accent-[#00F5FF]"
+                      className="h-4 w-4 rounded border-white/20 bg-transparent accent-[#00F5FF]"
                     />
+                    <span className={`text-sm font-semibold transition ${filters.verifiedOnly ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>
+                      Verified only
+                    </span>
                   </label>
                 </section>
               ) : null}

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import DarkConnectModal from "@/components/DarkConnectModal";
+import BookSessionModal from "@/components/teacher/BookSessionModal";
 import RequestInfoModal from "@/components/teacher/RequestInfoModal";
 
 type Props = {
@@ -14,18 +15,29 @@ type Props = {
 export default function TeacherHeroActions({ userId, displayName, avatarUrl, variant = "hero" }: Props) {
   const [connectOpen, setConnectOpen] = useState(false);
   const [requestInfoOpen, setRequestInfoOpen] = useState(false);
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [bookingSuccessMsg, setBookingSuccessMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (variant === "cta") {
     return (
       <>
-        <button
-          type="button"
-          onClick={() => setRequestInfoOpen(true)}
-          className="inline-block bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] shadow-[0_0_50px_rgba(255,81,250,0.3)] text-zinc-900 px-12 py-5 rounded-full font-black uppercase text-base tracking-widest hover:scale-105 transition-transform"
-        >
-          {successMsg ?? "Request Information Package"}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => setBookingOpen(true)}
+            className="inline-block rounded-full bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] px-12 py-5 text-base font-black uppercase tracking-widest text-zinc-900 shadow-[0_0_50px_rgba(255,81,250,0.3)] transition-transform hover:scale-105"
+          >
+            {bookingSuccessMsg ?? "Book Session"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setRequestInfoOpen(true)}
+            className="inline-block rounded-full border border-white/20 bg-white/[0.04] px-8 py-5 text-sm font-black uppercase tracking-widest text-white transition hover:bg-white/[0.08]"
+          >
+            {successMsg ?? "Request Information Package"}
+          </button>
+        </div>
 
         <RequestInfoModal
           open={requestInfoOpen}
@@ -37,6 +49,17 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
             setRequestInfoOpen(false);
           }}
         />
+
+        <BookSessionModal
+          open={bookingOpen}
+          teacherUserId={userId}
+          teacherName={displayName}
+          onClose={() => setBookingOpen(false)}
+          onSubmitted={(msg) => {
+            setBookingSuccessMsg(msg);
+            setBookingOpen(false);
+          }}
+        />
       </>
     );
   }
@@ -44,6 +67,15 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
   return (
     <>
       <div className="flex flex-wrap items-center gap-4 pt-6">
+        <button
+          type="button"
+          onClick={() => setBookingOpen(true)}
+          className="bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
+        >
+          {bookingSuccessMsg ?? "Book Session"}
+          <span className="material-symbols-outlined text-[18px]">event_available</span>
+        </button>
+
         {/* Request Info — gradient fill */}
         <button
           type="button"
@@ -81,6 +113,17 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
         onSubmitted={(msg) => {
           setSuccessMsg(msg);
           setRequestInfoOpen(false);
+        }}
+      />
+
+      <BookSessionModal
+        open={bookingOpen}
+        teacherUserId={userId}
+        teacherName={displayName}
+        onClose={() => setBookingOpen(false)}
+        onSubmitted={(msg) => {
+          setBookingSuccessMsg(msg);
+          setBookingOpen(false);
         }}
       />
     </>
