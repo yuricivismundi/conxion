@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import SearchableMobileSelect from "@/components/SearchableMobileSelect";
+import TeacherBookingsManager from "@/components/teacher/TeacherBookingsManager";
 import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { canManageTeacherInfo } from "@/lib/teacher-info/roles";
@@ -75,7 +76,7 @@ const AVAILABILITY_OPTIONS = [
 type AvailabilityOption = (typeof AVAILABILITY_OPTIONS)[number];
 
 type ServiceType = (typeof SERVICE_TYPES)[number]["value"];
-type ActiveTab = "profile" | "classes" | "events";
+type ActiveTab = "profile" | "classes" | "events" | "bookings";
 
 // ─── DB Row Types ─────────────────────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ type TeacherProfileRow = {
   headline: string | null;
   bio: string | null;
   base_city: string | null;
+  base_address: string | null;
   base_country: string | null;
   base_school: string | null;
   languages: string[];
@@ -184,13 +186,6 @@ function emptyEventDraft(): EventDraft {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function trialDaysRemaining(trialEndsAt: string | null): number | null {
-  if (!trialEndsAt) return null;
-  const diff = new Date(trialEndsAt).getTime() - Date.now();
-  if (diff <= 0) return 0;
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
 function formatTime(t: string | null) {
   if (!t) return "";
   // HH:MM:SS → HH:MM
@@ -254,11 +249,13 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   const [info, setInfo] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>("profile");
   const [featureUnavailable, setFeatureUnavailable] = useState(false);
+  const [profileDisplayName, setProfileDisplayName] = useState("Teacher");
 
   // Profile form state
   const [headline, setHeadline] = useState("");
   const [bio, setBio] = useState("");
   const [baseCity, setBaseCity] = useState("");
+  const [baseAddress, setBaseAddress] = useState("");
   const [baseSchool, setBaseSchool] = useState("");
   const [languages, setLanguages] = useState<string[]>([]);
   const [travelAvailable, setTravelAvailable] = useState(false);
@@ -322,7 +319,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
         const profileRes = await supabase
           .from("profiles")
-          .select("user_id,roles,verified,verified_label")
+          .select("user_id,display_name,roles,verified,verified_label")
           .eq("user_id", currentUser.id)
           .maybeSingle();
 
@@ -330,13 +327,24 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
           throw new Error(profileRes.error?.message ?? "Could not load your profile.");
         }
 
-        const profileRow = profileRes.data as { user_id?: string; roles?: unknown; verified?: unknown; verified_label?: unknown };
+        const profileRow = profileRes.data as {
+          user_id?: string;
+          display_name?: unknown;
+          roles?: unknown;
+          verified?: unknown;
+          verified_label?: unknown;
+        };
         const nextRoles: string[] = Array.isArray(profileRow.roles)
           ? profileRow.roles.filter((item): item is string => typeof item === "string")
           : [];
 
         if (cancelled) return;
         setUserId(currentUser.id);
+        setProfileDisplayName(
+          typeof profileRow.display_name === "string" && profileRow.display_name.trim()
+            ? profileRow.display_name.trim()
+            : "Teacher"
+        );
         setRoles(nextRoles);
         setPaymentVerified(isPaymentVerified(profileRow));
 
@@ -386,6 +394,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
           setHeadline(tp.headline ?? "");
           setBio(tp.bio ?? "");
           setBaseCity(tp.base_city ?? "");
+          setBaseAddress(tp.base_address ?? "");
           setBaseSchool(tp.base_school ?? "");
           setLanguages(tp.languages ?? []);
           setTravelAvailable(tp.travel_available ?? false);
@@ -499,6 +508,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         headline: headline.trim() || null,
         bio: bio.trim() || null,
         base_city: baseCity.trim() || null,
+        base_address: baseAddress.trim() || null,
         base_country: baseCountry.trim() || null,
         base_school: baseSchool.trim() || null,
         languages: languages,
@@ -733,14 +743,10 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   // ── Computed values ───────────────────────────────────────────────────────
 
   const isEnabled = teacherProfile?.teacher_profile_enabled ?? false;
-  const trialActive =
-    teacherProfile?.teacher_profile_trial_ends_at != null &&
-    new Date(teacherProfile.teacher_profile_trial_ends_at).getTime() > Date.now();
   const trialExpired =
     teacherProfile?.teacher_profile_trial_started_at != null &&
     teacherProfile?.teacher_profile_trial_ends_at != null &&
     new Date(teacherProfile.teacher_profile_trial_ends_at).getTime() <= Date.now();
-  const daysLeft = trialActive ? trialDaysRemaining(teacherProfile?.teacher_profile_trial_ends_at ?? null) : null;
   const defaultView = teacherProfile?.default_public_view ?? "social";
   const teacherProfileLocked = trialExpired && !paymentVerified;
 
@@ -793,7 +799,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     return (
       <div className={embedded ? "" : "min-h-screen bg-[#06070b] text-slate-100"}>
         {!embedded && <Nav />}
-        <div className="mx-auto max-w-2xl px-4 pb-24 pt-6">
+        <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
           <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 text-center sm:p-7">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-fuchsia-200/80">Teacher Profile Locked</p>
             <h1 className="mt-3 text-2xl font-black text-white">Your teacher page trial has ended</h1>
@@ -824,7 +830,13 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     <div className={embedded ? "" : "min-h-screen bg-[#06070b] text-slate-100"}>
       {!embedded && <Nav />}
 
-      <div className="mx-auto max-w-2xl px-4 pb-24 pt-6">
+      <div
+        className={[
+          embedded
+            ? "w-full pb-24 pt-1"
+            : "mx-auto w-full max-w-[1240px] px-4 pb-24 pt-6 sm:px-6 lg:px-8",
+        ].join(" ")}
+      >
         {/* ── Header ──────────────────────────────────────────────────────── */}
         {!embedded && (
           <div className="mb-6 flex items-center gap-3">
@@ -850,11 +862,6 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         )}
 
         {/* ── Trial / verification status banner ─────────────────────────── */}
-        {trialActive && daysLeft != null && (
-          <div className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-            Free trial active — <strong>{daysLeft}</strong> {daysLeft === 1 ? "day" : "days"} remaining
-          </div>
-        )}
         {trialExpired && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
             <span>Trial ended. Upgrade to Plus to continue.</span>
@@ -880,24 +887,21 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         )}
 
         {/* ── Enable / disable toggle ─────────────────────────────────────── */}
-        <section className="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-100">Teacher profile</p>
-              <p className="mt-0.5 text-xs text-slate-400">
-                When enabled, visitors can see your professional teacher profile.
-              </p>
-              {isEnabled && userId && (
+        <div className="mb-2 grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="flex min-w-0 items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Teacher profile</p>
+              {isEnabled && userId ? (
                 <a
                   href={`/profile/${userId}/teacher`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-cyan-300/80 hover:text-cyan-200"
+                  className="mt-2 inline-flex items-center gap-1 text-sm text-cyan-300/80 hover:text-cyan-200"
                 >
                   <span className="material-symbols-outlined text-[13px]">open_in_new</span>
                   View teacher profile
                 </a>
-              )}
+              ) : null}
             </div>
             <Toggle
               checked={isEnabled}
@@ -905,40 +909,60 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
               disabled={autoSaving}
             />
           </div>
-        </section>
-
-        {/* ── Default view ────────────────────────────────────────────────── */}
-        <section className="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Default public view
-          </p>
-          <p className="mb-3 text-xs text-slate-500">
-            Choose what visitors see first when they open your profile.
-          </p>
-          <div className="flex gap-2">
-            {(["social", "teacher"] as const).map((view) => (
-              <button
-                key={view}
-                type="button"
-                onClick={() => handleSetDefaultView(view)}
-                disabled={autoSaving}
-                className={[
-                  "rounded-xl px-4 py-2 text-sm font-medium transition-colors",
-                  defaultView === view
-                    ? "bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-[#06121a] font-semibold"
-                    : "border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10",
-                  autoSaving ? "cursor-not-allowed opacity-50" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                {view === "social" ? "Social profile" : "Teacher profile"}
-              </button>
-            ))}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Default public view</p>
+            <div className="mt-3 flex gap-2">
+              {(["social", "teacher"] as const).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => handleSetDefaultView(view)}
+                  disabled={autoSaving}
+                  className={[
+                    "flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors",
+                    defaultView === view
+                      ? "bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-[#06121a] font-semibold"
+                      : "border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10",
+                    autoSaving ? "cursor-not-allowed opacity-50" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  {view === "social" ? "Social" : "Teacher"}
+                </button>
+              ))}
+            </div>
           </div>
-        </section>
+        </div>
+
+        {/* ── Tabs ────────────────────────────────────────────────────────── */}
+        <div className="mb-4 flex gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
+          {(
+            [
+              { key: "profile", label: "Profile info" },
+              { key: "classes", label: "Weekly classes" },
+              { key: "events", label: "Events" },
+              { key: "bookings", label: "Booking" },
+            ] as const
+          ).map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveTab(key)}
+              className={[
+                "flex-1 rounded-xl px-2.5 py-1.5 text-sm font-medium transition-colors",
+                activeTab === key
+                  ? "bg-white/10 text-slate-100"
+                  : "text-slate-500 hover:text-slate-300",
+              ].join(" ")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {/* ── Profile info form ───────────────────────────────────────────── */}
+        {activeTab === "profile" && (
         <section className="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
           <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Profile info
@@ -974,47 +998,47 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
               />
             </div>
 
-            {/* Country + City */}
-            <label className="block">
-              <span className="text-xs text-slate-400">Country</span>
-              <div className="mt-1.5 sm:hidden">
-                <SearchableMobileSelect
-                  label="Country"
+            {/* Country + City + Studio */}
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="block">
+                <span className="text-xs text-slate-400">Country</span>
+                <div className="mt-1.5 sm:hidden">
+                  <SearchableMobileSelect
+                    label="Country"
+                    value={baseCountry}
+                    options={countriesAll.map((country) => country.name)}
+                    placeholder="Select country..."
+                    searchPlaceholder="Search countries..."
+                    onSelect={(nextCountry) => {
+                      setBaseCountry(nextCountry);
+                      setBaseCity("");
+                      setBaseCountryCities([]);
+                      const iso = countriesAll.find((country) => country.name === nextCountry)?.isoCode ?? nextCountry;
+                      void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
+                    }}
+                    buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
+                  />
+                </div>
+                <select
                   value={baseCountry}
-                  options={countriesAll.map((country) => country.name)}
-                  placeholder="Select country..."
-                  searchPlaceholder="Search countries..."
-                  onSelect={(nextCountry) => {
-                    setBaseCountry(nextCountry);
+                  onChange={(e) => {
+                    setBaseCountry(e.target.value);
                     setBaseCity("");
                     setBaseCountryCities([]);
-                    const iso = countriesAll.find((country) => country.name === nextCountry)?.isoCode ?? nextCountry;
-                    void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
+                    if (e.target.value) {
+                      const iso = countriesAll.find((c) => c.name === e.target.value)?.isoCode ?? e.target.value;
+                      void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
+                    }
                   }}
-                  buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
-                />
-              </div>
-              <select
-                value={baseCountry}
-                onChange={(e) => {
-                  setBaseCountry(e.target.value);
-                  setBaseCity("");
-                  setBaseCountryCities([]);
-                  if (e.target.value) {
-                    const iso = countriesAll.find((c) => c.name === e.target.value)?.isoCode ?? e.target.value;
-                    void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
-                  }
-                }}
-                className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none sm:block"
-              >
-                <option value="">Select country…</option>
-                {countriesAll.map((c) => (
-                  <option key={c.isoCode} value={c.name}>{c.name}</option>
-                ))}
-              </select>
-            </label>
+                  className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none sm:block"
+                >
+                  <option value="">Select country…</option>
+                  {countriesAll.map((c) => (
+                    <option key={c.isoCode} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </label>
 
-            {baseCountry && (
               <label className="block">
                 <span className="text-xs text-slate-400">City</span>
                 <div className="mt-1.5 sm:hidden">
@@ -1022,9 +1046,9 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                     label="City"
                     value={baseCity}
                     options={baseCountryCities}
-                    placeholder={baseCountryCities.length === 0 ? "Loading..." : "Select city..."}
+                    placeholder={baseCountry ? (baseCountryCities.length === 0 ? "Loading..." : "Select city...") : "Select country first"}
                     searchPlaceholder="Search cities..."
-                    disabled={baseCountryCities.length === 0}
+                    disabled={!baseCountry || baseCountryCities.length === 0}
                     emptyMessage="No cities found."
                     onSelect={(nextCity) => setBaseCity(nextCity)}
                     buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white disabled:opacity-50"
@@ -1033,24 +1057,37 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                 <select
                   value={baseCity}
                   onChange={(e) => setBaseCity(e.target.value)}
-                  className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none sm:block"
+                  disabled={!baseCountry}
+                  className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none disabled:opacity-50 sm:block"
                 >
-                  <option value="">{baseCountryCities.length === 0 ? "Loading…" : "Select city…"}</option>
+                  <option value="">
+                    {!baseCountry ? "Select country first" : baseCountryCities.length === 0 ? "Loading…" : "Select city…"}
+                  </option>
                   {baseCountryCities.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </label>
-            )}
 
-            {/* Base school */}
+              <label className="block">
+                <span className="text-xs text-slate-400">Base school / studio</span>
+                <input
+                  type="text"
+                  value={baseSchool}
+                  onChange={(e) => setBaseSchool(e.target.value)}
+                  placeholder="Studio name"
+                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
+                />
+              </label>
+            </div>
+
             <div className="space-y-1.5">
-              <label className="text-xs text-slate-400">Base school / studio</label>
+              <label className="text-xs text-slate-400">Address</label>
               <input
                 type="text"
-                value={baseSchool}
-                onChange={(e) => setBaseSchool(e.target.value)}
-                placeholder="Studio name"
+                value={baseAddress}
+                onChange={(e) => setBaseAddress(e.target.value.slice(0, 240))}
+                placeholder="Street, number, or meeting point"
                 className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
               />
             </div>
@@ -1116,47 +1153,6 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
               )}
             </div>
 
-            {/* Travel available */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-200">Available to travel</p>
-                <p className="text-xs text-slate-500">I can travel to teach at events or studios</p>
-              </div>
-              <Toggle
-                checked={travelAvailable}
-                onChange={setTravelAvailable}
-              />
-            </div>
-
-            {/* Availability tags */}
-            <div>
-              <span className="text-xs text-slate-400">Availability</span>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {AVAILABILITY_OPTIONS.map((opt) => {
-                  const selected = availabilityTags.includes(opt);
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() =>
-                        setAvailabilityTags((prev) =>
-                          selected ? prev.filter((x) => x !== opt) : [...prev, opt]
-                        )
-                      }
-                      className={[
-                        "rounded-xl border px-3 py-2 text-left text-xs font-medium transition-colors",
-                        selected
-                          ? "border-cyan-300/35 bg-cyan-300/14 text-cyan-100"
-                          : "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
-                      ].join(" ")}
-                    >
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             <button
               type="button"
               onClick={() => void handleSaveProfile()}
@@ -1167,37 +1163,18 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
             </button>
           </div>
         </section>
+        )}
 
-        {/* ── Tabs ────────────────────────────────────────────────────────── */}
-        <div className="mb-4 flex gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1">
-          {(
-            [
-              { key: "classes", label: "Classes" },
-              { key: "events", label: "Events" },
-            ] as const
-          ).map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActiveTab(key)}
-              className={[
-                "flex-1 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-                activeTab === key
-                  ? "bg-white/10 text-slate-100"
-                  : "text-slate-500 hover:text-slate-300",
-              ].join(" ")}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {activeTab === "bookings" && userId ? (
+          <TeacherBookingsManager teacherUserId={userId} teacherName={profileDisplayName} />
+        ) : null}
 
         {/* ── Tab: Classes ────────────────────────────────────────────────── */}
         {activeTab === "classes" && (
           <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
             <div className="mb-4 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Regular classes
+                Weekly classes
               </p>
               {!showClassForm && (
                 <button
@@ -1205,14 +1182,14 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                   onClick={openAddClass}
                   className="rounded-xl bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 transition-colors"
                 >
-                  + Add class
+                  + Add weekly class
                 </button>
               )}
             </div>
 
             {/* Class list */}
             {regularClasses.length === 0 && !showClassForm && (
-              <p className="text-sm text-slate-500">No classes added yet.</p>
+              <p className="text-sm text-slate-500">No weekly classes added yet.</p>
             )}
             <div className="space-y-2">
               {regularClasses.map((cls) => (
@@ -1263,7 +1240,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                 className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4"
               >
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  {editingClassId ? "Edit class" : "New class"}
+                  {editingClassId ? "Edit weekly class" : "New weekly class"}
                 </p>
 
                 {/* Title */}
@@ -1440,7 +1417,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                     disabled={savingClass}
                     className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-[#06121a] disabled:opacity-60"
                   >
-                    {savingClass ? "Saving…" : editingClassId ? "Update" : "Add class"}
+                    {savingClass ? "Saving…" : editingClassId ? "Update" : "Add weekly class"}
                   </button>
                   <button
                     type="button"

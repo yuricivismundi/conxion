@@ -355,6 +355,17 @@ export default async function TeacherProfilePage({
         </section>
 
         {/* ── Experiences + Videos (tabbed) ───────────────────────────────── */}
+        {teacherProfile.bio && (
+          <section className="mb-24">
+            <div className="max-w-5xl rounded-[32px] border border-white/6 bg-zinc-900/35 px-8 py-10 backdrop-blur-2xl sm:px-10">
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-500">Bio</p>
+              <p className="mt-5 text-lg leading-relaxed text-zinc-300 sm:text-[21px]">
+                {teacherProfile.bio}
+              </p>
+            </div>
+          </section>
+        )}
+
         <TeacherExperiencesSection
           infoBlocks={infoBlocks}
           videos={profileMedia.filter((m) => m.kind === "video")}

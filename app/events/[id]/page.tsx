@@ -663,7 +663,7 @@ export default function EventDetailsPage() {
   const respondedCount = counts.going + counts.interested + counts.waitlist;
   const requiresApproval = event?.accessType === "request";
   const isPrivateGroup = event?.accessType === "private_group";
-  const threadTabLabel = event ? eventThreadTabLabel(event.accessType, event.chatMode) : "Updates";
+  const threadTabLabel = event ? eventThreadTabLabel(event.accessType) : "Updates";
   const canInviteConnections = Boolean(
     event &&
       (

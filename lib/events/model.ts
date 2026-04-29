@@ -36,6 +36,9 @@ export type EventRecord = {
   endsAt: string;
   capacity: number | null;
   maxMembers: number | null;
+  showGuestList: boolean;
+  guestsCanInvite: boolean;
+  approveMessages: boolean;
   coverUrl: string | null;
   coverStatus: EventCoverStatus;
   coverReviewedBy: string | null;
@@ -230,6 +233,9 @@ export function mapEventRows(rows: unknown[]): EventRecord[] {
         endsAt,
         capacity: pickNumber(row, "capacity"),
         maxMembers: pickNumber(row, "max_members"),
+        showGuestList: row.show_guest_list !== false,
+        guestsCanInvite: row.guests_can_invite === true,
+        approveMessages: row.approve_messages === true,
         coverUrl: pickNullableString(row, "cover_url"),
         coverStatus: normalizeCoverStatus(pickString(row, "cover_status")),
         coverReviewedBy: pickNullableString(row, "cover_reviewed_by"),

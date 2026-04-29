@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TeacherInfoBlock, TeacherInfoBlockKind } from "@/lib/teacher-info/types";
 import { TEACHER_INFO_KIND_LABELS, getTeacherInfoTemplateText } from "@/lib/teacher-info/types";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
@@ -36,14 +36,43 @@ type Props = {
   videos: ProfileMediaItem[];
 };
 
+type ExperienceCard = {
+  id: string;
+  kind: TeacherInfoBlockKind;
+  title: string;
+  bodyText: string | null;
+  priceText: string | null;
+  ctaText: string | null;
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function TeacherExperiencesSection({ infoBlocks, videos }: Props) {
   const [tab, setTab] = useState<Tab>("experiences");
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [inlineVideoId, setInlineVideoId] = useState<string | null>(null);
+  const marqueeRef = useRef<HTMLDivElement | null>(null);
 
   const showVideosTab = videos.length > 0;
+  const experienceCards: ExperienceCard[] =
+    infoBlocks.length > 0
+      ? infoBlocks.map((block) => ({
+          id: block.id,
+          kind: block.kind,
+          title: block.title,
+          bodyText: getTeacherInfoTemplateText(block),
+          priceText: block.contentJson.priceText ?? null,
+          ctaText: block.contentJson.ctaText ?? null,
+        }))
+      : (["private_class", "group_class", "workshop"] as TeacherInfoBlockKind[]).map((kind) => ({
+          id: `placeholder-${kind}`,
+          kind,
+          title: TEACHER_INFO_KIND_LABELS[kind],
+          bodyText: null,
+          priceText: null,
+          ctaText: null,
+        }));
+  const marqueeCards = experienceCards.length > 1 ? [...experienceCards, ...experienceCards] : experienceCards;
 
   // Lightbox keyboard nav
   useEffect(() => {
@@ -56,6 +85,47 @@ export default function TeacherExperiencesSection({ infoBlocks, videos }: Props)
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxIndex, videos.length]);
+
+  useEffect(() => {
+    if (tab !== "experiences") return;
+    const el = marqueeRef.current;
+    if (!el || marqueeCards.length <= 1) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let raf = 0;
+    let lastTs = 0;
+    let paused = false;
+
+    const onEnter = () => {
+      paused = true;
+    };
+    const onLeave = () => {
+      paused = false;
+    };
+
+    el.addEventListener("mouseenter", onEnter);
+    el.addEventListener("mouseleave", onLeave);
+
+    const tick = (ts: number) => {
+      if (!lastTs) lastTs = ts;
+      const delta = ts - lastTs;
+      lastTs = ts;
+      const half = el.scrollWidth / 2;
+      if (!paused && half > 0) {
+        el.scrollLeft += delta * 0.035;
+        if (el.scrollLeft >= half) el.scrollLeft -= half;
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      el.removeEventListener("mouseenter", onEnter);
+      el.removeEventListener("mouseleave", onLeave);
+    };
+  }, [marqueeCards.length, tab]);
 
   const lightboxItem = lightboxIndex !== null ? (videos[lightboxIndex] ?? null) : null;
 
@@ -91,50 +161,39 @@ export default function TeacherExperiencesSection({ infoBlocks, videos }: Props)
 
         {/* ── Experiences content ───────────────────────────────────────────── */}
         {tab === "experiences" && (
-          infoBlocks.length === 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {(["private_class", "group_class", "workshop"] as TeacherInfoBlockKind[]).map((kind) => (
-                <div
-                  key={kind}
-                  className="bg-zinc-900/20 backdrop-blur-2xl p-8 rounded-2xl border border-white/5 border-dashed flex flex-col items-center justify-center gap-4 min-h-[200px]"
-                >
-                  <span className="material-symbols-outlined text-zinc-700 text-4xl">{kindToIcon(kind)}</span>
-                  <p className="text-zinc-700 text-sm font-bold uppercase tracking-widest">{TEACHER_INFO_KIND_LABELS[kind]}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {infoBlocks.map((block) => {
-                const bodyText = getTeacherInfoTemplateText(block);
-                const priceText = block.contentJson.priceText;
-                const ctaText = block.contentJson.ctaText;
-                return (
+          <div className="relative">
+            <div className="pointer-events-none absolute inset-y-0 left-0 z-[2] w-14 bg-gradient-to-r from-[#0e0e0e] to-transparent" />
+            <div className="pointer-events-none absolute inset-y-0 right-0 z-[2] w-14 bg-gradient-to-l from-[#0e0e0e] to-transparent" />
+            <div ref={marqueeRef} className="overflow-x-hidden">
+              <div className="flex w-max gap-6 py-2">
+                {marqueeCards.map((card, index) => (
                   <div
-                    key={block.id}
-                    className="bg-zinc-900/40 backdrop-blur-2xl p-8 rounded-2xl hover:-translate-y-2 transition-all duration-500 group border border-white/5"
+                    key={`${card.id}-${index}`}
+                    className="w-[320px] shrink-0 rounded-[28px] border border-white/6 bg-zinc-900/45 p-8 backdrop-blur-2xl"
                   >
-                    <span className="material-symbols-outlined text-[#c1fffe] text-4xl mb-6 group-hover:scale-110 transition-transform block">
-                      {kindToIcon(block.kind)}
+                    <span className="material-symbols-outlined mb-6 block text-4xl text-[#c1fffe]">
+                      {kindToIcon(card.kind)}
                     </span>
-                    <h3 className="font-bold text-xl mb-3 text-white">{block.title}</h3>
-                    {bodyText && (
-                      <p className="text-zinc-400 text-sm leading-relaxed mb-6">
-                        {bodyText.slice(0, 150)}
-                        {bodyText.length > 150 ? "…" : ""}
+                    <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-500">
+                      {TEACHER_INFO_KIND_LABELS[card.kind]}
+                    </p>
+                    <h3 className="mb-3 text-xl font-bold text-white">{card.title}</h3>
+                    {card.bodyText && (
+                      <p className="mb-6 text-sm leading-relaxed text-zinc-400">
+                        {card.bodyText.slice(0, 150)}
+                        {card.bodyText.length > 150 ? "…" : ""}
                       </p>
                     )}
-                    {priceText && (
-                      <p className="text-[#ff51fa] font-black text-xl tracking-tighter">{priceText}</p>
-                    )}
-                    {ctaText && !priceText && (
-                      <p className="text-[#ff51fa] font-black text-xl tracking-tighter">{ctaText}</p>
-                    )}
+                    {card.priceText ? (
+                      <p className="text-xl font-black tracking-tighter text-[#ff51fa]">{card.priceText}</p>
+                    ) : card.ctaText ? (
+                      <p className="text-xl font-black tracking-tighter text-[#ff51fa]">{card.ctaText}</p>
+                    ) : null}
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          )
+          </div>
         )}
 
         {/* ── Videos content ────────────────────────────────────────────────── */}

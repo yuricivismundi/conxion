@@ -108,7 +108,7 @@ function trimForm(form: TripFormState): TripFormState {
   };
 }
 
-export default function TripsPage() {
+export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean) => void } = {}) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -218,6 +218,10 @@ export default function TripsPage() {
     [currentPastTripsPage, pastTrips]
   );
   const canCreate = activeTrips.length < 5;
+
+  useEffect(() => {
+    onCanCreate?.(canCreate);
+  }, [canCreate, onCanCreate]);
   const selectedCountryIso = useMemo(
     () => countriesAll.find((country) => country.name === tripForm.destinationCountry)?.isoCode ?? "",
     [countriesAll, tripForm.destinationCountry]

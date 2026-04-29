@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
 import EventHeroImage from "@/components/events/EventHeroImage";
+import EventsExploreSkeleton, { EventsCardsSkeleton } from "@/components/events/EventsExploreSkeleton";
+import CreateEventModal from "@/components/events/CreateEventModal";
 import { supabase } from "@/lib/supabase/client";
 import {
   type EventMemberRecord,
@@ -23,6 +25,8 @@ import {
 import { eventAccessTypeShortLabel, isEventDiscoverable } from "@/lib/events/access";
 import { cx } from "@/lib/cx";
 
+const CORE_DANCE_STYLES = ["bachata", "salsa", "kizomba", "tango", "zouk"] as const;
+
 type DatePreset = "any" | "today" | "tomorrow" | "this_weekend" | "this_week" | "next_week" | "this_month" | "custom";
 type EventResponseState = "interested" | "going" | "waitlist" | "request_sent";
 
@@ -31,8 +35,8 @@ type DateRange = {
   end: string;
 };
 
-const PUBLIC_EVENTS_CAP = 5;
-const EVENTS_PAGE_SIZE = 10;
+const PUBLIC_EVENTS_CAP = 12;
+const EVENTS_PAGE_SIZE = 12;
 const PAST_EVENTS_CUTOFF_MONTHS = 3;
 const ACTION_TOAST_MS = 3000;
 
@@ -104,20 +108,14 @@ function resolveDateRange(preset: DatePreset, customFrom: string, customTo: stri
 }
 
 function eventTypeBadge(eventType: string) {
-  const normalized = eventType.toLowerCase();
-  if (normalized.includes("festival")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
-  if (normalized.includes("workshop") || normalized.includes("class") || normalized.includes("masterclass")) {
-    return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
+  switch (eventType.toLowerCase()) {
+    case "festival":     return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
+    case "workshop":     return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
+    case "masterclass":  return "border-cyan-300/35 bg-cyan-300/15 text-cyan-100";
+    case "competition":  return "border-amber-300/35 bg-amber-400/15 text-amber-100";
+    case "social":
+    default:             return "border-emerald-300/35 bg-emerald-400/15 text-emerald-100";
   }
-  if (normalized.includes("social")) return "border-fuchsia-300/35 bg-fuchsia-400/15 text-fuchsia-100";
-  return "border-slate-300/30 bg-slate-400/15 text-slate-100";
-}
-
-function summarize(text: string | null | undefined, max = 78) {
-  const value = (text ?? "").trim();
-  if (!value) return "No description provided yet.";
-  if (value.length <= max) return value;
-  return `${value.slice(0, max - 1).trimEnd()}...`;
 }
 
 function eventDateBadgeParts(value: string) {
@@ -380,15 +378,23 @@ function EventsExplorePageContent() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [modeFilter, setModeFilter] = useState<"all" | "public" | "request">("all");
   const [styleFilter, setStyleFilter] = useState("all");
+  const [styleText, setStyleText] = useState("");
   const [referencesFilter, setReferencesFilter] = useState<"all" | "has" | "none">("all");
   const [countryFilter, setCountryFilter] = useState("all");
+  const [allEventCountries, setAllEventCountries] = useState<string[]>([]);
+  const [allEventCities, setAllEventCities] = useState<Array<{ country: string; city: string }>>([]);
   const [cityFilter, setCityFilter] = useState("all");
+  const [locationQuery, setLocationQuery] = useState("");
+  const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
+  const [locationResults, setLocationResults] = useState<Array<{ type: "country" | "city"; country: string; city?: string; display: string }>>([]);
+  const [locationSearching, setLocationSearching] = useState(false);
 
   const [datePreset, setDatePreset] = useState<DatePreset>("any");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [responseMenuEventId, setResponseMenuEventId] = useState<string | null>(null);
   const [responseBusyEventId, setResponseBusyEventId] = useState<string | null>(null);
   const [eventsPage, setEventsPage] = useState(1);
@@ -404,6 +410,44 @@ function EventsExplorePageContent() {
   const effectiveDatePreset: DatePreset = !isAuthenticated && datePreset === "custom" ? "any" : datePreset;
   const effectiveCustomDateFrom = !isAuthenticated && datePreset === "custom" ? "" : customDateFrom;
   const effectiveCustomDateTo = !isAuthenticated && datePreset === "custom" ? "" : customDateTo;
+
+  useEffect(() => {
+    const q = locationQuery.trim();
+    if (q.length < 2) { setLocationResults([]); return; }
+    setLocationSearching(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=8&addressdetails=1&accept-language=en`;
+        const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "ConXion/1.0" } });
+        const data = (await res.json()) as Array<Record<string, unknown>>;
+        const seen = new Set<string>();
+        const results: Array<{ type: "country" | "city"; country: string; city?: string; display: string }> = [];
+        for (const item of data) {
+          const addr = (item.address ?? {}) as Record<string, string>;
+          const country = (addr.country ?? "").trim();
+          const city = (addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? addr.county ?? "").trim();
+          const type = (item.type as string) ?? "";
+          const cls = (item.class as string) ?? "";
+          if (!country) continue;
+          if ((cls === "boundary" || type === "administrative" || type === "country") && !city) {
+            const key = `country:${country}`;
+            if (!seen.has(key)) { seen.add(key); results.push({ type: "country", country, display: country }); }
+          } else if (city) {
+            const key = `city:${city}:${country}`;
+            if (!seen.has(key)) { seen.add(key); results.push({ type: "city", country, city, display: `${city}, ${country}` }); }
+          }
+          if (results.length >= 8) break;
+        }
+        setLocationResults(results);
+      } catch {
+        // aborted or network error — ignore
+      } finally {
+        setLocationSearching(false);
+      }
+    }, 350);
+    return () => { window.clearTimeout(timer); controller.abort(); setLocationSearching(false); };
+  }, [locationQuery]);
 
   const closeMenus = useCallback(() => {
     setFiltersOpen(false);
@@ -438,6 +482,20 @@ function EventsExplorePageContent() {
 
     setMeId(userId);
     setIsAuthenticated(Boolean(userId));
+
+    // Fetch all distinct countries and cities from published events
+    const locationRes = await supabase
+      .from("events")
+      .select("country,city")
+      .eq("status", "published")
+      .not("country", "is", null)
+      .limit(2000);
+    if (!locationRes.error && locationRes.data) {
+      const rows = locationRes.data as Array<{ country: string; city: string }>;
+      const countries = Array.from(new Set(rows.map((r) => r.country.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      setAllEventCountries(countries);
+      setAllEventCities(rows.filter((r) => r.country?.trim() && r.city?.trim()).map((r) => ({ country: r.country.trim(), city: r.city.trim() })));
+    }
 
     let eventRows: EventRecord[] = [];
 
@@ -585,18 +643,6 @@ function EventsExplorePageContent() {
 
     const profileIds = Array.from(new Set([...hostIds, ...connectionIds]));
     if (profileIds.length) {
-      const profileFeedRes = await supabase.from("profiles_feed").select("id,ref_total_all").in("id", hostIds.slice(0, 600));
-      if (!profileFeedRes.error) {
-        const nextHostReferenceTotals: Record<string, number> = {};
-        ((profileFeedRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
-          const id = typeof row.id === "string" ? row.id : "";
-          const total = typeof row.ref_total_all === "number" ? row.ref_total_all : 0;
-          if (id) nextHostReferenceTotals[id] = total;
-        });
-        setHostReferenceTotals(nextHostReferenceTotals);
-      } else {
-        setHostReferenceTotals({});
-      }
 
       const profilesRes = await supabase
         .from("profiles")
@@ -660,44 +706,32 @@ function EventsExplorePageContent() {
     return map;
   }, [allMembers, connectedUserIds]);
 
-  const eventTypeOptions = useMemo(() => {
-    const set = new Set<string>();
-    events.forEach((event) => {
-      if (event.eventType.trim()) set.add(event.eventType.trim());
-    });
-    return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [events]);
+  const EVENT_TYPES = ["Social", "Workshop", "Festival", "Masterclass", "Competition"] as const;
+  const eventTypeOptions = ["all", ...EVENT_TYPES];
 
   const styleOptions = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>([...CORE_DANCE_STYLES]);
     events.forEach((event) => {
       event.styles.forEach((style) => {
-        const normalized = style.trim();
-        if (normalized) set.add(normalized);
+        const normalized = style.trim().toLowerCase();
+        if (normalized && !CORE_DANCE_STYLES.includes(normalized as typeof CORE_DANCE_STYLES[number])) set.add(normalized);
       });
     });
-    return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+    return ["all", ...Array.from(set)];
   }, [events]);
 
   const countryOptions = useMemo(() => {
-    const set = new Set<string>();
-    events.forEach((event) => {
-      const normalized = event.country.trim();
-      if (normalized) set.add(normalized);
-    });
-    return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [events]);
+    return ["all", ...allEventCountries];
+  }, [allEventCountries]);
 
   const cityOptions = useMemo(() => {
+    if (countryFilter === "all") return ["all"];
     const set = new Set<string>();
-    events.forEach((event) => {
-      const countryMatches = countryFilter === "all" || event.country.toLowerCase() === countryFilter.toLowerCase();
-      if (!countryMatches) return;
-      const normalized = event.city.trim();
-      if (normalized) set.add(normalized);
+    allEventCities.forEach(({ country, city }) => {
+      if (country.toLowerCase() === countryFilter.toLowerCase()) set.add(city);
     });
     return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [countryFilter, events]);
+  }, [countryFilter, allEventCities]);
 
   const effectiveCityFilter = useMemo(() => {
     if (countryFilter === "all" || cityFilter === "all") return "all";
@@ -716,7 +750,15 @@ function EventsExplorePageContent() {
       if (!isEventDiscoverable(event.accessType)) return false;
       if (modeFilter !== "all" && event.accessType !== modeFilter) return false;
       if (typeFilter !== "all" && event.eventType !== typeFilter) return false;
-      if (styleFilter !== "all" && !event.styles.some((style) => style.toLowerCase() === styleFilter.toLowerCase())) return false;
+      if (styleFilter !== "all") {
+        const styles = event.styles.map((s) => s.toLowerCase());
+        if (styleFilter === "other") {
+          const needle = styleText.trim().toLowerCase();
+          if (needle && !styles.some((s) => s.includes(needle))) return false;
+        } else {
+          if (!styles.includes(styleFilter.toLowerCase())) return false;
+        }
+      }
       if (referencesFilter !== "all") {
         const referenceTotal = Number(hostReferenceTotals[event.hostUserId] ?? 0);
         if (referencesFilter === "has" && referenceTotal <= 0) return false;
@@ -747,8 +789,8 @@ function EventsExplorePageContent() {
         if (!cityMatch && !countryMatch) return false;
       }
 
-      if (countryFilter !== "all" && event.country.toLowerCase() !== countryFilter.toLowerCase()) return false;
-      if (effectiveCityFilter !== "all" && event.city.toLowerCase() !== effectiveCityFilter.toLowerCase()) return false;
+      if (countryFilter !== "all" && !event.country.toLowerCase().includes(countryFilter.toLowerCase()) && !countryFilter.toLowerCase().includes(event.country.toLowerCase())) return false;
+      if (effectiveCityFilter !== "all" && !event.city.toLowerCase().includes(effectiveCityFilter.toLowerCase()) && !effectiveCityFilter.toLowerCase().includes(event.city.toLowerCase())) return false;
 
       if (connectionsOnly) {
         const connectedCount = connectedAttendeesByEvent[event.id]?.length ?? 0;
@@ -815,10 +857,6 @@ function EventsExplorePageContent() {
     () => pagedEvents,
     [pagedEvents]
   );
-  const myEventsCount = useMemo(() => {
-    return meId ? events.filter((event) => event.hostUserId === meId).length : 0;
-  }, [events, meId]);
-
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (effectivePastOnly) count += 1;
@@ -833,7 +871,7 @@ function EventsExplorePageContent() {
     if (isAuthenticated && myLocationOnly) count += 1;
     if (isAuthenticated && query.trim().length > 0) count += 1;
     return count;
-  }, [connectionsOnly, countryFilter, datePreset, effectiveCityFilter, effectivePastOnly, isAuthenticated, modeFilter, myLocationOnly, query, referencesFilter, styleFilter, typeFilter]);
+  }, [connectionsOnly, countryFilter, datePreset, effectiveCityFilter, effectivePastOnly, isAuthenticated, modeFilter, myLocationOnly, query, referencesFilter, styleFilter, styleText, typeFilter]);
 
   const setEventsView = useCallback(
     (view: "active" | "past") => {
@@ -852,6 +890,7 @@ function EventsExplorePageContent() {
   const resetFilters = useCallback(() => {
     setCountryFilter("all");
     setCityFilter("all");
+    setLocationQuery("");
     setStyleFilter("all");
     setReferencesFilter("all");
     setTypeFilter("all");
@@ -879,6 +918,7 @@ function EventsExplorePageContent() {
     typeFilter,
     modeFilter,
     styleFilter,
+    styleText,
     countryFilter,
     cityFilter,
     referencesFilter,
@@ -1051,9 +1091,8 @@ function EventsExplorePageContent() {
     return (
       <article
         key={event.id}
-        className={cx(
-          "relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
-        )}
+        className="relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
+        style={{ height: "320px" }}
         onClick={() => router.push(`/events/${event.id}`)}
       >
         <Link href={`/events/${event.id}`} className="block">
@@ -1067,17 +1106,6 @@ function EventsExplorePageContent() {
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
 
-            <div className="absolute left-2 top-2 flex items-center gap-1.5">
-              <span className={cx("rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase", eventTypeBadge(event.eventType))}>
-                {event.eventType}
-              </span>
-            </div>
-
-            <div className="absolute right-2 top-2">
-              <span className="rounded-full border border-white/20 bg-black/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-slate-100">
-                {eventAccessTypeShortLabel(event.accessType)}
-              </span>
-            </div>
           </div>
         </Link>
 
@@ -1091,7 +1119,11 @@ function EventsExplorePageContent() {
           </div>
 
           <div className="mb-0.5">
-            <p className={cx("mb-0.5 text-[10px] font-semibold uppercase tracking-wide", timeline.textClass)}>{timeline.label}</p>
+            <p className={cx("mb-0.5 text-[10px] font-semibold uppercase tracking-wide", timeline.textClass)}>
+              {timeline.label}
+              <span className="ml-1.5 text-white/30">·</span>
+              <span className="ml-1.5 text-white/45">{event.eventType}</span>
+            </p>
             <Link href={`/events/${event.id}`} className="block min-w-0 pr-[98px]">
               {isAuthenticated ? (
                 <h2 className="line-clamp-2 min-h-[34px] text-[15px] font-bold leading-tight text-white">{event.title}</h2>
@@ -1117,9 +1149,7 @@ function EventsExplorePageContent() {
               ) : null}
             </p>
 
-            <p className="mt-0.5 line-clamp-2 min-h-[30px] text-[13px] leading-[1.25] text-slate-400">{summarize(event.description)}</p>
-
-            <div className="mt-0.5 min-h-[20px]">
+            <div className="mt-1 min-h-[20px]">
               {isAuthenticated ? (
                 friendCount > 0 ? (
                   <div className="flex items-center gap-2">
@@ -1300,22 +1330,7 @@ function EventsExplorePageContent() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0A0A0A] text-white">
-        <Nav />
-        <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
-          <div className="animate-pulse space-y-6">
-            <div className="h-28 rounded-[28px] bg-white/[0.04] sm:h-36" />
-            <div className="h-12 rounded-full bg-white/[0.04]" />
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div key={index} className="h-[280px] rounded-2xl bg-white/[0.04]" />
-              ))}
-            </div>
-          </div>
-        </main>
-      </div>
-    );
+    return <EventsExploreSkeleton />;
   }
 
   return (
@@ -1348,20 +1363,39 @@ function EventsExplorePageContent() {
           </section>
         ) : null}
 
-        <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Left: filters + search + count */}
-          <div className="flex items-center gap-3">
+        <header className="mb-4 flex items-center justify-between gap-2">
+          {/* Left: Create Event */}
+          {isAuthenticated ? (
             <button
               type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setFiltersOpen((value) => !value);
-              }}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#00F5FF] px-4 py-2 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
+              onClick={(e) => { e.stopPropagation(); setCreateModalOpen(true); }}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-bold text-[#071116] transition hover:opacity-90 sm:px-5 sm:text-[13px]" style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
             >
-              <span className="material-symbols-outlined text-[16px]">tune</span>
-              Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              <span className="hidden sm:inline">Create Event</span>
+              <span className="sm:hidden">Create</span>
             </button>
+          ) : (
+            <div />
+          )}
+
+          {/* Right: My location + search + showing + filters */}
+          <div className="flex min-w-0 items-center gap-2">
+            {isAuthenticated && (myCity || myCountry) ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setMyLocationOnly((v) => !v); }}
+                className={cx(
+                  "hidden shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition sm:inline-flex",
+                  myLocationOnly
+                    ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
+                    : "border-white/10 text-white/40 hover:text-white/70"
+                )}
+              >
+                <span className="material-symbols-outlined text-[13px]">my_location</span>
+                My location
+              </button>
+            ) : null}
             <label className="group relative hidden sm:block">
               <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
                 search
@@ -1371,38 +1405,27 @@ function EventsExplorePageContent() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search events, cities, venues..."
-                className="h-10 w-[300px] rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+                className="h-10 w-[260px] rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
               />
             </label>
-            <p className="hidden text-[13px] text-white/50 sm:block">
-              Showing <span className="font-semibold text-white">{discoverEvents.length}</span>{" "}
-              {effectivePastOnly ? "past events" : "events"}
-            </p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setFiltersOpen((value) => !value);
+              }}
+              aria-label="Open event filters"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#00F5FF] px-3 text-xs font-bold text-[#0A0A0A] transition hover:opacity-90 sm:px-4 sm:text-sm"
+            >
+              <span className="material-symbols-outlined text-[16px]">tune</span>
+              Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+            </button>
           </div>
-
-          {/* Right: My Events + Create Event */}
-          {isAuthenticated ? (
-            <div className="flex items-center gap-2">
-              <Link
-                href="/events/my"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.05] px-3 py-2 text-[13px] font-semibold text-white/85 hover:bg-white/[0.08]"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <span className="material-symbols-outlined text-[16px]">calendar_month</span>
-                My Events
-                <span className="rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-bold">{myEventsCount}</span>
-              </Link>
-              <Link
-                href="/events/new"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-3 py-2 text-[13px] font-semibold text-cyan-50 hover:bg-cyan-300/30"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <span className="material-symbols-outlined text-[16px]">add</span>
-                Create Event
-              </Link>
-            </div>
-          ) : null}
         </header>
+
+        <p className="mt-3 mb-2 text-right text-[12px] text-white/40">
+          Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span> {effectivePastOnly ? "past events" : "events"}
+        </p>
 
         {!isAuthenticated ? (
           <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
@@ -1480,6 +1503,7 @@ function EventsExplorePageContent() {
                     <button
                       type="button"
                       onClick={resetFilters}
+                      aria-label="Reset event search"
                       className="inline-flex h-[50px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-white/85 transition hover:border-white/25 hover:bg-white/8"
                     >
                       Clear filters
@@ -1495,7 +1519,7 @@ function EventsExplorePageContent() {
           <div className="fixed inset-0 z-[60]">
             <button aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} type="button" />
 
-            <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-[#0A0A0A] shadow-2xl">
+            <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-[#0A0A0A] shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
                 <h2 className="text-2xl font-bold tracking-tight text-white">Filter Events</h2>
                 <button
@@ -1509,76 +1533,203 @@ function EventsExplorePageContent() {
               </div>
 
               <div className="flex-1 space-y-7 overflow-y-auto px-6 py-6 pb-36">
-                {isAuthenticated ? (
-                  <section className="space-y-4">
-                    <div className="flex items-center gap-2 text-[#00F5FF]">
-                      <span className="material-symbols-outlined text-[20px]">search</span>
-                      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Search & Shortcuts</h3>
-                    </div>
+                <section className="space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Location</h3>
 
-                    <label className="group relative block">
-                      <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/35 transition-colors group-focus-within:text-cyan-300">
-                        search
+                  {/* Selected location badge */}
+                  {(countryFilter !== "all" || cityFilter !== "all") ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2">
+                      <span className="material-symbols-outlined text-[16px] text-cyan-300">location_on</span>
+                      <span className="flex-1 truncate text-sm font-semibold text-cyan-100">
+                        {effectiveCityFilter !== "all" ? `${effectiveCityFilter}, ${countryFilter}` : countryFilter}
                       </span>
-                      <input
-                        type="text"
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search events, cities, venues..."
-                        className="h-12 w-full rounded-2xl border border-white/10 bg-[#1B1B1B] pl-11 pr-4 text-sm text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      />
-                    </label>
-
-                    <div className="grid gap-2">
                       <button
                         type="button"
-                        onClick={() => setMyLocationOnly((value) => !value)}
-                        disabled={!myCity && !myCountry}
-                        className={cx(
-                          "inline-flex min-h-12 items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition",
-                          myLocationOnly
-                            ? "border-cyan-300/40 bg-cyan-300/20 text-cyan-50"
-                            : "border-white/10 bg-white/[0.03] text-white/80 hover:text-white",
-                          (!myCity && !myCountry) && "cursor-not-allowed opacity-45"
-                        )}
-                        title={myCity || myCountry ? `Filter to ${[myCity, myCountry].filter(Boolean).join(", ")}` : "Location unavailable"}
+                        onClick={() => { setCountryFilter("all"); setCityFilter("all"); setLocationQuery(""); }}
+                        className="text-white/40 hover:text-white"
                       >
-                        <span className="inline-flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">location_on</span>
-                          My location
-                        </span>
-                        <span className="text-[11px] text-white/55">{myCity || myCountry ? "On map" : "No profile location"}</span>
+                        <span className="material-symbols-outlined text-[16px]">close</span>
                       </button>
                     </div>
-                  </section>
-                ) : null}
+                  ) : null}
+
+                  {/* Location search */}
+                  <div className="relative">
+                    <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35">search</span>
+                    <input
+                      type="text"
+                      value={locationQuery}
+                      onChange={(e) => { setLocationQuery(e.target.value); setLocationDropdownOpen(true); }}
+                      onFocus={() => setLocationDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setLocationDropdownOpen(false), 150)}
+                      placeholder="Search by city or country..."
+                      className="w-full rounded-xl border border-white/10 bg-[#1B1B1B] py-3 pl-10 pr-4 text-sm text-white/90 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                    />
+                    {locationDropdownOpen && locationQuery.trim().length >= 2 ? (
+                      <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-10 overflow-hidden rounded-xl border border-white/10 bg-[#1B1B1B] shadow-2xl">
+                        {locationSearching ? (
+                          <div className="px-4 py-3 text-sm text-white/40">Searching…</div>
+                        ) : locationResults.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-white/40">No locations found.</div>
+                        ) : (
+                          locationResults.map((r, i) => (
+                            <button
+                              key={`loc-${i}`}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                if (r.type === "country") {
+                                  setCountryFilter(r.country); setCityFilter("all");
+                                } else {
+                                  setCountryFilter(r.country); setCityFilter(r.city!);
+                                }
+                                setLocationQuery(""); setLocationDropdownOpen(false);
+                              }}
+                              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/6"
+                            >
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/8">
+                                <span className="material-symbols-outlined text-[18px] text-white/50">
+                                  {r.type === "country" ? "public" : "location_on"}
+                                </span>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-white">{r.display}</p>
+                                <p className="text-[11px] text-white/40">{r.type === "country" ? "Country" : "City"}</p>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Date</h3>
+                  <div className="flex flex-wrap gap-x-5 gap-y-3">
+                    {dateOptions.filter((o) => o.key !== "any").map((option) => {
+                      const selected = effectiveDatePreset === option.key;
+                      return (
+                        <button key={option.key} type="button" onClick={() => setDatePreset(option.key)} className="flex items-center gap-2.5 text-left">
+                          <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                            {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                          </span>
+                          <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {effectiveDatePreset === "custom" ? (
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <label className="text-sm font-semibold text-white/90">
+                        From
+                        <input type="date" value={customDateFrom} onChange={(e) => setCustomDateFrom(e.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30" />
+                      </label>
+                      <label className="text-sm font-semibold text-white/90">
+                        To
+                        <input type="date" value={customDateTo} onChange={(e) => setCustomDateTo(e.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30" />
+                      </label>
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Event Mode</h3>
+                  <div className="flex flex-wrap gap-x-5 gap-y-3">
+                    {([{ key: "public", label: "Public Event" }, { key: "request", label: "Private Event" }] as const).map((option) => {
+                      const selected = modeFilter === option.key;
+                      return (
+                        <button key={option.key} type="button" onClick={() => setModeFilter(option.key)} className="flex items-center gap-2.5 text-left">
+                          <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                            {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                          </span>
+                          <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Event Type</h3>
+                  <div className="flex flex-wrap gap-x-5 gap-y-3">
+                    {eventTypeOptions.filter((o) => o !== "all").map((option) => {
+                      const selected = typeFilter === option;
+                      const label = option;
+                      return (
+                        <button key={option} type="button" onClick={() => setTypeFilter(option)} className="flex items-center gap-2.5 text-left">
+                          <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                            {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                          </span>
+                          <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Dance Styles</h3>
+                  <div className="flex flex-wrap gap-x-5 gap-y-3">
+                    {styleOptions.filter((o) => o !== "all").map((option) => {
+                      const selected = styleFilter === option;
+                      const label = option.charAt(0).toUpperCase() + option.slice(1).toLowerCase();
+                      return (
+                        <button key={option} type="button" onClick={() => { setStyleFilter(option); setStyleText(""); }} className="flex items-center gap-2.5 text-left">
+                          <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                            {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                          </span>
+                          <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{label}</span>
+                        </button>
+                      );
+                    })}
+                    <button type="button" onClick={() => { setStyleFilter("other"); setStyleText(""); }} className="flex items-center gap-2.5 text-left">
+                      <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", styleFilter === "other" ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                        {styleFilter === "other" && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                      </span>
+                      <span className={cx("text-sm font-semibold transition", styleFilter === "other" ? "text-white" : "text-white/60")}>Other</span>
+                    </button>
+                  </div>
+                  {styleFilter === "other" && (
+                    <input
+                      value={styleText}
+                      onChange={(e) => setStyleText(e.target.value)}
+                      placeholder="Search style (e.g. Hip Hop)"
+                      className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:outline-none"
+                    />
+                  )}
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">References</h3>
+                  <p className="text-[11px] text-white/45">Filter by whether the event organizer already has reference history.</p>
+                  <div className="flex flex-wrap gap-x-5 gap-y-3">
+                    {([{ key: "has", label: "Has references" }, { key: "none", label: "No references" }] as const).map((option) => {
+                      const selected = referencesFilter === option.key;
+                      return (
+                        <button key={option.key} type="button" onClick={() => setReferencesFilter(option.key)} className="flex items-center gap-2.5 text-left">
+                          <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                            {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                          </span>
+                          <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
 
                 {isAuthenticated ? (
-                  <section className="space-y-4">
-                    <div className="flex items-center gap-2 text-[#00F5FF]">
-                      <span className="material-symbols-outlined text-[20px]">history</span>
-                      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event timeline</h3>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {([
-                        { key: "active", label: "Active events" },
-                        { key: "past", label: "Past events" },
-                      ] as const).map((option) => {
-                        const selected =
-                          (option.key === "past" && effectivePastOnly) || (option.key === "active" && !effectivePastOnly);
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Network</h3>
+                    <div className="flex flex-wrap gap-x-5 gap-y-3">
+                      {([{ key: "friends", label: "Friends going" }] as const).map((option) => {
+                        const selected = connectionsOnly;
                         return (
-                          <button
-                            key={option.key}
-                            type="button"
-                            onClick={() => setEventsView(option.key)}
-                            className={cx(
-                              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                              selected
-                                ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                                : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                            )}
-                          >
-                            {option.label}
+                          <button key={option.key} type="button" onClick={() => setConnectionsOnly(option.key === "friends")} className="flex items-center gap-2.5 text-left">
+                            <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                              {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                            </span>
+                            <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{option.label}</span>
                           </button>
                         );
                       })}
@@ -1586,263 +1737,18 @@ function EventsExplorePageContent() {
                   </section>
                 ) : null}
 
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <span className="material-symbols-outlined text-[20px]">location_on</span>
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Location</h3>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-semibold text-white/90">Country</label>
-                    <div className="relative mt-2">
-                      <select
-                        value={countryFilter === "all" ? "" : countryFilter}
-                        onChange={(event) => {
-                          setCountryFilter(event.target.value || "all");
-                          setCityFilter("all");
-                        }}
-                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      >
-                        <option value="">Any country</option>
-                        {countryOptions.filter((option) => option !== "all").map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
-                        expand_more
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-semibold text-white/90">City</label>
-                      <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
-                        {effectiveCityFilter === "all" ? "0/1" : "1/1"}
-                      </span>
-                    </div>
-                    <div className="relative mt-2">
-                      <select
-                        value={effectiveCityFilter === "all" ? "" : effectiveCityFilter}
-                        onChange={(event) => setCityFilter(event.target.value || "all")}
-                        disabled={cityOptions.filter((option) => option !== "all").length === 0}
-                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <option value="">{countryFilter === "all" ? "Any city" : "Any city in country"}</option>
-                        {cityOptions.filter((option) => option !== "all").map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="material-symbols-outlined pointer-events-none absolute right-3 top-3 text-[20px] text-white/40">
-                        expand_more
-                      </span>
-                    </div>
-                    {countryFilter === "all" ? (
-                      <p className="mt-2 text-[11px] text-white/45">Choose a country to narrow city options.</p>
-                    ) : null}
-                  </div>
-                </section>
-
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <span className="material-symbols-outlined text-[20px]">calendar_month</span>
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Date</h3>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {dateOptions.map((option) => {
-                      const selected = effectiveDatePreset === option.key;
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => setDatePreset(option.key)}
-                          className={cx(
-                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                            selected
-                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {effectiveDatePreset === "custom" ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="text-sm font-semibold text-white/90">
-                        From
-                        <input
-                          type="date"
-                          value={customDateFrom}
-                          onChange={(event) => setCustomDateFrom(event.target.value)}
-                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                        />
-                      </label>
-                      <label className="text-sm font-semibold text-white/90">
-                        To
-                        <input
-                          type="date"
-                          value={customDateTo}
-                          onChange={(event) => setCustomDateTo(event.target.value)}
-                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <span className="material-symbols-outlined text-[20px]">lock_open</span>
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event Mode</h3>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { key: "all", label: "All" },
-                      { key: "public", label: "Public Event" },
-                      { key: "request", label: "Request Event" },
-                    ].map((option) => {
-                      const selected = modeFilter === option.key;
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => setModeFilter(option.key as "all" | "public" | "request")}
-                          className={cx(
-                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                            selected
-                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <span className="material-symbols-outlined text-[20px]">category</span>
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Event Type</h3>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {eventTypeOptions.map((option) => {
-                      const selected = typeFilter === option;
-                      const label = option === "all" ? "All" : option;
-                      return (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setTypeFilter(option)}
-                          className={cx(
-                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                            selected
-                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                          )}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <span className="material-symbols-outlined text-[20px]">interests</span>
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Dance Styles</h3>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {styleOptions.map((option) => {
-                      const selected = styleFilter === option;
-                      const label =
-                        option === "all"
-                          ? "All"
-                          : option.charAt(0).toUpperCase() + option.slice(1).toLowerCase();
-                      return (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setStyleFilter(option)}
-                          className={cx(
-                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                            selected
-                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                          )}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2 text-[#00F5FF]">
-                    <span className="material-symbols-outlined text-[20px]">verified</span>
-                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">References</h3>
-                  </div>
-                  <p className="text-[11px] text-white/45">Filter by whether the event organizer already has reference history.</p>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { key: "all", label: "All" },
-                      { key: "has", label: "Has references" },
-                      { key: "none", label: "No references" },
-                    ].map((option) => {
-                      const selected = referencesFilter === option.key;
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => setReferencesFilter(option.key as "all" | "has" | "none")}
-                          className={cx(
-                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                            selected
-                              ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                              : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-
                 {isAuthenticated ? (
-                  <section className="space-y-4">
-                    <div className="flex items-center gap-2 text-[#00F5FF]">
-                      <span className="material-symbols-outlined text-[20px]">group</span>
-                      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-white/60">Network</h3>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { key: "all", label: "All" },
-                        { key: "friends", label: "Friends going" },
-                      ].map((option) => {
-                        const selected = option.key === "all" ? !connectionsOnly : connectionsOnly;
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Event Timeline</h3>
+                    <div className="flex flex-wrap gap-x-5 gap-y-3">
+                      {([{ key: "active", label: "Active events" }, { key: "past", label: "Past events" }] as const).map((option) => {
+                        const selected = option.key === "past" ? effectivePastOnly : !effectivePastOnly;
                         return (
-                          <button
-                            key={option.key}
-                            type="button"
-                            onClick={() => setConnectionsOnly(option.key === "friends")}
-                            className={cx(
-                              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                              selected
-                                ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]"
-                                : "border-white/10 bg-white/5 text-white/60 hover:border-white/30"
-                            )}
-                          >
-                            {option.label}
+                          <button key={option.key} type="button" onClick={() => setEventsView(option.key)} className="flex items-center gap-2.5 text-left">
+                            <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/20" : "border-white/25 bg-white/5")}>
+                              {selected && <span className="block h-2.5 w-2.5 rounded-sm bg-[#00F5FF]" />}
+                            </span>
+                            <span className={cx("text-sm font-semibold transition", selected ? "text-white" : "text-white/60")}>{option.label}</span>
                           </button>
                         );
                       })}
@@ -1891,75 +1797,59 @@ function EventsExplorePageContent() {
         ) : null}
 
         {loading ? (
-          <div className="space-y-4">
-            <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              {Array.from({ length: 8 }).map((_, index) => (
-                <div
-                  key={`event-card-sk-${index}`}
-                  className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
-                >
-                  <div className="h-44 bg-white/5" />
-                  <div className="space-y-3 p-4">
-                    <div className="h-4 w-20 rounded bg-white/10" />
-                    <div className="h-5 w-11/12 rounded bg-white/10" />
-                    <div className="h-4 w-2/3 rounded bg-white/10" />
-                    <div className="flex gap-2 pt-1">
-                      <div className="h-7 w-16 rounded-full bg-white/10" />
-                      <div className="h-7 w-20 rounded-full bg-white/10" />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </section>
+          <div className="animate-pulse">
+            <EventsCardsSkeleton />
           </div>
         ) : discoverEvents.length === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-[#121212] p-8 text-center text-slate-300">
-            <p>{effectivePastOnly ? "No past events found for the current filters." : "No events found for the current filters."}</p>
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              {isAuthenticated && !effectivePastOnly ? (
-                <>
-                  <Link
-                    href="/events/new"
-                    className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/20 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-300/30"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">add</span>
-                    Create Event
-                  </Link>
-                  <Link
-                    href="/events/past"
-                    className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white/85 hover:text-white"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">history</span>
-                    View Past Events
-                  </Link>
-                </>
-              ) : null}
-              {isAuthenticated && effectivePastOnly ? (
-                <Link
-                  href="/events"
-                  className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                >
-                  <span className="material-symbols-outlined text-[18px]">event</span>
-                  Back to Active Events
-                </Link>
-              ) : null}
-              {!isAuthenticated ? (
-                <Link
-                  href="/auth?mode=signup"
-                  className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/18 px-4 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-300/28"
-                >
-                  <span className="material-symbols-outlined text-[18px]">person_add</span>
-                  Create an account
-                </Link>
-              ) : null}
-            </div>
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" className="mb-6 opacity-90">
+              {/* Calendar back page */}
+              <rect x="18" y="28" width="76" height="72" rx="10" fill="#1e3a5f" opacity="0.6" transform="rotate(-6 18 28)" />
+              {/* Calendar main body */}
+              <rect x="16" y="30" width="76" height="72" rx="10" fill="#2563eb" />
+              {/* Calendar header */}
+              <rect x="16" y="30" width="76" height="22" rx="10" fill="#1d4ed8" />
+              <rect x="16" y="44" width="76" height="8" fill="#1d4ed8" />
+              {/* Grid lines */}
+              <rect x="26" y="62" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.5" />
+              <rect x="42" y="62" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.5" />
+              <rect x="58" y="62" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.5" />
+              <rect x="74" y="62" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.5" />
+              <rect x="26" y="76" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.35" />
+              <rect x="42" y="76" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.35" />
+              <rect x="58" y="76" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.35" />
+              <rect x="74" y="76" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.35" />
+              <rect x="26" y="90" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.2" />
+              <rect x="42" y="90" width="10" height="8" rx="2" fill="#93c5fd" opacity="0.2" />
+              {/* Ring left */}
+              <circle cx="38" cy="30" r="6" fill="none" stroke="#f9a8d4" strokeWidth="3" />
+              <circle cx="38" cy="24" r="3" fill="#1e293b" />
+              {/* Ring right */}
+              <circle cx="70" cy="30" r="6" fill="none" stroke="#f9a8d4" strokeWidth="3" />
+              <circle cx="70" cy="24" r="3" fill="#1e293b" />
+            </svg>
+            <p className="text-base font-semibold text-white/60">
+              {effectivePastOnly ? "No past events match your filters." : "No events found for these filters."}
+            </p>
+            <p className="mt-1 text-sm text-white/35">Try adjusting or clearing your filters.</p>
+            <button
+              type="button"
+              onClick={resetFilters}
+              aria-label="Reset event search"
+              className="mt-5 rounded-full border border-white/15 bg-white/6 px-5 py-2 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+            >
+              Clear filters
+            </button>
           </div>
         ) : (
           <div className="animate-fade-in space-y-4">
             {regularEvents.length ? (
               <>
-                <section className="animate-fade-in-grid grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                <section className="animate-fade-in-grid grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {regularEvents.map((event) => renderEventCard(event))}
+                  {Array.from({ length: (3 - (regularEvents.length % 3)) % 3 }).map((_, i) => (
+                    <div key={`event-pad-${i}`} className="hidden lg:block" aria-hidden="true" />
+                  ))}
                 </section>
 
                 {!isAuthenticated && orderedEvents.length > discoverEvents.length ? (
@@ -1979,8 +1869,8 @@ function EventsExplorePageContent() {
                         Create an account
                       </Link>
                     </div>
-                    <div className="relative mt-6 grid grid-cols-1 gap-3 opacity-35 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                      {Array.from({ length: 4 }).map((_, index) => (
+                    <div className="relative mt-6 grid grid-cols-1 gap-3 opacity-35 sm:grid-cols-2 lg:grid-cols-3">
+                      {Array.from({ length: 6 }).map((_, index) => (
                         <div
                           key={`event-lock-preview-${index}`}
                           className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212]"
@@ -2022,6 +1912,16 @@ function EventsExplorePageContent() {
           {actionInfo}
         </div>
       ) : null}
+
+      {createModalOpen ? (
+        <CreateEventModal
+          onClose={() => setCreateModalOpen(false)}
+          onPublished={(eventId) => {
+            setCreateModalOpen(false);
+            router.push(`/events/${encodeURIComponent(eventId)}`);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2055,8 +1955,8 @@ export default function EventsExplorePage() {
                   <div className="h-11 w-full animate-pulse rounded-full bg-[#00F5FF]/80 sm:w-[144px]" />
                 </div>
               </div>
-              <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                {Array.from({ length: 8 }).map((_, index) => (
+              <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 12 }).map((_, index) => (
                   <div
                     key={`event-fallback-card-sk-${index}`}
                     className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212] animate-pulse"
