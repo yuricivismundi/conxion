@@ -45,7 +45,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       {
         title: "Events & Activities",
         items: [
-          "Create up to 2 public/request events or private groups per month",
+          "Create up to 2 events per month",
+          "Up to 3 private groups (max 50 messages/day per user, 200 messages/day per group)",
           "5 activity requests per month",
         ],
       },
@@ -120,7 +121,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       {
         title: "Events & Activities",
         items: [
-          "Create up to 5 public/request events or private groups per month",
+          "Create up to 5 events per month",
+          "Up to 10 private groups (max 100 messages/day per user, 500 messages/day per group)",
           "15 activity requests per month",
           "Your events appear before free users (Ideal for Organisers)",
         ],

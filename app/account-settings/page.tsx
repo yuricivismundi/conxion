@@ -208,17 +208,8 @@ export default function AccountSettingsPage() {
       const isPlusUser = planId === "pro";
       const teacherRow = teacherRes.data ? asRecord(teacherRes.data) : null;
 
-      // visibility column may not exist yet — fetch separately and fail gracefully
-      let profileVisibility: "public" | "private" = "public";
-      const visRes = await supabase
-        .from("profiles")
-        .select("visibility")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (!visRes.error && visRes.data) {
-        const v = (visRes.data as Record<string, unknown>).visibility;
-        if (v === "private") profileVisibility = "private";
-      }
+      // visibility column doesn't exist on profiles yet — default to public
+      const profileVisibility: "public" | "private" = "public";
 
       setMe({
         userId: user.id,
@@ -235,31 +226,21 @@ export default function AccountSettingsPage() {
         isPlusUser,
       });
 
-      const [blockedRes, reportsRes] = await Promise.all([
-        supabase
-          .from("connections")
-          .select("id,requester_id,target_id,blocked_by,updated_at,status")
-          .eq("status", "blocked")
-          .eq("blocked_by", user.id)
-          .or(`requester_id.eq.${user.id},target_id.eq.${user.id}`)
-          .order("updated_at", { ascending: false })
-          .limit(80),
-        supabase
-          .from("reports")
-          .select("id,target_user_id,reason,status,created_at")
-          .eq("reporter_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(80),
-      ]);
+      const blockedRes = await supabase
+        .from("connections")
+        .select("id,requester_id,target_id,blocked_by,updated_at,status")
+        .eq("status", "blocked")
+        .eq("blocked_by", user.id)
+        .or(`requester_id.eq.${user.id},target_id.eq.${user.id}`)
+        .order("updated_at", { ascending: false })
+        .limit(80);
 
       const warnings: string[] = [];
       const blockedRows = blockedRes.error ? [] : ((blockedRes.data ?? []) as unknown[]);
       if (blockedRes.error && !isMissingTableError(blockedRes.error.message))
         warnings.push(`Blocked members: ${blockedRes.error.message}`);
 
-      const reportRows = reportsRes.error ? [] : ((reportsRes.data ?? []) as unknown[]);
-      if (reportsRes.error && !isMissingTableError(reportsRes.error.message))
-        warnings.push(`Reports: ${reportsRes.error.message}`);
+      const reportRows: unknown[] = [];
 
       const blockedPartnerIds = blockedRows.map((raw) => {
         const row = asRecord(raw);
@@ -558,7 +539,7 @@ export default function AccountSettingsPage() {
                 <SettingRow
                   icon="visibility_off"
                   label="Private mode"
-                  description="Only people you interact with can see you"
+                  description="Only people you interact with can see you in Discover"
                 >
                   <Toggle
                     enabled={me?.visibility === "private"}
@@ -575,13 +556,13 @@ export default function AccountSettingsPage() {
                         <p className="text-sm font-medium text-white/40">Private mode</p>
                         <span className="rounded-full border border-[#0df2f2]/30 bg-[#0df2f2]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-[#0df2f2]">Plus</span>
                       </div>
-                      <p className="mt-0.5 text-xs text-white/25">Only people you interact with can see you</p>
+                      <p className="mt-0.5 text-xs text-white/25">Only people you interact with can see you in Discover</p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setCheckoutPlanId("pro")}
-                    className="shrink-0 rounded-lg border border-[#0df2f2]/30 bg-[#0df2f2]/[0.06] px-3 py-1.5 text-xs font-semibold text-[#0df2f2] hover:bg-[#0df2f2]/10 transition-colors"
+                    className="inline-flex min-h-11 shrink-0 items-center rounded-lg border border-[#0df2f2]/30 bg-[#0df2f2]/[0.06] px-4 py-2 text-sm font-semibold text-[#0df2f2] hover:bg-[#0df2f2]/10 transition-colors"
                   >
                     Upgrade to Plus
                   </button>
@@ -592,7 +573,7 @@ export default function AccountSettingsPage() {
                 label="Edit full profile"
                 description="Update your profile details, photos, and settings"
               >
-                <Link href="/me/edit" className="text-xs text-cyan-300 hover:text-cyan-100 transition-colors">
+                <Link href="/me/edit" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-300/15 hover:text-cyan-100 transition-colors">
                   Edit →
                 </Link>
               </SettingRow>
@@ -615,10 +596,10 @@ export default function AccountSettingsPage() {
                   <p className="text-[10px] uppercase tracking-widest text-white/35">Reports</p>
                 </div>
                 <div className="ml-auto flex items-center gap-2">
-                  <Link href="/safety-center" className="rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/15 transition-colors">
+                  <Link href="/safety-center" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/15 transition-colors">
                     Safety Center
                   </Link>
-                  <Link href="/support" className="rounded-lg border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-white/60 hover:text-white transition-colors">
+                  <Link href="/support" className="inline-flex min-h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/60 hover:text-white transition-colors">
                     Support
                   </Link>
                 </div>
@@ -698,10 +679,10 @@ export default function AccountSettingsPage() {
             <SectionHeader icon="lock" label="Access & Recovery" />
             <div className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 divide-y divide-white/[0.05]">
               <SettingRow icon="link" label="Recover account access" description="Magic-link and OTP login only — no passwords">
-                <Link href="/auth/recovery" className="text-xs text-cyan-300 hover:text-cyan-100 transition-colors">Open →</Link>
+                <Link href="/auth/recovery" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-300/15 hover:text-cyan-100 transition-colors">Open →</Link>
               </SettingRow>
               <SettingRow icon="privacy_tip" label="Privacy rights & contact" description="Data requests and GDPR contact">
-                <Link href="/account-settings/data-requests" className="text-xs text-cyan-300 hover:text-cyan-100 transition-colors">Open →</Link>
+                <Link href="/account-settings/data-requests" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-300/15 hover:text-cyan-100 transition-colors">Open →</Link>
               </SettingRow>
             </div>
           </div>
@@ -719,7 +700,7 @@ export default function AccountSettingsPage() {
                   type="button"
                   onClick={() => void handleDeactivateAccount()}
                   disabled={deactivating}
-                  className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-400/20 disabled:opacity-50 transition-colors"
+                  className="inline-flex min-h-11 items-center rounded-lg border border-rose-400/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-400/20 disabled:opacity-50 transition-colors"
                 >
                   {deactivating ? "Deactivating…" : "Deactivate"}
                 </button>

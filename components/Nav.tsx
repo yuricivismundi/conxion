@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useAppLanguage } from "@/components/AppLanguageProvider";
+import { BLOG_ENABLED } from "@/content/blog/posts";
 import NotificationsBell from "@/components/NotificationsBell";
 import { fetchUnreadThreadTokens } from "@/lib/messages/unread";
 import { cx } from "@/lib/cx";
@@ -179,7 +180,7 @@ export default function Nav({ title }: NavProps) {
     { href: "/messages", label: t("nav.messages"), icon: "chat" },
     { href: "/events", label: t("nav.events"), icon: "calendar_today" },
     { href: "/network", label: t("nav.network"), icon: "hub" },
-    { href: "/activity", label: t("nav.trips"), icon: "travel_explore" },
+    { href: "/activity", label: t("nav.trips"), icon: "dashboard_customize" },
   ];
 
   async function signOut() {
@@ -198,6 +199,14 @@ export default function Nav({ title }: NavProps) {
     if (pathname?.startsWith("/references")) return "/network";
     if (pathname?.startsWith("/connections")) return "/discover";
     if (pathname?.startsWith("/messages")) return "/messages";
+    
+    // Check if we're on the group creation page
+    if (pathname?.startsWith("/events/new")) {
+      // For group creation, always return "/events" to avoid hydration mismatch
+      // The query parameter check causes hydration errors
+      return "/events";
+    }
+    
     if (pathname?.startsWith("/events")) return "/events";
     if (pathname?.startsWith("/activity")) return "/activity";
     if (pathname?.startsWith("/trips")) return "/activity";
@@ -222,7 +231,7 @@ export default function Nav({ title }: NavProps) {
         <div className="flex items-center gap-4 lg:gap-7">
           <Link href={isPublicContext ? "/" : "/connections"} className="flex items-center">
             <div className="relative h-11 w-[132px] overflow-hidden sm:h-12 sm:w-[150px]">
-              <Image src="/branding/CONXION-3-tight.png" alt="ConXion" fill className="object-contain object-left" priority />
+              <Image src="/branding/CONXION-3-tight.png" alt="ConXion" fill sizes="150px" className="object-contain object-left" priority />
             </div>
           </Link>
 
@@ -282,6 +291,14 @@ export default function Nav({ title }: NavProps) {
           </div>
         ) : isPublicContext ? (
           <div className="flex items-center gap-2">
+            {BLOG_ENABLED ? (
+              <Link
+                href="/blog"
+                className="hidden min-h-10 items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white sm:inline-flex"
+              >
+                Blog
+              </Link>
+            ) : null}
             <Link
               href="/auth"
               className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white/80 transition hover:border-white/30 hover:text-white"

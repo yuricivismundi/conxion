@@ -46,14 +46,6 @@ function formatRenewalDate(value: string) {
   }).format(parsed);
 }
 
-export function getMockBillingAccountState(): BillingAccountState {
-  return {
-    currentPlanId: "starter",
-    isVerified: false,
-    proRenewalLabel: null,
-  };
-}
-
 export function readProBillingMetadata(metadata: unknown): ProBillingMetadata {
   const record = asRecord(metadata);
   return {

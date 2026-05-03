@@ -22,7 +22,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     connectionRequestsPerMonth: 10,
     firstMonthConnectionRequestsPerMonth: 30,
     hostingOffersPerMonth: 5,
-    hostingRequestsPerMonth: null,
+    hostingRequestsPerMonth: 10,
     tripRequestsPerMonth: 5,
     tripsPerMonth: 1,
     eventsPerMonth: 2,
