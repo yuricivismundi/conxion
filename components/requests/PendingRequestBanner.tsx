@@ -12,7 +12,7 @@ type PendingRequestBannerProps = {
 
 export default function PendingRequestBanner({
   message,
-  ctaHref = "/messages?tab=requests",
+  ctaHref = "/messages?tab=pending",
   ctaLabel = "Open in Messages",
   onCtaClick,
   className = "",
