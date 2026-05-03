@@ -10159,10 +10159,7 @@ function MessagesPageContent() {
       {blockOpen ? (
         <BlockDialog
           blockBusy={blockBusy}
-          blockReason={blockReason}
-          blockNote={blockNote}
-          setBlockReason={setBlockReason}
-          setBlockNote={setBlockNote}
+          displayName={activeMeta?.title}
           onClose={() => {
             if (blockBusy) return;
             setBlockOpen(false);

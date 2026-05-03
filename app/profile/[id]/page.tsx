@@ -73,6 +73,7 @@ import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVeri
 import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-username";
 import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
 import DarkConnectModal from "@/components/DarkConnectModal";
+import BlockDialog from "@/components/messages/BlockDialog";
 import { cx } from "@/lib/cx";
 import { getPlanIdFromMeta, getPlanLimits } from "@/lib/billing/limits";
 
@@ -890,6 +891,7 @@ function MemberProfilePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
 
   const [meId, setMeId] = useState<string | null>(null);
   const [viewerVerified, setViewerVerified] = useState(false);
@@ -3714,7 +3716,7 @@ function MemberProfilePage() {
                     type="button"
                     onClick={() => {
                       closeActionMenu();
-                      void blockMember();
+                      setBlockConfirmOpen(true);
                     }}
                     disabled={busy || state.status === "blocked"}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-100 hover:bg-rose-300/15 disabled:opacity-60"
@@ -3962,6 +3964,18 @@ function MemberProfilePage() {
           targetPhotoUrl={profile.avatarUrl}
         />
       )}
+
+      {blockConfirmOpen ? (
+        <BlockDialog
+          displayName={profile.displayName}
+          blockBusy={busy}
+          onClose={() => setBlockConfirmOpen(false)}
+          onConfirm={() => {
+            setBlockConfirmOpen(false);
+            void blockMember();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

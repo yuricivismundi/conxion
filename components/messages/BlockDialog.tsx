@@ -2,76 +2,68 @@
 
 type BlockDialogProps = {
   blockBusy: boolean;
-  blockReason: string;
-  blockNote: string;
-  setBlockReason: (value: string) => void;
-  setBlockNote: (value: string) => void;
+  displayName?: string;
   onClose: () => void;
   onConfirm: () => void;
+  // kept for backwards compatibility — no longer rendered
+  blockReason?: string;
+  blockNote?: string;
+  setBlockReason?: (value: string) => void;
+  setBlockNote?: (value: string) => void;
 };
+
+const BLOCK_CONSEQUENCES = [
+  "See your profile or content",
+  "Message you",
+  "Invite you to events or groups",
+  "Send you connection requests",
+];
 
 export default function BlockDialog({
   blockBusy,
-  blockReason,
-  blockNote,
-  setBlockReason,
-  setBlockNote,
+  displayName = "this member",
   onClose,
   onConfirm,
 }: BlockDialogProps) {
+  const firstName = displayName.split(" ")[0] ?? displayName;
+
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-4">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#121414]">
-        <div className="h-px w-full bg-gradient-to-r from-rose-500/80 via-rose-400/20 to-[#0df2f2]/30" />
-        <div className="p-5 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-bold text-white">Block Member</h3>
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md overflow-hidden rounded-[28px] border border-white/10 bg-[#0f1214] shadow-[0_32px_80px_rgba(0,0,0,0.6)]">
+        <div className="h-px w-full bg-gradient-to-r from-rose-500/70 via-[#0df2f2]/20 to-rose-500/40" />
+
+        <div className="p-6">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-xl font-bold text-white">Block {displayName}?</h3>
             <button
               type="button"
               onClick={onClose}
-              className="text-white/55 hover:text-white"
-              aria-label="Close block modal"
+              disabled={blockBusy}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 text-white/55 transition hover:bg-white/12 hover:text-white disabled:opacity-40"
+              aria-label="Close"
             >
-              <span className="material-symbols-outlined">close</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
             </button>
           </div>
 
-          <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-100">
-            They won’t be able to message you in this connection. The thread will be archived.
-          </div>
+          <p className="mt-4 text-sm text-slate-300">
+            <span className="font-semibold text-white">{firstName}</span> will no longer be able to:
+          </p>
+          <ul className="mt-3 space-y-2">
+            {BLOCK_CONSEQUENCES.map((item) => (
+              <li key={item} className="flex items-center gap-2.5 text-sm text-slate-300">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400/80" />
+                {item}
+              </li>
+            ))}
+          </ul>
 
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-300">Reason</span>
-            <select
-              value={blockReason}
-              onChange={(event) => setBlockReason(event.target.value)}
-              className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2 text-sm text-white focus:border-rose-300/35 focus:outline-none"
-            >
-              <option>Safety concern</option>
-              <option>Harassment / abuse</option>
-              <option>Spam / scams</option>
-              <option>Boundary violation</option>
-              <option>Other</option>
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-300">Note (optional)</span>
-            <textarea
-              value={blockNote}
-              onChange={(event) => setBlockNote(event.target.value)}
-              rows={3}
-              className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-rose-300/35 focus:outline-none resize-none"
-              placeholder="Add context for moderation logs..."
-            />
-          </label>
-
-          <div className="flex justify-end gap-2">
+          <div className="mt-6 flex items-center justify-end gap-3">
             <button
               type="button"
               disabled={blockBusy}
               onClick={onClose}
-              className="rounded-full border border-white/15 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white/70 hover:text-white disabled:opacity-60"
+              className="px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-white disabled:opacity-50"
             >
               Cancel
             </button>
@@ -79,9 +71,9 @@ export default function BlockDialog({
               type="button"
               disabled={blockBusy}
               onClick={onConfirm}
-              className="rounded-full bg-rose-500 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white hover:bg-rose-400 disabled:opacity-60"
+              className="rounded-2xl bg-rose-500 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-rose-400 disabled:opacity-60"
             >
-              {blockBusy ? "Blocking..." : "Confirm block"}
+              {blockBusy ? "Blocking…" : "Confirm"}
             </button>
           </div>
         </div>
