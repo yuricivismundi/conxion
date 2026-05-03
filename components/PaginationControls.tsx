@@ -28,7 +28,7 @@ export default function PaginationControls({
   const end = Math.min(page * pageSize, totalItems);
 
   return (
-    <div className={cx("mt-6 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 sm:flex-row sm:items-center sm:justify-between", className)}>
+    <div className={cx("mt-6 flex flex-col gap-3 px-1 py-3 sm:flex-row sm:items-center sm:justify-between", className)}>
       <p className="text-sm text-white/55">
         Showing <span className="font-semibold text-white">{start}</span>-<span className="font-semibold text-white">{end}</span> of{" "}
         <span className="font-semibold text-white">{totalItems}</span> {itemLabel}

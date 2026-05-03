@@ -131,7 +131,8 @@ function withNamespacedEmail(baseEmail: string) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const workerIndex = process.env.TEST_WORKER_INDEX?.trim();
+  const localDaily = `p${process.pid.toString(36)}-d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}${workerIndex ? `-w${workerIndex}` : ""}`;
   const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
@@ -185,7 +186,9 @@ function isRetryableNetworkError(error: unknown) {
     text.includes("etimedout") ||
     text.includes("econnreset") ||
     text.includes("socket hang up") ||
-    text.includes("network")
+    text.includes("network") ||
+    text.includes("rate limit reached") ||
+    text.includes("too many requests")
   );
 }
 
@@ -393,23 +396,9 @@ function buildSeedContext(): SeedContext {
   };
 }
 
-async function findUserIdByEmail(
-  adminClient: ReturnType<typeof createClient>,
-  email: string
-): Promise<string | null> {
-  const normalized = email.trim().toLowerCase();
-  for (let page = 1; page <= 5; page += 1) {
-    const listed = await withNetworkRetries(() => adminClient.auth.admin.listUsers({ page, perPage: 200 }));
-    if (listed.error) throw listed.error;
-    const match = listed.data.users.find((item) => (item.email ?? "").toLowerCase() === normalized);
-    if (match?.id) return match.id;
-    if (listed.data.users.length < 200) break;
-  }
-  return null;
-}
-
 async function ensureUser(
   adminClient: ReturnType<typeof createClient>,
+  signInClient: ReturnType<typeof createClient>,
   params: {
     email: string;
     password: string;
@@ -420,9 +409,9 @@ async function ensureUser(
     primaryStyle: "bachata" | "salsa" | "kizomba" | "zouk";
   }
 ) {
-  let userId = await findUserIdByEmail(adminClient, params.email);
+  let userId: string | null = null;
 
-  if (!userId) {
+  try {
     const created = await withNetworkRetries(() =>
       adminClient.auth.admin.createUser({
         email: params.email,
@@ -432,13 +421,28 @@ async function ensureUser(
       })
     );
     if (created.error && !isLikelyAlreadyExistsError(created.error.message)) throw created.error;
-    if (!created.error) userId = created.data.user.id;
+    if (!created.error) {
+      userId = created.data.user.id;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isLikelyAlreadyExistsError(message)) {
+      throw error;
+    }
   }
 
   if (!userId) {
-    userId = await findUserIdByEmail(adminClient, params.email);
+    const signedIn = await withNetworkRetries(() =>
+      signInClient.auth.signInWithPassword({
+        email: params.email,
+        password: params.password,
+      })
+    );
+    if (signedIn.error || !signedIn.data.user?.id) {
+      throw signedIn.error ?? new Error(`Unable to resolve user id for ${params.email}`);
+    }
+    userId = signedIn.data.user.id;
   }
-  if (!userId) throw new Error(`Unable to resolve user id for ${params.email}`);
 
   const updated = await withNetworkRetries(() =>
     adminClient.auth.admin.updateUserById(userId, {
@@ -454,6 +458,7 @@ async function ensureUser(
       {
         user_id: userId,
         display_name: params.displayName,
+        username: `pw${userId.replace(/-/g, "").slice(0, 12)}`,
         city: params.city,
         country: params.country,
         avatar_url: params.avatarUrl,
@@ -833,7 +838,7 @@ async function getReferencesSeedRuntime(): Promise<ReferencesSeedRuntime | { rea
         auth: { persistSession: false, autoRefreshToken: false },
       });
 
-      const authorId = await ensureUser(adminClient, {
+      const authorId = await ensureUser(adminClient, authorClient, {
         email: context.authorEmail,
         password: context.password,
         displayName: context.authorName,
@@ -843,7 +848,7 @@ async function getReferencesSeedRuntime(): Promise<ReferencesSeedRuntime | { rea
         primaryStyle: "bachata",
       });
 
-      const recipientId = await ensureUser(adminClient, {
+      const recipientId = await ensureUser(adminClient, recipientClient, {
         email: context.recipientEmail,
         password: context.password,
         displayName: context.recipientName,
