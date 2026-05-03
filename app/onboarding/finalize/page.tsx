@@ -188,6 +188,38 @@ export default function OnboardingFinalizePage() {
   const hasAvailability = useMemo(() => Object.values(avail).some(Boolean), [avail]);
   const canComplete = langs.length > 0 && hasAvailability;
 
+  if (!hydrated) {
+    return (
+      <OnboardingShell
+        step={3}
+        title="Communication & Availability"
+        subtitle=""
+        rightLinkLabel=""
+        rightLinkHref="/auth"
+        rightLinkCta=""
+      >
+        <div className="animate-pulse space-y-8">
+          <section className="space-y-4">
+            <div className="h-4 w-28 rounded bg-white/5" />
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="h-12 rounded-xl bg-white/5" />
+            </div>
+          </section>
+          <section className="space-y-4">
+            <div className="h-4 w-36 rounded bg-white/5" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="h-14 rounded-2xl bg-white/5" />
+              <div className="h-14 rounded-2xl bg-white/5" />
+              <div className="h-14 rounded-2xl bg-white/5" />
+              <div className="h-14 rounded-2xl bg-white/5" />
+            </div>
+          </section>
+          <div className="h-14 rounded-2xl bg-white/5" />
+        </div>
+      </OnboardingShell>
+    );
+  }
+
   async function completeProfile() {
     if (!canComplete || saving) return;
 

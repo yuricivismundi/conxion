@@ -135,6 +135,7 @@ function AuthPageContent() {
   const [resendIn, setResendIn] = useState(30);
   const [rateLimitIn, setRateLimitIn] = useState(0);
   const [existingSession, setExistingSession] = useState<ExistingSessionState | null>(null);
+  const [sessionChecking, setSessionChecking] = useState(true);
   const logoSrc = "/branding/CONXION-3-tight.png";
   const [logoFailed, setLogoFailed] = useState(false);
   const deactivatedNotice = searchParams.get("deactivated") === "1";
@@ -179,6 +180,7 @@ function AuthPageContent() {
         const userId = sessionRes.data.session?.user?.id ?? null;
         if (!userId) {
           setExistingSession(null);
+          setSessionChecking(false);
           return;
         }
 
@@ -197,9 +199,11 @@ function AuthPageContent() {
           email: normalizeEmail(sessionRes.data.session?.user?.email ?? ""),
           continuePath: ageConfirmed ? "/onboarding/profile" : "/onboarding/age",
         });
+        setSessionChecking(false);
       } catch (err: unknown) {
         if (cancelled) return;
         setExistingSession(null);
+        setSessionChecking(false);
         setError(err instanceof Error ? err.message : "Could not verify current session.");
       }
     })();
@@ -279,6 +283,19 @@ function AuthPageContent() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (sessionChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: BRAND.bg }}>
+        <div className="flex flex-col items-center gap-4">
+          <div
+            className="h-10 w-10 animate-spin rounded-full border-2 border-transparent"
+            style={{ borderTopColor: BRAND.cyan, borderRightColor: BRAND.cyan }}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -502,7 +519,6 @@ function AuthPageContent() {
                   )}
                 </Link>
 
-                <h2 className="text-2xl font-bold text-white">Check your email</h2>
                 <p className="mt-2 text-sm" style={{ color: BRAND.muted }}>
                   We emailed you a login link.
                 </p>
@@ -551,6 +567,9 @@ function AuthPageContent() {
                   >
                     Enter code instead
                   </button>
+                </div>
+
+                <div className="mt-10 border-t border-white/5 pt-5 flex flex-col items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -558,19 +577,15 @@ function AuthPageContent() {
                       setError(null);
                       setSuggestedMode(null);
                     }}
-                    className="w-full rounded-xl px-4 py-2 text-sm font-semibold transition"
-                    style={{ color: BRAND.cyan }}
+                    className="text-xs font-medium transition hover:underline"
+                    style={{ color: BRAND.muted }}
                   >
                     Use a different email
                   </button>
+                  <a className="text-xs font-medium hover:underline" href={`mailto:${LEGAL_PROFILE.supportEmail}`} style={{ color: BRAND.muted }}>
+                    Trouble accessing email?
+                  </a>
                 </div>
-
-                <div className="mt-8 border-t border-white/10 pt-5 text-[11px]" style={{ color: BRAND.muted }}>
-                  This link expires shortly for your safety.
-                </div>
-                <a className="mt-3 block text-xs font-medium hover:underline" href={`mailto:${LEGAL_PROFILE.supportEmail}`} style={{ color: BRAND.muted }}>
-                  Trouble accessing email?
-                </a>
               </div>
             )}
           </div>

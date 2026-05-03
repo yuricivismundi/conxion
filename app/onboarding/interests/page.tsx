@@ -327,6 +327,40 @@ export default function OnboardingInterestsPage() {
 
   const canContinue = stylesOk;
 
+  if (!hydrated) {
+    return (
+      <OnboardingShell
+        step={2}
+        title="Dance DNA & Interests"
+        subtitle={""}
+        rightLinkLabel="Already a member?"
+        rightLinkHref="/auth"
+        rightLinkCta="Sign in"
+      >
+        <div className="animate-pulse space-y-8">
+          <section className="space-y-4">
+            <div className="h-4 w-32 rounded bg-white/5" />
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <div className="h-10 rounded-full bg-white/5" />
+              <div className="h-10 rounded-full bg-white/5" />
+              <div className="h-10 rounded-full bg-white/5" />
+              <div className="h-10 rounded-full bg-white/5" />
+              <div className="h-10 rounded-full bg-white/5" />
+            </div>
+          </section>
+          <section className="space-y-4">
+            <div className="h-4 w-32 rounded bg-white/5" />
+            <div className="h-24 rounded-2xl bg-white/5" />
+          </section>
+          <div className="flex gap-3">
+            <div className="h-12 w-24 rounded-2xl bg-white/5" />
+            <div className="h-12 flex-1 rounded-2xl bg-white/5" />
+          </div>
+        </div>
+      </OnboardingShell>
+    );
+  }
+
   return (
     <OnboardingShell
       step={2}
@@ -368,6 +402,9 @@ export default function OnboardingInterestsPage() {
                   <button
                     type="button"
                     onClick={() => toggleCoreStyle(s)}
+                    aria-label={`Toggle ${s} dance style`}
+                    aria-pressed={active}
+                    data-testid={`onboarding-style-${s.toLowerCase()}`}
                     className="rounded-full px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition border bg-black/20 hover:border-white/20"
                     style={{ borderColor: border, color }}
                   >
@@ -376,6 +413,8 @@ export default function OnboardingInterestsPage() {
 
                   {active ? (
                     <select
+                      aria-label={`${s} level`}
+                      data-testid={`onboarding-style-level-${s.toLowerCase()}`}
                       className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2 text-[12px] text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
                       value={styleLevels[s] ?? ""}
                       onChange={(e) => {
@@ -400,6 +439,9 @@ export default function OnboardingInterestsPage() {
               <button
                 type="button"
                 onClick={toggleOtherStyle}
+                aria-label="Toggle other dance style"
+                aria-pressed={otherStyleEnabled}
+                data-testid="onboarding-style-other"
                 className="rounded-full px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition border bg-black/20 hover:border-white/20"
                 style={{
                   borderColor: otherStyleEnabled ? "#FF00FF" : "rgba(255,255,255,0.10)",
@@ -415,11 +457,13 @@ export default function OnboardingInterestsPage() {
                     value={otherStyleName}
                     onChange={(e) => setOtherStyleName(e.target.value.slice(0, 32))}
                     placeholder="Type…"
+                    aria-label="Other dance style"
                     className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2 text-[12px] text-[#E0E0E0] outline-none focus:border-[#FF00FF]/60 focus:ring-1 focus:ring-[#FF00FF]/30"
                   />
 
                   {otherStyleName.trim() ? (
                     <select
+                      aria-label="Other dance style level"
                       className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2 text-[12px] text-[#E0E0E0] outline-none focus:border-[#FF00FF]/60 focus:ring-1 focus:ring-[#FF00FF]/30"
                       value={styleLevels[otherStyleName.trim()] ?? ""}
                       onChange={(e) => {

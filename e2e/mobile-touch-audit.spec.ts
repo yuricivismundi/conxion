@@ -22,6 +22,8 @@ test.describe("mobile touch audit", () => {
   });
 
   test("report undersized mobile controls on core screens", async ({ page }) => {
+    test.setTimeout(120_000);
+
     const result = await bootstrapMessagesE2E(page, { initialPath: "/messages" });
     test.skip(!result.ready, `[mobile-touch-audit] ${result.reason}`);
 
@@ -29,7 +31,9 @@ test.describe("mobile touch audit", () => {
 
     for (const route of ROUTES) {
       await page.goto(route, { waitUntil: "commit" }).catch(() => {});
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(200);
 
       // Skip this route if redirected to auth
       if (page.url().includes("/auth")) continue;

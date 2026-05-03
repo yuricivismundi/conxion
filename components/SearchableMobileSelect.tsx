@@ -103,6 +103,9 @@ export default function SearchableMobileSelect({
           setQuery("");
           setOpen(true);
         }}
+        aria-label={value ? `${label}: ${value}` : `Select ${label}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         className={triggerClassName}
       >
         <span className={value ? "" : "text-white/35"}>{value || placeholder}</span>
@@ -142,6 +145,7 @@ export default function SearchableMobileSelect({
                       ref={inputRef}
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
+                      aria-label={`Search ${label.toLowerCase()}`}
                       placeholder={searchPlaceholder ?? `Search ${label.toLowerCase()}...`}
                       className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/30"
                     />
