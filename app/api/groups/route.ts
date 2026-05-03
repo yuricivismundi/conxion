@@ -60,17 +60,15 @@ export async function POST(req: Request) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = getSupabaseServiceClient() as any;
 
+    // Enforce plan-based group cap
     try {
-      const slotCheck = await service.rpc("cx_check_group_slot_allowed", { p_user_id: userId });
-      if (slotCheck.error) {
-        throw new Error(slotCheck.error.message);
-      }
+      await service.rpc("cx_check_group_create_allowed", { p_user_id: userId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      if (msg.includes("group_slot_limit_reached")) {
+      if (msg.includes("group_limit_reached")) {
         return NextResponse.json(
-          { ok: false, error: "You’ve reached your group slots. Leave a group or upgrade to Plus to add another one." },
-          { status: 409 }
+          { ok: false, error: "You've reached your group limit. Upgrade to Plus to create more groups." },
+          { status: 403 }
         );
       }
       throw e;
@@ -103,12 +101,14 @@ export async function POST(req: Request) {
 
     const groupId = (insertData as { id: string }).id;
 
+    // Add host as member
     await service.from("group_members").upsert(
       { group_id: groupId, user_id: userId, role: "host" },
       { onConflict: "group_id,user_id" }
     );
 
-    const extraIds = memberIds.filter((id) => id !== userId).slice(0, 24);
+    // Add additional members (from event-based creation), excluding creator
+    const extraIds = memberIds.filter((id) => id !== userId).slice(0, 24); // hard cap: 25 total
     if (extraIds.length > 0) {
       await service.from("group_members").upsert(
         extraIds.map((id) => ({ group_id: groupId, user_id: id, role: "member" })),
@@ -116,6 +116,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // Create group thread (best effort)
     try {
       await service.rpc("cx_ensure_group_thread", {
         p_group_id: groupId,

@@ -96,6 +96,82 @@ export async function POST(
         const message = error.message ?? "Failed to join event.";
         return NextResponse.json({ ok: false, error: message }, { status: mapActionErrorStatus(message) });
       }
+
+      // Add/restore the user in the event's thread so it appears in their inbox.
+      // Create the thread on-demand if it doesn't exist yet.
+      // On re-join we must clear archived_at (ignoreDuplicates would silently skip archived rows).
+      const threadsTable = service.from("threads" as never) as unknown as {
+        select: (columns: string) => {
+          eq: (column: string, value: string) => {
+            eq: (column: string, value: string) => {
+              maybeSingle: () => Promise<{ data: unknown; error: { message?: string } | null }>;
+            };
+          };
+        };
+        insert: (value: Record<string, string>) => {
+          select: (columns: string) => {
+            single: () => Promise<{ data: unknown; error: { message?: string } | null }>;
+          };
+        };
+      };
+      const threadParticipantsTable = service.from("thread_participants" as never) as unknown as {
+        upsert: (
+          value: Record<string, string | null>,
+          options: { onConflict: string; ignoreDuplicates: boolean }
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      };
+      const threadContextsTable = service.from("thread_contexts" as never) as unknown as {
+        upsert: (
+          value: Record<string, unknown>,
+          options: { onConflict: string; ignoreDuplicates: boolean }
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      };
+      let eventThreadId: string | null = null;
+      const threadRes = await threadsTable
+        .select("id")
+        .eq("event_id", eventId)
+        .eq("thread_type", "event")
+        .maybeSingle();
+      const threadRow = (threadRes.data ?? null) as { id?: string } | null;
+      if (threadRow?.id) {
+        eventThreadId = threadRow.id;
+      } else if (hostUserId) {
+        // Thread doesn't exist yet — create it now
+        const newThreadRes = await threadsTable
+          .insert({ event_id: eventId, thread_type: "event", created_by: hostUserId })
+          .select("id")
+          .single();
+        const newThreadRow = (newThreadRes.data ?? null) as { id?: string } | null;
+        if (newThreadRow?.id) {
+          eventThreadId = newThreadRow.id;
+          // Add the host as a participant too
+          await threadParticipantsTable.upsert(
+            { thread_id: eventThreadId, user_id: hostUserId, role: "admin", archived_at: null },
+            { onConflict: "thread_id,user_id", ignoreDuplicates: false }
+          );
+        }
+      }
+      if (eventThreadId) {
+        await threadParticipantsTable.upsert(
+          { thread_id: eventThreadId, user_id: authData.user.id, role: "member", archived_at: null },
+          { onConflict: "thread_id,user_id", ignoreDuplicates: false }
+        );
+        // Ensure a thread_contexts row exists so the inbox filter works
+        await threadContextsTable.upsert(
+          {
+            thread_id: eventThreadId,
+            source_table: "events",
+            source_id: eventId,
+            context_tag: "event_chat",
+            status_tag: "active",
+            requester_id: authData.user.id,
+            recipient_id: hostUserId || authData.user.id,
+            metadata: { event_id: eventId },
+          },
+          { onConflict: "source_table,source_id", ignoreDuplicates: true }
+        );
+      }
+
       if (hostUserId && hostUserId !== authData.user.id) {
         await sendAppEmailBestEffort({
           kind: "event_joined",

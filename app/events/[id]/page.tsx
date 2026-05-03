@@ -243,6 +243,7 @@ export default function EventDetailsPage() {
   const [activeEventTab, setActiveEventTab] = useState<"details" | "people" | "thread">("details");
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
+  const suggestedEventsScrollerRef = useRef<HTMLDivElement | null>(null);
 
   const shareUrl = useMemo(() => {
     const base =
@@ -323,6 +324,16 @@ export default function EventDetailsPage() {
     }
   }
 
+  const scrollSuggestedEvents = useCallback((direction: "left" | "right") => {
+    const container = suggestedEventsScrollerRef.current;
+    if (!container) return;
+    const amount = Math.max(280, Math.round(container.clientWidth * 0.82));
+    container.scrollBy({
+      left: direction === "left" ? -amount : amount,
+      behavior: "smooth",
+    });
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!eventId) return;
 
@@ -352,7 +363,7 @@ export default function EventDetailsPage() {
       if (authData.user) {
         const meta = (authData.user.user_metadata ?? {}) as Record<string, unknown>;
         const planId = getPlanIdFromMeta(meta, Boolean(meta.is_verified));
-        setGroupMonthlyLimit(getPlanLimits(planId).privateGroupsPerMonth);
+        setGroupMonthlyLimit(getPlanLimits(planId).eventsPerMonth);
       }
 
       const eventRes = userId
@@ -607,6 +618,29 @@ export default function EventDetailsPage() {
       .slice(0, 5)
       .map((member) => ({ member, profile: profilesById[member.userId] ?? null }));
   }, [members, profilesById]);
+
+  const joiningMembers = useMemo(() => {
+    return members
+      .filter((member) => member.status === "host" || member.status === "going")
+      .sort((a, b) => {
+        const leftRank = a.status === "host" ? 0 : 1;
+        const rightRank = b.status === "host" ? 0 : 1;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+  }, [members]);
+
+  const interestedMembers = useMemo(() => {
+    return members
+      .filter((member) => member.status === "interested")
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [members]);
+
+  const waitlistMembers = useMemo(() => {
+    return members
+      .filter((member) => member.status === "waitlist")
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [members]);
 
   const popularWithFriends = useMemo(() => {
     const connectionUserIdSet = new Set(acceptedConnectionUserIds);
@@ -1418,7 +1452,8 @@ export default function EventDetailsPage() {
         <section className="mx-auto mt-5 grid w-full max-w-[1220px] grid-cols-1 gap-5 px-4 sm:px-6 xl:grid-cols-[minmax(0,2fr)_360px] lg:px-8">
           <div className="order-1 space-y-6 xl:order-1">
             {activeEventTab === "thread" ? (
-              <article className={`${panelClass} p-5 sm:p-6`}>
+              <>
+                <article className={`${panelClass} p-5 sm:p-6`}>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{threadTabLabel}</p>
@@ -1443,30 +1478,254 @@ export default function EventDetailsPage() {
                     Attendee chat is enabled. Guests get one message each{event.approveMessages ? ", and new messages require organiser approval." : "."}
                   </div>
                 ) : null}
-              </article>
+                </article>
+
+                {(suggestedEventsLoading || suggestedEvents.length > 0) ? (
+                  <article className={`${panelClass} p-5 sm:p-6`}>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
+                        <h3 className="mt-2 text-[22px] font-bold text-white">Keep exploring</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => scrollSuggestedEvents("left")}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
+                          aria-label="Scroll suggested events left"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollSuggestedEvents("right")}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
+                          aria-label="Scroll suggested events right"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                        </button>
+                        <Link
+                          href="/events"
+                          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
+                        >
+                          Explore all events
+                        </Link>
+                      </div>
+                    </div>
+
+                    {suggestedEventsLoading ? (
+                      <div className="mt-5 flex gap-4 overflow-hidden">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                          <div key={index} className="w-[286px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
+                            <div className="h-36 bg-white/[0.05]" />
+                            <div className="space-y-3 p-4">
+                              <div className="h-3 w-20 rounded bg-white/[0.08]" />
+                              <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
+                              <div className="h-4 w-2/3 rounded bg-white/[0.06]" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        ref={suggestedEventsScrollerRef}
+                        className="no-scrollbar mt-5 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
+                      >
+                        {suggestedEvents.map((suggested) => {
+                          const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
+                          const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
+                          return (
+                            <Link
+                              key={suggested.id}
+                              href={`/events/${suggested.id}`}
+                              className="group w-[286px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/10 bg-[#202327] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
+                            >
+                              <div className="relative h-36 overflow-hidden bg-[#0f1218]">
+                                {hero ? (
+                                  <img
+                                    src={hero}
+                                    alt={suggested.title}
+                                    className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="h-full w-full bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(217,70,239,0.08))]" />
+                                )}
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
+                                <div className="absolute left-3 top-3 flex items-center gap-2">
+                                  <span className={cx("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(suggested.eventType))}>
+                                    {suggested.eventType}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="space-y-2 p-4">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                                  {new Intl.DateTimeFormat("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }).format(new Date(suggested.startsAt))}
+                                </p>
+                                <h4 className="line-clamp-2 text-lg font-bold leading-tight text-white">{suggested.title}</h4>
+                                <p className="line-clamp-1 text-sm text-slate-300">{location || "Location announced soon"}</p>
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </article>
+                ) : null}
+              </>
             ) : null}
 
             {activeEventTab === "people" ? (
               <article className={`${panelClass} p-5 sm:p-6`}>
-                <h2 className="text-[22px] font-bold text-white">People</h2>
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Joining</p>
-                    <p className="mt-2 text-2xl font-black text-white">{counts.going}</p>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">People</p>
+                    <h2 className="mt-2 text-[22px] font-bold text-white">Who is around this event</h2>
                   </div>
-                  <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Interested</p>
-                    <p className="mt-2 text-2xl font-black text-white">{counts.interested}</p>
-                  </div>
-                  <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Waitlist</p>
-                    <p className="mt-2 text-2xl font-black text-white">{counts.waitlist}</p>
+                  <div className="grid grid-cols-3 gap-3 sm:min-w-[360px]">
+                    <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Joining</p>
+                      <p className="mt-2 text-2xl font-black text-white">{counts.going}</p>
+                    </div>
+                    <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Interested</p>
+                      <p className="mt-2 text-2xl font-black text-white">{counts.interested}</p>
+                    </div>
+                    <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Waitlist</p>
+                      <p className="mt-2 text-2xl font-black text-white">{counts.waitlist}</p>
+                    </div>
                   </div>
                 </div>
+
+                {!isAuthenticated ? (
+                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-4">
+                    <p className="text-sm text-slate-300">Sign in to see people joining, friend activity, and member identities.</p>
+                    <Link
+                      href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
+                      className="inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
+                    >
+                      Sign in
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-5">
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div className="rounded-2xl border border-white/8 bg-black/20 p-4 lg:col-span-2">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <h3 className="text-sm font-semibold text-white">Joining</h3>
+                          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">{joiningMembers.length}</span>
+                        </div>
+                        {joiningMembers.length > 0 ? (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {joiningMembers.map((member) => {
+                              const profile = profilesById[member.userId] ?? null;
+                              return (
+                                <div key={member.id} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3">
+                                  <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-[#121722]">
+                                    {profile?.avatarUrl ? (
+                                      <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center text-xs font-bold text-cyan-100">
+                                        {(profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-white">{profile?.displayName ?? "Member"}</p>
+                                    <p className="truncate text-xs text-slate-400">
+                                      {member.status === "host" ? "Host" : [profile?.city, profile?.country].filter(Boolean).join(", ") || "Guest"}
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400">No one has joined yet.</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold text-white">Interested</h3>
+                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">{interestedMembers.length}</span>
+                          </div>
+                          {interestedMembers.length > 0 ? (
+                            <div className="space-y-3">
+                              {interestedMembers.slice(0, 5).map((member) => {
+                                const profile = profilesById[member.userId] ?? null;
+                                return (
+                                  <div key={member.id} className="flex items-center gap-3">
+                                    <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-[#121722]">
+                                      {profile?.avatarUrl ? (
+                                        <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-cyan-100">
+                                          {(profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-semibold text-white">{profile?.displayName ?? "Member"}</p>
+                                      <p className="truncate text-xs text-slate-400">{[profile?.city, profile?.country].filter(Boolean).join(", ") || "Interested attendee"}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-400">No interested members yet.</p>
+                          )}
+                        </div>
+
+                        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold text-white">Waitlist</h3>
+                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">{waitlistMembers.length}</span>
+                          </div>
+                          {waitlistMembers.length > 0 ? (
+                            <div className="space-y-3">
+                              {waitlistMembers.slice(0, 5).map((member) => {
+                                const profile = profilesById[member.userId] ?? null;
+                                return (
+                                  <div key={member.id} className="flex items-center gap-3">
+                                    <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-[#121722]">
+                                      {profile?.avatarUrl ? (
+                                        <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-cyan-100">
+                                          {(profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-semibold text-white">{profile?.displayName ?? "Member"}</p>
+                                      <p className="truncate text-xs text-slate-400">{[profile?.city, profile?.country].filter(Boolean).join(", ") || "Waiting for a spot"}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-400">Nobody on the waitlist.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </article>
             ) : null}
 
-            <article className={`${panelClass} overflow-hidden`}>
+            {activeEventTab === "details" ? (
+              <>
+                <article className={`${panelClass} overflow-hidden`}>
               <div className="border-b border-white/8 px-5 py-4 sm:px-6">
                 <h2 className="text-[22px] font-bold text-white">Details</h2>
               </div>
@@ -1557,85 +1816,106 @@ export default function EventDetailsPage() {
                   </div>
                 ) : null}
               </div>
-            </article>
+                </article>
 
-            {suggestedEventsLoading || suggestedEvents.length > 0 ? (
-              <article className={`${panelClass} p-5 sm:p-6`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
-                    <h3 className="mt-2 text-[22px] font-bold text-white">Keep exploring</h3>
-                  </div>
-                  <Link
-                    href="/events"
-                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
-                  >
-                    Explore all events
-                  </Link>
-                </div>
-
-                {suggestedEventsLoading ? (
-                  <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {Array.from({ length: 3 }).map((_, index) => (
-                      <div key={index} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
-                        <div className="h-36 bg-white/[0.05]" />
-                        <div className="space-y-3 p-4">
-                          <div className="h-3 w-20 rounded bg-white/[0.08]" />
-                          <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
-                          <div className="h-4 w-2/3 rounded bg-white/[0.06]" />
-                        </div>
+                {(suggestedEventsLoading || suggestedEvents.length > 0) ? (
+                  <article className={`${panelClass} p-5 sm:p-6`}>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
+                        <h3 className="mt-2 text-[22px] font-bold text-white">Keep exploring</h3>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {suggestedEvents.map((suggested) => {
-                      const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
-                      const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
-                      return (
-                        <Link
-                          key={suggested.id}
-                          href={`/events/${suggested.id}`}
-                          className="group overflow-hidden rounded-2xl border border-white/10 bg-[#202327] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => scrollSuggestedEvents("left")}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
+                          aria-label="Scroll suggested events left"
                         >
-                          <div className="relative h-36 overflow-hidden bg-[#0f1218]">
-                            {hero ? (
-                              <img
-                                src={hero}
-                                alt={suggested.title}
-                                className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <div className="h-full w-full bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(217,70,239,0.08))]" />
-                            )}
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
-                            <div className="absolute left-3 top-3 flex items-center gap-2">
-                              <span className={cx("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(suggested.eventType))}>
-                                {suggested.eventType}
-                              </span>
+                          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollSuggestedEvents("right")}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
+                          aria-label="Scroll suggested events right"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                        </button>
+                        <Link
+                          href="/events"
+                          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
+                        >
+                          Explore all events
+                        </Link>
+                      </div>
+                    </div>
+
+                    {suggestedEventsLoading ? (
+                      <div className="mt-5 flex gap-4 overflow-hidden">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                          <div key={index} className="w-[286px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
+                            <div className="h-36 bg-white/[0.05]" />
+                            <div className="space-y-3 p-4">
+                              <div className="h-3 w-20 rounded bg-white/[0.08]" />
+                              <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
+                              <div className="h-4 w-2/3 rounded bg-white/[0.06]" />
                             </div>
                           </div>
-                          <div className="space-y-2 p-4">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                              {new Intl.DateTimeFormat("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              }).format(new Date(suggested.startsAt))}
-                            </p>
-                            <h4 className="line-clamp-2 text-lg font-bold leading-tight text-white">{suggested.title}</h4>
-                            <p className="line-clamp-1 text-sm text-slate-300">{location || "Location announced soon"}</p>
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </article>
-            ) : null}
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        ref={suggestedEventsScrollerRef}
+                        className="no-scrollbar mt-5 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
+                      >
+                        {suggestedEvents.map((suggested) => {
+                          const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
+                          const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
+                          return (
+                            <Link
+                              key={suggested.id}
+                              href={`/events/${suggested.id}`}
+                              className="group w-[286px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/10 bg-[#202327] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
+                            >
+                              <div className="relative h-36 overflow-hidden bg-[#0f1218]">
+                                {hero ? (
+                                  <img
+                                    src={hero}
+                                    alt={suggested.title}
+                                    className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="h-full w-full bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(217,70,239,0.08))]" />
+                                )}
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
+                                <div className="absolute left-3 top-3 flex items-center gap-2">
+                                  <span className={cx("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(suggested.eventType))}>
+                                    {suggested.eventType}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="space-y-2 p-4">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                                  {new Intl.DateTimeFormat("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }).format(new Date(suggested.startsAt))}
+                                </p>
+                                <h4 className="line-clamp-2 text-lg font-bold leading-tight text-white">{suggested.title}</h4>
+                                <p className="line-clamp-1 text-sm text-slate-300">{location || "Location announced soon"}</p>
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </article>
+                ) : null}
 
-            <article id="feedback" className={`${panelClass} p-5 sm:p-6`}>
+                <article id="feedback" className={`${panelClass} p-5 sm:p-6`}>
               <h3 className="mb-3 text-lg font-bold text-white">Post-event feedback</h3>
               {!hasEnded ? (
                 <p className="text-sm text-slate-300">Feedback opens once the event ends.</p>
@@ -1741,7 +2021,9 @@ export default function EventDetailsPage() {
                   )}
                 </div>
               )}
-            </article>
+                </article>
+              </>
+            ) : null}
           </div>
 
           <aside className="order-2 space-y-6 xl:order-2">

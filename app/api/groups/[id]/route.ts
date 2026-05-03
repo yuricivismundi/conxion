@@ -30,6 +30,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = getSupabaseServiceClient() as any;
 
+    // Verify host
     const { data: groupData, error: groupErr } = await service.from("groups").select("host_user_id").eq("id", groupId).single();
     if (groupErr || !groupData) return NextResponse.json({ ok: false, error: "Group not found." }, { status: 404 });
     if ((groupData as { host_user_id: string }).host_user_id !== userId) {
@@ -92,12 +93,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = getSupabaseServiceClient() as any;
 
+    // Verify host
     const { data: groupData, error: groupErr } = await service.from("groups").select("host_user_id").eq("id", groupId).single();
     if (groupErr || !groupData) return NextResponse.json({ ok: false, error: "Group not found." }, { status: 404 });
     if ((groupData as { host_user_id: string }).host_user_id !== userId) {
       return NextResponse.json({ ok: false, error: "Not authorized." }, { status: 403 });
     }
 
+    // Find group thread
     const { data: threadData } = await service
       .from("threads")
       .select("id")
@@ -107,12 +110,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
     if (threadData) {
       const threadId = (threadData as { id: string }).id;
+      // Archive all thread participants
       await service
         .from("thread_participants")
         .update({ archived_at: new Date().toISOString() })
         .eq("thread_id", threadId);
     }
 
+    // Delete group
     const { error: deleteErr } = await service.from("groups").delete().eq("id", groupId).eq("host_user_id", userId);
     if (deleteErr) {
       return NextResponse.json({ ok: false, error: (deleteErr as { message?: string }).message ?? "Delete failed." }, { status: 500 });

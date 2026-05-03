@@ -55,6 +55,34 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
     }
 
+    const eventHostRes = await service
+      .from("events")
+      .select("host_user_id")
+      .eq("id", eventId)
+      .maybeSingle();
+    const eventHostRow = (eventHostRes.data ?? null) as { host_user_id?: string } | null;
+    const hostUserId = typeof eventHostRow?.host_user_id === "string" ? eventHostRow.host_user_id : "";
+    const threadsTable = service.from("threads" as never) as unknown as {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          eq: (column: string, value: string) => {
+            maybeSingle: () => Promise<{ data: unknown; error: { message?: string } | null }>;
+          };
+        };
+      };
+      insert: (value: Record<string, string>) => {
+        select: (columns: string) => {
+          single: () => Promise<{ data: unknown; error: { message?: string } | null }>;
+        };
+      };
+    };
+    const threadParticipantsTable = service.from("thread_participants" as never) as unknown as {
+      upsert: (
+        value: Record<string, string | null>,
+        options: { onConflict: string; ignoreDuplicates: boolean }
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>;
+    };
+
     if (requestId) {
       const requestRes = await service
         .from("event_requests")
@@ -78,6 +106,40 @@ export async function POST(
       }
       const requesterIdResolved = typeof requestRow?.requester_id === "string" ? requestRow.requester_id : "";
       const eventIdResolved = typeof requestRow?.event_id === "string" ? requestRow.event_id : eventId;
+
+      // When accepting, add the requester to the event's thread (create thread on-demand if needed)
+      if (action === "accept" && requesterIdResolved) {
+        let eventThreadId: string | null = null;
+        const threadRes = await threadsTable
+          .select("id")
+          .eq("event_id", eventIdResolved)
+          .eq("thread_type", "event")
+          .maybeSingle();
+        const threadRow = (threadRes.data ?? null) as { id?: string } | null;
+        if (threadRow?.id) {
+          eventThreadId = threadRow.id;
+        } else if (hostUserId) {
+          const newThreadRes = await threadsTable
+            .insert({ event_id: eventIdResolved, thread_type: "event", created_by: hostUserId })
+            .select("id")
+            .single();
+          const newThreadRow = (newThreadRes.data ?? null) as { id?: string } | null;
+          if (newThreadRow?.id) {
+            eventThreadId = newThreadRow.id;
+            await threadParticipantsTable.upsert(
+              { thread_id: eventThreadId, user_id: hostUserId, role: "admin", archived_at: null },
+              { onConflict: "thread_id,user_id", ignoreDuplicates: false }
+            );
+          }
+        }
+        if (eventThreadId) {
+          await threadParticipantsTable.upsert(
+            { thread_id: eventThreadId, user_id: requesterIdResolved, role: "member", archived_at: null },
+            { onConflict: "thread_id,user_id", ignoreDuplicates: false }
+          );
+        }
+      }
+
       if (requesterIdResolved) {
         await sendAppEmailBestEffort({
           kind: action === "accept" ? "event_request_accepted" : "event_request_declined",
@@ -113,12 +175,47 @@ export async function POST(
       return NextResponse.json({ ok: false, error: message }, { status: mapRespondErrorStatus(message) });
     }
 
+    const resolvedEventId = typeof existingRequestRow?.event_id === "string" ? existingRequestRow.event_id : eventId;
+
+    // When accepting, add the requester to the event's thread (create on-demand if needed)
+    if (action === "accept" && requesterId) {
+      let eventThreadId: string | null = null;
+      const threadRes = await threadsTable
+        .select("id")
+        .eq("event_id", resolvedEventId)
+        .eq("thread_type", "event")
+        .maybeSingle();
+      const threadRow = (threadRes.data ?? null) as { id?: string } | null;
+      if (threadRow?.id) {
+        eventThreadId = threadRow.id;
+      } else if (hostUserId) {
+        const newThreadRes = await threadsTable
+          .insert({ event_id: resolvedEventId, thread_type: "event", created_by: hostUserId })
+          .select("id")
+          .single();
+        const newThreadRow = (newThreadRes.data ?? null) as { id?: string } | null;
+        if (newThreadRow?.id) {
+          eventThreadId = newThreadRow.id;
+          await threadParticipantsTable.upsert(
+            { thread_id: eventThreadId, user_id: hostUserId, role: "admin", archived_at: null },
+            { onConflict: "thread_id,user_id", ignoreDuplicates: false }
+          );
+        }
+      }
+      if (eventThreadId) {
+        await threadParticipantsTable.upsert(
+          { thread_id: eventThreadId, user_id: requesterId, role: "member", archived_at: null },
+          { onConflict: "thread_id,user_id", ignoreDuplicates: false }
+        );
+      }
+    }
+
     if (requesterId) {
       await sendAppEmailBestEffort({
         kind: action === "accept" ? "event_request_accepted" : "event_request_declined",
         recipientUserId: requesterId,
         actorUserId: authData.user.id,
-        eventId: typeof existingRequestRow?.event_id === "string" ? existingRequestRow.event_id : eventId,
+        eventId: resolvedEventId,
       });
     }
 

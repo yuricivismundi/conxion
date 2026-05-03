@@ -3,7 +3,7 @@ import { City } from "country-state-city";
 
 const cachedByIso = new Map<string, string>();
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ iso: string }> }) {
   const { iso: rawIso } = await params;

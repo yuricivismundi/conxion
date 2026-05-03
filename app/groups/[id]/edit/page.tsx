@@ -1,18 +1,10 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 import EventCoverCropDialog from "@/components/events/EventCoverCropDialog";
-import SearchableMobileSelect from "@/components/SearchableMobileSelect";
-import {
-  getCachedCitiesOfCountry,
-  getCachedCountriesAll,
-  getCitiesOfCountry,
-  getCountriesAll,
-  type CountryEntry,
-} from "@/lib/country-city-client";
 import { PRIVATE_GROUP_CHAT_MODE_OPTIONS, type EventChatMode } from "@/lib/events/access";
 import { validateEventCoverSourceFile } from "@/lib/events/cover-upload";
 import { supabase } from "@/lib/supabase/client";
@@ -22,29 +14,23 @@ const MAX_TITLE_LENGTH = 50;
 const MIN_DESCRIPTION_LENGTH = 24;
 const MAX_DESCRIPTION_LENGTH = 4000;
 
-function resolveCountryEntry(countries: CountryEntry[], value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  return (
-    countries.find((e) => e.name.trim().toLowerCase() === normalized) ??
-    countries.find((e) => e.isoCode.trim().toLowerCase() === normalized) ??
-    null
-  );
-}
-
-export default function CreateGroupPage() {
+export default function EditGroupPage() {
   return (
     <Suspense>
-      <CreateGroupForm />
+      <EditGroupForm />
     </Suspense>
   );
 }
 
-function CreateGroupForm() {
+function EditGroupForm() {
+  const { id: groupId } = useParams<{ id: string }>();
   const router = useRouter();
+
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -58,67 +44,44 @@ function CreateGroupForm() {
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Location (optional)
-  const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
-  const [cityOptions, setCityOptions] = useState<string[]>([]);
-  const [loadingCities, setLoadingCities] = useState(false);
-  const [country, setCountry] = useState("");
-  const [city, setCity] = useState("");
-  const countryNames = useMemo(() => countriesAll.map((e) => e.name), [countriesAll]);
-  const selectedCountryEntry = useMemo(() => resolveCountryEntry(countriesAll, country), [countriesAll, country]);
-  const selectedCountryIso = selectedCountryEntry?.isoCode ?? "";
-  const cityMenuOptions = useMemo(() => cityOptions.slice(0, 500), [cityOptions]);
-
-  const canCreate = useMemo(() => {
-    const t = title.trim();
-    const d = description.trim();
-    return t.length >= MIN_TITLE_LENGTH && t.length <= MAX_TITLE_LENGTH &&
-      d.length >= MIN_DESCRIPTION_LENGTH && d.length <= MAX_DESCRIPTION_LENGTH;
-  }, [title, description]);
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const { data: authData, error: authErr } = await supabase.auth.getUser();
         if (authErr || !authData.user) { router.replace("/auth"); return; }
-        setMeId(authData.user.id);
+        const userId = authData.user.id;
+        setMeId(userId);
         const { data: sessionData } = await supabase.auth.getSession();
         if (cancelled) return;
         setAccessToken(sessionData.session?.access_token ?? null);
-        if (countriesAll.length === 0) {
-          const fetched = await getCountriesAll();
-          if (!cancelled && fetched.length > 0) setCountriesAll(fetched);
+
+        // Load group data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const db = supabase as any;
+        const { data: groupData, error: groupErr } = await db.from("groups").select("*").eq("id", groupId).single();
+        if (cancelled) return;
+        if (groupErr || !groupData) {
+          router.replace("/activity?tab=groups");
+          return;
         }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Could not load form.");
+        if (groupData.host_user_id !== userId) {
+          router.replace("/activity?tab=groups");
+          return;
+        }
+
+        setTitle(groupData.title ?? "");
+        setDescription(groupData.description ?? "");
+        setChatMode(groupData.chat_mode === "broadcast" ? "broadcast" : "discussion");
+        setCoverUrl(groupData.cover_url ?? "");
+      } catch {
+        if (!cancelled) setError("Could not load group.");
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [countriesAll.length, router]);
-
-  useEffect(() => {
-    if (!selectedCountryIso) { setCityOptions([]); setLoadingCities(false); return; }
-    const cached = getCachedCitiesOfCountry(selectedCountryIso);
-    if (cached.length) { setCityOptions(cached); setLoadingCities(false); return; }
-    setLoadingCities(true);
-    let cancelled = false;
-    (async () => {
-      try {
-        const fetched = await getCitiesOfCountry(selectedCountryIso);
-        if (!cancelled) { setCityOptions(fetched); setLoadingCities(false); }
-      } catch {
-        if (!cancelled) {
-          const c = getCachedCitiesOfCountry(selectedCountryIso);
-          setCityOptions(c.length ? c : []);
-          setLoadingCities(false);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedCountryIso]);
+  }, [groupId, router]);
 
   async function onPickCover(file: File | null) {
     if (!file || !meId) return;
@@ -158,8 +121,8 @@ function CreateGroupForm() {
     }
   }
 
-  async function handleCreate() {
-    if (!accessToken) { setError("Missing auth session. Please sign in again."); return; }
+  async function handleSave() {
+    if (!accessToken) { setError("Missing auth session."); return; }
     if (uploadingCover) { setError("Please wait for cover upload to finish."); return; }
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
@@ -170,30 +133,51 @@ function CreateGroupForm() {
 
     setSubmitting(true);
     setError(null);
-
     try {
-      const res = await fetch("/api/groups", {
-        method: "POST",
+      const res = await fetch(`/api/groups/${groupId}`, {
+        method: "PATCH",
         headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
+          title: trimmedTitle,
+          description: trimmedDescription,
           chatMode,
-          city: city.trim() || null,
-          country: country.trim() || null,
           coverUrl: coverUrl.trim() || null,
         }),
       });
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; group_id?: string } | null;
-      if (!res.ok || !json?.ok || !json.group_id) {
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !json?.ok) {
+        setError(json?.error ?? "Failed to save changes.");
         setSubmitting(false);
-        setError(json?.error ?? "Failed to create group.");
+        return;
+      }
+      router.push(`/groups/${groupId}`);
+    } catch {
+      setError("Could not save changes. Check your connection.");
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!accessToken) { setError("Missing auth session."); return; }
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/groups/${groupId}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !json?.ok) {
+        setError(json?.error ?? "Failed to delete group.");
+        setDeleting(false);
+        setDeleteConfirmOpen(false);
         return;
       }
       router.push("/activity?tab=groups");
     } catch {
-      setSubmitting(false);
-      setError("Could not create group. Check your connection and try again.");
+      setError("Could not delete group. Check your connection.");
+      setDeleting(false);
+      setDeleteConfirmOpen(false);
     }
   }
 
@@ -223,10 +207,40 @@ function CreateGroupForm() {
         />
       ) : null}
 
+      {/* Delete confirmation dialog */}
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#0d1117] p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-white">Delete group?</h3>
+            <p className="mt-2 text-sm leading-relaxed text-white/60">
+              This will permanently delete the group and archive its chat thread. This cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={deleting}
+                className="flex-1 rounded-full border border-white/15 py-2.5 text-sm font-semibold text-white/70 transition hover:border-white/30 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+                className="flex-1 rounded-full bg-rose-600 py-2.5 text-sm font-bold text-white transition hover:bg-rose-500 disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete group"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="mx-auto w-full max-w-[680px] px-4 pb-20 pt-7 sm:px-6">
         {/* Header */}
         <header className="mb-8 text-center">
-          <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Create Group</h1>
+          <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Edit Group</h1>
         </header>
 
         {error ? (
@@ -345,107 +359,6 @@ function CreateGroupForm() {
                 );
               })}
             </div>
-            <p className="text-xs text-cyan-200/75">Can be changed later from group settings.</p>
-          </section>
-
-          {/* Location — optional */}
-          <section className="space-y-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Location</p>
-              <p className="mt-0.5 text-[11px] text-slate-500">Can be added or updated later.</p>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {/* Country */}
-              <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Country</span>
-                <div className="sm:hidden">
-                  <SearchableMobileSelect
-                    label="Country"
-                    value={country}
-                    options={countryNames}
-                    placeholder="Select country"
-                    searchPlaceholder="Search countries..."
-                    onSelect={(v) => { setCountry(v); setCity(""); }}
-                    buttonClassName="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white"
-                  />
-                </div>
-                <div className="relative hidden sm:block">
-                  <select
-                    value={country}
-                    onChange={(e) => { setCountry(e.target.value); setCity(""); }}
-                    className="w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 pr-11 text-white focus:border-cyan-300/35 focus:outline-none"
-                  >
-                    <option value="">Select country</option>
-                    {countryNames.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                  <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-500">expand_more</span>
-                </div>
-              </label>
-
-              {/* City */}
-              <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">City</span>
-                {selectedCountryIso ? (
-                  <>
-                    <div className="sm:hidden">
-                      <SearchableMobileSelect
-                        label="City"
-                        value={city}
-                        options={cityMenuOptions}
-                        placeholder={loadingCities ? "Loading cities..." : cityMenuOptions.length > 0 ? "Select city" : "Select country first"}
-                        searchPlaceholder="Search cities..."
-                        disabled={!selectedCountryIso}
-                        allowCustomValue
-                        customValueLabel={(v) => `Use "${v}"`}
-                        onSelect={(v) => setCity(v)}
-                        buttonClassName="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white disabled:opacity-55"
-                      />
-                    </div>
-                    <div className="hidden sm:block">
-                      {city && city !== "custom" && !cityMenuOptions.includes(city) ? (
-                        <input
-                          value={city}
-                          onChange={(e) => setCity(e.target.value)}
-                          className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
-                          placeholder="Type city name"
-                          autoFocus
-                        />
-                      ) : (
-                        <div className="relative">
-                          <select
-                            value={city === "custom" ? "custom" : city}
-                            onChange={(e) => {
-                              if (e.target.value === "custom") setCity("custom");
-                              else setCity(e.target.value);
-                            }}
-                            disabled={!selectedCountryIso || loadingCities}
-                            className="w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 pr-11 text-white focus:border-cyan-300/35 focus:outline-none disabled:opacity-55"
-                          >
-                            <option value="">{loadingCities ? "Loading cities..." : cityMenuOptions.length > 0 ? "Select city" : "No cities found"}</option>
-                            {cityMenuOptions.map((name) => (
-                              <option key={name} value={name}>{name}</option>
-                            ))}
-                            {cityMenuOptions.length > 0 && (
-                              <>
-                                <option value="" disabled>───</option>
-                                <option value="custom">Type custom city...</option>
-                              </>
-                            )}
-                          </select>
-                          <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-500">expand_more</span>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-500">
-                    Select country first
-                  </div>
-                )}
-              </label>
-            </div>
           </section>
         </div>
 
@@ -460,11 +373,22 @@ function CreateGroupForm() {
           </button>
           <button
             type="button"
-            onClick={() => void handleCreate()}
-            disabled={!canCreate || submitting || uploadingCover}
+            onClick={() => void handleSave()}
+            disabled={submitting || uploadingCover}
             className="flex-1 rounded-full bg-[linear-gradient(135deg,#6ee7f9,#d946ef)] py-3 text-sm font-bold text-[#06121a] shadow-[0_8px_24px_rgba(217,70,239,0.25)] transition disabled:opacity-50 hover:brightness-110"
           >
-            {submitting ? "Creating..." : "Create Group"}
+            {submitting ? "Saving..." : "Save changes"}
+          </button>
+        </div>
+
+        {/* Delete group */}
+        <div className="mt-8 border-t border-white/[0.06] pt-6">
+          <button
+            type="button"
+            onClick={() => setDeleteConfirmOpen(true)}
+            className="w-full rounded-full border border-rose-400/30 bg-rose-500/[0.08] py-3 text-sm font-bold text-rose-300 transition hover:bg-rose-500/15"
+          >
+            Delete group
           </button>
         </div>
       </main>

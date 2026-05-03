@@ -285,7 +285,7 @@ export default function EventCoverCropDialog({
                   step={0.01}
                   value={zoom}
                   onChange={(event) => setZoom(Number(event.target.value))}
-                  className="mt-3 w-full"
+                  className="brand-range mt-3 w-full"
                   disabled={confirming}
                 />
               </div>
@@ -299,7 +299,7 @@ export default function EventCoverCropDialog({
                   step={1}
                   value={Math.round(panX * 100)}
                   onChange={(event) => setPanX(Number(event.target.value) / 100)}
-                  className="mt-3 w-full"
+                  className="brand-range mt-3 w-full"
                   disabled={confirming || !preview || preview.maxOffsetX === 0}
                 />
               </div>
@@ -313,7 +313,7 @@ export default function EventCoverCropDialog({
                   step={1}
                   value={Math.round(panY * 100)}
                   onChange={(event) => setPanY(Number(event.target.value) / 100)}
-                  className="mt-3 w-full"
+                  className="brand-range mt-3 w-full"
                   disabled={confirming || !preview || preview.maxOffsetY === 0}
                 />
               </div>
