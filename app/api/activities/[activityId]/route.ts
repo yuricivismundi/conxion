@@ -3,6 +3,7 @@ import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-serve
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { activityTypeLabel } from "@/lib/activities/types";
 import { validatePairActivityMonthlyLimit } from "@/lib/activities/limits";
+import { computeActivityEntitlementWindow } from "@/lib/chat/request-entitlement";
 
 type ActivityAction = "accept" | "decline" | "cancel";
 
@@ -206,6 +207,20 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     }
 
     if (action === "accept") {
+      // Block acceptance if the activity date has already passed.
+      // Use end_at if set, otherwise start_at. Non-date activities (no start_at) are always acceptable.
+      const closingTs = current.end_at ?? current.start_at ?? null;
+      if (closingTs) {
+        const dateStr = closingTs.slice(0, 10); // "YYYY-MM-DD"
+        const closingMs = new Date(`${dateStr}T23:59:59.999Z`).getTime();
+        if (Date.now() > closingMs) {
+          return NextResponse.json(
+            { ok: false, error: "This activity request can no longer be accepted. The activity date has already passed." },
+            { status: 409 }
+          );
+        }
+      }
+
       const pairLimitCheck = await validatePairActivityMonthlyLimit({
         serviceClient: service,
         requesterUserId: current.requester_id,
@@ -272,6 +287,42 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     if (contextRes.error) {
       // Log but don't fail — the activity status was already updated successfully.
       console.error("[activity action] cx_upsert_thread_context failed:", contextRes.error.message);
+    }
+
+    // Create request-linked chat entitlement on acceptance (best-effort)
+    if (nextStatus === "accepted" && current.thread_id && current.requester_id && current.recipient_id) {
+      try {
+        const { opensAt, expiresAt } = computeActivityEntitlementWindow({
+          acceptedAt: new Date(),
+          startAt: current.start_at ?? null,
+          endAt: current.end_at ?? null,
+        });
+        await (service as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }> }).rpc(
+          "cx_upsert_request_chat_entitlement",
+          {
+            p_thread_id: current.thread_id,
+            p_source_type: "activity_request",
+            p_source_id: current.id,
+            p_requester_user_id: current.requester_id,
+            p_responder_user_id: current.recipient_id,
+            p_opens_at: opensAt.toISOString(),
+            p_expires_at: expiresAt.toISOString(),
+          }
+        );
+      } catch {
+        // non-fatal — activity was already accepted
+      }
+    }
+
+    if (nextStatus === "cancelled") {
+      try {
+        await (service as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }> }).rpc(
+          "cx_cancel_request_chat_entitlement",
+          { p_source_type: "activity_request", p_source_id: current.id }
+        );
+      } catch {
+        // non-fatal
+      }
     }
 
     if (nextStatus === "accepted" || nextStatus === "declined" || nextStatus === "cancelled") {

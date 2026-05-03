@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
+import { computeHostingEntitlementWindow } from "@/lib/chat/request-entitlement";
 
 type TripRequestAction = "accept" | "decline" | "cancel";
 
@@ -269,12 +270,26 @@ export async function POST(
 
     const tripRes = await service
       .from("trips")
-      .select("user_id")
+      .select("user_id,start_date,end_date")
       .eq("id", requestRow.trip_id)
       .maybeSingle();
 
-    const tripRow = (tripRes.data ?? null) as { user_id?: string } | null;
+    const tripRow = (tripRes.data ?? null) as { user_id?: string; start_date?: string | null; end_date?: string | null } | null;
     const ownerId = typeof tripRow?.user_id === "string" ? tripRow.user_id : "";
+
+    // Block acceptance if the trip has already ended (end_date end-of-day, or start_date if no end_date)
+    if (action === "accept") {
+      const closingDateStr = tripRow?.end_date ?? tripRow?.start_date ?? null;
+      if (closingDateStr) {
+        const closingMs = new Date(`${closingDateStr}T23:59:59.999Z`).getTime();
+        if (Date.now() > closingMs) {
+          return NextResponse.json(
+            { ok: false, error: "This hosting request can no longer be accepted. The trip dates have already passed." },
+            { status: 409 }
+          );
+        }
+      }
+    }
 
     const rpcRes = await supabase.rpc("respond_trip_request", {
       p_request_id: requestId,
@@ -335,13 +350,62 @@ export async function POST(
       }
 
       if (action === "accept") {
-        await ensureTripThreadCompat({
+        const threadId = await ensureTripThreadCompat({
           service,
           tripId: requestRow.trip_id,
           ownerId,
           requesterId: requestRow.requester_id,
           actorId: authData.user.id,
         });
+        if (threadId) {
+          try {
+            const { opensAt, expiresAt } = computeHostingEntitlementWindow({
+              acceptedAt: new Date(),
+              startDate: tripRow?.start_date ?? null,
+              endDate: tripRow?.end_date ?? null,
+            });
+            const serviceRpc = service.rpc as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+            await serviceRpc("cx_upsert_request_chat_entitlement", {
+              p_thread_id: threadId,
+              p_source_type: "hosting_request",
+              p_source_id: requestRow.id,
+              p_requester_user_id: requestRow.requester_id,
+              p_responder_user_id: ownerId,
+              p_opens_at: opensAt.toISOString(),
+              p_expires_at: expiresAt.toISOString(),
+            });
+          } catch {
+            // non-fatal
+          }
+        }
+      }
+    }
+
+    // RPC path: create entitlement if accepted via respond_trip_request RPC
+    if (!usedFallback && action === "accept") {
+      try {
+        // Fetch thread created by the RPC
+        const threadRes = await service.from("threads").select("id").eq("trip_id", requestRow.trip_id).maybeSingle();
+        const rpcThreadId = (threadRes.data as { id?: string } | null)?.id ?? null;
+        if (rpcThreadId) {
+          const { opensAt, expiresAt } = computeHostingEntitlementWindow({
+            acceptedAt: new Date(),
+            startDate: tripRow?.start_date ?? null,
+            endDate: tripRow?.end_date ?? null,
+          });
+          const serviceRpc = service.rpc as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+          await serviceRpc("cx_upsert_request_chat_entitlement", {
+            p_thread_id: rpcThreadId,
+            p_source_type: "hosting_request",
+            p_source_id: requestRow.id,
+            p_requester_user_id: requestRow.requester_id,
+            p_responder_user_id: ownerId,
+            p_opens_at: opensAt.toISOString(),
+            p_expires_at: expiresAt.toISOString(),
+          });
+        }
+      } catch {
+        // non-fatal
       }
     }
 
