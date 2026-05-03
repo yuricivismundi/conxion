@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAppLanguage, type AppLanguage } from "@/components/AppLanguageProvider";
+import { BLOG_ENABLED } from "@/content/blog/posts";
 import { cx } from "@/lib/cx";
 
 
@@ -26,7 +27,7 @@ export default function AppFooter() {
     { href: "/about", label: t("footer.about") },
     { href: "/safety-center", label: t("footer.safetyCenter") },
     { href: "/support", label: t("footer.support") },
-    { href: "/blog", label: t("footer.blog") },
+    ...(BLOG_ENABLED ? [{ href: "/blog", label: t("footer.blog") }] : []),
     { href: "/shop", label: t("footer.shop") },
     { href: "/cookie-settings", label: t("footer.cookieSettings") },
   ];
@@ -43,7 +44,7 @@ export default function AppFooter() {
           <div className="flex flex-col gap-4">
             <Link href="/connections" className="flex items-center">
               <div className="relative h-10 w-[154px] overflow-hidden">
-                <Image src="/branding/CONXION-3-tight.png" alt="ConXion" fill className="object-contain object-left" />
+                <Image src="/branding/CONXION-3-tight.png" alt="ConXion" fill sizes="154px" className="object-contain object-left" />
               </div>
             </Link>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm font-semibold uppercase tracking-wide text-white/65">
