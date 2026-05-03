@@ -33,11 +33,13 @@ const remoteImageLoader = ({ src }: ImageLoaderProps) => src;
 export default function ComposeDialog({
   composeQuery,
   filteredComposeConnections,
-  filteredComposeTrips,
   setComposeQuery,
   onClose,
   onSelectConnection,
-  onSelectTrip,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  filteredComposeTrips: _filteredComposeTrips,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onSelectTrip: _onSelectTrip,
 }: ComposeDialogProps) {
   useBodyScrollLock(true);
 
@@ -47,7 +49,7 @@ export default function ComposeDialog({
         <div className="h-px w-full bg-gradient-to-r from-[#0df2f2]/60 via-[#0df2f2]/10 to-[#f20db1]/60" />
         <div className="flex min-h-0 flex-1 flex-col p-5">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-bold text-white">Start New Thread</h3>
+            <h3 className="text-lg font-bold text-white">Start a Conversation</h3>
             <button type="button" onClick={onClose} className="text-white/55 hover:text-white" aria-label="Close composer">
               <span className="material-symbols-outlined">close</span>
             </button>
@@ -58,92 +60,57 @@ export default function ComposeDialog({
             <input
               value={composeQuery}
               onChange={(event) => setComposeQuery(event.target.value)}
-              placeholder="Search connection or trip..."
+              placeholder="Search connections..."
               className="w-full rounded-xl border border-white/15 bg-black/25 py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
             />
           </div>
 
-          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
-            {filteredComposeConnections.length === 0 && filteredComposeTrips.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-400 space-y-3">
-                <p>No eligible connections or trips available yet.</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link
-                    href="/connections"
-                    className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
-                  >
-                    Find Connections
-                  </Link>
-                  <Link
-                    href="/activity?tab=trips"
-                    className="rounded-full border border-white/20 bg-black/25 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-cyan-300/30 hover:text-cyan-100"
-                  >
-                    Browse Trips
-                  </Link>
-                </div>
+          <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+            {filteredComposeConnections.length === 0 ? (
+              <div className="p-3 text-sm text-slate-400 space-y-3">
+                <p>No connections found.</p>
+                <Link
+                  href="/connections"
+                  className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
+                >
+                  Find Connections
+                </Link>
               </div>
             ) : (
-              <>
-                {filteredComposeConnections.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="px-1 text-[11px] font-bold uppercase tracking-widest text-cyan-200/80">Connections</p>
-                    {filteredComposeConnections.map((target) => (
-                      <button
-                        key={target.connectionId}
-                        type="button"
-                        onClick={() => onSelectConnection(target)}
-                        className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left hover:border-cyan-300/30 hover:bg-[#1e2f2f]"
-                      >
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[#223838]">
-                          {target.avatarUrl ? (
-                            <Image
-                              src={target.avatarUrl}
-                              alt={target.displayName}
-                              fill
-                              sizes="40px"
-                              loader={remoteImageLoader}
-                              unoptimized
-                              className="object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-cyan-100/80">
-                              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-                                person
-                              </span>
-                            </div>
-                          )}
+              <div className="space-y-0.5">
+                {filteredComposeConnections.map((target) => (
+                  <button
+                    key={target.connectionId}
+                    type="button"
+                    onClick={() => onSelectConnection(target)}
+                    className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-white/[0.05] transition-colors"
+                  >
+                    <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[#223838]">
+                      {target.avatarUrl ? (
+                        <Image
+                          src={target.avatarUrl}
+                          alt={target.displayName}
+                          fill
+                          sizes="40px"
+                          loader={remoteImageLoader}
+                          unoptimized
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-cyan-100/80">
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                            person
+                          </span>
                         </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">{target.displayName}</p>
-                          <p className="truncate text-xs text-slate-400">{target.subtitle}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-
-                {filteredComposeTrips.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="px-1 text-[11px] font-bold uppercase tracking-widest text-cyan-200/80">Trips</p>
-                    {filteredComposeTrips.map((target) => (
-                      <button
-                        key={target.tripId}
-                        type="button"
-                        onClick={() => onSelectTrip(target)}
-                        className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left hover:border-cyan-300/30 hover:bg-[#1e2f2f]"
-                      >
-                        <div className="h-10 w-10 shrink-0 rounded-full bg-[#223838] flex items-center justify-center text-cyan-200">
-                          <span className="material-symbols-outlined">luggage</span>
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">{target.displayName}</p>
-                          <p className="truncate text-xs text-slate-400">{target.subtitle}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{target.displayName}</p>
+                      <p className="truncate text-xs text-slate-400">{target.subtitle}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
