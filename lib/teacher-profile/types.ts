@@ -99,6 +99,7 @@ export type TeacherProfileRecord = {
   headline: string | null;
   bio: string | null;
   baseCity: string | null;
+  baseAddress: string | null;
   baseSchool: string | null;
   languages: string[];
   travelAvailable: boolean;
@@ -216,6 +217,7 @@ export function normalizeTeacherProfileRow(row: unknown): TeacherProfileRecord |
     headline: asNullableString(record.headline),
     bio: asNullableString(record.bio),
     baseCity: asNullableString(record.base_city ?? record.baseCity),
+    baseAddress: asNullableString(record.base_address ?? record.baseAddress),
     baseSchool: asNullableString(record.base_school ?? record.baseSchool),
     languages: asStringArray(record.languages),
     travelAvailable: asBoolean(record.travel_available ?? record.travelAvailable, false),

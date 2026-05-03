@@ -6,7 +6,6 @@ export const TEACHER_INFO_BLOCK_KINDS = [
   "private_class",
   "group_class",
   "workshop",
-  "show",
   "organizer_collab",
   "other",
 ] as const;
@@ -55,8 +54,7 @@ export const TEACHER_INFO_KIND_LABELS: Record<TeacherInfoBlockKind, string> = {
   private_class: "Private classes",
   group_class: "Group classes",
   workshop: "Workshop",
-  show: "Show / performance",
-  organizer_collab: "Organizer collaboration",
+  organizer_collab: "Collaboration",
   other: "Other",
 };
 

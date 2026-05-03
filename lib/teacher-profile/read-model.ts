@@ -26,6 +26,7 @@ const TEACHER_PROFILE_SELECT = [
   "headline",
   "bio",
   "base_city",
+  "base_address",
   "base_school",
   "languages",
   "travel_available",
