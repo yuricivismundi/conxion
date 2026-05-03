@@ -224,7 +224,7 @@ export default function ContactSidebarPanel({
 
       {/* Quick actions — Profile | Mute | Search */}
       <div className="mb-2 flex gap-2">
-        <Link
+        <a
           href={profileHref}
           className="flex flex-1 flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-semibold text-white/50 transition bg-white/[0.06] hover:bg-white/10 hover:text-white/80"
         >
@@ -232,7 +232,7 @@ export default function ContactSidebarPanel({
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
           </svg>
           Profile
-        </Link>
+        </a>
         {(onMuteFor8h || onMuteFor24h || onMuteForever || onUnmute) && (
           <div className="relative flex-1">
             <button

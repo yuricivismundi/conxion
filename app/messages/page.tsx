@@ -8290,6 +8290,24 @@ function MessagesPageContent() {
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    if (isMuted) {
+                                      void unmuteThread(thread.threadId, thread.dbThreadId);
+                                    } else {
+                                      void muteThreadForHours(thread.threadId, thread.dbThreadId, 8);
+                                    }
+                                    setOpenThreadRowMenuId(null);
+                                  }}
+                                  className="mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left text-xs text-slate-200 transition-colors hover:text-white"
+                                >
+                                  <span className="material-symbols-outlined text-sm">
+                                    {isMuted ? "notifications_active" : "notifications_paused"}
+                                  </span>
+                                  {isMuted ? "Unmute" : "Mute"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
                                     if (archivedThreads[thread.threadId]) {
                                       void unarchiveThread(thread.threadId, thread.dbThreadId);
                                     } else {
@@ -8298,7 +8316,7 @@ function MessagesPageContent() {
                                     setOpenThreadRowMenuId(null);
                                   }}
                                   data-testid={archivedThreads[thread.threadId] ? "thread-unarchive" : "thread-archive"}
-                                  className="mt-1 flex w-full items-center gap-2 px-2 py-2 text-left text-xs text-slate-200 transition-colors hover:text-white"
+                                  className="mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left text-xs text-slate-200 transition-colors hover:text-white"
                                 >
                                   <span className="material-symbols-outlined text-sm">
                                     {archivedThreads[thread.threadId] ? "unarchive" : "archive"}
