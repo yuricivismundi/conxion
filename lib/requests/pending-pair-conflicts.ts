@@ -15,6 +15,12 @@ export type PendingPairRequestConflict = {
   requestId: string | null;
 };
 
+const PENDING_REQUEST_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+function pendingCutoffIso() {
+  return new Date(Date.now() - PENDING_REQUEST_WINDOW_MS).toISOString();
+}
+
 function pairOrClause(leftField: string, rightField: string, leftUserId: string, rightUserId: string) {
   return `and(${leftField}.eq.${leftUserId},${rightField}.eq.${rightUserId}),and(${leftField}.eq.${rightUserId},${rightField}.eq.${leftUserId})`;
 }
@@ -28,6 +34,35 @@ function createConflict(kind: PendingPairRequestKind, label: string, requestId?:
   };
 }
 
+async function hasLivePendingThreadContext(
+  serviceClient: SupabaseServiceClient,
+  sourceTable: string,
+  sourceId: string | null | undefined
+) {
+  const resolvedSourceId = sourceId?.trim();
+  if (!resolvedSourceId) return false;
+
+  const contextRes = await serviceClient
+    .from("thread_contexts")
+    .select("status_tag,created_at")
+    .eq("source_table", sourceTable)
+    .eq("source_id", resolvedSourceId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (contextRes.error) throw contextRes.error;
+  const row = (contextRes.data ?? null) as { status_tag?: string | null; created_at?: string | null } | null;
+  if (!row) return true;
+
+  const statusTag = (row.status_tag ?? "").trim().toLowerCase();
+  if (statusTag !== "pending" && statusTag !== "inquiry_followup_pending") return false;
+
+  const createdAt = row.created_at ? Date.parse(row.created_at) : NaN;
+  if (!Number.isFinite(createdAt)) return true;
+  return createdAt >= Date.now() - PENDING_REQUEST_WINDOW_MS;
+}
+
 async function findPendingConnectionConflict(
   serviceClient: SupabaseServiceClient,
   actorUserId: string,
@@ -37,6 +72,7 @@ async function findPendingConnectionConflict(
     .from("connections")
     .select("id")
     .eq("status", "pending")
+    .gte("created_at", pendingCutoffIso())
     .or(pairOrClause("requester_id", "target_id", actorUserId, otherUserId))
     .limit(1)
     .maybeSingle();
@@ -44,6 +80,7 @@ async function findPendingConnectionConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null } | null;
   if (!row?.id) return null;
+  if (!(await hasLivePendingThreadContext(serviceClient, "connections", row.id))) return null;
   return createConflict("connection", "connection request", row.id);
 }
 
@@ -56,6 +93,7 @@ async function findPendingHostingConflict(
     .from("hosting_requests")
     .select("id,request_type")
     .eq("status", "pending")
+    .gte("created_at", pendingCutoffIso())
     .or(pairOrClause("sender_user_id", "recipient_user_id", actorUserId, otherUserId))
     .order("created_at", { ascending: false })
     .limit(1)
@@ -64,6 +102,7 @@ async function findPendingHostingConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null; request_type?: string | null } | null;
   if (!row?.id) return null;
+  if (!(await hasLivePendingThreadContext(serviceClient, "hosting_requests", row.id))) return null;
   const label = row.request_type === "offer_to_host" ? "host offer" : "hosting request";
   return createConflict("hosting_request", label, row.id);
 }
@@ -77,6 +116,7 @@ async function findPendingServiceInquiryConflict(
     .from("service_inquiries")
     .select("id")
     .eq("status", "pending")
+    .gte("created_at", pendingCutoffIso())
     .or(pairOrClause("requester_id", "recipient_id", actorUserId, otherUserId))
     .order("created_at", { ascending: false })
     .limit(1)
@@ -85,6 +125,7 @@ async function findPendingServiceInquiryConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null } | null;
   if (!row?.id) return null;
+  if (!(await hasLivePendingThreadContext(serviceClient, "service_inquiries", row.id))) return null;
   return createConflict("service_inquiry", "teaching inquiry", row.id);
 }
 
@@ -97,6 +138,7 @@ async function findPendingActivityConflict(
     .from("activities")
     .select("id,activity_type")
     .eq("status", "pending")
+    .gte("created_at", pendingCutoffIso())
     .or(pairOrClause("requester_id", "recipient_id", actorUserId, otherUserId))
     .order("created_at", { ascending: false })
     .limit(1)
@@ -105,6 +147,7 @@ async function findPendingActivityConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null; activity_type?: string | null } | null;
   if (!row?.id) return null;
+  if (!(await hasLivePendingThreadContext(serviceClient, "activities", row.id))) return null;
   const activityLabel = row.activity_type ? `${activityTypeLabel(row.activity_type)} activity request` : "activity request";
   return createConflict("activity", activityLabel.toLowerCase(), row.id);
 }
@@ -121,6 +164,7 @@ async function findPendingTripRequestConflictForDirection(
     .select("id,trip_id")
     .eq("requester_id", requesterId)
     .eq("status", "pending")
+    .gte("created_at", pendingCutoffIso())
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -147,6 +191,7 @@ async function findPendingTripRequestConflictForDirection(
 
   const match = pendingRows.find((row) => typeof row.trip_id === "string" && ownedTripIds.has(row.trip_id));
   if (!match?.id) return null;
+  if (!(await hasLivePendingThreadContext(serviceClient, "trip_requests", match.id))) return null;
   return createConflict("trip_request", "trip request", match.id);
 }
 

@@ -26,6 +26,8 @@ export default function AppFooter() {
     { href: "/about", label: t("footer.about") },
     { href: "/safety-center", label: t("footer.safetyCenter") },
     { href: "/support", label: t("footer.support") },
+    { href: "/blog", label: t("footer.blog") },
+    { href: "/shop", label: t("footer.shop") },
     { href: "/cookie-settings", label: t("footer.cookieSettings") },
   ];
 

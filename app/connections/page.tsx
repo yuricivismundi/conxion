@@ -28,7 +28,7 @@ import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { clearVerificationResume, loadVerificationResume, type VerificationResumePayload } from "@/lib/verification-client";
 import { VERIFICATION_SUCCESS_MESSAGE, isPaymentVerified } from "@/lib/verification";
 import { getPlanLimits, getPlanIdFromMeta } from "@/lib/billing/limits";
-import { fetchPendingPairConflict } from "@/lib/requests/pending-pair-client";
+import { fetchPendingPairConflict, fetchPendingPairConflictDetails } from "@/lib/requests/pending-pair-client";
 import {
   fetchLinkedConnectionOptions,
   type LinkedMemberOption,
@@ -1372,14 +1372,17 @@ function ConnectionsPageContent() {
 
         const { data: existing } = await supabase
           .from("trip_requests")
-          .select("id,status")
+          .select("id,status,created_at")
           .eq("trip_id", tripJoinModal.tripId)
           .eq("requester_id", userId)
           .in("status", ["pending", "accepted"])
           .limit(1)
           .maybeSingle();
 
-        if (existing?.status === "pending") {
+        const existingCreatedAt = existing?.created_at ? Date.parse(existing.created_at) : NaN;
+        const existingPendingLive = existing?.status === "pending" && (!Number.isFinite(existingCreatedAt) || existingCreatedAt >= Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+        if (existingPendingLive) {
           if (canCommit()) setTripJoinWarning("You already sent a pending join request for this trip.");
         } else if (existing?.status === "accepted") {
           if (canCommit()) setTripJoinWarning("You are already part of this trip.");
@@ -2437,9 +2440,16 @@ function ConnectionsPageContent() {
         throw new Error(payload?.error ?? "Failed to create trip request.");
       }
 
+      const targetUserId = tripJoinModal.targetUserId;
+      const tripId = tripJoinModal.tripId;
       closeTripJoinModal();
-      setUiInfo("Trip request sent. Continue the request inside Messages.");
-      router.replace("/messages?tab=requests");
+      if (tripId) {
+        await openMessagesForPendingPair(targetUserId, { tab: "requests", tripId });
+      } else if (targetUserId) {
+        await openMessagesForMemberThread(targetUserId, "requests");
+      } else {
+        router.replace("/messages?kind=connection&tab=requests");
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to send trip request.";
       setTripJoinError(
@@ -2450,6 +2460,110 @@ function ConnectionsPageContent() {
     } finally {
       setTripRequestSending(false);
     }
+  }
+
+  async function openMessagesForMemberThread(
+    targetUserId: string | null | undefined,
+    tab: "requests" | "active" | "all" = "requests"
+  ) {
+    const resolvedTargetUserId = targetUserId?.trim();
+    if (!resolvedTargetUserId) {
+      router.push(`/messages?kind=connection&tab=${tab}`);
+      return;
+    }
+
+    const { data: authUser } = await supabase.auth.getUser();
+    const viewerId = authUser?.user?.id?.trim() ?? "";
+    if (!viewerId) {
+      router.push(`/messages?kind=connection&tab=${tab}`);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc("cx_ensure_pair_thread", {
+        p_user_a: viewerId,
+        p_user_b: resolvedTargetUserId,
+        p_actor: viewerId,
+      });
+      if (error) throw error;
+
+      const threadId = typeof data === "string" ? data.trim() : "";
+      if (!threadId) {
+        router.push(`/messages?kind=connection&tab=${tab}`);
+        return;
+      }
+
+      router.push(`/messages?kind=connection&tab=${tab}&thread=${encodeURIComponent(`direct:${threadId}`)}`);
+    } catch {
+      router.push(`/messages?kind=connection&tab=${tab}`);
+    }
+  }
+
+  function openMessagesForTripRequest(
+    tripId: string | null | undefined,
+    tab: "requests" | "active" | "all" = "requests"
+  ) {
+    const resolvedTripId = tripId?.trim();
+    if (!resolvedTripId) {
+      router.push(`/messages?kind=connection&tab=${tab}`);
+      return;
+    }
+    router.push(`/messages?kind=connection&tab=${tab}&thread=${encodeURIComponent(`trip:${resolvedTripId}`)}`);
+  }
+
+  async function openMessagesForPendingPair(
+    targetUserId: string | null | undefined,
+    options?: { tab?: "requests" | "active" | "all"; tripId?: string | null }
+  ) {
+    const tab = options?.tab ?? "requests";
+    const details = await fetchPendingPairConflictDetails(targetUserId);
+    const sourceTable =
+      details?.kind === "connection"
+        ? "connections"
+        : details?.kind === "trip_request"
+          ? "trip_requests"
+          : details?.kind === "hosting_request"
+            ? "hosting_requests"
+            : details?.kind === "service_inquiry"
+              ? "service_inquiries"
+              : details?.kind === "activity"
+                ? "activities"
+                : null;
+
+    if (sourceTable && details?.requestId) {
+      const contextRes = await supabase
+        .from("thread_contexts")
+        .select("thread_id")
+        .eq("source_table", sourceTable)
+        .eq("source_id", details.requestId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const threadId =
+        !contextRes.error &&
+        contextRes.data &&
+        typeof (contextRes.data as { thread_id?: unknown }).thread_id === "string"
+          ? ((contextRes.data as { thread_id?: string }).thread_id ?? "").trim()
+          : "";
+
+      if (threadId) {
+        router.push(`/messages?kind=connection&tab=${tab}&thread=${encodeURIComponent(`direct:${threadId}`)}`);
+        return;
+      }
+
+      if (details.kind === "connection") {
+        router.push(`/messages?kind=connection&tab=${tab}&thread=${encodeURIComponent(`conn:${details.requestId}`)}`);
+        return;
+      }
+    }
+
+    if (options?.tripId) {
+      openMessagesForTripRequest(options.tripId, tab);
+      return;
+    }
+
+    await openMessagesForMemberThread(targetUserId, tab);
   }
 
   async function sendHostingRequest() {
@@ -2694,16 +2808,26 @@ function ConnectionsPageContent() {
               </div>
 
               {tab === "members" || tab === "travellers" ? (
-                <label className={`flex items-center gap-3 text-sm ${myCity ? "text-white/70" : "text-white/35"}`}>
-                  <input
-                    type="checkbox"
-                    checked={myCityOnly}
-                    onChange={(e) => setMyCityOnly(e.target.checked)}
-                    disabled={!myCity}
-                    className="h-5 w-9 accent-[#00F5FF]"
-                  />
-                  {myCity ? `My city (${myCity})` : "My city (set your city in profile)"}
-                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!myCity) return;
+                    setMyCityOnly((value) => !value);
+                  }}
+                  disabled={!myCity}
+                  title={myCity ? `Only show ${myCity}` : "Set your city in profile first"}
+                  className={[
+                    "inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
+                    myCityOnly
+                      ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
+                      : myCity
+                        ? "border-white/10 text-white/40 hover:text-white/70"
+                        : "cursor-not-allowed border-white/10 text-white/20",
+                  ].join(" ")}
+                >
+                  <span className="material-symbols-outlined text-[13px]">my_location</span>
+                  My location
+                </button>
               ) : null}
             </div>
           </div>
@@ -3393,21 +3517,27 @@ function ConnectionsPageContent() {
                     </div>
                   </div>
                   {tab === "members" || tab === "travellers" ? (
-                    <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                      <span>
-                        <span className="block text-xs font-bold uppercase tracking-wider text-white/75">My City</span>
-                        <span className="mt-0.5 block text-[11px] text-white/45">
-                          {myCity ? `Only show ${myCity}` : "Set your city in profile first"}
-                        </span>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={myCityOnly}
-                        onChange={(e) => setMyCityOnly(e.target.checked)}
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!myCity) return;
+                          setMyCityOnly((value) => !value);
+                        }}
                         disabled={!myCity}
-                        className="h-5 w-5 rounded border-white/20 bg-transparent accent-[#00F5FF]"
-                      />
-                    </label>
+                        className={[
+                          "inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
+                          myCityOnly
+                            ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
+                            : myCity
+                              ? "border-white/10 text-white/55 hover:text-white/80"
+                              : "cursor-not-allowed border-white/10 text-white/25",
+                        ].join(" ")}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">my_location</span>
+                        My location
+                      </button>
+                    </div>
                   ) : null}
                 </div>
                 {tab === "travellers" ? (
@@ -3879,7 +4009,18 @@ function ConnectionsPageContent() {
             <div className="max-h-[min(60svh,480px)] overflow-y-auto overscroll-contain px-5 pt-5 pb-4 space-y-4">
 
               {/* Pending warning */}
-              {tripJoinWarning ? <PendingRequestBanner message={tripJoinWarning} onCtaClick={closeTripJoinModal} /> : null}
+              {tripJoinWarning ? (
+                <PendingRequestBanner
+                  message={tripJoinWarning}
+                  onCtaClick={() => {
+                    closeTripJoinModal();
+                    void openMessagesForPendingPair(tripJoinModal.targetUserId, {
+                      tab: "requests",
+                      tripId: tripJoinModal.tripId,
+                    });
+                  }}
+                />
+              ) : null}
 
               {/* Error */}
               {tripJoinError ? (

@@ -24,10 +24,17 @@ export default function PendingRequestBanner({
       <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px] text-[#00F5FF]">info</span>
       <span className="min-w-0">
         {message}{" "}
-        {ctaHref ? (
+        {onCtaClick ? (
+          <button
+            type="button"
+            onClick={onCtaClick}
+            className="font-semibold text-[#00F5FF] underline underline-offset-2 transition hover:text-white"
+          >
+            {ctaLabel}
+          </button>
+        ) : ctaHref ? (
           <Link
             href={ctaHref}
-            onClick={onCtaClick}
             className="font-semibold text-[#00F5FF] underline underline-offset-2 transition hover:text-white"
           >
             {ctaLabel}

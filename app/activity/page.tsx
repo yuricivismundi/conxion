@@ -510,11 +510,8 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
       return [group.title, group.city, group.country, group.chatMode].filter(Boolean).join(" ").toLowerCase().includes(queryText);
     });
   }, [groupFilter, groupQuery, groups, meId]);
-  const hostedGroupsThisMonth = useMemo(
-    () => groups.filter((group) => group.hostUserId === meId && isThisMonth(group.createdAt)).length,
-    [groups, meId]
-  );
-  const canCreateGroup = groupLimit === null || hostedGroupsThisMonth < groupLimit;
+  const activeGroupSlotsUsed = groups.length;
+  const canCreateGroup = groupLimit === null || activeGroupSlotsUsed < groupLimit;
   useEffect(() => { onCanCreate?.(canCreateGroup); }, [canCreateGroup, onCanCreate]);
 
   if (loading) {
@@ -550,16 +547,16 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
               Create Group
             </span>
             <span className="pointer-events-none absolute bottom-full left-1/2 z-[200] mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1a1a2e] border border-white/10 px-3 py-1.5 text-[12px] font-semibold text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-              Upgrade to Plus to create more groups
+              Leave a group or upgrade to Plus for more group slots
             </span>
           </div>
         )}
         <ActivityLimitPill
           label="Groups"
-          current={hostedGroupsThisMonth}
+          current={activeGroupSlotsUsed}
           limit={groupLimit}
           compact
-          upgradeHint="Upgrade to Plus to create more private groups this month."
+          upgradeHint="Leave a group or upgrade to Plus to have more group slots."
         />
         <div className="flex flex-1 gap-2 sm:justify-end">
           <label className="group relative flex-1 sm:max-w-[260px]">

@@ -8,6 +8,12 @@ type EventLinkInput = {
   type?: unknown;
 };
 
+type EventSettingsInput = {
+  showGuestList?: unknown;
+  guestsCanInvite?: unknown;
+  approveMessages?: unknown;
+};
+
 const MIN_DESCRIPTION_LENGTH = 32;
 const MAX_DESCRIPTION_LENGTH = 1600;
 
@@ -50,6 +56,16 @@ function normalizeCoverUrl(value: unknown) {
   }
 }
 
+function sanitizeSettings(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const row = value as EventSettingsInput;
+  return {
+    show_guest_list: row.showGuestList !== false,
+    guests_can_invite: row.guestsCanInvite === true,
+    approve_messages: row.approveMessages === true,
+  };
+}
+
 function mapUpdateErrorStatus(message: string) {
   if (message.includes("not_authenticated")) return 401;
   if (message.includes("not_authorized")) return 403;
@@ -82,6 +98,18 @@ function mapUpdateErrorStatus(message: string) {
 function formatUpdateErrorMessage(message: string) {
   if (message.includes("invalid_cover_format")) {
     return "Cover image could not be used. Upload a JPG, PNG, or WEBP and we will crop it into a wide event banner.";
+  }
+  if (message.includes("venue_required")) {
+    return "Add a venue before publishing this event.";
+  }
+  if (message.includes("description_required")) {
+    return `Add a description before publishing. Minimum ${MIN_DESCRIPTION_LENGTH} characters.`;
+  }
+  if (message.includes("description_too_short")) {
+    return `Description must be at least ${MIN_DESCRIPTION_LENGTH} characters before publishing.`;
+  }
+  if (message.includes("title, city, country, startsAt, and endsAt are required")) {
+    return "To publish, add title, city, country, and a valid start and end time.";
   }
   return message;
 }
@@ -119,6 +147,7 @@ export async function PATCH(
     const trimmedDescription = typeof description === "string" ? description.trim() : "";
     const links = sanitizeLinks(body?.links);
     const styles = sanitizeStyles(body?.styles);
+    const settings = sanitizeSettings(body?.settings);
 
     if (!title || !city || !country || !startsAt || !endsAt) {
       return NextResponse.json(
@@ -180,6 +209,17 @@ export async function PATCH(
     if (error) {
       const message = error.message ?? "Failed to update event.";
       return NextResponse.json({ ok: false, error: formatUpdateErrorMessage(message) }, { status: mapUpdateErrorStatus(message) });
+    }
+
+    if (settings) {
+      const { error: settingsError } = await supabase
+        .from("events")
+        .update(settings)
+        .eq("id", data ?? eventId)
+        .eq("host_user_id", authData.user.id);
+      if (settingsError) {
+        return NextResponse.json({ ok: false, error: settingsError.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({ ok: true, event_id: data ?? eventId });

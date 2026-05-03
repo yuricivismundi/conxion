@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
 import SearchableMobileSelect from "@/components/SearchableMobileSelect";
@@ -110,6 +109,9 @@ function trimForm(form: TripFormState): TripFormState {
 
 export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean) => void } = {}) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const embeddedInActivity = pathname?.startsWith("/activity") ?? false;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [trips, setTrips] = useState<TripItem[]>([]);
@@ -132,7 +134,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
 
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) {
-      router.replace("/auth");
+      router.replace(embeddedInActivity ? "/auth?next=/activity?tab=trips" : "/auth");
       return;
     }
 
@@ -186,7 +188,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
     setActiveTripsPage(1);
     setPastTripsPage(1);
     setLoading(false);
-  }, [router]);
+  }, [embeddedInActivity, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +204,18 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
       cancelled = true;
     };
   }, [loadTrips]);
+
+  useEffect(() => {
+    if (!embeddedInActivity || searchParams.get("create") !== "trip" || createOpen) return;
+    const frame = window.setTimeout(() => {
+      setEditingTripId(null);
+      setTripForm(EMPTY_TRIP_FORM);
+      setCreateError(null);
+      setCreateOpen(true);
+      router.replace("/activity?tab=trips", { scroll: false });
+    }, 0);
+    return () => window.clearTimeout(frame);
+  }, [createOpen, embeddedInActivity, router, searchParams]);
 
   const activeTrips = useMemo(() => trips.filter((trip) => trip.status === "active"), [trips]);
   const pastTrips = useMemo(() => trips.filter((trip) => trip.status !== "active"), [trips]);
@@ -532,19 +546,16 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
 
         <div className="p-3">
           <div className="flex min-w-0 flex-col gap-3 px-1 pb-1 pt-1">
-            <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/42">Description</div>
-              <p className="text-sm leading-6 text-white/72">
-                {trip.note || "No trip description yet."}
-              </p>
-            </div>
+            <p className="text-sm leading-6 text-white/72">
+              {trip.note || "No trip description yet."}
+            </p>
 
-            <div className="mt-auto flex flex-wrap gap-2">
+            <div className={archived ? "mt-auto grid grid-cols-2 gap-2" : "mt-auto grid grid-cols-3 gap-2"}>
               {!archived ? (
                 <button
                   type="button"
                   onClick={() => openEditModal(trip)}
-                  className="min-h-[38px] rounded-full border border-[#00F5FF]/25 bg-[#00F5FF]/8 px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#b8fbff] transition hover:border-[#00F5FF]/45 hover:bg-[#00F5FF]/14 hover:text-white"
+                  className="min-h-[38px] rounded-full border border-[#00F5FF]/30 bg-[#00F5FF]/12 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#b8fbff] transition hover:border-[#00F5FF]/50 hover:bg-[#00F5FF]/18 hover:text-white"
                 >
                   Edit
                 </button>
@@ -561,7 +572,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
                     note: trip.note,
                   })
                 }
-                className="min-h-[38px] rounded-full border border-white/14 bg-white/[0.04] px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80 transition hover:border-white/24 hover:bg-white/[0.08] hover:text-white"
+                className="min-h-[38px] rounded-full border border-cyan-300/20 bg-white/[0.04] px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 transition hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-white"
               >
                 Duplicate
               </button>
@@ -569,7 +580,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
                 type="button"
                 onClick={() => void deleteTrip(trip)}
                 disabled={deleteBusy}
-                className="min-h-[38px] rounded-full border border-[#ff7b7b]/20 bg-[#ff7b7b]/8 px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#ffb3b3] transition hover:border-[#ff7b7b]/35 hover:bg-[#ff7b7b]/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-h-[38px] rounded-full border border-[#ff7b7b]/20 bg-[#ff7b7b]/8 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#ffb3b3] transition hover:border-[#ff7b7b]/35 hover:bg-[#ff7b7b]/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {deleteBusy ? "Deleting..." : "Delete"}
               </button>
@@ -581,10 +592,10 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
   };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] font-sans text-white">
-      <Nav />
+    <div className={embeddedInActivity ? "font-sans text-white" : "min-h-screen bg-[#0A0A0A] font-sans text-white"}>
+      {embeddedInActivity ? null : <Nav />}
 
-      <main className="mx-auto w-full max-w-[1180px] px-4 pb-16 pt-7 sm:px-6 lg:px-8">
+      <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1180px] px-4 pb-16 pt-7 sm:px-6 lg:px-8"}>
         {error ? (
           <div className="mb-4 rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
         ) : null}

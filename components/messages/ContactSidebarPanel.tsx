@@ -54,7 +54,11 @@ type ContactSidebarPanelProps = {
   searchQuery?: string;
   onSearch?: (q: string) => void;
   isMuted?: boolean;
-  onMuteToggle?: () => void;
+  muteLabel?: string;
+  onMuteFor8h?: () => void;
+  onMuteFor24h?: () => void;
+  onMuteForever?: () => void;
+  onUnmute?: () => void;
   onReport?: () => void;
   onBlock?: () => void;
   pinnedMessages?: { id: string; text: string; senderName: string }[];
@@ -123,13 +127,18 @@ export default function ContactSidebarPanel({
   searchQuery = "",
   onSearch,
   isMuted = false,
-  onMuteToggle,
+  muteLabel = "",
+  onMuteFor8h,
+  onMuteFor24h,
+  onMuteForever,
+  onUnmute,
   onReport,
   onBlock,
   pinnedMessages = [],
 }: ContactSidebarPanelProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [blockConfirm, setBlockConfirm] = useState(false);
+  const [muteMenuOpen, setMuteMenuOpen] = useState(false);
 
   if (loading) return <ContactSidebarSkeleton />;
 
@@ -223,17 +232,78 @@ export default function ContactSidebarPanel({
           </svg>
           Profile
         </Link>
-        {onMuteToggle && (
-          <button
-            onClick={onMuteToggle}
-            className={["flex flex-1 flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-semibold transition",
-              isMuted ? "bg-white/10 text-white/80" : "bg-white/[0.06] text-white/50 hover:bg-white/10 hover:text-white/80"].join(" ")}
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-            </svg>
-            {isMuted ? "Unmute" : "Mute"}
-          </button>
+        {(onMuteFor8h || onMuteFor24h || onMuteForever || onUnmute) && (
+          <div className="relative flex-1">
+            <button
+              onClick={() => setMuteMenuOpen((prev) => !prev)}
+              className={["flex w-full flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-semibold transition",
+                muteMenuOpen || isMuted ? "bg-white/10 text-white/80" : "bg-white/[0.06] text-white/50 hover:bg-white/10 hover:text-white/80"].join(" ")}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+              </svg>
+              {isMuted ? "Muted" : "Mute"}
+            </button>
+            {muteMenuOpen ? (
+              <div className="absolute left-1/2 top-full z-20 mt-2 w-36 -translate-x-1/2 rounded-xl border border-white/10 bg-[#0b1015] px-2 py-2 shadow-[0_18px_48px_rgba(0,0,0,0.48)]">
+                {isMuted && onUnmute ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUnmute();
+                      setMuteMenuOpen(false);
+                    }}
+                    className="flex w-full items-center justify-center gap-1.5 px-2 py-1.5 text-[12px] text-white/80 transition hover:text-cyan-100"
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">notifications_active</span>
+                    {muteLabel ? `Unmute (${muteLabel})` : "Unmute"}
+                  </button>
+                ) : (
+                  <>
+                    {onMuteFor8h ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onMuteFor8h();
+                          setMuteMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-center gap-1.5 px-2 py-1.5 text-[12px] text-white/80 transition hover:text-cyan-100"
+                      >
+                        <span className="material-symbols-outlined text-[15px] leading-none">notifications_paused</span>
+                        8 hours
+                      </button>
+                    ) : null}
+                    {onMuteFor24h ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onMuteFor24h();
+                          setMuteMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-center gap-1.5 px-2 py-1.5 text-[12px] text-white/80 transition hover:text-cyan-100"
+                      >
+                        <span className="material-symbols-outlined text-[15px] leading-none">notifications_paused</span>
+                        24 hours
+                      </button>
+                    ) : null}
+                    {onMuteForever ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onMuteForever();
+                          setMuteMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-center gap-1.5 px-2 py-1.5 text-[12px] text-white/80 transition hover:text-cyan-100"
+                      >
+                        <span className="material-symbols-outlined text-[15px] leading-none">do_not_disturb_on</span>
+                        Forever
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
         )}
         {onSearch && (
           <button
@@ -285,7 +355,10 @@ export default function ContactSidebarPanel({
             ))}
           </div>
         ) : (
-          <p className="text-[12px] text-white/30">No pinned messages yet.</p>
+          <div className="space-y-1">
+            <p className="text-[12px] text-white/30">No pinned messages yet.</p>
+            <p className="text-[11px] text-white/20">Use Pin message in a chat message menu to keep it here.</p>
+          </div>
         )}
       </SidebarAccordion>
 
@@ -389,6 +462,56 @@ export default function ContactSidebarPanel({
       {/* Privacy & Support */}
       <SidebarAccordion title="Privacy & Support" defaultOpen={false}>
         <div className="space-y-0.5">
+          {(onMuteFor8h || onMuteFor24h || onMuteForever || onUnmute) && (
+            <div className="px-3 py-2.5">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">Mute chat</p>
+              <div className="flex flex-wrap gap-2">
+                {isMuted && onUnmute ? (
+                  <button
+                    type="button"
+                    onClick={onUnmute}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/75 transition hover:border-cyan-300/25 hover:text-cyan-100"
+                  >
+                    <span className="material-symbols-outlined text-[14px] leading-none">notifications_active</span>
+                    {muteLabel ? `Unmute (${muteLabel})` : "Unmute"}
+                  </button>
+                ) : (
+                  <>
+                    {onMuteFor8h ? (
+                      <button
+                        type="button"
+                        onClick={onMuteFor8h}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/75 transition hover:border-cyan-300/25 hover:text-cyan-100"
+                      >
+                        <span className="material-symbols-outlined text-[14px] leading-none">notifications_paused</span>
+                        8h
+                      </button>
+                    ) : null}
+                    {onMuteFor24h ? (
+                      <button
+                        type="button"
+                        onClick={onMuteFor24h}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/75 transition hover:border-cyan-300/25 hover:text-cyan-100"
+                      >
+                        <span className="material-symbols-outlined text-[14px] leading-none">notifications_paused</span>
+                        24h
+                      </button>
+                    ) : null}
+                    {onMuteForever ? (
+                      <button
+                        type="button"
+                        onClick={onMuteForever}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-[11px] font-semibold text-white/75 transition hover:border-cyan-300/25 hover:text-cyan-100"
+                      >
+                        <span className="material-symbols-outlined text-[14px] leading-none">do_not_disturb_on</span>
+                        Forever
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {onBlock && (
             <>
               {blockConfirm ? (

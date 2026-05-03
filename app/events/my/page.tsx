@@ -159,7 +159,8 @@ function EventRelationshipCard({
   const hero = isHost && event.coverUrl ? event.coverUrl : pickEventHeroUrl(event);
   const fallbackHero = pickEventFallbackHeroUrl(event);
   const badge = eventDateBadgeParts(event.startsAt);
-  const primaryHref = isHost && event.status === "draft" ? `/events/${event.id}/edit` : `/events/${event.id}`;
+  const isEditableDraft = isHost && event.status === "draft";
+  const primaryHref = isEditableDraft ? `/events/new?edit=${encodeURIComponent(event.id)}&returnTo=${encodeURIComponent("/events/my")}` : `/events/${event.id}`;
 
   return (
     <article className={cx("relative flex flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30 cursor-pointer", className)} style={{ height: "280px" }} onClick={(e) => { if ((e.target as HTMLElement).closest("a,button")) return; window.location.href = primaryHref; }}>
@@ -208,7 +209,7 @@ function EventRelationshipCard({
           <div className="mt-auto flex gap-2 border-t border-white/10 pt-3">
             <button
               type="button"
-              onClick={() => onEditRequest ? onEditRequest(event.id) : (window.location.href = `/events/${event.id}/edit`)}
+              onClick={() => onEditRequest ? onEditRequest(event.id) : (window.location.href = `/events/new?edit=${encodeURIComponent(event.id)}&returnTo=${encodeURIComponent("/events/my")}`)}
               className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-300/16 px-4 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/24"
             >
               <span className="material-symbols-outlined text-[18px]">{event.status === "draft" ? "edit" : "tune"}</span>

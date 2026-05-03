@@ -570,6 +570,11 @@ export default function LandingPage() {
                     Careers
                   </Link>
                 </li>
+                <li>
+                  <Link href="/blog" className="transition hover:text-[#00F5FF]">
+                    Blog
+                  </Link>
+                </li>
               </ul>
             </div>
 
@@ -610,6 +615,11 @@ export default function LandingPage() {
                 <li>
                   <Link href="/support" className="transition hover:text-[#00F5FF]">
                     FAQ
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/shop" className="transition hover:text-[#00F5FF]">
+                    Shop
                   </Link>
                 </li>
               </ul>

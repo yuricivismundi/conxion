@@ -42,6 +42,24 @@ function formatLocalDateTimeValue(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function exactStreetAddress(result: OsmGeocodeResult) {
+  const parts = [result.address.road, result.address.houseNumber].filter(Boolean);
+  return parts.join(" ").trim();
+}
+
+function geocodePlaceName(result: OsmGeocodeResult) {
+  return result.displayName.split(",")[0]?.trim() || result.address.city || result.address.town || result.address.village || result.address.country || "Selected place";
+}
+
+function geocodePlaceDetails(result: OsmGeocodeResult) {
+  const placeCity = result.address.city ?? result.address.town ?? result.address.village ?? result.address.municipality ?? "";
+  const placeCountry = result.address.country ?? "";
+  const streetAddress = exactStreetAddress(result);
+  return [streetAddress, placeCity, placeCountry]
+    .filter((segment, index, arr) => Boolean(segment) && arr.indexOf(segment) === index)
+    .join(" · ");
+}
+
 function plusHoursLocalDateTimeValue(hours: number) {
   const now = new Date();
   return formatLocalDateTimeValue(new Date(now.getTime() + hours * 60 * 60 * 1000));
@@ -206,8 +224,6 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
   const [accessDropdownOpen, setAccessDropdownOpen] = useState(false);
   const [showGuestList, setShowGuestList] = useState(true);
   const [guestsCanInvite, setGuestsCanInvite] = useState(false);
-  const [hostOnlyMessages, setHostOnlyMessages] = useState(false);
-  const [requireApproval, setRequireApproval] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [scheduledDates, setScheduledDates] = useState<ScheduledDateSelection[]>([]);
 
@@ -277,8 +293,6 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
             const settings = (ev.settings ?? {}) as Record<string, boolean>;
             setShowGuestList(settings.showGuestList !== false);
             setGuestsCanInvite(settings.guestsCanInvite === true);
-            setHostOnlyMessages(settings.hostOnlyMessages === true);
-            setRequireApproval(settings.approveMessages === true);
           }
         } finally {
           if (!cancelled) setLoadingEdit(false);
@@ -316,18 +330,24 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced Nominatim location search
+  // Debounced business/location search
   useEffect(() => {
     const q = locationQuery.trim();
     if (!q || q === `${city}, ${country}`) { setLocationResults([]); setLocationDropOpen(false); return; }
     const timer = setTimeout(async () => {
       setLocationSearching(true);
       try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&q=${encodeURIComponent(q)}`;
-        const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-        const data = (await res.json()) as OsmGeocodeResult[];
-        setLocationResults(Array.isArray(data) ? data : []);
-        setLocationDropOpen(true);
+        const searchParams = new URLSearchParams({
+          q,
+          venue: q,
+          city: city.trim(),
+          country: country.trim(),
+        });
+        const res = await fetch(`/api/geocode/search?${searchParams.toString()}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; results?: OsmGeocodeResult[] } | null;
+        const data = res.ok && json?.ok && Array.isArray(json.results) ? json.results : [];
+        setLocationResults(data);
+        setLocationDropOpen(data.length > 0);
       } catch { setLocationResults([]); }
       finally { setLocationSearching(false); }
     }, 350);
@@ -367,22 +387,31 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
     });
   }, [coverNaturalSize, coverFrameSize, coverPanX, coverPanY]);
 
-  // Nominatim search for location modal
+  // Business/location search for location modal
   useEffect(() => {
     const q = locationModalQuery.trim();
     if (q.length < 2) { setLocationModalResults([]); return; }
     setLocationModalSearching(true);
-    const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=8&addressdetails=1&accept-language=en`;
-        const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "ConXion/1.0" } });
-        const raw = await res.json() as unknown[];
-        setLocationModalResults(raw.map(normalizeOsmGeocodeResult).filter(Boolean) as OsmGeocodeResult[]);
-      } catch { /* aborted */ } finally { setLocationModalSearching(false); }
+        const searchParams = new URLSearchParams({
+          q,
+          venue: q,
+          city: city.trim(),
+          country: country.trim(),
+        });
+        const res = await fetch(`/api/geocode/search?${searchParams.toString()}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; results?: OsmGeocodeResult[] } | null;
+        const data = res.ok && json?.ok && Array.isArray(json.results) ? json.results : [];
+        setLocationModalResults(data);
+      } catch {
+        setLocationModalResults([]);
+      } finally {
+        setLocationModalSearching(false);
+      }
     }, 350);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [locationModalQuery]);
+    return () => window.clearTimeout(timer);
+  }, [city, country, locationModalQuery]);
 
   const isValidWindow = useMemo(() => {
     const start = toIsoOrNull(startsAtLocal);
@@ -413,8 +442,8 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
       });
-      const json = (await res.json()) as { ok: boolean; url?: string; error?: string };
-      if (!json.ok || !json.url) throw new Error(json.error ?? "Cover upload failed.");
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; url?: string; error?: string } | null;
+      if (!json?.ok || !json.url) throw new Error(json?.error ?? "Cover upload failed.");
       return json.url;
     } finally { setUploadingCover(false); }
   }
@@ -425,11 +454,18 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
 
     if (title.trim().length < MIN_TITLE_LENGTH) { setError(`Title must be at least ${MIN_TITLE_LENGTH} characters.`); return; }
     if (title.trim().length > MAX_TITLE_LENGTH) { setError(`Title must be no more than ${MAX_TITLE_LENGTH} characters.`); return; }
-    if (nextStatus === "published" && (!city.trim() || !country.trim() || !venueName.trim())) {
-      setError("Title, venue, city, and country are required to publish."); return;
-    }
-    if (nextStatus === "published" && descriptionLength < MIN_DESCRIPTION_LENGTH) {
-      setError(`Description must be at least ${MIN_DESCRIPTION_LENGTH} characters.`); return;
+    if (nextStatus === "published") {
+      const missing: string[] = [];
+      if (!title.trim()) missing.push("title");
+      if (!venueName.trim()) missing.push("venue");
+      if (!city.trim()) missing.push("city");
+      if (!country.trim()) missing.push("country");
+      if (!startsAtLocal || !endsAtLocal || !isValidWindow) missing.push("a valid start and end time");
+      if (descriptionLength < MIN_DESCRIPTION_LENGTH) missing.push(`description (${MIN_DESCRIPTION_LENGTH}+ chars)`);
+      if (missing.length > 0) {
+        setError(`To publish, add ${missing.join(", ")}.`);
+        return;
+      }
     }
     if (descriptionLength > MAX_DESCRIPTION_LENGTH) { setError(`Description must be no more than ${MAX_DESCRIPTION_LENGTH} characters.`); return; }
     const startsAt = toIsoOrNull(startsAtLocal);
@@ -466,7 +502,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
       eventType,
       styles,
       eventAccessType,
-      chatMode: hostOnlyMessages ? "broadcast" : "discussion",
+      chatMode: "broadcast",
       city: city.trim(),
       country: country.trim(),
       venueName: venueName.trim(),
@@ -480,8 +516,6 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
       settings: {
         showGuestList,
         guestsCanInvite,
-        hostOnlyMessages,
-        approveMessages: requireApproval,
       },
       ...(!isEditMode && recurring !== "none" && recurringOccurrences.length > 1
         ? { recurrence: { kind: recurring, timezone, occurrences: recurringOccurrences } }
@@ -743,9 +777,9 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                           if (!normalized) return null;
                           const placeCity = normalized.address.city ?? normalized.address.town ?? normalized.address.village ?? normalized.address.municipality ?? "";
                           const placeCountry = normalized.address.country ?? "";
-                          // First part of displayName = venue/place name
                           const placeName = normalized.displayName.split(",")[0]?.trim() ?? placeCity;
-                          const label = [placeName, placeCity, placeCountry].filter((s, idx, arr) => s && arr.indexOf(s) === idx).join(", ");
+                          const streetAddress = exactStreetAddress(normalized);
+                          const details = [streetAddress, placeCity, placeCountry].filter((s, idx, arr) => s && arr.indexOf(s) === idx).join(" · ");
                           return (
                             <button
                               key={i}
@@ -754,8 +788,8 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                                 setCity(placeCity);
                                 setCountry(placeCountry);
                                 setVenueName(placeName);
-                                setVenueAddress(normalized.displayName);
-                                setLocationQuery(label);
+                                setVenueAddress(streetAddress || normalized.displayName);
+                                setLocationQuery(placeName);
                                 setLocationDropOpen(false);
                                 setLocationResults([]);
                               }}
@@ -766,7 +800,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                               </span>
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-white">{placeName}</p>
-                                <p className="truncate text-[11px] text-slate-400">{[placeCity, placeCountry].filter(Boolean).join(", ")}</p>
+                                <p className="truncate text-[11px] text-slate-400">{details || normalized.displayName}</p>
                               </div>
                             </button>
                           );
@@ -1040,43 +1074,6 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                         <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${guestsCanInvite ? "translate-x-4" : "translate-x-0"}`} />
                       </button>
                     </div>
-                    {/* Host only messages */}
-                    <div className="flex items-center gap-3 border-t border-white/6 px-4 py-3">
-                      <span className="material-symbols-outlined text-[18px] text-white/30">speaker_notes_off</span>
-                      <div className="flex-1">
-                        <p className="text-sm text-white/80">Only hosts can message</p>
-                        <p className="text-[11px] text-slate-500">Turn this off to let guests post one message each in the event thread</p>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={hostOnlyMessages}
-                        onClick={() => setHostOnlyMessages((v) => !v)}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${hostOnlyMessages ? "bg-[#00f5ff]" : "bg-white/20"}`}
-                      >
-                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${hostOnlyMessages ? "translate-x-4" : "translate-x-0"}`} />
-                      </button>
-                    </div>
-                    {/* Approval */}
-                    {!hostOnlyMessages ? (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="material-symbols-outlined text-[18px] text-white/30">how_to_reg</span>
-                        <div className="flex-1">
-                          <p className="text-sm text-white/80">Approve messages</p>
-                          <p className="text-[11px] text-slate-500">Guest messages stay pending until you approve them</p>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={requireApproval}
-                          onClick={() => setRequireApproval((v) => !v)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${requireApproval ? "bg-[#00f5ff]" : "bg-white/20"}`}
-                        >
-                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${requireApproval ? "translate-x-4" : "translate-x-0"}`} />
-                        </button>
-                      </div>
-                    ) : null}
-
                   </div>
                 ) : null}
               </div>
@@ -1333,7 +1330,11 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
             >
               Cancel
             </button>
-            <div className="flex gap-2">
+            <div className="flex flex-col items-end gap-2">
+              <p className="text-[11px] text-slate-400">
+                Publish requires venue, city, country, start/end time, and a {MIN_DESCRIPTION_LENGTH}+ character description.
+              </p>
+              <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => void submitEvent("draft")}
@@ -1350,6 +1351,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
               >
                 {submitting ? "Saving…" : uploadingCover ? "Uploading…" : "Publish event"}
               </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1404,8 +1406,8 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                         <span className="material-symbols-outlined text-[18px] text-[#0df2f2]/70">location_on</span>
                       </div>
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">{r.displayName.split(",").slice(0, 2).join(",")}</p>
-                        <p className="truncate text-[11px] text-white/35">{r.displayName}</p>
+                        <p className="truncate text-sm font-semibold text-white">{geocodePlaceName(r)}</p>
+                        <p className="truncate text-[11px] text-white/35">{geocodePlaceDetails(r) || r.displayName}</p>
                       </div>
                     </button>
                   ))}
@@ -1433,7 +1435,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
               {locationModalSelected ? (
                 <div className="flex items-center gap-2 rounded-xl border border-[#0df2f2]/20 bg-[#0df2f2]/8 px-3 py-2">
                   <span className="material-symbols-outlined text-[16px] text-[#0df2f2]">check_circle</span>
-                  <p className="truncate text-sm font-semibold text-[#0df2f2]/90">{locationModalSelected.displayName.split(",").slice(0, 3).join(",")}</p>
+                  <p className="truncate text-sm font-semibold text-[#0df2f2]/90">{geocodePlaceName(locationModalSelected)}</p>
                   <button type="button" onClick={() => { setLocationModalSelected(null); setLocationModalQuery(""); }} className="ml-auto shrink-0 text-white/30 hover:text-white">
                     <span className="material-symbols-outlined text-[15px]">close</span>
                   </button>
@@ -1456,9 +1458,9 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                       const resolvedCity = locationModalSelected.address.city ?? locationModalSelected.address.town ?? locationModalSelected.address.village ?? locationModalSelected.address.municipality ?? "";
                       if (resolvedCity) setCity(resolvedCity);
                       if (locationModalSelected.address.country) setCountry(locationModalSelected.address.country);
-                      const street = [locationModalSelected.address.road, locationModalSelected.address.houseNumber].filter(Boolean).join(" ");
+                      const street = exactStreetAddress(locationModalSelected);
                       if (street) setVenueAddress(street);
-                      setVenueName(locationModalSelected.displayName.split(",")[0] ?? "");
+                      setVenueName(geocodePlaceName(locationModalSelected));
                     }
                     setLocationModalOpen(false);
                     setLocationModalResults([]);

@@ -1305,7 +1305,7 @@ export default function EventDetailsPage() {
                           </Link>
                         )}
                         <Link
-                          href={`/events/${event.id}/edit`}
+                          href={`/events/new?edit=${encodeURIComponent(event.id)}&returnTo=${encodeURIComponent(`/events/${event.id}`)}`}
                           className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#2d3035] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#373a40]"
                         >
                           Edit Event

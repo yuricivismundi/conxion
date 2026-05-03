@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
@@ -254,6 +254,21 @@ type ActiveGroupThreadRecord = GroupRecord & {
   isHost: boolean;
 };
 
+type EventSidebarSettingsDraft = {
+  hasCapacity: boolean;
+  capacity: string;
+  showGuestList: boolean;
+  guestsCanInvite: boolean;
+};
+
+type SidebarProfilePreview = {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  city: string;
+  country: string;
+};
+
 type ContactSidebarData = {
   userId: string;
   displayName: string;
@@ -371,6 +386,15 @@ type MessagingSummary = {
   cycleEnd: string | null;
 };
 
+type ThreadQuotaSummary = {
+  eventCreated: number;
+  eventLimit: number | null;
+  groupCreated: number;
+  groupLimit: number | null;
+  eventJoined: number;
+  groupJoined: number;
+};
+
 type InteractionStatus = "none" | "pending" | "accepted";
 
 type RequestQuotaSummary = {
@@ -470,6 +494,130 @@ function SidebarAccordion({
   );
 }
 
+function SidebarInfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-[12px] text-white/70">
+      <span>{label}</span>
+      <span className="text-right font-semibold text-white">{value}</span>
+    </div>
+  );
+}
+
+function SidebarPersonCard({
+  person,
+  roleLabel,
+  showMeta = true,
+  href,
+  className = "",
+}: {
+  person: SidebarProfilePreview;
+  roleLabel?: string;
+  showMeta?: boolean;
+  href?: string;
+  className?: string;
+}) {
+  const content = (
+    <div className={`flex items-center gap-3 ${className}`}>
+      <div className="h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-white/[0.04]">
+        {person.avatarUrl ? (
+          <img src={person.avatarUrl} alt={person.displayName} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-sm font-bold text-cyan-100">
+            {person.displayName.slice(0, 1).toUpperCase()}
+          </div>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-white">{person.displayName}</p>
+        {showMeta ? (
+          <p className="truncate text-[11px] text-white/45">
+            {roleLabel ? `${roleLabel} · ` : ""}
+            {[person.city, person.country].filter(Boolean).join(", ") || "Member"}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className="block transition hover:opacity-90">
+        {content}
+      </Link>
+    );
+  }
+
+  return content;
+}
+
+function SidebarAvatarStrip({
+  people,
+  emptyText,
+  showMeta = true,
+  maxVisibleRows = 5,
+}: {
+  people: SidebarProfilePreview[];
+  emptyText: string;
+  showMeta?: boolean;
+  maxVisibleRows?: number;
+}) {
+  if (people.length === 0) {
+    return <p className="text-[12px] text-white/45">{emptyText}</p>;
+  }
+
+  return (
+    <div
+      className="space-y-2 overflow-y-auto pr-1"
+      style={{ maxHeight: `${maxVisibleRows * 48}px` }}
+    >
+        {people.map((person) => (
+          <SidebarPersonCard key={person.userId} person={person} showMeta={showMeta} />
+        ))}
+    </div>
+  );
+}
+
+function SidebarActionRow({
+  icon,
+  title,
+  subtitle,
+  onClick,
+}: {
+  icon: string;
+  title: string;
+  subtitle?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-start gap-3 rounded-xl px-0.5 py-1.5 text-left transition hover:text-cyan-100"
+    >
+      <span className="material-symbols-outlined mt-0.5 text-[18px] text-white/70">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-[13px] font-medium text-white">{title}</span>
+        {subtitle ? <span className="block text-[11px] leading-relaxed text-white/45">{subtitle}</span> : null}
+      </span>
+    </button>
+  );
+}
+
+function formatSidebarEventRange(startsAt: string, endsAt: string | null) {
+  const start = new Date(startsAt);
+  const end = endsAt ? new Date(endsAt) : null;
+  if (Number.isNaN(start.getTime())) return "";
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (!end || Number.isNaN(end.getTime())) return fmt.format(start);
+  return `${fmt.format(start)} - ${fmt.format(end)}`;
+}
+
 function addOneMonthIso(value?: string | null) {
   const base = value ? new Date(value) : new Date();
   if (Number.isNaN(base.getTime())) {
@@ -487,6 +635,7 @@ const LOCAL_THREAD_DRAFTS_STORAGE_KEY = "cx_messages_thread_drafts_v1";
 const LOCAL_ARCHIVED_THREADS_STORAGE_KEY = "cx_messages_archived_threads_v1";
 const LOCAL_MUTED_THREADS_STORAGE_KEY = "cx_messages_muted_threads_v1";
 const LOCAL_PINNED_THREADS_STORAGE_KEY = "cx_messages_pinned_threads_v1";
+const LOCAL_PINNED_THREAD_MESSAGES_STORAGE_KEY = "cx_messages_pinned_thread_messages_v1";
 const REPORT_REASON_OPTIONS = [
   "Harassment",
   "Suicide or self-injury",
@@ -640,7 +789,7 @@ function supportsSyncedMessageReactions(kind: ThreadKind) {
 const CONTEXT_LABELS: Record<ThreadContextTag, string> = {
   connection_request: "Connection request",
   hosting_request: "Hosting request",
-  trip_join_request: "Trip join request",
+  trip_join_request: "Join Trip",
   event_chat: "Event chat",
   activity: "Activity",
   service_inquiry: "Teaching services",
@@ -933,9 +1082,17 @@ function describeServiceInquiryRequest(context: ThreadContextItem) {
   return parts;
 }
 
+function isTripJoinLikeContext(context: ThreadContextItem) {
+  if (context.contextTag === "trip_join_request") return true;
+  if (context.contextTag !== "activity") return false;
+  return normalizeActivityType(asString(context.metadata.activity_type)) === "travelling";
+}
+
 function describeTripJoinRequest(context: ThreadContextItem) {
-  if (context.contextTag !== "trip_join_request") return [];
+  if (!isTripJoinLikeContext(context)) return [];
   const parts: Array<{ label: string; value: string }> = [];
+  const destination = context.city?.trim() ?? "";
+  const dates = formatStarterDateWindow(context.startDate, context.endDate);
   const reasonRaw =
     asString(context.metadata.trip_join_reason).trim() ||
     asString(context.metadata.reason).trim();
@@ -946,6 +1103,12 @@ function describeTripJoinRequest(context: ThreadContextItem) {
       note.localeCompare(reasonRaw, undefined, { sensitivity: "accent" }) === 0
   );
 
+  if (destination) {
+    parts.push({ label: "Destination", value: destination });
+  }
+  if (dates && dates !== "those dates") {
+    parts.push({ label: "Dates", value: dates });
+  }
   if (reasonRaw) {
     parts.push({ label: "Reason", value: tripJoinReasonLabel(reasonRaw) });
   }
@@ -953,6 +1116,12 @@ function describeTripJoinRequest(context: ThreadContextItem) {
     parts.push({ label: "Note", value: note });
   }
   return parts;
+}
+
+function formatTripJoinBannerMeta(details: Array<{ label: string; value: string }>) {
+  const destination = details.find((detail) => detail.label === "Destination")?.value ?? "";
+  const dates = details.find((detail) => detail.label === "Dates")?.value ?? "";
+  return [destination, dates].filter(Boolean).join(" · ");
 }
 
 function describeHostingRequest(context: ThreadContextItem) {
@@ -1027,11 +1196,17 @@ function contextHistorySummary(context: ThreadContextItem) {
 function threadPreviewFromContext(context: ThreadContextItem) {
   const activityType = typeof context.metadata.activity_type === "string" ? context.metadata.activity_type : "";
   const contextLabel =
-    context.contextTag === "activity" && activityType
+    isTripJoinLikeContext(context)
+      ? "Join Trip"
+      : context.contextTag === "activity" && activityType
       ? activityTypeLabel(activityType)
       : CONTEXT_LABELS[context.contextTag];
+  const metaDesc = describeContextMeta(context);
 
   if (context.statusTag === "pending") {
+    if (isTripJoinLikeContext(context)) {
+      return metaDesc ? `${contextLabel} requested · ${metaDesc}` : `${contextLabel} requested.`;
+    }
     if (context.contextTag === "activity") return `${contextLabel} requested.`;
     if (context.contextTag === "service_inquiry") return `${contextLabel} pending.`;
     return `${contextLabel} pending.`;
@@ -1110,6 +1285,10 @@ function parseFilterTab(rawTab: string | null): FilterTab | null {
   return null;
 }
 
+function defaultInboxTabForKind(kind: InboxKindFilter): FilterTab {
+  return "active";
+}
+
 function normalizeThreadKindFilter(kind: ThreadKind): Exclude<InboxKindFilter, "all"> {
   if (kind === "event") return "event";
   if (kind === "group") return "group";
@@ -1133,6 +1312,12 @@ function daysUntilPendingExpiry(context: ThreadContextItem) {
   return Math.max(0, Math.ceil(diff / (24 * 60 * 60 * 1000)));
 }
 
+function isLivePendingContext(context: ThreadContextItem) {
+  if (!isPendingLikeStatus(context.statusTag)) return false;
+  const days = daysUntilPendingExpiry(context);
+  return days === null || days > 0;
+}
+
 function formatRemaining(ms: number) {
   const totalMinutes = Math.max(1, Math.ceil(ms / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -1140,6 +1325,12 @@ function formatRemaining(ms: number) {
   if (hours <= 0) return `${minutes}m`;
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
+}
+
+function isPermanentMute(until: string | null | undefined) {
+  const value = toTime(until);
+  if (!value) return false;
+  return value - Date.now() > 10 * 365 * 24 * 60 * 60 * 1000;
 }
 
 function formatDaysLeft(days: number) {
@@ -1163,6 +1354,34 @@ function toSingleLineText(value: string, max = 140) {
   const compact = value.replace(/\s+/g, " ").trim();
   if (compact.length <= max) return compact;
   return `${compact.slice(0, max).trimEnd()}...`;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderHighlightedMessageText(text: string, query: string, isCurrentMatch = false): ReactNode {
+  const needle = query.trim();
+  if (!needle) return text;
+  const regex = new RegExp(`(${escapeRegExp(needle)})`, "gi");
+  const parts = text.split(regex);
+  if (parts.length <= 1) return text;
+  return parts.map((part, index) =>
+    index % 2 === 1 ? (
+      <span
+        key={`${part}-${index}`}
+        className={
+          isCurrentMatch
+            ? "rounded bg-[#0b1015]/25 px-0.5 text-inherit shadow-[0_0_0_1px_rgba(13,242,242,0.28)]"
+            : "rounded bg-[#0b1015]/18 px-0.5 text-inherit"
+        }
+      >
+        {part}
+      </span>
+    ) : (
+      <span key={`${part}-${index}`}>{part}</span>
+    )
+  );
 }
 
 function buildReactionAggregateMap(rows: MessageReactionDbRow[], viewerId: string | null) {
@@ -1233,7 +1452,7 @@ function normalizeThreadContextRow(row: ThreadContextRow): ThreadContextItem | n
 
 function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[]): ThreadRow {
   const sorted = collapseDuplicateThreadContexts(contexts);
-  const pending = sorted.find((context) => isPendingLikeStatus(context.statusTag)) ?? null;
+  const pending = sorted.find((context) => isLivePendingContext(context)) ?? null;
   const primary = pending ?? sorted[0] ?? null;
   const hasAcceptedInteraction = sorted.some(
     (context) => CHAT_UNLOCK_CONTEXT_TAGS.includes(context.contextTag) && isAcceptedInteractionStatus(context.statusTag)
@@ -1249,11 +1468,11 @@ function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[
     ...thread,
     contextTag,
     statusTag,
-    hasPendingRequest: sorted.some((context) => isPendingLikeStatus(context.statusTag)) || Boolean(thread.hasPendingRequest),
+    hasPendingRequest: sorted.some((context) => isLivePendingContext(context)) || Boolean(thread.hasPendingRequest),
     hasAcceptedInteraction,
     isRelationshipPending,
     metaLabel,
-    preview: primary && isPendingLikeStatus(primary.statusTag) ? threadPreviewFromContext(primary) : thread.preview,
+    preview: primary && isLivePendingContext(primary) ? threadPreviewFromContext(primary) : thread.preview,
   };
 }
 
@@ -1270,7 +1489,6 @@ function inboxKindLabel(kind: InboxKindFilter) {
 
 function normalizeInboxTabForKind(kind: InboxKindFilter, tab: FilterTab): FilterTab {
   if (tab === "archived") return "archived";
-  if (kind === "group" && tab === "pending") return "all";
   return tab;
 }
 
@@ -1432,7 +1650,7 @@ function deriveThreadPreviewFromState(params: {
   messages: MessageItem[];
 }) {
   const collapsed = collapseDuplicateThreadContexts(params.contexts);
-  const pending = collapsed.find((context) => isPendingLikeStatus(context.statusTag)) ?? null;
+  const pending = collapsed.find((context) => isLivePendingContext(context)) ?? null;
   if (pending) return threadPreviewFromContext(pending);
   return latestTextPreview(params.messages, defaultThreadPreview(params.thread.kind));
 }
@@ -1443,14 +1661,15 @@ function MessagesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedThreadToken = searchParams.get("thread")?.trim() || null;
-  const initialTab = parseFilterTab(searchParams.get("tab")) ?? "all";
+  const initialKind = parseInboxKindFilter(searchParams.get("kind")) ?? "connection";
+  const initialTab = parseFilterTab(searchParams.get("tab")) ?? defaultInboxTabForKind(initialKind);
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [threadsHydrated, setThreadsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>(initialTab);
-  const [kindFilter, setKindFilter] = useState<InboxKindFilter>(parseInboxKindFilter(searchParams.get("kind")) ?? "all");
+  const [kindFilter, setKindFilter] = useState<InboxKindFilter>(initialKind);
   const [inboxFilterMenuOpen, setInboxFilterMenuOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeQuery, setComposeQuery] = useState("");
@@ -1474,6 +1693,7 @@ function MessagesPageContent() {
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(null);
+  const [threadQuotaSummary, setThreadQuotaSummary] = useState<ThreadQuotaSummary | null>(null);
   const [requestQuotaSummary, setRequestQuotaSummary] = useState<RequestQuotaSummary | null>(null);
   const [activityComposerOpen, setActivityComposerOpen] = useState(false);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(DEFAULT_ACTIVITY_DRAFT);
@@ -1514,15 +1734,16 @@ function MessagesPageContent() {
   const [archivedThreads, setArchivedThreads] = useState<Record<string, true>>({});
   const [mutedUntilByThread, setMutedUntilByThread] = useState<Record<string, string>>({});
   const [pinnedThreads, setPinnedThreads] = useState<Record<string, true>>({});
+  const [pinnedMessagesByThread, setPinnedMessagesByThread] = useState<Record<string, Array<{ id: string; text: string; senderName: string }>>>({});
   const [threadPrefsInLocalMode, setThreadPrefsInLocalMode] = useState(false);
   const [activeLastReadAt, setActiveLastReadAt] = useState<string | null>(null);
   const [activePeerLastReadAt, setActivePeerLastReadAt] = useState<string | null>(null);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [openThreadRowMenuId, setOpenThreadRowMenuId] = useState<string | null>(null);
-  const [threadActionsOpen, setThreadActionsOpen] = useState(false);
   const [archiveToContinueOpen, setArchiveToContinueOpen] = useState(false);
   const [requestActionBusyId, setRequestActionBusyId] = useState<string | null>(null);
   const [groupSettingsBusy, setGroupSettingsBusy] = useState(false);
+  const [eventSettingsBusy, setEventSettingsBusy] = useState(false);
   const [chatFooterBusy, setChatFooterBusy] = useState<"request" | "activate" | null>(null);
   const [showActivateConfirm, setShowActivateConfirm] = useState(false);
   const [connectRequestModal, setConnectRequestModal] = useState<ConnectRequestModalState>(EMPTY_CONNECT_REQUEST_MODAL);
@@ -1535,6 +1756,8 @@ function MessagesPageContent() {
   const [shareInquiryError, setShareInquiryError] = useState<string | null>(null);
   const [chatBookingOpen, setChatBookingOpen] = useState(false);
   const [chatBookingAvailable, setChatBookingAvailable] = useState(false);
+  const [conversationSearchQuery, setConversationSearchQuery] = useState("");
+  const [conversationSearchIndex, setConversationSearchIndex] = useState(0);
 
   useEffect(() => {
     if (activityDraft.dateMode === "none" && (activityDraft.startAt || activityDraft.endAt)) {
@@ -1643,20 +1866,57 @@ function MessagesPageContent() {
   const [connectionEventsFeedLoading, setConnectionEventsFeedLoading] = useState(false);
   const [activeCurrentEvent, setActiveCurrentEvent] = useState<EventRecord | null>(null);
   const [activeCurrentGroup, setActiveCurrentGroup] = useState<ActiveGroupThreadRecord | null>(null);
+  const [eventSettingsDraft, setEventSettingsDraft] = useState<EventSidebarSettingsDraft>({
+    hasCapacity: false,
+    capacity: "",
+    showGuestList: true,
+    guestsCanInvite: false,
+  });
+  const [activeEventOrganizer, setActiveEventOrganizer] = useState<SidebarProfilePreview | null>(null);
+  const [activeEventConnectionMembers, setActiveEventConnectionMembers] = useState<SidebarProfilePreview[]>([]);
+  const [activeEventConnectionCount, setActiveEventConnectionCount] = useState(0);
+  const [activeGroupOrganizer, setActiveGroupOrganizer] = useState<SidebarProfilePreview | null>(null);
+  const [activeGroupConnectionMembers, setActiveGroupConnectionMembers] = useState<SidebarProfilePreview[]>([]);
+  const [activeGroupConnectionCount, setActiveGroupConnectionCount] = useState(0);
+
+  useEffect(() => {
+    if (!activeCurrentEvent) {
+      setEventSettingsDraft({
+        hasCapacity: false,
+        capacity: "",
+        showGuestList: true,
+        guestsCanInvite: false,
+      });
+      return;
+    }
+
+    const capacityValue = activeCurrentEvent.capacity ?? activeCurrentEvent.maxMembers;
+    setEventSettingsDraft({
+      hasCapacity: typeof capacityValue === "number" && capacityValue > 0,
+      capacity: typeof capacityValue === "number" && capacityValue > 0 ? String(capacityValue) : "",
+      showGuestList: activeCurrentEvent.showGuestList !== false,
+      guestsCanInvite: activeCurrentEvent.guestsCanInvite === true,
+    });
+  }, [activeCurrentEvent]);
 
   const buildInboxUrl = useCallback(
     (options?: { tab?: FilterTab | null; threadToken?: string | null; kind?: InboxKindFilter | null }) => {
       const nextParams = new URLSearchParams(searchParams.toString());
       const nextTab = options && "tab" in options ? options.tab ?? "all" : activeTab;
-      const nextKind = options && "kind" in options ? options.kind ?? "all" : kindFilter;
+      const nextKind = options && "kind" in options ? options.kind ?? "connection" : kindFilter;
 
       nextParams.delete("mobile");
 
-      if (!nextTab || nextTab === "all") nextParams.delete("tab");
+      if (!nextTab || nextTab === defaultInboxTabForKind(nextKind)) nextParams.delete("tab");
       else nextParams.set("tab", nextTab);
 
-      if (!nextKind || nextKind === "all") nextParams.delete("kind");
-      else nextParams.set("kind", nextKind);
+      if (!nextKind) {
+        nextParams.delete("kind");
+      } else if (nextKind === "connection" && nextTab !== "archived") {
+        nextParams.delete("kind");
+      } else {
+        nextParams.set("kind", nextKind);
+      }
 
       if (options && "threadToken" in options) {
         if (options.threadToken) nextParams.set("thread", options.threadToken);
@@ -1671,7 +1931,6 @@ function MessagesPageContent() {
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
-  const threadActionsRef = useRef<HTMLDivElement | null>(null);
   const inboxFilterMenuRef = useRef<HTMLDivElement | null>(null);
   const connectionFeedRef = useRef<HTMLDivElement | null>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1681,6 +1940,50 @@ function MessagesPageContent() {
   const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const threadLoadRequestIdRef = useRef(0);
   const typingLastSentAtRef = useRef(0);
+
+  const buildAbsoluteUrl = useCallback((path: string) => {
+    if (typeof window === "undefined") return path;
+    return new URL(path, window.location.origin).toString();
+  }, []);
+
+  const copySidebarLink = useCallback(async (label: string, path: string) => {
+    try {
+      await navigator.clipboard.writeText(buildAbsoluteUrl(path));
+      setThreadInfo(`${label} copied.`);
+    } catch {
+      setThreadError(`Could not copy ${label.toLowerCase()}.`);
+    }
+  }, [buildAbsoluteUrl]);
+
+  const shareSidebarLink = useCallback(async (title: string, path: string, text: string) => {
+    const url = buildAbsoluteUrl(path);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setThreadInfo("Link copied.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setThreadError("Could not share right now.");
+    }
+  }, [buildAbsoluteUrl]);
+
+  const openEventCalendar = useCallback((event: EventRecord) => {
+    const formatGoogleDate = (value: string) => new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const location = [event.venueName, event.city, event.country].filter(Boolean).join(", ");
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: event.title,
+      dates: `${formatGoogleDate(event.startsAt)}/${formatGoogleDate(event.endsAt)}`,
+      location,
+      details: event.description ?? "",
+    });
+    if (typeof window !== "undefined") {
+      window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, "_blank", "noopener,noreferrer");
+    }
+  }, []);
   const typingTimeoutRef = useRef<number | null>(null);
   const composerLockReasonRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1734,7 +2037,7 @@ function MessagesPageContent() {
       const monthStart = new Date();
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
-      const [profileRes, requestCountRes] = await Promise.all([
+      const [profileRes, requestCountRes, eventCountRes, groupCountRes] = await Promise.all([
         supabase.from("profiles").select("verified,verified_label").eq("user_id", viewerId).maybeSingle(),
         viewerId
           ? supabase
@@ -1743,12 +2046,28 @@ function MessagesPageContent() {
               .eq("requester_id", viewerId)
               .gte("created_at", monthStart.toISOString())
           : Promise.resolve({ count: 0, error: null }),
+        viewerId
+          ? supabase
+              .from("events")
+              .select("id", { count: "exact", head: true })
+              .eq("host_user_id", viewerId)
+              .gte("created_at", monthStart.toISOString())
+          : Promise.resolve({ count: 0, error: null }),
+        viewerId
+          ? supabase
+              .from("groups")
+              .select("id", { count: "exact", head: true })
+              .eq("host_user_id", viewerId)
+              .gte("created_at", monthStart.toISOString())
+          : Promise.resolve({ count: 0, error: null }),
       ]);
       const isVerified = (profileRes.data as { verified?: boolean } | null)?.verified === true;
       const billingState = getBillingAccountState({ userMetadata: userMeta, isVerified });
       const planLimits = getPlanLimits(billingState.currentPlanId);
       const requestLimit = planLimits.connectionRequestsPerMonth ?? null;
       const requestsUsed = Number(requestCountRes.count) || 0;
+      const eventCreated = Number(eventCountRes.count) || 0;
+      const groupCreated = Number(groupCountRes.count) || 0;
 
       const summary: MessagingSummary = {
         plan: billingState.currentPlanId === "pro" ? "premium" : "free",
@@ -1761,6 +2080,14 @@ function MessagesPageContent() {
         cycleEnd: asString(data.cycleEnd) || null,
       };
       setMessagingSummary(summary);
+      setThreadQuotaSummary((prev) => ({
+        eventCreated,
+        eventLimit: planLimits.eventsPerMonth ?? null,
+        groupCreated,
+        groupLimit: planLimits.privateGroupsPerMonth ?? null,
+        eventJoined: prev?.eventJoined ?? 0,
+        groupJoined: prev?.groupJoined ?? 0,
+      }));
       setRequestQuotaSummary({
         used: requestsUsed,
         limit: requestLimit,
@@ -1950,11 +2277,31 @@ function MessagesPageContent() {
   }, [pinnedThreads]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(LOCAL_PINNED_THREAD_MESSAGES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, Array<{ id: string; text: string; senderName: string }>> | null;
+      if (parsed && typeof parsed === "object") {
+        setPinnedMessagesByThread(parsed);
+      }
+    } catch {
+      // Ignore invalid local cache payloads.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(LOCAL_PINNED_THREAD_MESSAGES_STORAGE_KEY, JSON.stringify(pinnedMessagesByThread));
+    } catch {
+      // Ignore local storage failures.
+    }
+  }, [pinnedMessagesByThread]);
+
+  useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
       const target = event.target as Node | null;
-      if (target && threadActionsRef.current && !threadActionsRef.current.contains(target)) {
-        setThreadActionsOpen(false);
-      }
       if (target && inboxFilterMenuRef.current && !inboxFilterMenuRef.current.contains(target)) {
         setInboxFilterMenuOpen(false);
       }
@@ -1979,7 +2326,6 @@ function MessagesPageContent() {
       if (event.key === "Escape") {
         setOpenMessageMenuId(null);
         setOpenThreadRowMenuId(null);
-        setThreadActionsOpen(false);
         setComposerEmojiOpen(false);
         setHoveredUnreadThreadId(null);
         if (reportOpen) setReportOpen(false);
@@ -2187,6 +2533,56 @@ function MessagesPageContent() {
           }
         }
 
+        const tripIds = Array.from(
+          new Set(
+            normalized
+              .filter((row) => row.contextTag === "trip_join_request")
+              .map((row) => asString(row.metadata.trip_id).trim())
+              .filter(Boolean)
+          )
+        );
+
+        if (tripIds.length > 0) {
+          const tripsRes = await supabase
+            .from("trips")
+            .select("id,destination_city,destination_country,start_date,end_date")
+            .in("id", tripIds);
+          if (!tripsRes.error && !isStale()) {
+            const tripById = new Map(
+              ((tripsRes.data ?? []) as Array<Record<string, unknown>>)
+                .map((row) => {
+                  const id = asString(row.id).trim();
+                  if (!id) return null;
+                  return [
+                    id,
+                    {
+                      city: asString(row.destination_city).trim(),
+                      country: asString(row.destination_country).trim(),
+                      startDate: asString(row.start_date).trim(),
+                      endDate: asString(row.end_date).trim(),
+                    },
+                  ] as const;
+                })
+                .filter((entry): entry is readonly [string, { city: string; country: string; startDate: string; endDate: string }] => Boolean(entry))
+            );
+
+            normalized = normalized.map((row) => {
+              if (row.contextTag !== "trip_join_request") return row;
+              const tripId = asString(row.metadata.trip_id).trim();
+              const trip = tripById.get(tripId);
+              if (!trip) return row;
+              const cityLabel = [trip.city, trip.country].filter(Boolean).join(", ");
+              return {
+                ...row,
+                title: "Join Trip",
+                city: cityLabel || row.city,
+                startDate: trip.startDate || row.startDate,
+                endDate: trip.endDate || row.endDate,
+              };
+            });
+          }
+        }
+
         const hostingRequestIds = normalized
           .filter((row) => row.contextTag === "hosting_request" && row.sourceId)
           .map((row) => row.sourceId);
@@ -2330,7 +2726,7 @@ function MessagesPageContent() {
             ? "cancelled"
             : "active";
         const fallbackContextTag: ThreadContextTag = fallbackStatusTag === "active" ? "regular_chat" : "connection_request";
-        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const primaryContext = contexts.find((ctx) => isLivePendingContext(ctx)) ?? contexts[0] ?? null;
         const hasAcceptedInteraction = contexts.some(
           (ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag)
         );
@@ -2512,7 +2908,7 @@ function MessagesPageContent() {
         if (tripMsgRes.error) throw new Error(tripMsgRes.error.message);
         if (isStale()) return;
 
-        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const primaryContext = contexts.find((ctx) => isLivePendingContext(ctx)) ?? contexts[0] ?? null;
         setActivePeerLastReadAt(null);
         setActiveLastReadAt(previousLastReadAt);
         setActiveMeta({
@@ -2616,7 +3012,7 @@ function MessagesPageContent() {
         const profile = (profileRes.data ?? null) as ProfileRow | null;
         const contexts = await hydrateContextState(thread.id);
         if (isStale()) return;
-        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const primaryContext = contexts.find((ctx) => isLivePendingContext(ctx)) ?? contexts[0] ?? null;
         const connectionContext = contexts.find((ctx) => ctx.sourceTable === "connections");
         const tripContext = contexts.find((ctx) => ctx.contextTag === "trip_join_request");
         const serviceInquiryContext = contexts.find((ctx) => ctx.contextTag === "service_inquiry") ?? null;
@@ -2733,7 +3129,7 @@ function MessagesPageContent() {
         }
         const contexts = await hydrateContextState(thread.id);
         if (isStale()) return;
-        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const primaryContext = contexts.find((ctx) => isLivePendingContext(ctx)) ?? contexts[0] ?? null;
         const hasAcceptedInteraction = contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag));
         setActiveLastReadAt(meParticipant.last_read_at ?? null);
         setActivePeerLastReadAt(null);
@@ -2863,7 +3259,7 @@ function MessagesPageContent() {
         }
         const contexts = await hydrateContextState(thread.id);
         if (isStale()) return;
-        const primaryContext = contexts.find((ctx) => isPendingLikeStatus(ctx.statusTag)) ?? contexts[0] ?? null;
+        const primaryContext = contexts.find((ctx) => isLivePendingContext(ctx)) ?? contexts[0] ?? null;
         const hasAcceptedInteraction = contexts.some((ctx) => CHAT_UNLOCK_CONTEXT_TAGS.includes(ctx.contextTag) && isAcceptedInteractionStatus(ctx.statusTag));
         setActiveLastReadAt(meParticipant.last_read_at ?? null);
         setActivePeerLastReadAt(null);
@@ -3111,6 +3507,15 @@ function MessagesPageContent() {
           )
         );
 
+        setThreadQuotaSummary((prev) => ({
+          eventCreated: prev?.eventCreated ?? 0,
+          eventLimit: prev?.eventLimit ?? null,
+          groupCreated: prev?.groupCreated ?? 0,
+          groupLimit: prev?.groupLimit ?? null,
+          eventJoined: joinedEventIds.length,
+          groupJoined: joinedGroupIds.length,
+        }));
+
         if (joinedEventIds.length || joinedGroupIds.length) {
           await Promise.all([
             ...joinedEventIds.slice(0, 50).map((eventId) =>
@@ -3188,17 +3593,17 @@ function MessagesPageContent() {
                   .select("id,destination_city,destination_country,start_date,end_date")
                   .in("id", allTripIds)
               : Promise.resolve({ data: [], error: null }),
-            eventThreadIds.length
+            Array.from(new Set([...eventThreadIds, ...joinedEventIds])).length
               ? supabase
                   .from("events")
                   .select("*")
-                  .in("id", eventThreadIds)
+                  .in("id", Array.from(new Set([...eventThreadIds, ...joinedEventIds])).slice(0, 300))
               : Promise.resolve({ data: [], error: null }),
-            groupThreadIds.length
+            Array.from(new Set([...groupThreadIds, ...joinedGroupIds])).length
               ? supabase
                   .from("groups")
                   .select("id,host_user_id,title,description,chat_mode,city,country,cover_url,cover_status,max_members,invite_token,status,created_at,updated_at")
-                  .in("id", groupThreadIds)
+                  .in("id", Array.from(new Set([...groupThreadIds, ...joinedGroupIds])).slice(0, 300))
               : Promise.resolve({ data: [], error: null }),
             threadIds.length
               ? supabase
@@ -3545,11 +3950,71 @@ function MessagesPageContent() {
             .filter(shouldIncludeInboxThread)
             .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt));
 
+          const existingEventIds = new Set(
+            mappedFromThreads.map((thread) => thread.eventId ?? "").filter(Boolean)
+          );
+          const existingGroupIds = new Set(
+            mappedFromThreads.map((thread) => thread.groupId ?? "").filter(Boolean)
+          );
+
+          const syntheticEventThreads: ThreadRow[] = joinedEventIds
+            .filter((eventId) => !existingEventIds.has(eventId))
+            .map((eventId) => {
+              const event = eventsById[eventId];
+              const location = [event?.city ?? "", event?.country ?? ""].filter(Boolean).join(", ");
+              const date = event?.startsAt ? formatDateShort(event.startsAt) : "";
+              return {
+                threadId: `event:${eventId}`,
+                dbThreadId: null,
+                kind: "event",
+                title: event?.title || "Event",
+                subtitle: [location, date].filter(Boolean).join(" • ") || "Event",
+                avatarUrl: event?.coverUrl ?? null,
+                preview: [event?.eventType ?? "", location, date].filter(Boolean).join(" • ") || "No messages yet.",
+                updatedAt: event?.startsAt || new Date().toISOString(),
+                unreadCount: 0,
+                badge: "Event",
+                otherUserId: null,
+                eventId,
+                groupId: null,
+                messagingState: "active",
+                activatedAt: null,
+                activationCycleStart: null,
+                activationCycleEnd: null,
+              } satisfies ThreadRow;
+            });
+
+          const syntheticGroupThreads: ThreadRow[] = joinedGroupIds
+            .filter((groupId) => !existingGroupIds.has(groupId))
+            .map((groupId) => {
+              const group = groupsById[groupId];
+              const location = [group?.city ?? "", group?.country ?? ""].filter(Boolean).join(", ");
+              return {
+                threadId: `group:${groupId}`,
+                dbThreadId: null,
+                kind: "group",
+                title: group?.title || "Group",
+                subtitle: location || "Private Group",
+                avatarUrl: group?.coverUrl ?? null,
+                preview: group?.description || location || "No messages yet.",
+                updatedAt: group?.updatedAt || group?.createdAt || new Date().toISOString(),
+                unreadCount: 0,
+                badge: "Group",
+                otherUserId: null,
+                eventId: null,
+                groupId,
+                messagingState: "active",
+                activatedAt: null,
+                activationCycleStart: null,
+                activationCycleEnd: null,
+              } satisfies ThreadRow;
+            });
+
           mergedThreads = collapseDuplicateInboxThreads(
-            mappedFromThreads
-            .map((thread) => enrichThreadWithContext(thread, thread.dbThreadId ? localContextsByThreadId[thread.dbThreadId] ?? [] : []))
-            .filter(shouldIncludeInboxThread)
-            .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
+            [...mappedFromThreads, ...syntheticEventThreads, ...syntheticGroupThreads]
+              .map((thread) => enrichThreadWithContext(thread, thread.dbThreadId ? localContextsByThreadId[thread.dbThreadId] ?? [] : []))
+              .filter(shouldIncludeInboxThread)
+              .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
           );
         } else if (threadsRes.error && !threadsRelationMissing) {
           throw new Error(threadsRes.error.message);
@@ -3750,15 +4215,12 @@ function MessagesPageContent() {
   }, [requestedThreadToken, searchParams, threads]);
 
   useEffect(() => {
-    const requestedTab = parseFilterTab(searchParams.get("tab"));
-    const nextTab = requestedTab ?? "all";
-    setActiveTab((prev) => (prev === nextTab ? prev : nextTab));
-  }, [searchParams]);
-
-  useEffect(() => {
     const requestedKind = parseInboxKindFilter(searchParams.get("kind"));
-    const nextKind = requestedKind ?? "all";
+    const nextKind = requestedKind ?? "connection";
     setKindFilter((prev) => (prev === nextKind ? prev : nextKind));
+    const requestedTab = parseFilterTab(searchParams.get("tab"));
+    const nextTab = requestedTab ?? defaultInboxTabForKind(nextKind);
+    setActiveTab((prev) => (prev === nextTab ? prev : nextTab));
   }, [searchParams]);
 
   const selectFilterTab = useCallback(
@@ -3774,18 +4236,28 @@ function MessagesPageContent() {
     (kind: InboxKindFilter) => {
       setKindFilter(kind);
       setInboxFilterMenuOpen(false);
-      const nextTab = normalizeInboxTabForKind(kind, activeTab === "archived" ? "all" : activeTab);
+      const nextTab = normalizeInboxTabForKind(kind, "active");
       setActiveTab(nextTab);
       router.replace(buildInboxUrl({ kind, tab: nextTab }), { scroll: false });
     },
-    [activeTab, buildInboxUrl, router]
+    [buildInboxUrl, router]
   );
 
   const selectArchivedFilter = useCallback(() => {
     setInboxFilterMenuOpen(false);
+    setKindFilter("all");
     setActiveTab("archived");
-    router.replace(buildInboxUrl({ tab: "archived" }), { scroll: false });
+    router.replace(buildInboxUrl({ kind: "all", tab: "archived" }), { scroll: false });
   }, [buildInboxUrl, router]);
+
+  const selectArchiveKindFilter = useCallback(
+    (kind: InboxKindFilter) => {
+      setKindFilter(kind);
+      setActiveTab("archived");
+      router.replace(buildInboxUrl({ kind, tab: "archived" }), { scroll: false });
+    },
+    [buildInboxUrl, router]
+  );
 
   const mobileThreadOpen = Boolean(requestedThreadToken);
 
@@ -3806,7 +4278,6 @@ function MessagesPageContent() {
       setActiveFallbackContext(null);
       setOpenMessageMenuId(null);
       setOpenThreadRowMenuId(null);
-      setThreadActionsOpen(false);
       setReplyTo(null);
       setHighlightedMessageId(null);
       setComposerEmojiOpen(false);
@@ -3816,7 +4287,6 @@ function MessagesPageContent() {
     }
     setOpenMessageMenuId(null);
     setOpenThreadRowMenuId(null);
-    setThreadActionsOpen(false);
     setChatBookingOpen(false);
     setReplyTo(null);
     setHighlightedMessageId(null);
@@ -4730,6 +5200,21 @@ function MessagesPageContent() {
     [upsertThreadPrefs]
   );
 
+  const muteThreadForever = useCallback(
+    async (threadToken: string, dbThreadId: string | null) => {
+      setThreadError(null);
+      try {
+        const until = "9999-12-31T23:59:59.000Z";
+        await upsertThreadPrefs(dbThreadId, { muted_until: until });
+        setMutedUntilByThread((prev) => ({ ...prev, [threadToken]: until }));
+        setThreadInfo("Notifications muted forever.");
+      } catch (e: unknown) {
+        setThreadError(e instanceof Error ? e.message : "Failed to mute thread.");
+      }
+    },
+    [upsertThreadPrefs]
+  );
+
   const unmuteThread = useCallback(
     async (threadToken: string, dbThreadId: string | null) => {
       setThreadError(null);
@@ -4749,9 +5234,41 @@ function MessagesPageContent() {
     [upsertThreadPrefs]
   );
 
+  const togglePinnedMessage = useCallback(
+    (message: MessageItem, text: string) => {
+      if (!activeThreadToken || !(activeMeta?.kind === "connection" || activeMeta?.kind === "direct")) return;
+      const senderName = message.senderId === meId ? "You" : activeMeta.title || "Member";
+      let nextPinned = false;
+      setPinnedMessagesByThread((prev) => {
+        const current = prev[activeThreadToken] ?? [];
+        const exists = current.some((item) => item.id === message.id);
+        nextPinned = !exists;
+        if (exists) {
+          const filtered = current.filter((item) => item.id !== message.id);
+          if (filtered.length === 0) {
+            const copy = { ...prev };
+            delete copy[activeThreadToken];
+            return copy;
+          }
+          return { ...prev, [activeThreadToken]: filtered };
+        }
+        return {
+          ...prev,
+          [activeThreadToken]: [{ id: message.id, text: toSingleLineText(text, 120), senderName }, ...current].slice(0, 5),
+        };
+      });
+      setThreadInfo(nextPinned ? "Message pinned." : "Message unpinned.");
+    },
+    [activeMeta, activeThreadToken, meId]
+  );
+
   const pinThread = useCallback(
     async (threadToken: string, dbThreadId: string | null) => {
       setThreadError(null);
+      if (!pinnedThreads[threadToken] && Object.keys(pinnedThreads).length >= 5) {
+        setThreadInfo("You can pin up to 5 chats.");
+        return;
+      }
       try {
         await upsertThreadPrefs(dbThreadId, { pinned_at: new Date().toISOString() });
         setPinnedThreads((prev) => ({ ...prev, [threadToken]: true }));
@@ -4760,7 +5277,7 @@ function MessagesPageContent() {
         setThreadError(e instanceof Error ? e.message : "Failed to pin thread.");
       }
     },
-    [upsertThreadPrefs]
+    [pinnedThreads, upsertThreadPrefs]
   );
 
   const unpinThread = useCallback(
@@ -4848,7 +5365,7 @@ function MessagesPageContent() {
   }, [activeDbThreadId, activeFallbackContext, threadContextsByDbId]);
 
   const activePendingContext = useMemo(
-    () => activeThreadContexts.find((context) => isPendingLikeStatus(context.statusTag)) ?? null,
+    () => activeThreadContexts.find((context) => isLivePendingContext(context)) ?? null,
     [activeThreadContexts]
   );
   const pinnedPendingContexts = useMemo(
@@ -5189,7 +5706,7 @@ function MessagesPageContent() {
         setThreads((prev) =>
           prev.map((thread) => {
             if (thread.threadId !== activeThreadToken) return thread;
-            const remainingPending = nextContexts.some((item) => isPendingLikeStatus(item.statusTag));
+            const remainingPending = nextContexts.some((item) => isLivePendingContext(item));
             const primaryContext = nextContexts.find((item) => isPendingLikeStatus(item.statusTag)) ?? nextContexts[0] ?? null;
             return {
               ...thread,
@@ -5386,7 +5903,7 @@ function MessagesPageContent() {
           thread.threadId === activeThreadToken
             ? {
                 ...thread,
-                hasPendingRequest: nextContexts.some((item) => isPendingLikeStatus(item.statusTag)),
+                hasPendingRequest: nextContexts.some((item) => isLivePendingContext(item)),
                 statusTag: nextPrimaryContext?.statusTag ?? "declined",
               }
             : thread
@@ -5656,11 +6173,81 @@ function MessagesPageContent() {
     [activeCurrentGroup, meId]
   );
 
+  const saveEventSidebarSettings = useCallback(async () => {
+    if (!activeCurrentEvent || activeCurrentEvent.hostUserId !== meId) return;
+
+    const parsedCapacity = Number.parseInt(eventSettingsDraft.capacity, 10);
+    const nextCapacity = eventSettingsDraft.hasCapacity ? parsedCapacity : null;
+
+    if (eventSettingsDraft.hasCapacity && (!Number.isFinite(parsedCapacity) || parsedCapacity < 1 || parsedCapacity > 2000)) {
+      setThreadError("Set a valid attendee limit between 1 and 2000.");
+      return;
+    }
+
+    setEventSettingsBusy(true);
+    setThreadError(null);
+    setThreadInfo(null);
+    try {
+      const accessToken = await resolveAccessToken();
+      const response = await fetch(`/api/events/${activeCurrentEvent.id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          title: activeCurrentEvent.title,
+          description: activeCurrentEvent.description ?? "",
+          eventType: activeCurrentEvent.eventType,
+          styles: activeCurrentEvent.styles,
+          eventAccessType: activeCurrentEvent.accessType,
+          chatMode: activeCurrentEvent.chatMode,
+          city: activeCurrentEvent.city,
+          country: activeCurrentEvent.country,
+          venueName: activeCurrentEvent.venueName ?? "",
+          venueAddress: activeCurrentEvent.venueAddress ?? "",
+          startsAt: activeCurrentEvent.startsAt,
+          endsAt: activeCurrentEvent.endsAt,
+          capacity: eventSettingsDraft.hasCapacity ? nextCapacity : null,
+          coverUrl: activeCurrentEvent.coverUrl ?? "",
+          links: activeCurrentEvent.links,
+          status: activeCurrentEvent.status,
+          settings: {
+            showGuestList: eventSettingsDraft.showGuestList,
+            guestsCanInvite: eventSettingsDraft.guestsCanInvite,
+            approveMessages: activeCurrentEvent.approveMessages,
+          },
+        }),
+      });
+
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "Failed to update event settings.");
+      }
+
+      setActiveCurrentEvent((prev) =>
+        prev && prev.id === activeCurrentEvent.id
+          ? {
+              ...prev,
+              capacity: eventSettingsDraft.hasCapacity ? nextCapacity : null,
+              showGuestList: eventSettingsDraft.showGuestList,
+              guestsCanInvite: eventSettingsDraft.guestsCanInvite,
+            }
+          : prev
+      );
+      setThreadInfo("Event settings updated.");
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : "Failed to update event settings.");
+    } finally {
+      setEventSettingsBusy(false);
+    }
+  }, [activeCurrentEvent, eventSettingsDraft, meId, resolveAccessToken]);
+
   const activeIsArchived = Boolean(activeMeta?.messagingState === "archived" || (activeThreadToken && archivedThreads[activeThreadToken]));
   const activeIsPinned = Boolean(activeThreadToken && pinnedThreads[activeThreadToken]);
   const activeMuteUntil = activeThreadToken ? mutedUntilByThread[activeThreadToken] : undefined;
   const activeIsMuted = Boolean(activeMuteUntil && toTime(activeMuteUntil) > clockMs);
-  const activeMuteRemaining = activeIsMuted ? formatRemaining(toTime(activeMuteUntil) - clockMs) : "";
+  const activeMuteRemaining = activeIsMuted ? (isPermanentMute(activeMuteUntil) ? "Forever" : formatRemaining(toTime(activeMuteUntil) - clockMs)) : "";
   const monthlyActivationRemaining = useMemo(() => {
     if (!messagingSummary) return null;
     return Math.max(0, messagingSummary.monthlyLimit - messagingSummary.monthlyUsed);
@@ -5692,15 +6279,21 @@ function MessagesPageContent() {
     if (!endMs) return null;
     return Math.max(0, Math.ceil((endMs - clockMs) / DAY_MS));
   }, [activeActivationEnd, clockMs]);
-  const activeConversationDaysLeftText = useMemo(() => {
-    if (!chatActivated || activeConversationDaysLeft === null) return "";
-    return `Active chat: ${formatDaysLeft(activeConversationDaysLeft)}`;
-  }, [activeConversationDaysLeft, chatActivated]);
-  const activeConversationNoticeBody = useMemo(() => {
+  const activeConversationFooterText = useMemo(() => {
     if (!chatActivated) return "";
-    const startText = activeActivationStart ? ` started ${formatDateShort(activeActivationStart)}` : "";
-    return `You started an active conversation${startText}. It stays active for 1 month.`;
-  }, [activeActivationStart, chatActivated]);
+    const daysLeft = activeConversationDaysLeft !== null ? formatDaysLeft(activeConversationDaysLeft).replace(/\.$/, "") : "";
+    const activationRange = activeActivationStart
+      ? activeActivationEnd
+        ? `Active ${formatDateShort(activeActivationStart)} – ${formatDateShort(activeActivationEnd)}`
+        : `Active ${formatDateShort(activeActivationStart)}`
+      : activeActivationEnd
+      ? `Active until ${formatDateShort(activeActivationEnd)}`
+      : "Chat active";
+    if (activeActivationEnd) {
+      return daysLeft ? `${activationRange} • ${daysLeft}` : activationRange;
+    }
+    return daysLeft ? `${activationRange} • ${daysLeft}` : activationRange;
+  }, [activeActivationEnd, activeActivationStart, activeConversationDaysLeft, chatActivated]);
   const hasUnlockedChatHistory = useMemo(
     () =>
       acceptedInteractionContexts.length > 0 ||
@@ -5720,6 +6313,9 @@ function MessagesPageContent() {
       !serviceInquiryOwnFlowState &&
       !interactionBlocked &&
       interactionStatus === "accepted" &&
+      acceptedInteractionContexts.every(
+        (context) => context.contextTag !== "trip_join_request" && context.contextTag !== "hosting_request"
+      ) &&
       !chatActivated &&
       activeMeta.threadId
   );
@@ -5734,10 +6330,19 @@ function MessagesPageContent() {
     if (!activeMeta || serviceInquiryOwnFlowState || interactionBlocked) return null;
     if (activeMeta.kind === "event" || activeMeta.kind === "group") return null;
     if (interactionStatus === "pending") return "pending";
-    if (interactionStatus === "accepted" && !chatActivated && activeMeta.threadId) return "start_conversation";
+    if (
+      interactionStatus === "accepted" &&
+      !chatActivated &&
+      activeMeta.threadId &&
+      acceptedInteractionContexts.every(
+        (context) => context.contextTag !== "trip_join_request" && context.contextTag !== "hosting_request"
+      )
+    ) {
+      return "start_conversation";
+    }
     if (interactionStatus === "none" && activeMeta.otherUserId) return "request_connect";
     return null;
-  }, [activeMeta, chatActivated, interactionBlocked, interactionStatus, serviceInquiryOwnFlowState]);
+  }, [acceptedInteractionContexts, activeMeta, chatActivated, interactionBlocked, interactionStatus, serviceInquiryOwnFlowState]);
   const composerLockReason = useMemo(() => {
     if (!activeMeta) return null;
     if (interactionBlocked) {
@@ -5752,6 +6357,13 @@ function MessagesPageContent() {
         : "You need to be a member of this event to post.";
     }
     if (acceptedInteractionContexts.length > 0) {
+      if (
+        acceptedInteractionContexts.some(
+          (context) => context.contextTag === "trip_join_request" || context.contextTag === "hosting_request"
+        )
+      ) {
+        return null;
+      }
       return activeMeta.threadId && !chatActivated
         ? "Start conversation to activate chat."
         : null;
@@ -5938,8 +6550,11 @@ function MessagesPageContent() {
       const isArchived = thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]);
       const isUnread = thread.unreadCount > 0 || Boolean(manualUnreadByThread[thread.threadId]);
       const contextTag = thread.contextTag ?? (thread.kind === "event" ? "event_chat" : thread.kind === "trip" ? "trip_join_request" : "regular_chat");
-      const isPendingRelationship = Boolean(thread.isRelationshipPending);
-      const isActiveThread = thread.messagingState === "active" || thread.kind === "event" || thread.kind === "group";
+      const hasPendingRequest = Boolean(thread.hasPendingRequest);
+      const isAcceptedActivityThread =
+        Boolean(thread.hasAcceptedInteraction) &&
+        (contextTag === "trip_join_request" || contextTag === "hosting_request" || contextTag === "activity");
+      const isActiveThread = thread.messagingState === "active" || thread.kind === "event" || thread.kind === "group" || isAcceptedActivityThread;
       const kindMatches =
         kindFilter === "all"
           ? true
@@ -5951,9 +6566,9 @@ function MessagesPageContent() {
 
       if (activeTab === "all" && isArchived) return false;
       if (activeTab === "archived" && !isArchived) return false;
-      if (activeTab === "pending" && (!isPendingRelationship || isArchived)) return false;
-      if (activeTab === "active" && (isArchived || isPendingRelationship || !isActiveThread)) return false;
-      if (!kindMatches && thread.threadId !== activeThreadToken) return false;
+      if (activeTab === "pending" && (!hasPendingRequest || isArchived)) return false;
+      if (activeTab === "active" && (isArchived || hasPendingRequest || !isActiveThread)) return false;
+      if (!kindMatches) return false;
 
       if (!q) return true;
       const haystack = [
@@ -5981,7 +6596,7 @@ function MessagesPageContent() {
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
       return toTime(b.updatedAt) - toTime(a.updatedAt);
     });
-  }, [activeTab, activeThreadToken, archivedThreads, kindFilter, manualUnreadByThread, pinnedThreads, query, threads]);
+  }, [activeTab, archivedThreads, kindFilter, manualUnreadByThread, pinnedThreads, query, threads]);
   const kindScopedThreads = useMemo(() => {
     return threads.filter((thread) => {
       if (kindFilter === "all") return true;
@@ -5994,11 +6609,15 @@ function MessagesPageContent() {
     const counts = { all: 0, active: 0, pending: 0, archived: 0 };
     for (const thread of kindScopedThreads) {
       const isArchived = thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]);
-      const isPendingRelationship = Boolean(thread.isRelationshipPending);
-      const isActiveThread = thread.messagingState === "active" || thread.kind === "event" || thread.kind === "group";
+      const contextTag = thread.contextTag ?? (thread.kind === "event" ? "event_chat" : thread.kind === "trip" ? "trip_join_request" : "regular_chat");
+      const hasPendingRequest = Boolean(thread.hasPendingRequest);
+      const isAcceptedActivityThread =
+        Boolean(thread.hasAcceptedInteraction) &&
+        (contextTag === "trip_join_request" || contextTag === "hosting_request" || contextTag === "activity");
+      const isActiveThread = thread.messagingState === "active" || thread.kind === "event" || thread.kind === "group" || isAcceptedActivityThread;
       if (isArchived) {
         counts.archived += 1;
-      } else if (isPendingRelationship) {
+      } else if (hasPendingRequest) {
         counts.pending += 1;
         counts.all += 1;
       } else if (isActiveThread) {
@@ -6019,26 +6638,92 @@ function MessagesPageContent() {
     }),
     [threads]
   );
+  const visibleKindCounts = useMemo(
+    () => ({
+      all: kindCounts.connection + Math.max(kindCounts.event, threadQuotaSummary?.eventJoined ?? 0) + Math.max(kindCounts.group, threadQuotaSummary?.groupJoined ?? 0),
+      connection: kindCounts.connection,
+      event: Math.max(kindCounts.event, threadQuotaSummary?.eventJoined ?? 0),
+      group: Math.max(kindCounts.group, threadQuotaSummary?.groupJoined ?? 0),
+    }),
+    [kindCounts, threadQuotaSummary?.eventJoined, threadQuotaSummary?.groupJoined]
+  );
+  const archivedKindCounts = useMemo(
+    () => ({
+      all: threads.filter((thread) => thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId])).length,
+      connection: threads.filter((thread) => (thread.kind !== "event" && thread.kind !== "group") && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
+      event: threads.filter((thread) => thread.kind === "event" && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
+      group: threads.filter((thread) => thread.kind === "group" && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
+    }),
+    [archivedThreads, threads]
+  );
   const inboxViewTabs = useMemo(() => {
+    if (activeTab === "archived") {
+      return [
+        { key: "all", label: "All" },
+        { key: "connection", label: "Connections" },
+        { key: "event", label: "Events" },
+        { key: "group", label: "Groups" },
+      ] as const;
+    }
     if (kindFilter === "event") {
-    return [
-      { key: "all", label: "All" },
-      { key: "active", label: "Joined" },
-      { key: "pending", label: "Requests" },
-    ] as const;
+      return [
+        { key: "active", label: "Joined" },
+        { key: "pending", label: "Requests" },
+        { key: "all", label: "All" },
+      ] as const;
     }
     if (kindFilter === "group") {
+      return [
+        { key: "active", label: "Joined" },
+        { key: "pending", label: "Requests" },
+        { key: "all", label: "All" },
+      ] as const;
+    }
     return [
+      { key: "active", label: "Active" },
+      { key: "pending", label: "Requests" },
       { key: "all", label: "All" },
-      { key: "active", label: "Joined" },
     ] as const;
-  }
-  return [
-    { key: "all", label: "All" },
-    { key: "active", label: "Active" },
-    { key: "pending", label: "Pending" },
-  ] as const;
-}, [kindFilter]);
+  }, [activeTab, kindFilter]);
+  const headerQuotaMeta = useMemo(() => {
+    if (activeTab === "archived") return null;
+    if (kindFilter === "event") {
+      const current = threadQuotaSummary?.eventCreated ?? 0;
+      const limit = threadQuotaSummary?.eventLimit ?? null;
+      const displayCurrent = limit === null ? current : Math.min(current, limit);
+      return {
+        label: "EVENTS THIS MONTH",
+        current: displayCurrent,
+        limit,
+        reached: limit !== null && current >= limit,
+        upgradeHint: "Upgrade to Plus to create more events this month.",
+        compact: true,
+      };
+    }
+    if (kindFilter === "group") {
+      const current = threadQuotaSummary?.groupJoined ?? kindCounts.group;
+      const limit = threadQuotaSummary?.groupLimit ?? null;
+      const displayCurrent = limit === null ? current : Math.min(current, limit);
+      return {
+        label: "GROUPS",
+        current: displayCurrent,
+        limit,
+        reached: limit !== null && current >= limit,
+        upgradeHint: "Leave a group or upgrade to Plus to have more group slots.",
+        compact: true,
+      };
+    }
+    const current = messagingSummary?.activeCount ?? 0;
+    const limit = messagingSummary?.activeLimit ?? 10;
+    return {
+      label: "ACTIVE CHATS",
+      current,
+      limit,
+      reached: limit !== null && current >= limit,
+      compact: false,
+      upgradeHint: "Upgrade to Plus to unlock more active chats.",
+    };
+  }, [activeTab, kindCounts.group, kindFilter, messagingSummary?.activeCount, messagingSummary?.activeLimit, threadQuotaSummary]);
   const inboxSectionLabel = useMemo(() => {
     if (activeTab === "archived") return "Archived";
     if (kindFilter === "all") return "";
@@ -6068,6 +6753,9 @@ function MessagesPageContent() {
     setConnectionEventsFeed([]);
     setConnectionEventsFeedLoading(false);
     setActiveCurrentEvent(null);
+    setActiveEventOrganizer(null);
+    setActiveEventConnectionMembers([]);
+    setActiveEventConnectionCount(0);
     setFeedLightboxUrl(null);
   }, [activeMeta?.kind]);
 
@@ -6187,6 +6875,111 @@ function MessagesPageContent() {
   }, [activeCurrentEvent?.id, activeMeta?.kind, meId]);
 
   useEffect(() => {
+    if (activeMeta?.kind !== "event" || !meId || !activeCurrentEvent?.id) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const [organizerRes, connectionRes, memberRes] = await Promise.all([
+          activeCurrentEvent.hostUserId
+            ? supabase
+                .from("profiles")
+                .select("user_id,display_name,avatar_url,city,country")
+                .eq("user_id", activeCurrentEvent.hostUserId)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          supabase
+            .from("connections")
+            .select("requester_id,target_id")
+            .or(`requester_id.eq.${meId},target_id.eq.${meId}`)
+            .eq("status", "accepted")
+            .is("blocked_by", null)
+            .limit(300),
+          supabase
+            .from("event_members")
+            .select("user_id,status")
+            .eq("event_id", activeCurrentEvent.id)
+            .in("status", ["host", "going", "waitlist"])
+            .limit(300),
+        ]);
+
+        if (cancelled) return;
+        if (organizerRes.error) throw organizerRes.error;
+        if (connectionRes.error) throw connectionRes.error;
+        if (memberRes.error) throw memberRes.error;
+
+        const organizerRow = organizerRes.data as Record<string, unknown> | null;
+        setActiveEventOrganizer(
+          organizerRow && typeof organizerRow.user_id === "string"
+            ? {
+                userId: organizerRow.user_id,
+                displayName: asString(organizerRow.display_name) || "Organiser",
+                avatarUrl: asString(organizerRow.avatar_url) || null,
+                city: asString(organizerRow.city),
+                country: asString(organizerRow.country),
+              }
+            : null
+        );
+
+        const connectedUserIds = new Set(
+          ((connectionRes.data ?? []) as Array<Record<string, unknown>>)
+            .map((row) => (asString(row.requester_id) === meId ? asString(row.target_id) : asString(row.requester_id)))
+            .filter(Boolean)
+        );
+
+        const attendingConnectionIds = Array.from(
+          new Set(
+            ((memberRes.data ?? []) as Array<Record<string, unknown>>)
+              .map((row) => asString(row.user_id))
+              .filter((userId) => userId.length > 0 && connectedUserIds.has(userId))
+          )
+        );
+
+        if (!attendingConnectionIds.length) {
+          setActiveEventConnectionMembers([]);
+          setActiveEventConnectionCount(0);
+          return;
+        }
+
+        const attendeeProfilesRes = await supabase
+          .from("profiles")
+          .select("user_id,display_name,avatar_url,city,country")
+          .in("user_id", attendingConnectionIds.slice(0, 24))
+          .limit(24);
+        if (cancelled) return;
+        if (attendeeProfilesRes.error) throw attendeeProfilesRes.error;
+
+        const attendees = ((attendeeProfilesRes.data ?? []) as Array<Record<string, unknown>>).flatMap((row) => {
+          const userId = asString(row.user_id);
+          if (!userId) return [];
+          return [
+            {
+              userId,
+              displayName: asString(row.display_name) || "Member",
+              avatarUrl: asString(row.avatar_url) || null,
+              city: asString(row.city),
+              country: asString(row.country),
+            } satisfies SidebarProfilePreview,
+          ];
+        });
+
+        setActiveEventConnectionMembers(attendees);
+        setActiveEventConnectionCount(attendingConnectionIds.length);
+      } catch {
+        if (cancelled) return;
+        setActiveEventOrganizer(null);
+        setActiveEventConnectionMembers([]);
+        setActiveEventConnectionCount(0);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCurrentEvent?.hostUserId, activeCurrentEvent?.id, activeMeta?.kind, meId]);
+
+  useEffect(() => {
     const el = connectionFeedRef.current;
     if (!el || connectionEventsFeed.length === 0) return;
 
@@ -6196,23 +6989,34 @@ function MessagesPageContent() {
     let dragMoved = false;
     let dragStartX = 0;
     let dragScrollLeft = 0;
-    let half = 0;
+    let cycleWidth = 0;
+    let seededScroll = false;
+    let lastFrame = performance.now();
 
-    raf = requestAnimationFrame(() => {
-      half = el.scrollWidth / 4;
-      const canScroll = el.scrollWidth > el.clientWidth + 10;
+    const recalc = () => {
+      cycleWidth = el.scrollWidth / 4;
+      const canScroll = cycleWidth > 0 && el.scrollWidth > el.clientWidth + 10;
+      if (canScroll && !seededScroll) {
+        el.scrollLeft = cycleWidth;
+        seededScroll = true;
+      } else if (!canScroll) {
+        el.scrollLeft = 0;
+        seededScroll = false;
+      }
+    };
 
-      const tick = () => {
-        const canScrollNow = el.scrollWidth > el.clientWidth + 10;
-        if (!isDragging && canScrollNow) {
-          el.scrollLeft += SPEED;
-          if (half > 0 && el.scrollLeft >= half) el.scrollLeft -= half;
-        }
-        raf = requestAnimationFrame(tick);
-      };
-
+    const tick = (now: number) => {
+      recalc();
+      const canScroll = cycleWidth > 0 && el.scrollWidth > el.clientWidth + 10;
+      if (!isDragging && canScroll) {
+        const frameRatio = Math.min(2.5, Math.max(0.5, (now - lastFrame) / 16.6667));
+        el.scrollLeft += SPEED * frameRatio;
+        if (el.scrollLeft >= cycleWidth) el.scrollLeft -= cycleWidth;
+        if (el.scrollLeft < 0) el.scrollLeft += cycleWidth;
+      }
+      lastFrame = now;
       raf = requestAnimationFrame(tick);
-    });
+    };
 
     const onPointerDown = (event: PointerEvent) => {
       isDragging = true;
@@ -6231,13 +7035,13 @@ function MessagesPageContent() {
         el.dataset.dragged = "1";
       }
       el.scrollLeft = dragScrollLeft - delta;
-      if (half > 0) {
-        if (el.scrollLeft < 0) el.scrollLeft += half;
-        if (el.scrollLeft >= half) el.scrollLeft -= half;
+      if (cycleWidth > 0) {
+        if (el.scrollLeft < 0) el.scrollLeft += cycleWidth;
+        if (el.scrollLeft >= cycleWidth) el.scrollLeft -= cycleWidth;
       }
     };
 
-    const onPointerUp = () => {
+    const releaseDrag = () => {
       if (!isDragging) return;
       isDragging = false;
       el.style.cursor = "grab";
@@ -6246,16 +7050,50 @@ function MessagesPageContent() {
       }, 0);
     };
 
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        releaseDrag();
+        return;
+      }
+      recalc();
+      if (cycleWidth > 0 && el.scrollLeft <= 0) {
+        el.scrollLeft = cycleWidth;
+        seededScroll = true;
+      }
+    };
+
     el.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointerup", releaseDrag);
+    window.addEventListener("pointercancel", releaseDrag);
+    window.addEventListener("blur", releaseDrag);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     el.style.cursor = "grab";
+    recalc();
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(recalc) : null;
+    resizeObserver?.observe(el);
+    const mutationObserver =
+      typeof MutationObserver !== "undefined"
+        ? new MutationObserver(() => {
+            recalc();
+          })
+        : null;
+    mutationObserver?.observe(el, { childList: true, subtree: true });
+    const images = Array.from(el.querySelectorAll("img"));
+    images.forEach((image) => image.addEventListener("load", recalc));
+    raf = requestAnimationFrame(tick);
 
     return () => {
       cancelAnimationFrame(raf);
       el.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointerup", releaseDrag);
+      window.removeEventListener("pointercancel", releaseDrag);
+      window.removeEventListener("blur", releaseDrag);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      images.forEach((image) => image.removeEventListener("load", recalc));
       el.style.cursor = "";
       delete el.dataset.dragged;
     };
@@ -6264,17 +7102,125 @@ function MessagesPageContent() {
   useEffect(() => {
     if (activeMeta?.kind === "group") return;
     setActiveCurrentGroup(null);
+    setActiveGroupOrganizer(null);
+    setActiveGroupConnectionMembers([]);
+    setActiveGroupConnectionCount(0);
   }, [activeMeta?.kind]);
 
   useEffect(() => {
+    if (activeMeta?.kind !== "group" || !meId || !activeCurrentGroup?.id) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const [organizerRes, connectionRes, memberRes] = await Promise.all([
+          activeCurrentGroup.hostUserId
+            ? supabase
+                .from("profiles")
+                .select("user_id,display_name,avatar_url,city,country")
+                .eq("user_id", activeCurrentGroup.hostUserId)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          supabase
+            .from("connections")
+            .select("requester_id,target_id")
+            .or(`requester_id.eq.${meId},target_id.eq.${meId}`)
+            .eq("status", "accepted")
+            .is("blocked_by", null)
+            .limit(300),
+          supabase
+            .from("group_members")
+            .select("user_id")
+            .eq("group_id", activeCurrentGroup.id)
+            .limit(300),
+        ]);
+
+        if (cancelled) return;
+        if (organizerRes.error) throw organizerRes.error;
+        if (connectionRes.error) throw connectionRes.error;
+        if (memberRes.error) throw memberRes.error;
+
+        const organizerRow = organizerRes.data as Record<string, unknown> | null;
+        setActiveGroupOrganizer(
+          organizerRow && typeof organizerRow.user_id === "string"
+            ? {
+                userId: organizerRow.user_id,
+                displayName: asString(organizerRow.display_name) || "Organiser",
+                avatarUrl: asString(organizerRow.avatar_url) || null,
+                city: asString(organizerRow.city),
+                country: asString(organizerRow.country),
+              }
+            : null
+        );
+
+        const connectedUserIds = new Set(
+          ((connectionRes.data ?? []) as Array<Record<string, unknown>>)
+            .map((row) => (asString(row.requester_id) === meId ? asString(row.target_id) : asString(row.requester_id)))
+            .filter(Boolean)
+        );
+
+        const connectionMemberIds = Array.from(
+          new Set(
+            ((memberRes.data ?? []) as Array<Record<string, unknown>>)
+              .map((row) => asString(row.user_id))
+              .filter((userId) => userId.length > 0 && connectedUserIds.has(userId))
+          )
+        );
+
+        if (!connectionMemberIds.length) {
+          setActiveGroupConnectionMembers([]);
+          setActiveGroupConnectionCount(0);
+          return;
+        }
+
+        const memberProfilesRes = await supabase
+          .from("profiles")
+          .select("user_id,display_name,avatar_url,city,country")
+          .in("user_id", connectionMemberIds.slice(0, 24))
+          .limit(24);
+        if (cancelled) return;
+        if (memberProfilesRes.error) throw memberProfilesRes.error;
+
+        const members = ((memberProfilesRes.data ?? []) as Array<Record<string, unknown>>).flatMap((row) => {
+          const userId = asString(row.user_id);
+          if (!userId) return [];
+          return [
+            {
+              userId,
+              displayName: asString(row.display_name) || "Member",
+              avatarUrl: asString(row.avatar_url) || null,
+              city: asString(row.city),
+              country: asString(row.country),
+            } satisfies SidebarProfilePreview,
+          ];
+        });
+
+        setActiveGroupConnectionMembers(members);
+        setActiveGroupConnectionCount(connectionMemberIds.length);
+      } catch {
+        if (cancelled) return;
+        setActiveGroupOrganizer(null);
+        setActiveGroupConnectionMembers([]);
+        setActiveGroupConnectionCount(0);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCurrentGroup?.hostUserId, activeCurrentGroup?.id, activeMeta?.kind, meId]);
+
+  useEffect(() => {
     if (loading) return;
+    if (requestedThreadToken && activeThreadToken === requestedThreadToken) return;
     const activeStillVisible = activeThreadToken ? filtered.some((thread) => thread.threadId === activeThreadToken) : false;
     if (activeStillVisible) return;
     const nextThreadToken = filtered[0]?.threadId ?? null;
     if (nextThreadToken === activeThreadToken) return;
     setActiveThreadToken(nextThreadToken);
     router.replace(buildInboxUrl({ threadToken: nextThreadToken }), { scroll: false });
-  }, [activeThreadToken, buildInboxUrl, filtered, loading, router]);
+  }, [activeThreadToken, buildInboxUrl, filtered, loading, requestedThreadToken, router]);
 
   useEffect(() => {
     if (searchParams.get("activity") !== "1") return;
@@ -6535,6 +7481,23 @@ function MessagesPageContent() {
     return latestId;
   }, [activeMessages, activeMeta?.kind, activePeerLastReadAt, meId]);
 
+  const conversationSearchMatches = useMemo(() => {
+    const needle = conversationSearchQuery.trim().toLowerCase();
+    if (!needle) return [] as string[];
+    return activeMessages
+      .filter((message) => {
+        const parsed = parsedMessagesById[message.id] ?? parseReplyPayload(message.body);
+        return parsed.text.toLowerCase().includes(needle);
+      })
+      .map((message) => message.id);
+  }, [activeMessages, conversationSearchQuery, parsedMessagesById]);
+
+  const currentConversationSearchMatchId =
+    conversationSearchMatches.length > 0 ? conversationSearchMatches[Math.min(conversationSearchIndex, conversationSearchMatches.length - 1)] : null;
+
+  const conversationSearchMatchSet = useMemo(() => new Set(conversationSearchMatches), [conversationSearchMatches]);
+  const activePinnedMessages = activeThreadToken ? pinnedMessagesByThread[activeThreadToken] ?? [] : [];
+
   const scrollToLatest = useCallback((smooth = false) => {
     const el = chatScrollRef.current;
     if (!el) return;
@@ -6542,6 +7505,12 @@ function MessagesPageContent() {
       top: el.scrollHeight,
       behavior: smooth ? "smooth" : "auto",
     });
+  }, []);
+
+  const focusConversationSearchMatch = useCallback((messageId: string) => {
+    const target = messageRefs.current[messageId];
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
   useEffect(() => {
@@ -6561,6 +7530,30 @@ function MessagesPageContent() {
     const timer = window.setTimeout(() => scrollToLatest(false), 10);
     return () => window.clearTimeout(timer);
   }, [activeThreadToken, scrollToLatest]);
+
+  useEffect(() => {
+    setConversationSearchQuery("");
+    setConversationSearchIndex(0);
+  }, [activeThreadToken]);
+
+  useEffect(() => {
+    if (!conversationSearchQuery.trim()) {
+      setConversationSearchIndex(0);
+      return;
+    }
+    setConversationSearchIndex((prev) => {
+      if (conversationSearchMatches.length === 0) return 0;
+      return Math.min(prev, conversationSearchMatches.length - 1);
+    });
+  }, [conversationSearchMatches.length, conversationSearchQuery]);
+
+  useEffect(() => {
+    if (!currentConversationSearchMatchId) return;
+    const timer = window.setTimeout(() => {
+      focusConversationSearchMatch(currentConversationSearchMatchId);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [currentConversationSearchMatchId, focusConversationSearchMatch]);
 
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -6860,11 +7853,37 @@ function MessagesPageContent() {
     setReportOpen(true);
   }, []);
 
+  const goToConversationSearchMatch = useCallback(
+    (direction: "prev" | "next") => {
+      if (conversationSearchMatches.length === 0) return;
+      setConversationSearchIndex((prev) => {
+        if (direction === "next") {
+          return (prev + 1) % conversationSearchMatches.length;
+        }
+        return (prev - 1 + conversationSearchMatches.length) % conversationSearchMatches.length;
+      });
+    },
+    [conversationSearchMatches.length]
+  );
+
   const deleteOwnMessage = useCallback(
     async (message: MessageItem) => {
       if (!meId || message.senderId !== meId) return;
       if (message.localOnly) {
         setActiveMessages((prev) => prev.filter((item) => item.id !== message.id));
+        if (activeThreadToken) {
+          setPinnedMessagesByThread((prev) => {
+            const current = prev[activeThreadToken] ?? [];
+            if (!current.some((item) => item.id === message.id)) return prev;
+            const filtered = current.filter((item) => item.id !== message.id);
+            if (filtered.length === 0) {
+              const copy = { ...prev };
+              delete copy[activeThreadToken];
+              return copy;
+            }
+            return { ...prev, [activeThreadToken]: filtered };
+          });
+        }
         setThreadInfo("Message removed.");
         return;
       }
@@ -6891,13 +7910,26 @@ function MessagesPageContent() {
         }
 
         setActiveMessages((prev) => prev.filter((item) => item.id !== message.id));
+        if (activeThreadToken) {
+          setPinnedMessagesByThread((prev) => {
+            const current = prev[activeThreadToken] ?? [];
+            if (!current.some((item) => item.id === message.id)) return prev;
+            const filtered = current.filter((item) => item.id !== message.id);
+            if (filtered.length === 0) {
+              const copy = { ...prev };
+              delete copy[activeThreadToken];
+              return copy;
+            }
+            return { ...prev, [activeThreadToken]: filtered };
+          });
+        }
         setThreadInfo("Message deleted.");
         setReloadTick((v) => v + 1);
       } catch (e: unknown) {
         setThreadError(e instanceof Error ? e.message : "Failed to delete message.");
       }
     },
-    [activeMeta, meId]
+    [activeMeta, activeThreadToken, meId]
   );
 
   return (
@@ -6922,10 +7954,23 @@ function MessagesPageContent() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
-                  {messagingSummary ? (
-                    <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
-                      <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">Active chats</span>
-                      <span className="text-[11px] font-bold tabular-nums text-white">{messagingSummary.monthlyUsed} / {messagingSummary.monthlyLimit}</span>
+                  {headerQuotaMeta ? (
+                    <div className="flex flex-col items-end gap-0.5 text-right">
+                      {headerQuotaMeta.reached ? (
+                        <Link
+                          href="/pricing"
+                          title={headerQuotaMeta.upgradeHint}
+                          className="hidden bg-gradient-to-r from-[#6ee7f9] to-[#d946ef] bg-clip-text text-[10px] font-black uppercase tracking-[0.16em] text-transparent transition-opacity hover:opacity-80 sm:inline"
+                        >
+                          Upgrade to Plus
+                        </Link>
+                      ) : null}
+                      <div className="flex items-baseline gap-1.5">
+                        <span className={headerQuotaMeta.compact ? "text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-500" : "text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400"}>{headerQuotaMeta.label}</span>
+                        <span className={headerQuotaMeta.reached ? "text-[11px] font-bold tabular-nums text-[#FFC6FA]" : "text-[11px] font-bold tabular-nums text-white"}>
+                          {headerQuotaMeta.current} / {headerQuotaMeta.limit ?? "∞"}
+                        </span>
+                      </div>
                     </div>
                   ) : null}
                   <button
@@ -6954,16 +7999,32 @@ function MessagesPageContent() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute inset-y-0 right-2 inline-flex items-center justify-center px-2 text-slate-400 transition-colors hover:text-white"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                    close
+                  </span>
+                </button>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-1.5">
               {inboxViewTabs.map((tab) => {
-                const selected = activeTab === tab.key;
+                const archiveMode = activeTab === "archived";
+                const selected = archiveMode ? kindFilter === tab.key : activeTab === tab.key;
+                const count = archiveMode
+                  ? archivedKindCounts[tab.key as keyof typeof archivedKindCounts]
+                  : tabCounts[tab.key as keyof typeof tabCounts];
                 return (
                   <button
                     key={tab.key}
                     type="button"
-                    onClick={() => selectFilterTab(tab.key)}
+                    onClick={() => (archiveMode ? selectArchiveKindFilter(tab.key as InboxKindFilter) : selectFilterTab(tab.key as FilterTab))}
                     data-testid={`thread-filter-${tab.key}`}
                     className={[
                       "min-h-8 shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
@@ -6979,7 +8040,7 @@ function MessagesPageContent() {
                         selected ? "bg-white/10" : "bg-transparent text-current/70",
                       ].join(" ")}
                     >
-                      {tabCounts[tab.key]}
+                      {count}
                     </span>
                   </button>
                 );
@@ -6990,10 +8051,10 @@ function MessagesPageContent() {
                   onClick={() => setInboxFilterMenuOpen((prev) => !prev)}
                   data-testid="thread-filter-menu-button"
                   className={[
-                    "inline-flex min-h-8 shrink-0 items-center justify-center rounded-full border px-3 py-1 transition-colors",
-                    inboxFilterMenuOpen || kindFilter !== "all" || activeTab === "archived"
-                      ? "border-[#a855f7]/45 bg-[#24182f] text-[#f2d9ff]"
-                      : "border-white/15 bg-white/[0.04] text-[#90cbcb] hover:text-white",
+                    "inline-flex min-h-8 shrink-0 items-center justify-center px-1 py-1 transition-colors",
+                    inboxFilterMenuOpen || kindFilter !== "connection" || activeTab === "archived"
+                      ? "text-[#f2d9ff]"
+                      : "text-[#90cbcb] hover:text-white",
                   ].join(" ")}
                   aria-label="Open inbox filters"
                 >
@@ -7004,12 +8065,10 @@ function MessagesPageContent() {
                     data-testid="thread-filter-menu"
                     className="absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-white/10 bg-[#11161d] p-2 shadow-2xl"
                   >
-                    <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Thread type</p>
                     {([
-                      { key: "all", label: "All types", count: kindCounts.all },
-                      { key: "connection", label: "Connections", count: kindCounts.connection },
-                      { key: "event", label: "Events", count: kindCounts.event },
-                      { key: "group", label: "Groups", count: kindCounts.group },
+                      { key: "connection", label: "Connections", count: visibleKindCounts.connection },
+                      { key: "event", label: "Events", count: visibleKindCounts.event },
+                      { key: "group", label: "Groups", count: visibleKindCounts.group },
                     ] as const).map((option) => {
                       const selected = kindFilter === option.key && activeTab !== "archived";
                       return (
@@ -7028,7 +8087,6 @@ function MessagesPageContent() {
                       );
                     })}
                     <div className="my-2 h-px bg-white/10" />
-                    <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">View</p>
                     <button
                       type="button"
                       onClick={selectArchivedFilter}
@@ -7037,8 +8095,8 @@ function MessagesPageContent() {
                         activeTab === "archived" ? "bg-[#24182f] text-[#f2d9ff]" : "text-slate-200 hover:bg-white/[0.05]",
                       ].join(" ")}
                     >
-                      <span>Archived</span>
-                      <span className="text-[11px] font-bold tabular-nums text-inherit/70">{tabCounts.archived}</span>
+                      <span>Archive</span>
+                      <span className="text-[11px] font-bold tabular-nums text-inherit/70">{archivedKindCounts.all}</span>
                     </button>
                   </div>
                 ) : null}
@@ -7051,9 +8109,9 @@ function MessagesPageContent() {
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>
             ) : null}
             {loading ? (
-              <div className="space-y-2 p-2">
+              <div className="divide-y divide-white/[0.04] p-2">
                 {Array.from({ length: 6 }).map((_, index) => (
-                  <div key={index} className="flex min-h-[98px] items-center gap-3 rounded-xl border border-white/10 bg-black/25 p-3 animate-pulse">
+                  <div key={index} className="flex min-h-[86px] items-center gap-3 px-3 py-3 animate-pulse">
                     <div className="h-12 w-12 rounded-full bg-white/10" />
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex items-center justify-between gap-3">
@@ -7118,11 +8176,11 @@ function MessagesPageContent() {
                       data-testid="thread-row"
                       data-thread-token={thread.threadId}
                       className={[
-                        "w-full min-h-[86px] text-left group flex items-center gap-3 rounded-xl border bg-black/25 px-3 py-3 transition-colors",
+                        "w-full min-h-[86px] text-left group flex items-center gap-3 rounded-xl px-3 py-3 transition-colors",
                         activeThreadToken === thread.threadId
-                          ? "border-[#db2777]/45 bg-[#241723]"
-                          : "border-white/10 hover:border-[#25d1f4]/30 hover:bg-[#1c2224]",
-                        recentlyUpdatedThreadIds[thread.threadId] ? "shadow-[0_0_0_1px_rgba(219,39,119,0.5),0_0_18px_rgba(219,39,119,0.18)]" : "",
+                          ? "bg-white/[0.04]"
+                          : "bg-transparent hover:bg-white/[0.02]",
+                        recentlyUpdatedThreadIds[thread.threadId] ? "bg-[#1a1018]/60" : "",
                       ].join(" ")}
                       onClick={activateThread}
                       onKeyDown={(event) => {
@@ -7190,7 +8248,7 @@ function MessagesPageContent() {
                             </button>
                             {rowMenuOpen ? (
                               <div
-                                className="absolute right-0 top-full z-40 mt-1 w-40 rounded-xl border border-white/10 bg-[#101616] p-1 shadow-xl"
+                                className="absolute right-0 top-full z-40 mt-1 w-40 rounded-xl border border-white/10 bg-[#101616] p-2 shadow-xl"
                                 onClick={(event) => event.stopPropagation()}
                                 data-thread-row-menu="true"
                                 data-testid="thread-row-menu"
@@ -7199,10 +8257,29 @@ function MessagesPageContent() {
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    if (isPinned) {
+                                      void unpinThread(thread.threadId, thread.dbThreadId);
+                                    } else {
+                                      void pinThread(thread.threadId, thread.dbThreadId);
+                                    }
+                                    setOpenThreadRowMenuId(null);
+                                  }}
+                                  data-testid={isPinned ? "thread-unpin" : "thread-pin"}
+                                  className="flex w-full items-center gap-2 px-2 py-2 text-left text-xs text-slate-200 transition-colors hover:text-white"
+                                >
+                                  <span className="material-symbols-outlined text-sm">
+                                    {isPinned ? "keep_off" : "push_pin"}
+                                  </span>
+                                  {isPinned ? "Unpin" : "Pin to top"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
                                     void setThreadUnreadState(thread, !isUnread);
                                   }}
                                   data-testid={isUnread ? "thread-mark-read" : "thread-mark-unread"}
-                                  className="flex w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-xs text-slate-200 hover:border-[#f39acb]/35 hover:bg-[#f39acb]/10"
+                                  className="mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left text-xs text-slate-200 transition-colors hover:text-white"
                                 >
                                   <span className="material-symbols-outlined text-sm">
                                     {isUnread ? "drafts" : "mark_email_unread"}
@@ -7221,7 +8298,7 @@ function MessagesPageContent() {
                                     setOpenThreadRowMenuId(null);
                                   }}
                                   data-testid={archivedThreads[thread.threadId] ? "thread-unarchive" : "thread-archive"}
-                                  className="mt-1 flex w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-xs text-slate-200 hover:border-[#f39acb]/35 hover:bg-[#f39acb]/10"
+                                  className="mt-1 flex w-full items-center gap-2 px-2 py-2 text-left text-xs text-slate-200 transition-colors hover:text-white"
                                 >
                                   <span className="material-symbols-outlined text-sm">
                                     {archivedThreads[thread.threadId] ? "unarchive" : "archive"}
@@ -7237,11 +8314,11 @@ function MessagesPageContent() {
                           {isPinned ? (
                             <span
                               data-testid="thread-pinned-indicator"
-                              className="material-symbols-outlined shrink-0 text-fuchsia-200/90"
+                              className="material-symbols-outlined shrink-0 text-slate-300/90"
                               style={{ fontSize: 12 }}
                               title="Pinned"
                             >
-                              keep
+                              push_pin
                             </span>
                           ) : null}
                           {isMuted ? (
@@ -7425,7 +8502,7 @@ function MessagesPageContent() {
                   </div>
                 </div>
 
-                <div className="relative flex items-center gap-2" ref={threadActionsRef}>
+                <div className="relative flex items-center gap-2">
                   {canCreateActivity ? (
                     <button
                       type="button"
@@ -7436,230 +8513,89 @@ function MessagesPageContent() {
                       Activity
                     </button>
                   ) : null}
-                  {activeMeta.otherUserId && chatBookingAvailable ? (
-                    <button
-                      type="button"
-                      onClick={() => setChatBookingOpen(true)}
-                      className="inline-flex items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100 transition-colors hover:bg-cyan-300/16"
-                    >
-                      Book session
-                    </button>
-                  ) : null}
                   {threadPrefsInLocalMode ? (
                     <span className="hidden rounded-full border border-cyan-300/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100 sm:inline-flex">
                       Local prefs mode
                     </span>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() => setThreadActionsOpen((prev) => !prev)}
-                    data-testid="thread-actions-button"
-                    className="rounded-full border border-white/15 bg-black/20 p-2 text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100"
-                    aria-label="Thread actions"
-                    title="Thread actions"
-	                  >
-	                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
-	                      more_vert
-	                    </span>
-	                  </button>
-
-                  {threadActionsOpen ? (
-                    <div
-                      className="absolute top-full right-0 mt-2 z-[80] w-56 rounded-xl border border-white/10 bg-[#111818] p-1 shadow-2xl"
-                      data-testid="thread-actions-menu"
-                    >
-                      {activeThreadToken ? (
-                        activeIsPinned ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void unpinThread(activeThreadToken, activeDbThreadId);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-unpin"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                          >
-                            <span className="material-symbols-outlined text-base">keep_off</span>
-                            Unpin
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void pinThread(activeThreadToken, activeDbThreadId);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-pin"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                          >
-                            <span className="material-symbols-outlined text-base">keep</span>
-                            Pin to top
-                          </button>
-                        )
-                      ) : null}
-
-                      {activeThreadToken ? (
-                        activeIsMuted ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void unmuteThread(activeThreadToken, activeDbThreadId);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-unmute"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                          >
-                            <span className="material-symbols-outlined text-base">notifications_active</span>
-                            Unmute ({activeMuteRemaining})
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void muteThreadForHours(activeThreadToken, activeDbThreadId, 8);
-                                setThreadActionsOpen(false);
-                              }}
-                              data-testid="thread-action-mute-8h"
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                            >
-                              <span className="material-symbols-outlined text-base">notifications_off</span>
-                              Mute for 8h
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void muteThreadForHours(activeThreadToken, activeDbThreadId, 24);
-                                setThreadActionsOpen(false);
-                              }}
-                              data-testid="thread-action-mute-24h"
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                            >
-                              <span className="material-symbols-outlined text-base">notifications_paused</span>
-                              Mute for 24h
-                            </button>
-                          </>
-                        )
-                      ) : null}
-
-                      {activeThreadToken ? (
-                        activeIsArchived ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void unarchiveThread(activeThreadToken, activeDbThreadId);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-unarchive"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                          >
-                            <span className="material-symbols-outlined text-base">unarchive</span>
-                            Unarchive
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void archiveThread(activeThreadToken, activeDbThreadId);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-archive"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                          >
-                            <span className="material-symbols-outlined text-base">archive</span>
-                            Archive
-                          </button>
-                        )
-                      ) : null}
-
-                      {activeMeta.kind === "group" && activeCurrentGroup?.isHost ? (
-                        <>
-                          <div className="my-1 h-px bg-white/10" />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void updateGroupChatMode(activeCurrentGroup.chatMode === "discussion" ? "broadcast" : "discussion");
-                              setThreadActionsOpen(false);
-                            }}
-                            disabled={groupSettingsBusy}
-                            data-testid="thread-action-toggle-group-chat-mode"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5 disabled:opacity-50"
-                          >
-                            <span className="material-symbols-outlined text-base">
-                              {activeCurrentGroup.chatMode === "discussion" ? "campaign" : "forum"}
-                            </span>
-                            {groupSettingsBusy
-                              ? "Updating…"
-                              : activeCurrentGroup.chatMode === "discussion"
-                              ? "Switch to broadcast only"
-                              : "Allow members to write"}
-                          </button>
-                        </>
-                      ) : null}
-
-                      {activeMeta.connectionId ? (
-                        <>
-                          <div className="my-1 h-px bg-white/10" />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setReportFromMessageId(null);
-                              setReportOpen(true);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-report"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                          >
-                            <span className="material-symbols-outlined text-base">flag</span>
-                            Report
-                          </button>
-                          <button
-                            type="button"
-                            disabled={blockBusy}
-                            onClick={() => {
-                              setBlockOpen(true);
-                              setThreadActionsOpen(false);
-                            }}
-                            data-testid="thread-action-block"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-200 hover:bg-rose-500/15 disabled:opacity-60"
-                          >
-                            <span className="material-symbols-outlined text-base">block</span>
-                            {blockBusy ? "Blocking..." : "Block"}
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </div>
               </header>
 
               <div className="relative flex min-h-0 flex-1 flex-col">
+                {conversationSearchQuery.trim() ? (
+                  <div className="z-20 border-b border-white/[0.06] bg-[rgba(8,9,12,0.96)] px-4 py-2 sm:px-6">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Search in conversation</p>
+                        <p className="truncate text-[12px] text-white/70">
+                          {conversationSearchMatches.length > 0
+                            ? `${Math.min(conversationSearchIndex + 1, conversationSearchMatches.length)} of ${conversationSearchMatches.length} matches`
+                            : "No matches found"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => goToConversationSearchMatch("prev")}
+                          disabled={conversationSearchMatches.length === 0}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.03] text-white/70 transition hover:border-cyan-300/25 hover:text-cyan-100 disabled:opacity-40"
+                          aria-label="Previous match"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">keyboard_arrow_up</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => goToConversationSearchMatch("next")}
+                          disabled={conversationSearchMatches.length === 0}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.03] text-white/70 transition hover:border-cyan-300/25 hover:text-cyan-100 disabled:opacity-40"
+                          aria-label="Next match"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">keyboard_arrow_down</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConversationSearchQuery("")}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.03] text-white/70 transition hover:border-cyan-300/25 hover:text-cyan-100"
+                          aria-label="Clear conversation search"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">close</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {pinnedPendingContexts.length > 0 ? (
                   <div
                     data-testid="thread-pending-contexts"
-                    className="z-20 border-b border-cyan-300/12 bg-[linear-gradient(180deg,rgba(7,10,14,0.98),rgba(9,12,16,0.98))] px-4 py-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.22)] sm:px-6 sm:py-3"
+                    className="z-20 border-b border-cyan-300/12 bg-[linear-gradient(180deg,rgba(7,10,14,0.98),rgba(9,12,16,0.98))] shadow-[0_10px_30px_rgba(0,0,0,0.22)]"
                   >
-                    <div className="space-y-2">
+                    <div className="space-y-px">
                       {pinnedPendingContexts.map((pendingContext) => {
                         const pendingContextActions = pendingActionsForContext(pendingContext);
                         const serviceInquiryDetails = describeServiceInquiryRequest(pendingContext);
                         const tripJoinDetails = describeTripJoinRequest(pendingContext);
                         const hostingRequestDetails = describeHostingRequest(pendingContext);
-                        const allDetails = [...serviceInquiryDetails, ...tripJoinDetails, ...hostingRequestDetails];
+                        const tripJoinBannerDetails = isTripJoinLikeContext(pendingContext)
+                          ? tripJoinDetails.filter((detail) => detail.label === "Note")
+                          : tripJoinDetails;
+                        const allDetails = [...serviceInquiryDetails, ...tripJoinBannerDetails, ...hostingRequestDetails];
                         const expiryDays = daysUntilPendingExpiry(pendingContext);
-                        const metaDesc = describeContextMeta(pendingContext);
+                        const metaDesc =
+                          isTripJoinLikeContext(pendingContext)
+                            ? formatTripJoinBannerMeta(tripJoinDetails) || describeContextMeta(pendingContext)
+                            : describeContextMeta(pendingContext);
                         return (
                           <div
                             key={pendingContext.id}
                             data-testid="thread-pending-context-card"
-                            className="rounded-xl px-3 py-2.5"
-                            style={{ background: "linear-gradient(90deg, rgba(13,204,242,0.07) 0%, rgba(217,59,255,0.05) 100%)" }}
+                            className="border-y border-white/10 px-4 py-3 sm:px-6"
+                            style={{ background: "linear-gradient(90deg, rgba(13,242,242,0.16) 0%, rgba(217,59,255,0.14) 100%)" }}
                           >
                             <div className="flex items-start justify-between gap-4">
                               <div className="min-w-0 flex-1">
                                 <p className="text-xs text-slate-300">
                                   <span className="font-semibold text-slate-100">
-                                    {pendingContext.title || CONTEXT_LABELS[pendingContext.contextTag]}
+                                    {isTripJoinLikeContext(pendingContext) ? "Join Trip" : pendingContext.title || CONTEXT_LABELS[pendingContext.contextTag]}
                                   </span>
                                   {metaDesc ? <span className="text-slate-500"> · {metaDesc}</span> : null}
                                   {expiryDays !== null ? (
@@ -7977,6 +8913,9 @@ function MessagesPageContent() {
                       const replyTarget = parsedMessage.replyToId ? messageById[parsedMessage.replyToId] ?? null : null;
                       const parsedReplyTarget = replyTarget ? parseReplyPayload(replyTarget.body) : null;
                       const isHighlightedTarget = highlightedMessageId === message.id;
+                      const isConversationSearchMatch = conversationSearchMatchSet.has(message.id);
+                      const isConversationSearchCurrent = currentConversationSearchMatchId === message.id;
+                      const isMessagePinned = Boolean(activeThreadToken && (pinnedMessagesByThread[activeThreadToken] ?? []).some((item) => item.id === message.id));
                       const reactions = messageReactions[message.id] ?? [];
                       const showSeenByRecipient =
                         mine &&
@@ -8187,10 +9126,14 @@ function MessagesPageContent() {
                                   mine
                                     ? "bg-[#0df2f2] text-[#102323] rounded-br-none font-medium"
                                     : "bg-[#224949] text-white rounded-bl-none",
-                                  isHighlightedTarget ? "ring-2 ring-cyan-300/70 shadow-[0_0_0_4px_rgba(34,211,238,0.12)]" : "",
+                                  isHighlightedTarget || isConversationSearchCurrent
+                                    ? "ring-2 ring-cyan-300/70 shadow-[0_0_0_4px_rgba(34,211,238,0.12)]"
+                                    : isConversationSearchMatch
+                                    ? "ring-1 ring-cyan-300/35"
+                                    : "",
                                 ].join(" ")}
                               >
-                                {parsedMessage.text}
+                                {renderHighlightedMessageText(parsedMessage.text, conversationSearchQuery, isConversationSearchCurrent)}
                               </div>
                               <div className={`relative flex items-center ${mine ? "order-first" : ""}`}>
                                 <button
@@ -8209,12 +9152,12 @@ function MessagesPageContent() {
 
                                 {showMenu ? (
                                   <div
-                                    className={`absolute z-[70] bottom-full mb-2 w-52 rounded-xl border border-white/10 bg-[#101616] p-1 shadow-xl ${
+                                    className={`absolute z-[140] bottom-full mb-2 w-44 rounded-xl border border-white/10 bg-[#0b1015] px-2 py-2 shadow-[0_18px_48px_rgba(0,0,0,0.48)] ${
                                       mine ? "right-0" : "left-0"
                                     }`}
                                     onClick={(event) => event.stopPropagation()}
                                   >
-                                    <div className="rounded-lg px-2 py-2">
+                                    <div className="px-1 pb-1">
                                       <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">React</p>
                                       <div className="flex flex-wrap items-center gap-1">
                                         {QUICK_REACTIONS.map((emoji) => (
@@ -8239,13 +9182,28 @@ function MessagesPageContent() {
                                       </div>
                                     </div>
                                     <div className="my-1 h-px bg-white/10" />
+                                    {(activeMeta.kind === "connection" || activeMeta.kind === "direct") ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          togglePinnedMessage(message, parsedMessage.text);
+                                          setOpenMessageMenuId(null);
+                                        }}
+                                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[13px] text-slate-200 transition-colors hover:text-cyan-100"
+                                      >
+                                        <span className="material-symbols-outlined text-sm">
+                                          {isMessagePinned ? "keep_off" : "push_pin"}
+                                        </span>
+                                        {isMessagePinned ? "Unpin message" : "Pin message"}
+                                      </button>
+                                    ) : null}
                                     <button
                                       type="button"
                                       onClick={() => {
                                         void copyMessageBody(parsedMessage.text);
                                         setOpenMessageMenuId(null);
                                       }}
-                                      className="flex w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-xs text-slate-200 hover:border-cyan-300/35 hover:bg-cyan-300/10"
+                                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[13px] text-slate-200 transition-colors hover:text-cyan-100"
                                     >
                                       <span className="material-symbols-outlined text-sm">content_copy</span>
                                       Copy
@@ -8261,7 +9219,7 @@ function MessagesPageContent() {
                                         });
                                         setOpenMessageMenuId(null);
                                       }}
-                                      className="mt-1 flex w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-xs text-slate-200 hover:border-cyan-300/35 hover:bg-cyan-300/10"
+                                      className="mt-0.5 flex w-full items-center gap-2 px-2 py-1.5 text-left text-[13px] text-slate-200 transition-colors hover:text-cyan-100"
                                     >
                                       <span className="material-symbols-outlined text-sm">reply</span>
                                       Reply
@@ -8273,7 +9231,7 @@ function MessagesPageContent() {
                                           void deleteOwnMessage(message);
                                           setOpenMessageMenuId(null);
                                         }}
-                                        className="mt-1 flex w-full items-center gap-2 rounded-full border border-rose-300/20 bg-rose-500/10 px-3 py-2 text-left text-xs text-rose-100 hover:bg-rose-500/15"
+                                        className="mt-0.5 flex w-full items-center gap-2 px-2 py-1.5 text-left text-[13px] text-rose-200 transition-colors hover:text-rose-100"
                                       >
                                         <span className="material-symbols-outlined text-sm">delete</span>
                                         Delete
@@ -8286,7 +9244,7 @@ function MessagesPageContent() {
                                           openReportFromMessage(message.id);
                                           setOpenMessageMenuId(null);
                                         }}
-                                        className="mt-1 flex w-full items-center gap-2 rounded-full border border-rose-300/20 bg-rose-500/10 px-3 py-2 text-left text-xs text-rose-100 hover:bg-rose-500/15"
+                                        className="mt-0.5 flex w-full items-center gap-2 px-2 py-1.5 text-left text-[13px] text-rose-200 transition-colors hover:text-rose-100"
                                       >
                                         <span className="material-symbols-outlined text-sm">flag</span>
                                         Report
@@ -8441,11 +9399,6 @@ function MessagesPageContent() {
                       );
                     })
                   )}
-                  {activeConversationNoticeBody ? (
-                    <p className="px-2 py-2 text-center text-[11px] leading-5 text-slate-500">
-                      {activeConversationNoticeBody}
-                    </p>
-                  ) : null}
                 </div>
 
                 {showJumpToLatest ? (
@@ -8587,31 +9540,29 @@ function MessagesPageContent() {
                   </div>
                 ) : showChatFooterCta && chatFooterCta ? (
                   <div className="mx-auto max-w-4xl">
-                    <div className="rounded-[26px] border border-white/10 bg-white/[0.03] px-3 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (chatFooterCta.state === "request_connect") {
-                            openConnectRequestFromThread();
-                            return;
-                          }
-                          if (chatFooterCta.state === "start_conversation") {
-                            setShowActivateConfirm(true);
-                          }
-                        }}
-                        disabled={chatFooterCta.disabled}
-                        className={`inline-flex min-h-12 w-full items-center justify-center rounded-full px-4 text-sm font-semibold transition ${
-                          chatFooterCta.disabled
-                            ? "cursor-not-allowed border border-white/10 bg-white/[0.04] text-white/45"
-                            : "bg-[linear-gradient(135deg,#0df2f2,#d93bff)] text-[#041316] shadow-[0_14px_28px_rgba(13,242,242,0.18)] hover:brightness-105"
-                        }`}
-                      >
-                        {chatFooterCta.label}
-                      </button>
-                      <p className={`mt-2 text-center text-[11px] ${chatFooterCta.disabled ? "text-slate-400" : "text-[#90cbcb]"}`}>
-                        {chatFooterCta.helper}
-                      </p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (chatFooterCta.state === "request_connect") {
+                          openConnectRequestFromThread();
+                          return;
+                        }
+                        if (chatFooterCta.state === "start_conversation") {
+                          setShowActivateConfirm(true);
+                        }
+                      }}
+                      disabled={chatFooterCta.disabled}
+                      className={`inline-flex min-h-12 w-full items-center justify-center rounded-full px-4 text-sm font-semibold transition ${
+                        chatFooterCta.disabled
+                          ? "cursor-not-allowed border border-white/10 bg-white/[0.04] text-white/45"
+                          : "bg-[linear-gradient(135deg,#0df2f2,#d93bff)] text-[#041316] shadow-[0_14px_28px_rgba(13,242,242,0.18)] hover:brightness-105"
+                      }`}
+                    >
+                      {chatFooterCta.label}
+                    </button>
+                    <p className={`mt-2 text-center text-[11px] ${chatFooterCta.disabled ? "text-slate-400" : "text-[#90cbcb]"}`}>
+                      {chatFooterCta.helper}
+                    </p>
                   </div>
                 ) : (
                   <>
@@ -8697,9 +9648,9 @@ function MessagesPageContent() {
                         <p className="text-[10px] text-rose-200/90">
                           You have {messagingSummary?.activeLimit ?? 10} active conversations. Archive one to continue.
                         </p>
-                      ) : activeConversationDaysLeftText ? (
+                      ) : activeConversationFooterText ? (
                         <p className="text-[10px] text-slate-500">
-                          {activeConversationDaysLeftText}
+                          {activeConversationFooterText}
                         </p>
                       ) : threadPrefsInLocalMode ? (
                         <p className="text-[10px] text-slate-400">
@@ -8742,118 +9693,222 @@ function MessagesPageContent() {
                             <Link href={`/events/${activeCurrentEvent.id}`} className="block text-[15px] font-bold leading-snug text-white hover:text-cyan-100 transition-colors">
                               {activeCurrentEvent.title}
                             </Link>
-                            <div className="mt-2 space-y-1">
-                              {(activeCurrentEvent.city || activeCurrentEvent.country) && (
+                            <div className="mt-2 space-y-1.5">
+                              {activeCurrentEvent.startsAt ? (
+                                <div className="text-[12px] font-semibold text-[#ff8d85]">
+                                  {formatSidebarEventRange(activeCurrentEvent.startsAt, activeCurrentEvent.endsAt)}
+                                </div>
+                              ) : null}
+                              {(activeCurrentEvent.venueAddress || activeCurrentEvent.venueName || activeCurrentEvent.city || activeCurrentEvent.country) && (
                                 <div className="flex items-center gap-1.5 text-[12px] text-white/50">
                                   <span className="material-symbols-outlined text-[13px] text-cyan-300/60">location_on</span>
-                                  {[activeCurrentEvent.city, activeCurrentEvent.country].filter(Boolean).join(", ")}
+                                  {activeCurrentEvent.venueAddress ||
+                                    activeCurrentEvent.venueName ||
+                                    [activeCurrentEvent.city, activeCurrentEvent.country].filter(Boolean).join(", ")}
                                 </div>
                               )}
-                              {activeCurrentEvent.startsAt && (
-                                <div className="flex items-center gap-1.5 text-[12px] text-white/50">
-                                  <span className="material-symbols-outlined text-[13px] text-cyan-300/60">calendar_month</span>
-                                  {new Date(activeCurrentEvent.startsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                                </div>
-                              )}
-                              {activeCurrentEvent.venueName && (
-                                <div className="flex items-center gap-1.5 text-[12px] text-white/50">
-                                  <span className="material-symbols-outlined text-[13px] text-cyan-300/60">place</span>
-                                  {activeCurrentEvent.venueName}
-                                </div>
-                              )}
+                              <div className="flex items-center gap-1.5 text-[12px] text-white/50">
+                                <span className="material-symbols-outlined text-[13px] text-cyan-300/60">confirmation_number</span>
+                                {activeCurrentEvent.links.some((link) => link.type === "tickets" && link.url.trim().length > 0)
+                                  ? "Tickets available"
+                                  : "No tickets link"}
+                              </div>
                             </div>
                             {activeCurrentEvent.description && (
                               <p className="mt-2.5 text-[12px] leading-relaxed text-white/40 line-clamp-3">{activeCurrentEvent.description}</p>
                             )}
-                            <Link
-                              href={`/events/${activeCurrentEvent.id}`}
-                              className="mt-3 inline-flex items-center gap-1 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-200 transition hover:bg-cyan-300/15"
-                            >
-                              View event page
-                              <span className="material-symbols-outlined text-[12px]">arrow_forward</span>
-                            </Link>
+                            {activeEventOrganizer ? (
+                              <div className="mt-4">
+                                <SidebarPersonCard
+                                  person={activeEventOrganizer}
+                                  showMeta={false}
+                                  href={`/profile/${activeEventOrganizer.userId}`}
+                                />
+                              </div>
+                            ) : null}
+                            <div className="mt-4 border-t border-white/[0.07] pt-4">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/40">Connections attending</p>
+                              <SidebarAvatarStrip
+                                people={activeEventConnectionMembers}
+                                emptyText="No accepted connections are attending yet."
+                                showMeta={false}
+                                maxVisibleRows={5}
+                              />
+                            </div>
                           </>
                         ) : (
-                          <div className="space-y-2 animate-pulse">
+                          <div className="animate-pulse space-y-4">
                             <div className="h-3 w-16 rounded bg-white/[0.06]" />
                             <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
-                            <div className="h-3 w-1/2 rounded bg-white/[0.05]" />
+                            <div className="h-4 w-[220px] rounded bg-white/[0.05]" />
+                            <div className="h-4 w-[140px] rounded bg-white/[0.05]" />
+                            <div className="h-14 rounded-2xl bg-white/[0.04]" />
+                            <div className="space-y-2 border-t border-white/[0.07] pt-4">
+                              <div className="h-3 w-28 rounded bg-white/[0.05]" />
+                              <div className="space-y-2">
+                                {[1, 2, 3].map((i) => (
+                                  <div key={i} className="flex items-center gap-3">
+                                    <div className="h-10 w-10 rounded-full bg-white/[0.05]" />
+                                    <div className="h-4 w-28 rounded bg-white/[0.05]" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
                       {activeCurrentEvent ? (
                         <div className="space-y-3 px-4 py-4">
-                          <SidebarAccordion title="Thread mode">
-                            <p className="mt-1 text-sm text-white">
-                              {activeMeta.eventChatMode === "discussion" ? "Members can write in chat." : "Broadcast only. Organisers post updates."}
-                            </p>
-                            <p className="mt-1 text-[11px] text-white/45">
-                              {activeMeta.canPostToEventThread
-                                ? activeMeta.isEventHost
-                                  ? "You can post updates in this thread."
-                                  : "You can write here because this event is open for discussion."
-                                : "Guests read updates here and browse related events below."}
-                            </p>
-                          </SidebarAccordion>
                           <SidebarAccordion title="Event settings">
-                            <div className="mt-2 space-y-2 text-[12px] text-white/70">
-                              <div className="flex items-center justify-between gap-3">
-                                <span>Guest list visible</span>
-                                <span className="font-semibold text-white">{activeCurrentEvent.showGuestList ? "Yes" : "No"}</span>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <span>Guests can invite</span>
-                                <span className="font-semibold text-white">{activeCurrentEvent.guestsCanInvite ? "Yes" : "No"}</span>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <span>Messages need approval</span>
-                                <span className="font-semibold text-white">{activeCurrentEvent.approveMessages ? "Yes" : "No"}</span>
-                              </div>
-                              {activeCurrentEvent.maxMembers ? (
-                                <div className="flex items-center justify-between gap-3">
-                                  <span>Capacity</span>
-                                  <span className="font-semibold text-white">{activeCurrentEvent.maxMembers}</span>
+                            {activeCurrentEvent.hostUserId === meId ? (
+                              <div className="mt-2 space-y-3 text-[12px] text-white/70">
+                                <div className="flex items-center gap-3">
+                                  <span className="material-symbols-outlined text-[18px] text-white/30">group</span>
+                                  <div className="flex-1">
+                                    <p className="text-sm text-white/80">Limit attendees</p>
+                                    <p className="text-[11px] text-slate-500">Set max capacity (1–2000)</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={eventSettingsDraft.hasCapacity}
+                                    onClick={() =>
+                                      setEventSettingsDraft((prev) => ({
+                                        ...prev,
+                                        hasCapacity: !prev.hasCapacity,
+                                        capacity: !prev.hasCapacity
+                                          ? prev.capacity || String(activeCurrentEvent.capacity ?? activeCurrentEvent.maxMembers ?? "")
+                                          : "",
+                                      }))
+                                    }
+                                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                                      eventSettingsDraft.hasCapacity ? "bg-[#00f5ff]" : "bg-white/20"
+                                    }`}
+                                  >
+                                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${eventSettingsDraft.hasCapacity ? "translate-x-4" : "translate-x-0"}`} />
+                                  </button>
+                                  {eventSettingsDraft.hasCapacity ? (
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={2000}
+                                      value={eventSettingsDraft.capacity || String(activeCurrentEvent.capacity ?? activeCurrentEvent.maxMembers ?? "")}
+                                      onChange={(e) =>
+                                        setEventSettingsDraft((prev) => ({
+                                          ...prev,
+                                          capacity: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Max"
+                                      className="w-16 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
+                                    />
+                                  ) : null}
                                 </div>
-                              ) : null}
-                            </div>
+
+                                <div className="flex items-center gap-3 border-t border-white/6 pt-3">
+                                  <span className="material-symbols-outlined text-[18px] text-white/30">checklist</span>
+                                  <div className="flex-1">
+                                    <p className="text-sm text-white/80">Show guest list</p>
+                                    <p className="text-[11px] text-slate-500">Guests can see who is attending</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={eventSettingsDraft.showGuestList}
+                                    onClick={() =>
+                                      setEventSettingsDraft((prev) => ({
+                                        ...prev,
+                                        showGuestList: !prev.showGuestList,
+                                      }))
+                                    }
+                                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                                      eventSettingsDraft.showGuestList ? "bg-[#00f5ff]" : "bg-white/20"
+                                    }`}
+                                  >
+                                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${eventSettingsDraft.showGuestList ? "translate-x-4" : "translate-x-0"}`} />
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-3 border-t border-white/6 pt-3">
+                                  <span className="material-symbols-outlined text-[18px] text-white/30">group_add</span>
+                                  <div className="flex-1">
+                                    <p className="text-sm text-white/80">Guests can invite friends</p>
+                                    <p className="text-[11px] text-slate-500">Joined guests can invite accepted connections from the event page</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={eventSettingsDraft.guestsCanInvite}
+                                    onClick={() =>
+                                      setEventSettingsDraft((prev) => ({
+                                        ...prev,
+                                        guestsCanInvite: !prev.guestsCanInvite,
+                                      }))
+                                    }
+                                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                                      eventSettingsDraft.guestsCanInvite ? "bg-[#00f5ff]" : "bg-white/20"
+                                    }`}
+                                  >
+                                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${eventSettingsDraft.guestsCanInvite ? "translate-x-4" : "translate-x-0"}`} />
+                                  </button>
+                                </div>
+
+                                <div className="border-t border-white/6 pt-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveEventSidebarSettings()}
+                                    disabled={eventSettingsBusy}
+                                    className="inline-flex min-h-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,#0df2f2,#d93bff)] px-4 text-sm font-semibold text-[#041316] transition hover:brightness-105 disabled:opacity-50"
+                                  >
+                                    {eventSettingsBusy ? "Saving…" : "Save settings"}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-2 space-y-2 text-[12px] text-white/70">
+                                {activeCurrentEvent.capacity || activeCurrentEvent.maxMembers ? (
+                                  <SidebarInfoRow label="Attendee limit" value={activeCurrentEvent.capacity ?? activeCurrentEvent.maxMembers} />
+                                ) : (
+                                  <SidebarInfoRow label="Attendee limit" value="Unlimited" />
+                                )}
+                                <SidebarInfoRow label="Guest list visible" value={activeCurrentEvent.showGuestList ? "Yes" : "No"} />
+                                <SidebarInfoRow label="Guests can invite" value={activeCurrentEvent.guestsCanInvite ? "Yes" : "No"} />
+                                <p className="pt-2 text-[11px] text-white/35">Only the organiser can edit these settings.</p>
+                              </div>
+                            )}
                           </SidebarAccordion>
-                          <SidebarAccordion title="Thread actions">
-                            <div className="mt-3 flex flex-col gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!activeThreadToken) return;
-                                  if (activeIsMuted) {
-                                    void unmuteThread(activeThreadToken, activeDbThreadId);
-                                  } else {
-                                    void muteThreadForHours(activeThreadToken, activeDbThreadId, 8);
-                                  }
-                                }}
-                                className="inline-flex items-center justify-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-[11px] font-semibold text-cyan-100 transition hover:bg-cyan-300/15"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">
-                                  {activeIsMuted ? "notifications_active" : "notifications_off"}
-                                </span>
-                                {activeIsMuted ? `Unmute (${activeMuteRemaining})` : "Mute for 8h"}
-                              </button>
-                              <button
-                                type="button"
+                          <SidebarAccordion title="Event tools">
+                            <div className="mt-1 space-y-1">
+                              <SidebarActionRow
+                                icon="link"
+                                title="Copy event link"
+                                subtitle="Use the live event page link."
+                                onClick={() => void copySidebarLink("Event link", `/events/${activeCurrentEvent.id}`)}
+                              />
+                              <SidebarActionRow
+                                icon="share"
+                                title="Share"
+                                subtitle="Send this event to someone else."
+                                onClick={() =>
+                                  void shareSidebarLink(
+                                    activeCurrentEvent.title,
+                                    `/events/${activeCurrentEvent.id}`,
+                                    `Join ${activeCurrentEvent.title}`
+                                  )
+                                }
+                              />
+                              <SidebarActionRow
+                                icon="calendar_month"
+                                title="Add to calendar"
+                                subtitle="Open this event in Google Calendar."
+                                onClick={() => openEventCalendar(activeCurrentEvent)}
+                              />
+                              <SidebarActionRow
+                                icon="flag"
+                                title="Report event"
+                                subtitle="Flag this event for review."
                                 onClick={() => setReportOpen(true)}
-                                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300/25 hover:text-cyan-100"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">flag</span>
-                                Report
-                              </button>
-                              {activeThreadToken ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void archiveThread(activeThreadToken, activeDbThreadId)}
-                                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300/25 hover:text-cyan-100"
-                                >
-                                  <span className="material-symbols-outlined text-[14px]">archive</span>
-                                  Archive thread
-                                </button>
-                              ) : null}
+                              />
                             </div>
                           </SidebarAccordion>
                         </div>
@@ -8886,80 +9941,112 @@ function MessagesPageContent() {
                             {activeCurrentGroup.description ? (
                               <p className="mt-2.5 text-[12px] leading-relaxed text-white/40">{activeCurrentGroup.description}</p>
                             ) : null}
+                            {activeGroupOrganizer ? (
+                              <div className="mt-4">
+                                <SidebarPersonCard
+                                  person={activeGroupOrganizer}
+                                  showMeta={false}
+                                  href={`/profile/${activeGroupOrganizer.userId}`}
+                                />
+                              </div>
+                            ) : null}
+                            <div className="mt-4 border-t border-white/[0.07] pt-4">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/40">Connections in group</p>
+                              <SidebarAvatarStrip
+                                people={activeGroupConnectionMembers}
+                                emptyText="No accepted connections are in this group yet."
+                                showMeta={false}
+                                maxVisibleRows={5}
+                              />
+                            </div>
                           </div>
                           <div className="space-y-3 px-4 py-4">
-                            <SidebarAccordion title="Chat mode">
-                              <p className="mt-1 text-sm text-white">
-                                {activeCurrentGroup.chatMode === "discussion" ? "Members can write in chat." : "Only organisers can post updates."}
-                              </p>
+                            <SidebarAccordion title="Group settings">
                               {activeCurrentGroup.isHost ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void updateGroupChatMode(activeCurrentGroup.chatMode === "discussion" ? "broadcast" : "discussion")}
-                                  disabled={groupSettingsBusy}
-                                  className="mt-3 inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-100 transition hover:bg-cyan-300/15 disabled:opacity-50"
-                                >
-                                  <span className="material-symbols-outlined text-[14px]">
-                                    {activeCurrentGroup.chatMode === "discussion" ? "campaign" : "forum"}
-                                  </span>
-                                  {groupSettingsBusy
-                                    ? "Updating…"
-                                    : activeCurrentGroup.chatMode === "discussion"
-                                    ? "Block member posting"
-                                    : "Enable member posting"}
-                                </button>
-                              ) : null}
+                                <div className="mt-2 space-y-3 text-[12px] text-white/70">
+                                  <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-[18px] text-white/30">forum</span>
+                                    <div className="flex-1">
+                                      <p className="text-sm text-white/80">Allow members to post</p>
+                                      <p className="text-[11px] text-slate-500">Switch between discussion and broadcast</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={activeCurrentGroup.chatMode === "discussion"}
+                                      onClick={() =>
+                                        void updateGroupChatMode(
+                                          activeCurrentGroup.chatMode === "discussion" ? "broadcast" : "discussion"
+                                        )
+                                      }
+                                      disabled={groupSettingsBusy}
+                                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                                        activeCurrentGroup.chatMode === "discussion" ? "bg-[#00f5ff]" : "bg-white/20"
+                                      } disabled:opacity-50`}
+                                    >
+                                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${activeCurrentGroup.chatMode === "discussion" ? "translate-x-4" : "translate-x-0"}`} />
+                                    </button>
+                                  </div>
+                                  <div className="border-t border-white/6 pt-3">
+                                    <SidebarInfoRow label="Capacity" value={activeCurrentGroup.maxMembers} />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="mt-2 space-y-2 text-[12px] text-white/70">
+                                  <SidebarInfoRow label="Chat mode" value={activeCurrentGroup.chatMode === "discussion" ? "Discussion" : "Broadcast"} />
+                                  <SidebarInfoRow label="Capacity" value={activeCurrentGroup.maxMembers} />
+                                  <p className="pt-2 text-[11px] text-white/35">Only the organiser can edit these settings.</p>
+                                </div>
+                              )}
                             </SidebarAccordion>
-                            <SidebarAccordion title="Members">
-                              <p className="mt-1 text-sm text-white">{activeCurrentGroup.maxMembers} max members</p>
-                            </SidebarAccordion>
-                            <SidebarAccordion title="Thread actions">
-                              <div className="mt-3 flex flex-col gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!activeThreadToken) return;
-                                    if (activeIsMuted) {
-                                      void unmuteThread(activeThreadToken, activeDbThreadId);
-                                    } else {
-                                      void muteThreadForHours(activeThreadToken, activeDbThreadId, 8);
-                                    }
-                                  }}
-                                  className="inline-flex items-center justify-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-[11px] font-semibold text-cyan-100 transition hover:bg-cyan-300/15"
-                                >
-                                  <span className="material-symbols-outlined text-[14px]">
-                                    {activeIsMuted ? "notifications_active" : "notifications_off"}
-                                  </span>
-                                  {activeIsMuted ? `Unmute (${activeMuteRemaining})` : "Mute for 8h"}
-                                </button>
-                                <button
-                                  type="button"
+                            <SidebarAccordion title="Group tools">
+                              <div className="mt-1 space-y-1">
+                                <SidebarActionRow
+                                  icon="link"
+                                  title="Copy group link"
+                                  subtitle="Share this group page."
+                                  onClick={() => void copySidebarLink("Group link", `/groups/${activeCurrentGroup.id}`)}
+                                />
+                                <SidebarActionRow
+                                  icon="share"
+                                  title="Share"
+                                  subtitle="Send this group to someone else."
+                                  onClick={() =>
+                                    void shareSidebarLink(
+                                      activeCurrentGroup.title,
+                                      `/groups/${activeCurrentGroup.id}`,
+                                      `Join ${activeCurrentGroup.title}`
+                                    )
+                                  }
+                                />
+                                <SidebarActionRow
+                                  icon="flag"
+                                  title="Report group"
+                                  subtitle="Flag this group for review."
                                   onClick={() => setReportOpen(true)}
-                                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300/25 hover:text-cyan-100"
-                                >
-                                  <span className="material-symbols-outlined text-[14px]">flag</span>
-                                  Report
-                                </button>
-                                {activeThreadToken ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => void archiveThread(activeThreadToken, activeDbThreadId)}
-                                    className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300/25 hover:text-cyan-100"
-                                  >
-                                    <span className="material-symbols-outlined text-[14px]">archive</span>
-                                    Archive thread
-                                  </button>
-                                ) : null}
+                                />
                               </div>
                             </SidebarAccordion>
                           </div>
                         </>
                       ) : (
-                        <div className="space-y-2 px-4 py-5 animate-pulse">
+                        <div className="space-y-4 px-4 py-5 animate-pulse">
                           <div className="h-44 rounded-2xl bg-white/[0.05]" />
                           <div className="h-4 w-20 rounded bg-white/[0.06]" />
                           <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
                           <div className="h-3 w-1/2 rounded bg-white/[0.05]" />
+                          <div className="h-14 rounded-2xl bg-white/[0.04]" />
+                          <div className="space-y-2 border-t border-white/[0.07] pt-4">
+                            <div className="h-3 w-28 rounded bg-white/[0.05]" />
+                            <div className="space-y-2">
+                              {[1, 2, 3].map((i) => (
+                                <div key={i} className="flex items-center gap-3">
+                                  <div className="h-10 w-10 rounded-full bg-white/[0.05]" />
+                                  <div className="h-4 w-28 rounded bg-white/[0.05]" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -8969,6 +10056,20 @@ function MessagesPageContent() {
                         loading={contactSidebarLoading}
                         error={contactSidebarError}
                         contact={contactSidebar}
+                        searchQuery={conversationSearchQuery}
+                        onSearch={setConversationSearchQuery}
+                        isMuted={activeIsMuted}
+                        muteLabel={activeMuteRemaining}
+                        onMuteFor8h={activeThreadToken ? () => void muteThreadForHours(activeThreadToken, activeDbThreadId, 8) : undefined}
+                        onMuteFor24h={activeThreadToken ? () => void muteThreadForHours(activeThreadToken, activeDbThreadId, 24) : undefined}
+                        onMuteForever={activeThreadToken ? () => void muteThreadForever(activeThreadToken, activeDbThreadId) : undefined}
+                        onUnmute={activeThreadToken ? () => void unmuteThread(activeThreadToken, activeDbThreadId) : undefined}
+                        onReport={activeMeta.connectionId ? () => {
+                          setReportFromMessageId(null);
+                          setReportOpen(true);
+                        } : undefined}
+                        onBlock={activeMeta.connectionId ? () => void blockConnection() : undefined}
+                        pinnedMessages={activePinnedMessages}
                       />
                     </div>
                   ) : (

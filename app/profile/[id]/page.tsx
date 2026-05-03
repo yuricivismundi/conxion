@@ -2760,9 +2760,10 @@ function MemberProfilePage() {
                       <button
                         type="button"
                         onClick={() => setConnectModalOpen(true)}
-                        className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
                       >
-                        Connect
+                        <span className="material-symbols-outlined text-[16px]">person_add</span>
+                        Add Conexion
                       </button>
                     </>
                   ) : null}
@@ -2802,7 +2803,8 @@ function MemberProfilePage() {
                   {state.status === "accepted" ? (
                     <>
                       {!isTeacherProfile ? (
-                        <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100">
+                          <span className="material-symbols-outlined text-[16px]">person_check</span>
                           Connected
                         </span>
                       ) : null}

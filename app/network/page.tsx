@@ -1582,6 +1582,19 @@ function NetworkPageContent() {
     followQuery.trim().length > 0 || cityFilter !== "all" || styleFilter !== "all" || roleFilter !== "all" || activityFilter !== "all";
   const hasConnectionFilters =
     query.trim().length > 0 || connectionCityFilter !== "all" || connectionStyleFilter !== "all" || connectionRoleFilter !== "all";
+  const isFeedSection = networkSection === "feed";
+  const isConnectionsSection = networkSection === "connections";
+  const isFollowingSection = networkSection === "following";
+  const isContactsSection = networkSection === "contacts";
+  const showTopNetworkSearch = isFeedSection || isConnectionsSection || isFollowingSection || isContactsSection;
+  const topNetworkSearchValue = isFeedSection ? feedSearch : isFollowingSection ? followQuery : query;
+  const topNetworkSearchPlaceholder = isFeedSection
+    ? "Search name, city, event…"
+    : isConnectionsSection
+    ? "Search connections..."
+    : isFollowingSection
+    ? "Search following..."
+    : "Search contacts...";
   const activeNotesTooltip =
     networkSection === "following"
       ? {
@@ -1925,7 +1938,7 @@ function NetworkPageContent() {
 
           <section className="space-y-8">
               {/* Combined header: summary + tabs */}
-              <div className="border-b border-white/[0.07] pb-0">
+              <div className="pb-0">
                 {/* Title + stats row */}
                 <div className="flex flex-col gap-5 pb-5 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
@@ -1958,51 +1971,139 @@ function NetworkPageContent() {
                   </div>
                 </div>
                 {/* Profile-style tabs */}
-                <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
-                <div className="no-scrollbar flex flex-1 items-end gap-4 overflow-x-auto">
-                  {([
-                    { key: "feed" as const, label: "Feed", count: null },
-                    { key: "connections" as const, label: "Connections", count: connectionCount },
-                    { key: "following" as const, label: "Following", count: followingCount + followersCount },
-                    { key: "contacts" as const, label: "Contacts", count: externalContactsCount },
-                  ] as const).map((s) => {
-                    const active = networkSection === s.key;
-                    return (
-                      <button
-                        key={s.key}
-                        type="button"
-                        onClick={() => setNetworkSection(s.key)}
-                        aria-label={s.label}
-                        className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-1 pb-3 pt-2 text-[11px] font-bold uppercase tracking-widest transition-colors ${
-                          active
-                            ? "border-[#25d1f4] text-white"
-                            : "border-transparent text-white/35 hover:text-white/60"
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                  <div className="no-scrollbar flex min-w-0 flex-1 items-end gap-4 overflow-x-auto">
+                    {([
+                      { key: "feed" as const, label: "Feed", count: null },
+                      { key: "connections" as const, label: "Connections", count: connectionCount },
+                      { key: "following" as const, label: "Following", count: followingCount + followersCount },
+                      { key: "contacts" as const, label: "Contacts", count: externalContactsCount },
+                    ] as const).map((s) => {
+                      const active = networkSection === s.key;
+                      return (
+                        <button
+                          key={s.key}
+                          type="button"
+                          onClick={() => setNetworkSection(s.key)}
+                          aria-label={s.label}
+                          className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-1 pb-3 pt-2 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                            active
+                              ? "border-[#25d1f4] text-white"
+                              : "border-transparent text-white/35 hover:text-white/60"
+                          }`}
+                        >
+                          <span>{s.label}</span>
+                          {s.count !== null ? (
+                            <span className="rounded-full bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-bold text-white/50">{s.count}</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {showTopNetworkSearch ? (
+                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center xl:w-auto xl:flex-nowrap">
+                      <label
+                        className={`group relative ${
+                          isFeedSection
+                            ? "min-w-0 flex-1 xl:w-64"
+                            : isConnectionsSection || isFollowingSection
+                            ? "min-w-0 flex-1 xl:w-[280px]"
+                            : "min-w-0 flex-1 xl:w-[240px]"
                         }`}
                       >
-                        <span>{s.label}</span>
-                        {s.count !== null ? (
-                          <span className="rounded-full bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-bold text-white/50">{s.count}</span>
+                        <span className={`material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-cyan-300 ${
+                          isFeedSection ? "text-[15px] text-white/35" : "text-[18px] text-slate-500"
+                        }`}>search</span>
+                        <input
+                          type="text"
+                          value={topNetworkSearchValue}
+                          onChange={(event) => {
+                            if (isFeedSection) {
+                              setFeedSearch(event.target.value);
+                              return;
+                            }
+                            if (isFollowingSection) {
+                              setFollowQuery(event.target.value);
+                              return;
+                            }
+                            setQuery(event.target.value);
+                          }}
+                          placeholder={topNetworkSearchPlaceholder}
+                          className={`w-full rounded-full border outline-none ${
+                            isFeedSection
+                              ? "h-9 border-white/10 bg-white/[0.05] pl-8 pr-3 text-[12px] text-white/90 placeholder:text-white/30 focus:border-[#00F5FF]/50"
+                              : "h-[42px] border-white/10 bg-[#121212] pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                          }`}
+                        />
+                        {topNetworkSearchValue ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isFeedSection) {
+                                setFeedSearch("");
+                                return;
+                              }
+                              if (isFollowingSection) {
+                                setFollowQuery("");
+                                return;
+                              }
+                              setQuery("");
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">close</span>
+                          </button>
                         ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-                <label className="group relative mb-1 shrink-0">
-                  <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
-                  <input
-                    type="text"
-                    value={feedSearch}
-                    onChange={(e) => setFeedSearch(e.target.value)}
-                    placeholder="Search name, city, event…"
-                    className="h-9 w-64 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[12px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50"
-                  />
-                  {feedSearch ? (
-                    <button onClick={() => setFeedSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
-                      <span className="material-symbols-outlined text-[14px]">close</span>
-                    </button>
+                      </label>
+
+                      {isContactsSection ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowAddModal(true)}
+                          className="inline-flex h-[42px] shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-xs font-bold text-[#06121a] hover:brightness-110 sm:px-4 sm:text-sm"
+                        >
+                          <span className="material-symbols-outlined text-[17px] sm:text-[18px]">person_add</span>
+                          <span className="hidden sm:inline">Add Contact</span>
+                          <span className="sm:hidden">Add</span>
+                        </button>
+                      ) : null}
+
+                      {isConnectionsSection || isFollowingSection || isContactsSection ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isConnectionsSection) {
+                              setShowConnectionFilters((value) => !value);
+                              return;
+                            }
+                            if (isFollowingSection) {
+                              setShowContactFilters((value) => !value);
+                              return;
+                            }
+                            setShowContactFilters((value) => !value);
+                          }}
+                          className={`inline-flex h-[42px] shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-bold transition sm:px-4 sm:text-sm ${
+                            isConnectionsSection
+                              ? showConnectionFilters || hasConnectionFilters
+                                ? "bg-[#00F5FF] text-[#0A0A0A]"
+                                : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
+                              : isFollowingSection
+                              ? showContactFilters || hasFollowingFilters
+                                ? "bg-[#00F5FF] text-[#0A0A0A]"
+                                : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
+                              : showContactFilters || hasContactFilters
+                              ? "bg-[#00F5FF] text-[#0A0A0A]"
+                              : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[18px]">tune</span>
+                          <span className="hidden sm:inline">Filters</span>
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
-                </label>
-              </div>
+                </div>
               </div>
 
               {networkSection === "feed" ? (
@@ -2384,204 +2485,213 @@ function NetworkPageContent() {
               ) : null}
 
               {networkSection === "connections" ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 sm:justify-end">
-                    <div className="group relative min-w-0 flex-1 sm:max-w-[280px]">
-                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500 transition-colors group-focus-within:text-cyan-300">
-                        search
-                      </span>
-                      <input
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search connections..."
-                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
-                      />
+                showConnectionFilters ? (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <select
+                      value={connectionCityFilter}
+                      onChange={(event) => setConnectionCityFilter(event.target.value)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
+                    >
+                      <option value="all">All cities</option>
+                      {connectionCityOptions.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="space-y-1.5">
+                      <select
+                        value={connectionStyleFilter}
+                        onChange={(event) => { setConnectionStyleFilter(event.target.value); setConnectionStyleText(""); }}
+                        className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
+                      >
+                        <option value="all">All dance styles</option>
+                        {connectionStyleOptions.map((style) => (
+                          <option key={style} value={style}>
+                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
+                          </option>
+                        ))}
+                        <option value="other">Other…</option>
+                      </select>
+                      {connectionStyleFilter === "other" && (
+                        <input
+                          value={connectionStyleText}
+                          onChange={(e) => setConnectionStyleText(e.target.value)}
+                          placeholder="Search style (e.g. Hip Hop)"
+                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                        />
+                      )}
                     </div>
+                    <select
+                      value={connectionRoleFilter}
+                      onChange={(event) => setConnectionRoleFilter(event.target.value)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
+                    >
+                      <option value="all">All roles</option>
+                      {connectionRoleOptions.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      onClick={() => setShowConnectionFilters((value) => !value)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-bold transition ${
-                        showConnectionFilters || hasConnectionFilters
-                          ? "bg-[#00F5FF] text-[#0A0A0A]"
-                          : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                      }`}
+                      onClick={resetConnectionFilters}
+                      disabled={!hasConnectionFilters}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
                     >
-                      <span className="material-symbols-outlined text-[18px]">tune</span>
-                      <span className="hidden sm:inline">Filters</span>
+                      Clear Filters
                     </button>
                   </div>
+                ) : null
+              ) : null}
 
-                  {showConnectionFilters ? (
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {networkSection === "following" ? (
+                showContactFilters ? (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                    <select
+                      value={cityFilter}
+                      onChange={(event) => setCityFilter(event.target.value)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                    >
+                      <option value="all">All cities</option>
+                      {cityOptions.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="space-y-1.5">
                       <select
-                        value={connectionCityFilter}
-                        onChange={(event) => setConnectionCityFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
+                        value={styleFilter}
+                        onChange={(event) => { setStyleFilter(event.target.value); setStyleText(""); }}
+                        className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
                       >
-                        <option value="all">All cities</option>
-                        {connectionCityOptions.map((city) => (
-                          <option key={city} value={city}>
-                            {city}
+                        <option value="all">All dance styles</option>
+                        {styleOptions.map((style) => (
+                          <option key={style} value={style}>
+                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
                           </option>
                         ))}
+                        <option value="other">Other…</option>
                       </select>
-                      <div className="space-y-1.5">
-                        <select
-                          value={connectionStyleFilter}
-                          onChange={(event) => { setConnectionStyleFilter(event.target.value); setConnectionStyleText(""); }}
-                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
-                        >
-                          <option value="all">All dance styles</option>
-                          {connectionStyleOptions.map((style) => (
-                            <option key={style} value={style}>
-                              {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
-                            </option>
-                          ))}
-                          <option value="other">Other…</option>
-                        </select>
-                        {connectionStyleFilter === "other" && (
-                          <input
-                            value={connectionStyleText}
-                            onChange={(e) => setConnectionStyleText(e.target.value)}
-                            placeholder="Search style (e.g. Hip Hop)"
-                            className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
-                          />
-                        )}
-                      </div>
-                      <select
-                        value={connectionRoleFilter}
-                        onChange={(event) => setConnectionRoleFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-3 text-sm text-white"
-                      >
-                        <option value="all">All roles</option>
-                        {connectionRoleOptions.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={resetConnectionFilters}
-                        disabled={!hasConnectionFilters}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
-                      >
-                        Clear Filters
-                      </button>
+                      {styleFilter === "other" && (
+                        <input
+                          value={styleText}
+                          onChange={(e) => setStyleText(e.target.value)}
+                          placeholder="Search style (e.g. Hip Hop)"
+                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                        />
+                      )}
                     </div>
-                  ) : null}
-                </div>
+                    <select
+                      value={roleFilter}
+                      onChange={(event) => setRoleFilter(event.target.value)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                    >
+                      <option value="all">All roles</option>
+                      {roleOptions.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={activityFilter}
+                      onChange={(event) => setActivityFilter(event.target.value as "all" | TrackActivity)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                    >
+                      <option value="all">All activity</option>
+                      {TRACK_ACTIVITY_OPTIONS.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={resetFollowingFilters}
+                      disabled={!hasFollowingFilters}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-4 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                ) : null
               ) : null}
 
               {networkSection === "contacts" ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="group relative min-w-0 flex-1 sm:max-w-[240px]">
-                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500 transition-colors group-focus-within:text-cyan-300">
-                        search
-                      </span>
-                      <input
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search contacts..."
-                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
-                      />
+                showContactFilters ? (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                    <select
+                      value={cityFilter}
+                      onChange={(event) => setCityFilter(event.target.value)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                    >
+                      <option value="all">All cities</option>
+                      {cityOptions.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="space-y-1.5">
+                      <select
+                        value={styleFilter}
+                        onChange={(event) => { setStyleFilter(event.target.value); setStyleText(""); }}
+                        className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                      >
+                        <option value="all">All dance styles</option>
+                        {styleOptions.map((style) => (
+                          <option key={style} value={style}>
+                            {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
+                          </option>
+                        ))}
+                        <option value="other">Other…</option>
+                      </select>
+                      {styleFilter === "other" && (
+                        <input
+                          value={styleText}
+                          onChange={(e) => setStyleText(e.target.value)}
+                          placeholder="Search style (e.g. Hip Hop)"
+                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
+                        />
+                      )}
                     </div>
+                    <select
+                      value={roleFilter}
+                      onChange={(event) => setRoleFilter(event.target.value)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                    >
+                      <option value="all">All roles</option>
+                      {roleOptions.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={activityFilter}
+                      onChange={(event) => setActivityFilter(event.target.value as "all" | TrackActivity)}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
+                    >
+                      <option value="all">All activity</option>
+                      {TRACK_ACTIVITY_OPTIONS.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      onClick={() => setShowAddModal(true)}
-                      className="inline-flex h-[42px] shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-xs font-bold text-[#06121a] hover:brightness-110 sm:px-4 sm:text-sm"
+                      onClick={resetFilters}
+                      disabled={!hasContactFilters}
+                      className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-4 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
                     >
-                      <span className="material-symbols-outlined text-[17px] sm:text-[18px]">person_add</span>
-                      <span className="hidden sm:inline">Add Contact</span>
-                      <span className="sm:hidden">Add</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowContactFilters((value) => !value)}
-                      className={`inline-flex h-[42px] shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-bold transition sm:px-4 sm:text-sm ${
-                        showContactFilters || hasContactFilters
-                          ? "bg-[#00F5FF] text-[#0A0A0A]"
-                          : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[18px]">tune</span>
-                      <span className="hidden sm:inline">Filters</span>
+                      Clear Filters
                     </button>
                   </div>
-
-                  {showContactFilters ? (
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                      <select
-                        value={cityFilter}
-                        onChange={(event) => setCityFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All cities</option>
-                        {cityOptions.map((city) => (
-                          <option key={city} value={city}>
-                            {city}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="space-y-1.5">
-                        <select
-                          value={styleFilter}
-                          onChange={(event) => { setStyleFilter(event.target.value); setStyleText(""); }}
-                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                        >
-                          <option value="all">All dance styles</option>
-                          {styleOptions.map((style) => (
-                            <option key={style} value={style}>
-                              {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
-                            </option>
-                          ))}
-                          <option value="other">Other…</option>
-                        </select>
-                        {styleFilter === "other" && (
-                          <input
-                            value={styleText}
-                            onChange={(e) => setStyleText(e.target.value)}
-                            placeholder="Search style (e.g. Hip Hop)"
-                            className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
-                          />
-                        )}
-                      </div>
-                      <select
-                        value={roleFilter}
-                        onChange={(event) => setRoleFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All roles</option>
-                        {roleOptions.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={activityFilter}
-                        onChange={(event) => setActivityFilter(event.target.value as "all" | TrackActivity)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All activity</option>
-                        {TRACK_ACTIVITY_OPTIONS.map((option) => (
-                          <option key={option.key} value={option.key}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={resetFilters}
-                        disabled={!hasContactFilters}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-4 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
-                      >
-                        Clear Filters
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
+                ) : null
               ) : null}
             </section>
 
@@ -2678,104 +2788,8 @@ function NetworkPageContent() {
               const pagedFollowers = followerProfiles.slice((followersListPage - 1) * FOLLOW_PAGE_SIZE, followersListPage * FOLLOW_PAGE_SIZE);
               return (
               <div className="space-y-8">
-                {/* Following — 4-col grid with search */}
+                {/* Following — 4-col grid */}
                 <div className="space-y-3">
-                  {/* Search row */}
-                  <div className="flex items-center gap-2 sm:justify-end">
-                    <div className="group relative min-w-0 flex-1 sm:max-w-[280px]">
-                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500 transition-colors group-focus-within:text-cyan-300">search</span>
-                      <input
-                        value={followQuery}
-                        onChange={(e) => setFollowQuery(e.target.value)}
-                        placeholder="Search following..."
-                        className="w-full rounded-2xl border border-white/10 bg-[#121212] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-0"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowContactFilters((value) => !value)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-bold transition ${
-                        showContactFilters || hasFollowingFilters
-                          ? "bg-[#00F5FF] text-[#0A0A0A]"
-                          : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[18px]">tune</span>
-                      <span className="hidden sm:inline">Filters</span>
-                    </button>
-                  </div>
-
-                  {showContactFilters ? (
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                      <select
-                        value={cityFilter}
-                        onChange={(event) => setCityFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All cities</option>
-                        {cityOptions.map((city) => (
-                          <option key={city} value={city}>
-                            {city}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="space-y-1.5">
-                        <select
-                          value={styleFilter}
-                          onChange={(event) => { setStyleFilter(event.target.value); setStyleText(""); }}
-                          className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                        >
-                          <option value="all">All dance styles</option>
-                          {styleOptions.map((style) => (
-                            <option key={style} value={style}>
-                              {style.charAt(0).toUpperCase() + style.slice(1).toLowerCase()}
-                            </option>
-                          ))}
-                          <option value="other">Other…</option>
-                        </select>
-                        {styleFilter === "other" && (
-                          <input
-                            value={styleText}
-                            onChange={(e) => setStyleText(e.target.value)}
-                            placeholder="Search style (e.g. Hip Hop)"
-                            className="w-full rounded-2xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50"
-                          />
-                        )}
-                      </div>
-                      <select
-                        value={roleFilter}
-                        onChange={(event) => setRoleFilter(event.target.value)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All roles</option>
-                        {roleOptions.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={activityFilter}
-                        onChange={(event) => setActivityFilter(event.target.value as "all" | TrackActivity)}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-3 py-4 text-sm text-white"
-                      >
-                        <option value="all">All activity</option>
-                        {TRACK_ACTIVITY_OPTIONS.map((option) => (
-                          <option key={option.key} value={option.key}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={resetFollowingFilters}
-                        disabled={!hasFollowingFilters}
-                        className="rounded-2xl border border-white/10 bg-[#121212] px-4 py-4 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-45"
-                      >
-                        Clear Filters
-                      </button>
-                    </div>
-                  ) : null}
                   <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Following · {allFollowingCards.length}</p>
                   {loading ? (
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">

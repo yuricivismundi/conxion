@@ -24,6 +24,8 @@ const REASONS: Reason[] = [
   { id: "collaborate",         label: "Collaborate",         icon: "handshake"          },
 ];
 
+const PENDING_REQUEST_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -160,7 +162,7 @@ export default function DarkConnectModal({
       // Short-circuit if already connected / pending
       const { data: existing } = await supabase
         .from("connections")
-        .select("id,status")
+        .select("id,status,created_at")
         .or(
           `and(requester_id.eq.${user.id},target_id.eq.${targetUserId}),and(requester_id.eq.${targetUserId},target_id.eq.${user.id})`
         )
@@ -172,7 +174,9 @@ export default function DarkConnectModal({
         router.push(`/messages?thread=${encodeURIComponent(`conn:${existing.id}`)}`);
         return;
       }
-      if (existing?.status === "pending") {
+      const existingCreatedAt = existing?.created_at ? Date.parse(existing.created_at) : NaN;
+      const existingPendingLive = existing?.status === "pending" && (!Number.isFinite(existingCreatedAt) || existingCreatedAt >= Date.now() - PENDING_REQUEST_WINDOW_MS);
+      if (existingPendingLive) {
         throw new Error("There is already a pending connection request with this member.");
       }
 
