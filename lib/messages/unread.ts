@@ -18,6 +18,7 @@ type ThreadRow = {
   connection_id?: string | null;
   trip_id?: string | null;
   event_id?: string | null;
+  group_id?: string | null;
   last_message_at?: string | null;
 };
 
@@ -67,6 +68,9 @@ function toThreadToken(thread: ThreadRow): string | null {
   if (type === "event" && typeof thread.event_id === "string" && thread.event_id) {
     return `event:${thread.event_id}`;
   }
+  if (type === "group" && typeof thread.group_id === "string" && thread.group_id) {
+    return `group:${thread.group_id}`;
+  }
   if (type === "direct") {
     return `direct:${threadId}`;
   }
@@ -91,7 +95,7 @@ export async function fetchUnreadThreadTokens(userId: string): Promise<{ tokens:
 
   const threadRes = await supabase
     .from("threads")
-    .select("id,thread_type,connection_id,trip_id,event_id,last_message_at")
+    .select("id,thread_type,connection_id,trip_id,event_id,group_id,last_message_at")
     .in("id", threadIds)
     .limit(Math.max(threadIds.length, 1));
 

@@ -104,7 +104,8 @@ function withNamespacedEmail(baseEmail: string) {
     process.env.GITHUB_ACTIONS === "true"
       ? `${env("GITHUB_RUN_ID")}-${env("GITHUB_RUN_ATTEMPT")}-${env("GITHUB_JOB")}`
       : "";
-  const localDaily = `d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+  const workerIndex = process.env.TEST_WORKER_INDEX?.trim();
+  const localDaily = `p${process.pid.toString(36)}-d${new Date().toISOString().slice(0, 10).replace(/-/g, "")}${workerIndex ? `-w${workerIndex}` : ""}`;
   const namespace = sanitizeNamespace(explicit || implicit || localDaily);
   if (!namespace) return baseEmail;
 
@@ -148,6 +149,43 @@ function shouldFallbackAcceptedConnectionRpc(message: string) {
   );
 }
 
+function isRetryableAuthError(error: unknown) {
+  const message =
+    error instanceof Error
+      ? `${error.name} ${error.message} ${String((error as { code?: unknown }).code ?? "")} ${String(
+          (error as { cause?: { code?: unknown; message?: unknown } }).cause?.code ?? ""
+        )} ${String((error as { cause?: { message?: unknown } }).cause?.message ?? "")}`
+      : String(error ?? "");
+  const text = message.toLowerCase();
+  return (
+    text.includes("fetch failed") ||
+    text.includes("connect timeout") ||
+    text.includes("und_err_connect_timeout") ||
+    text.includes("etimedout") ||
+    text.includes("econnreset") ||
+    text.includes("socket hang up") ||
+    text.includes("network") ||
+    text.includes("rate limit reached") ||
+    text.includes("too many requests")
+  );
+}
+
+async function withAuthRetries<T>(fn: () => Promise<T>, attempts = 5, baseDelayMs = 500): Promise<T> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryableAuthError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * attempt));
+    }
+  }
+  throw lastError ?? new Error("auth_retry_failed");
+}
+
 function buildSeedContext(): SeedContext {
   const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
   const anonKey = env("NEXT_PUBLIC_SUPABASE_ANON_KEY");
@@ -189,12 +227,14 @@ async function ensureUser(
   let userId: string | null = null;
 
   try {
-    const created = await adminClient.auth.admin.createUser({
-      email: params.email,
-      password: params.password,
-      email_confirm: true,
-      user_metadata: { display_name: params.displayName },
-    });
+    const created = await withAuthRetries(() =>
+      adminClient.auth.admin.createUser({
+        email: params.email,
+        password: params.password,
+        email_confirm: true,
+        user_metadata: { display_name: params.displayName },
+      })
+    );
     if (created.error && !isLikelyAlreadyExistsError(created.error.message)) throw created.error;
     if (!created.error) {
       userId = created.data.user.id;
@@ -207,21 +247,25 @@ async function ensureUser(
   }
 
   if (!userId) {
-    const signedIn = await signInClient.auth.signInWithPassword({
-      email: params.email,
-      password: params.password,
-    });
+    const signedIn = await withAuthRetries(() =>
+      signInClient.auth.signInWithPassword({
+        email: params.email,
+        password: params.password,
+      })
+    );
     if (signedIn.error || !signedIn.data.user?.id) {
       throw signedIn.error ?? new Error(`Unable to resolve user id for ${params.email}`);
     }
     userId = signedIn.data.user.id;
   }
 
-  const updated = await adminClient.auth.admin.updateUserById(userId, {
-    email_confirm: true,
-    password: params.password,
-    user_metadata: { display_name: params.displayName },
-  });
+  const updated = await withAuthRetries(() =>
+    adminClient.auth.admin.updateUserById(userId, {
+      email_confirm: true,
+      password: params.password,
+      user_metadata: { display_name: params.displayName },
+    })
+  );
   if (updated.error) {
     throw updated.error;
   }
@@ -230,6 +274,7 @@ async function ensureUser(
     {
       user_id: userId,
       display_name: params.displayName,
+      username: `pw${userId.replace(/-/g, "").slice(0, 12)}`,
       city: params.city,
       country: params.country,
       avatar_url: params.avatarUrl,
@@ -530,18 +575,22 @@ async function getMessagesSeedRuntime(): Promise<MessagesSeedRuntime | { ready: 
         primaryStyle: "salsa",
       });
 
-      const requesterSignIn = await requesterClient.auth.signInWithPassword({
-        email: context.primaryEmail,
-        password: context.password,
-      });
+      const requesterSignIn = await withAuthRetries(() =>
+        requesterClient.auth.signInWithPassword({
+          email: context.primaryEmail,
+          password: context.password,
+        })
+      );
       if (requesterSignIn.error || !requesterSignIn.data.session) {
         throw requesterSignIn.error ?? new Error("Failed to sign in requester for e2e seed.");
       }
 
-      const targetSignIn = await targetClient.auth.signInWithPassword({
-        email: context.secondaryEmail,
-        password: context.password,
-      });
+      const targetSignIn = await withAuthRetries(() =>
+        targetClient.auth.signInWithPassword({
+          email: context.secondaryEmail,
+          password: context.password,
+        })
+      );
       if (targetSignIn.error || !targetSignIn.data.session) {
         throw targetSignIn.error ?? new Error("Failed to sign in target for e2e seed.");
       }

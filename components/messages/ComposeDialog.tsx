@@ -65,7 +65,7 @@ export default function ComposeDialog({
           <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             {filteredComposeConnections.length === 0 ? (
               <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-400 space-y-3">
-                <p>No connections found.</p>
+                <p>No connections or trips found.</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <Link
                     href="/connections"
@@ -114,6 +114,31 @@ export default function ComposeDialog({
                     ))}
                   </div>
                 ) : null}
+
+                {filteredComposeTrips.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200/80">Trips</p>
+                    {filteredComposeTrips.map((target) => (
+                      <button
+                        key={target.tripId}
+                        type="button"
+                        onClick={() => onSelectTrip(target)}
+                        className="flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3 text-left hover:border-fuchsia-300/25 hover:bg-white/[0.04] transition-colors"
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fuchsia-400/10 text-fuchsia-200">
+                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                            travel
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-white">{target.displayName}</p>
+                          <p className="truncate text-xs text-slate-400">{target.subtitle}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
               </div>
             )}
           </div>
