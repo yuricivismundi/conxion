@@ -28,9 +28,9 @@ export default function BlockDialog({
   const firstName = displayName.split(" ")[0] ?? displayName;
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-md overflow-hidden rounded-[28px] border border-white/10 bg-[#0f1214] shadow-[0_32px_80px_rgba(0,0,0,0.6)]">
-        <div className="h-px w-full bg-gradient-to-r from-rose-500/70 via-[#0df2f2]/20 to-rose-500/40" />
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md overflow-hidden rounded-[28px] border border-white/10 bg-[#0c0e10] shadow-[0_0_0_1px_rgba(219,39,119,0.15),0_32px_80px_rgba(0,0,0,0.7),0_0_60px_rgba(219,39,119,0.08)]">
+        <div className="h-px w-full bg-gradient-to-r from-[#f20db1]/80 via-[#0df2f2]/30 to-[#f20db1]/50" />
 
         <div className="p-6">
           <div className="flex items-start justify-between gap-3">
@@ -39,20 +39,20 @@ export default function BlockDialog({
               type="button"
               onClick={onClose}
               disabled={blockBusy}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 text-white/55 transition hover:bg-white/12 hover:text-white disabled:opacity-40"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/50 transition hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-40"
               aria-label="Close"
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
             </button>
           </div>
 
           <p className="mt-4 text-sm text-slate-300">
             <span className="font-semibold text-white">{firstName}</span> will no longer be able to:
           </p>
-          <ul className="mt-3 space-y-2">
+          <ul className="mt-3 space-y-2.5">
             {BLOCK_CONSEQUENCES.map((item) => (
-              <li key={item} className="flex items-center gap-2.5 text-sm text-slate-300">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400/80" />
+              <li key={item} className="flex items-center gap-3 text-sm text-slate-300">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#f20db1]/80" />
                 {item}
               </li>
             ))}
@@ -63,7 +63,7 @@ export default function BlockDialog({
               type="button"
               disabled={blockBusy}
               onClick={onClose}
-              className="px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-white disabled:opacity-50"
+              className="px-4 py-2 text-sm font-semibold text-slate-400 transition hover:text-white disabled:opacity-50"
             >
               Cancel
             </button>
@@ -71,7 +71,7 @@ export default function BlockDialog({
               type="button"
               disabled={blockBusy}
               onClick={onConfirm}
-              className="rounded-2xl bg-rose-500 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-rose-400 disabled:opacity-60"
+              className="rounded-2xl bg-[linear-gradient(135deg,#f20db1,#db2777)] px-6 py-2.5 text-sm font-bold text-white shadow-[0_4px_20px_rgba(242,13,177,0.35)] transition hover:shadow-[0_4px_24px_rgba(242,13,177,0.5)] hover:brightness-110 disabled:opacity-60"
             >
               {blockBusy ? "Blocking…" : "Confirm"}
             </button>
