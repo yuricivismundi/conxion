@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
+import BlockDialog from "@/components/messages/BlockDialog";
 import { type ReferenceContextTag } from "@/lib/activities/types";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import {
@@ -514,25 +515,15 @@ export default function ContactSidebarPanel({
           )}
           {onBlock && (
             <>
-              {blockConfirm ? (
-                <div className="rounded-lg bg-rose-500/10 px-3 py-2.5">
-                  <p className="mb-2 text-[12px] text-rose-200">Block {contact.displayName}? They won&apos;t be able to message you.</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { onBlock(); setBlockConfirm(false); }}
-                      className="flex-1 rounded-lg bg-rose-500/80 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-rose-500"
-                    >
-                      Confirm Block
-                    </button>
-                    <button
-                      onClick={() => setBlockConfirm(false)}
-                      className="flex-1 rounded-lg bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold text-white/60 transition hover:bg-white/10"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
+              {blockConfirm && (
+                <BlockDialog
+                  blockBusy={false}
+                  displayName={contact.displayName}
+                  onClose={() => setBlockConfirm(false)}
+                  onConfirm={() => { onBlock(); setBlockConfirm(false); }}
+                />
+              )}
+              {(
                 <button
                   onClick={() => setBlockConfirm(true)}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-rose-400 transition hover:bg-white/[0.05]"
