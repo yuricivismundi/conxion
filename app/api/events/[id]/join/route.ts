@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import { buildRateLimitKey, consumeRateLimit } from "@/lib/security/rate-limit";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import {
   ensureLinkedMemberPairThread,
   mergeLinkedMemberContextMetadata,
@@ -50,6 +52,7 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const { id: eventId } = await context.params;
     if (!eventId) {
@@ -77,6 +80,16 @@ export async function POST(
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    // Rate limit: 30 join/leave actions per 5 minutes per user
+    const rlKey = buildRateLimitKey(req, "event:join", authData.user.id);
+    const rl = consumeRateLimit({ key: rlKey, limit: 30, windowMs: 5 * 60 * 1000 });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Too many requests. Try again in ${rl.retryAfterSec}s.` },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } }
+      );
     }
 
     const eventRes = await service

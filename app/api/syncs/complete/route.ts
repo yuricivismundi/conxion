@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { createClient } from "@supabase/supabase-js";
 
 function getSupabaseUserClient(token: string) {
@@ -27,6 +28,7 @@ function mapSyncCompleteErrorStatus(message: string) {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const body = await req.json().catch(() => null);
     const connectionId = typeof body?.connectionId === "string" ? body.connectionId : "";

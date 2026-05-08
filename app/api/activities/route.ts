@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
@@ -271,6 +272,7 @@ async function resolveConnectionThreadId(params: {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const token = getBearerToken(req);
     if (!token) {

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { normalizeEventAccessType, normalizeEventChatMode } from "@/lib/events/access";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
+import { buildRateLimitKey, consumeRateLimit } from "@/lib/security/rate-limit";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 
 type EventLinkInput = {
   label?: unknown;
@@ -31,6 +33,15 @@ function sanitizeStyles(value: unknown) {
     .slice(0, 12);
 }
 
+function isSafeUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeLinks(value: unknown) {
   if (!Array.isArray(value)) return [] as Array<{ label: string; url: string; type: string }>;
 
@@ -38,7 +49,7 @@ function sanitizeLinks(value: unknown) {
     .map((raw) => {
       const row = (raw ?? {}) as EventLinkInput;
       const url = typeof row.url === "string" ? row.url.trim() : "";
-      if (!url) return null;
+      if (!url || !isSafeUrl(url)) return null;
       return {
         label: typeof row.label === "string" && row.label.trim() ? row.label.trim() : "Link",
         url,
@@ -119,6 +130,7 @@ function formatCreateErrorMessage(message: string) {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     const title = typeof body?.title === "string" ? body.title.trim() : "";
@@ -163,9 +175,9 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (!isPrivateGroup && (!city || !country || !startsAt || !endsAt)) {
+    if (!isPrivateGroup && !startsAt) {
       return NextResponse.json(
-        { ok: false, error: "city, country, startsAt, and endsAt are required for events." },
+        { ok: false, error: "startsAt is required for events." },
         { status: 400 }
       );
     }
@@ -197,6 +209,16 @@ export async function POST(req: Request) {
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    // Rate limit: 10 event/group creates per hour per user
+    const rlKey = buildRateLimitKey(req, "event:create", authData.user.id);
+    const rl = consumeRateLimit({ key: rlKey, limit: 10, windowMs: 60 * 60 * 1000 });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Too many requests. Try again in ${rl.retryAfterSec}s.` },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } }
+      );
     }
 
     if (!isPrivateGroup && occurrences.length > 1 && recurrenceKind !== "none") {
@@ -258,7 +280,7 @@ export async function POST(req: Request) {
       p_venue_name: venueName || null,
       p_venue_address: venueAddress || null,
       p_starts_at: startsAt,
-      p_ends_at: endsAt,
+      p_ends_at: endsAt || null,
       p_capacity: capacity,
       p_cover_url: coverUrl || null,
       p_links: links,
@@ -274,7 +296,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: formatCreateErrorMessage(message) }, { status: mapCreateErrorStatus(message) });
     }
 
-    return NextResponse.json({ ok: true, event_id: data ?? null });
+    const newEventId = data ?? null;
+
+    if (newEventId) {
+      try {
+        const { getSupabaseServiceClient } = await import("@/lib/supabase/service-role");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const service = getSupabaseServiceClient() as any;
+        await service.rpc("cx_ensure_event_thread", {
+          p_event_id: newEventId,
+          p_actor: authData.user.id,
+          p_requester: null,
+        });
+      } catch {
+        // Best effort only.
+      }
+    }
+
+    return NextResponse.json({ ok: true, event_id: newEventId });
   } catch (e: unknown) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Server error" },

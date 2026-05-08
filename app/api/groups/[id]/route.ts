@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
@@ -17,6 +18,7 @@ function getUserClient(token: string) {
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const { id: groupId } = await params;
     const token = getBearerToken(req);
@@ -80,6 +82,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const { id: groupId } = await params;
     const token = getBearerToken(req);

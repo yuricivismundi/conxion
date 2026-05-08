@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { normalizeEventAccessType, normalizeEventChatMode } from "@/lib/events/access";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 
 type EventLinkInput = {
   label?: unknown;
@@ -21,6 +22,15 @@ function privateGroupWindow() {
   return { startsAt: starts.toISOString(), endsAt: ends.toISOString() };
 }
 
+function isSafeUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeLinks(value: unknown) {
   if (!Array.isArray(value)) return [] as Array<{ label: string; url: string; type: string }>;
 
@@ -28,7 +38,7 @@ function sanitizeLinks(value: unknown) {
     .map((raw) => {
       const row = (raw ?? {}) as EventLinkInput;
       const url = typeof row.url === "string" ? row.url.trim() : "";
-      if (!url) return null;
+      if (!url || !isSafeUrl(url)) return null;
       return {
         label: typeof row.label === "string" && row.label.trim() ? row.label.trim() : "Link",
         url,
@@ -104,6 +114,7 @@ export async function DELETE(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const { id: eventId } = await context.params;
     if (!eventId) return NextResponse.json({ ok: false, error: "Missing event id." }, { status: 400 });
@@ -137,6 +148,7 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const { id: eventId } = await context.params;
     if (!eventId) {
@@ -184,9 +196,9 @@ export async function PATCH(
     if (title.length > MAX_TITLE_LENGTH) {
       return NextResponse.json({ ok: false, error: `title_too_long: maximum ${MAX_TITLE_LENGTH} characters.` }, { status: 400 });
     }
-    if (!isPrivateGroup && (!city || !country || !startsAt || !endsAt)) {
+    if (!isPrivateGroup && !startsAt) {
       return NextResponse.json(
-        { ok: false, error: "title, city, country, startsAt, and endsAt are required." },
+        { ok: false, error: "startsAt is required." },
         { status: 400 }
       );
     }
@@ -282,7 +294,7 @@ export async function PATCH(
       venue_name: typeof venueName === "string" && venueName.trim() ? venueName.trim() : null,
       venue_address: typeof venueAddress === "string" && venueAddress.trim() ? venueAddress.trim() : null,
       starts_at: startsAt,
-      ends_at: endsAt,
+      ends_at: endsAt || null,
       capacity: eventAccessType === "private_group" ? null : capacity,
       cover_url: nextCoverUrl,
       cover_status: nextCoverUrl === null ? "approved" : coverChanged ? "pending" : currentEvent.cover_status ?? "pending",

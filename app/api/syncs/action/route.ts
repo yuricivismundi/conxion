@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { sendAppEmailBestEffort } from "@/lib/email/app-events";
@@ -424,6 +425,7 @@ function toSyncType(value: unknown): "training" | "social_dancing" | "workshop" 
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const body = await req.json().catch(() => null);
     const actionRaw = typeof body?.action === "string" ? body.action : "";
