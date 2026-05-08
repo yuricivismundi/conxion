@@ -278,19 +278,17 @@ export default async function TeacherProfilePage({
 
                 {/* Verified badge overlay */}
                 {isVerified && (
-                  <div className="absolute -bottom-4 -right-4 bg-zinc-900/90 backdrop-blur-xl px-4 py-3 rounded-xl flex items-center gap-3 border border-white/10 z-20">
-                    <div className="w-10 h-10 rounded-full bg-[#c1fffe]/10 flex items-center justify-center">
-                      <span
-                        className="material-symbols-outlined text-[#c1fffe]"
-                        style={{ fontVariationSettings: "'FILL' 1" }}
-                      >
-                        verified
-                      </span>
-                    </div>
-                    <div>
-                      <p className="font-bold text-white text-xs uppercase tracking-[0.15em]">VERIFIED</p>
-                      <p className="text-zinc-400 text-[10px]">Elite Tier Teacher</p>
-                    </div>
+                  <div className="absolute -bottom-4 -right-4 z-20 flex items-center gap-2.5 rounded-2xl border border-white/10 bg-zinc-900/90 px-4 py-2.5 backdrop-blur-xl"
+                    style={{ boxShadow: "0 0 18px rgba(0,245,255,0.18), 0 0 6px rgba(255,0,255,0.12)" }}>
+                    <span
+                      className="material-symbols-outlined text-[22px]"
+                      style={{ fontVariationSettings: "'FILL' 1", background: "linear-gradient(135deg,#00F5FF,#FF00FF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
+                    >
+                      verified
+                    </span>
+                    <p className="bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] bg-clip-text text-xs font-black uppercase tracking-[0.18em] text-transparent">
+                      Verified
+                    </p>
                   </div>
                 )}
               </div>
