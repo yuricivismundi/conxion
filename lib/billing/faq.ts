@@ -34,12 +34,12 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
   {
     id: "connection-requests",
     question: "How many connection requests can I send?",
-    answer: "Starter includes 10 connection requests per month, with up to 30 in your first month after joining. Plus includes 30 per month.",
+    answer: "Starter includes 10 connection requests per month. Plus includes 60 per month.",
   },
   {
     id: "trip-event-limits",
     question: "How many trips and events can I create?",
-    answer: "Starter and Verified include 1 trip per month and 2 public/request events or private groups per month. Plus includes 5 trips and 5 events/private groups per month.",
+    answer: "Starter and Verified include 1 trip per month, 2 public/request events per month, and up to 5 private groups total. Plus includes 5 trips per month, 5 events per month, and up to 10 private groups total.",
   },
   {
     id: "leave-reference",

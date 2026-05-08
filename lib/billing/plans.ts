@@ -29,7 +29,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         items: [
           "Discover social dancers, teachers, organizers, DJs, and artists",
           "10 connection requests per month",
-          "10 active chat threads per month",
+          "Up to 10 active chat threads",
         ],
       },
       {
@@ -46,7 +46,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Events & Activities",
         items: [
           "Create up to 2 events per month",
-          "Up to 3 private groups (max 50 messages/day per user, 200 messages/day per group)",
+          "Up to 5 private groups total",
           "5 activity requests per month",
         ],
       },
@@ -70,7 +70,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
     featureGroups: [
       {
         title: "Trust",
-        items: ["Verified badge", "One-time payment"],
+        items: ["Verified badge", "One-time payment — stacks with Starter and Plus"],
       },
       {
         title: "Travelling",
@@ -103,8 +103,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Discovery",
         items: [
           "60 connection requests per month",
-          "30 active chat threads per month",
-          "Appear before free users",
+          "Up to 30 active chat threads",
+          "Appear before free users in Discover",
         ],
       },
       {
@@ -122,7 +122,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Events & Activities",
         items: [
           "Create up to 5 events per month",
-          "Up to 10 private groups (max 100 messages/day per user, 500 messages/day per group)",
+          "Up to 10 private groups total",
           "15 activity requests per month",
           "Your events appear before free users (Ideal for Organisers)",
         ],
@@ -131,7 +131,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Profile",
         items: [
           "2 showcase videos",
-          "3 additional photos on your profile",
+          "3 profile photos (in addition to your avatar)",
         ],
       },
       {

@@ -10,7 +10,7 @@ export type PlanLimits = {
   tripRequestsPerMonth: number | null;
   tripsPerMonth: number | null;
   eventsPerMonth: number | null;
-  privateGroupsPerMonth: number | null;
+  privateGroupsTotal: number | null;
   profileVideos: number | null;
   profilePhotos: number | null;
 };
@@ -26,7 +26,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     tripRequestsPerMonth: 5,
     tripsPerMonth: 1,
     eventsPerMonth: 2,
-    privateGroupsPerMonth: 5,
+    privateGroupsTotal: 5,
     profileVideos: 2,
     profilePhotos: 0,
   },
@@ -40,7 +40,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     tripRequestsPerMonth: 5,
     tripsPerMonth: 1,
     eventsPerMonth: 2,
-    privateGroupsPerMonth: 5,
+    privateGroupsTotal: 5,
     profileVideos: 2,
     profilePhotos: 0,
   },
@@ -54,7 +54,7 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     tripRequestsPerMonth: 10,
     tripsPerMonth: 5,
     eventsPerMonth: 5,
-    privateGroupsPerMonth: 25,
+    privateGroupsTotal: 10,
     profileVideos: 2,
     profilePhotos: 3,
   },
