@@ -647,7 +647,7 @@ function CreateEventForm() {
     <div className="min-h-screen bg-[#05060a] text-slate-100">
       <Nav />
 
-      <main className="mx-auto w-full max-w-[980px] px-4 pb-14 pt-7 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[980px] px-4 pb-28 pt-7 sm:pb-14 sm:px-6 lg:px-8">
         <header className="mb-8 text-center">
           <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">{formTitle}</h1>
         </header>
@@ -1313,7 +1313,7 @@ function CreateEventForm() {
       {/* FB-style Find a Location modal */}
       {locationModalOpen ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121414] shadow-[0_30px_60px_rgba(0,0,0,0.5)]">
+          <div className="flex w-[calc(100vw-2rem)] max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121414] shadow-[0_30px_60px_rgba(0,0,0,0.5)]">
             {/* Brand gradient top bar */}
             <div className="h-px w-full bg-gradient-to-r from-[#0df2f2]/70 via-[#0df2f2]/20 to-[#f20db1]/70" />
 

@@ -231,7 +231,7 @@ export default function ReferenceReportPage() {
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white">
       <Nav />
-      <main className="mx-auto flex w-full max-w-[1160px] flex-col gap-6 px-4 py-6 sm:gap-8 sm:py-8 md:px-8">
+      <main className="mx-auto flex w-full max-w-[1160px] flex-col gap-6 px-4 pb-28 pt-6 sm:gap-8 sm:pb-8 sm:pt-8 md:px-8">
         <div className="flex items-center gap-2 text-sm text-slate-400">
           <Link href="/network" className="hover:text-[#00F5FF]">
             References

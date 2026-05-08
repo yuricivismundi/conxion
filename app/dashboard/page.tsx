@@ -2031,7 +2031,7 @@ function DashboardPageContent({
   return (
     <div className={showOnlyGrowth ? "text-slate-100" : "min-h-screen bg-[#06070b] text-slate-100"}>
       {!showOnlyGrowth ? <Nav /> : null}
-      <main className={showOnlyGrowth ? "w-full" : "mx-auto w-full max-w-[1380px] px-4 pb-16 pt-6 sm:px-6 lg:px-8"}>
+      <main className={showOnlyGrowth ? "w-full" : "mx-auto w-full max-w-[1380px] px-4 pb-28 pt-6 sm:pb-16 sm:px-6 lg:px-8"}>
         {error ? (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
             <p className="min-w-0">{error}</p>

@@ -1100,11 +1100,11 @@ function EventsExplorePageContent() {
       <article
         key={event.id}
         className="relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
-        style={{ height: "320px" }}
+        style={{ height: "336px" }}
         onClick={() => router.push(`/events/${event.id}`)}
       >
         <Link href={`/events/${event.id}`} className="block">
-          <div className="relative h-[108px]">
+          <div className="relative h-[120px]">
             <EventHeroImage
               key={`${hero ?? ""}|${fallbackHero ?? ""}`}
               primarySrc={hero}
@@ -1211,7 +1211,7 @@ function EventsExplorePageContent() {
                 }}
                 disabled={responseBusyEventId === event.id}
                 className={cx(
-                  "flex h-[33px] w-full items-center justify-center gap-1 rounded-xl border text-[12px] font-semibold transition",
+                  "flex h-[42px] w-full items-center justify-center gap-1 rounded-xl border text-[12px] font-semibold transition",
                   responseButtonTone(currentResponseState),
                   responseBusyEventId === event.id && "cursor-not-allowed opacity-65"
                 )}
@@ -1346,7 +1346,7 @@ function EventsExplorePageContent() {
       <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       <Nav />
 
-      <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8" onClick={closeMenus}>
+      <main className="mx-auto w-full max-w-[1320px] px-4 pb-28 pt-7 sm:pb-12 sm:px-6 lg:px-8" onClick={closeMenus}>
         {!isAuthenticated ? (
           <section className="mb-5 overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_42%),linear-gradient(180deg,rgba(18,24,32,0.96),rgba(10,10,10,0.98))] p-5 sm:p-6">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -1941,7 +1941,7 @@ export default function EventsExplorePage() {
       fallback={
         <div className="min-h-screen bg-[#0A0A0A] text-white">
           <Nav />
-          <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
+          <main className="mx-auto w-full max-w-[1320px] px-4 pb-28 pt-7 sm:pb-12 sm:px-6 lg:px-8">
             <div className="space-y-4">
               <section className="border-b border-white/6 pb-4">
                 <div className="no-scrollbar mx-auto flex w-full max-w-[560px] items-center gap-3 overflow-x-auto pb-1 sm:justify-center sm:gap-8">

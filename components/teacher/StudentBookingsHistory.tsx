@@ -193,7 +193,7 @@ export default function StudentBookingsHistory() {
               type="button"
               onClick={() => void handleCancel(booking.id)}
               disabled={cancellingId === booking.id}
-              className="shrink-0 rounded-xl border border-rose-400/25 bg-rose-400/[0.06] px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-400/12 disabled:opacity-50"
+              className="shrink-0 rounded-xl border border-rose-400/25 bg-rose-400/[0.06] px-4 py-2.5 min-h-[44px] text-sm font-semibold text-rose-300 hover:bg-rose-400/12 disabled:opacity-50"
             >
               {cancellingId === booking.id ? "Cancelling…" : "Cancel"}
             </button>

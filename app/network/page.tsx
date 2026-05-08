@@ -2685,7 +2685,7 @@ function NetworkPageContent() {
             {networkSection === "connections" ? (
               <>
                 {loading ? (
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                     {Array.from({ length: 16 }).map((_, i) => (
                       <div key={`net-sk-conn-${i}`} className="flex animate-pulse items-center gap-3 py-2.5">
                         <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
@@ -2702,7 +2702,7 @@ function NetworkPageContent() {
                     No connections found for this filter.
                   </div>
                 ) : (
-                  <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                  <div className="animate-fade-in-grid grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                     {paginatedConnections.map((item) => {
                       const profile = item.profile;
                       const cityLabel = [profile?.city, profile?.country].filter(Boolean).join(", ") || "Location not set";
@@ -2778,7 +2778,7 @@ function NetworkPageContent() {
                 <div className="space-y-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Following · {allFollowingCards.length}</p>
                   {loading ? (
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                       {Array.from({ length: 8 }).map((_, i) => (
                         <div key={i} className="flex animate-pulse items-center gap-2 py-2.5">
                           <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
@@ -2795,7 +2795,7 @@ function NetworkPageContent() {
                     </p>
                   ) : (
                     <>
-                      <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                      <div className="animate-fade-in-grid grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                         {pagedFollowing.map((card) => {
                           const cityLabel = [card.city, card.country].filter(Boolean).join(", ") || "Location not set";
                           const roleLabel = card.roles.slice(0, 2).join(" • ") || "Dancer";
@@ -2845,7 +2845,7 @@ function NetworkPageContent() {
                 <div className="space-y-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-white/40">Followers · {followersCount}</p>
                   {loading ? (
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                       {Array.from({ length: 8 }).map((_, i) => (
                         <div key={i} className="flex animate-pulse items-center gap-2 py-2.5">
                           <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
@@ -2860,7 +2860,7 @@ function NetworkPageContent() {
                     <p className="rounded-xl border border-dashed border-white/10 py-6 text-center text-sm text-white/30">No followers yet.</p>
                   ) : (
                     <>
-                      <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                      <div className="animate-fade-in-grid grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                         {pagedFollowers.map((fp) => (
                           <Link key={fp.userId} href={`/profile/${fp.userId}`} className="flex items-center gap-2 py-2.5">
                             <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-cover bg-center" style={{ backgroundImage: fp.avatarUrl ? `url(${fp.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
@@ -2884,7 +2884,7 @@ function NetworkPageContent() {
               <>
                 <article className="space-y-6">
                   {loading ? (
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                       {Array.from({ length: 16 }).map((_, i) => (
                         <div key={`net-sk-contact-${i}`} className="flex animate-pulse items-center gap-3 py-2.5">
                           <div className="h-[60px] w-[60px] shrink-0 rounded-2xl bg-white/[0.06]" />
@@ -2915,7 +2915,7 @@ function NetworkPageContent() {
                       No contacts match the current filters.
                     </div>
                   ) : (
-                    <div className="animate-fade-in-grid grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                    <div className="animate-fade-in-grid grid grid-cols-2 gap-x-3 gap-y-2 sm:gap-x-6 sm:gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                       {paginatedContactCards.map((card) => {
                         const cityLabel = [card.city, card.country].filter(Boolean).join(", ") || "Location not set";
                         const roleLabel = card.roles.slice(0, 2).join(" • ") || (card.contactType === "external" ? "External contact" : "Dancer");
@@ -3219,7 +3219,7 @@ function NetworkPageFallback() {
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
       <Nav />
-      <main className="mx-auto w-full max-w-[1320px] px-4 pb-16 pt-7 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[1320px] px-4 pb-28 pt-7 sm:pb-16 sm:px-6 lg:px-8">
         <div className="space-y-5">
           <section className="border-b border-white/6 pb-3">
             <div className="no-scrollbar mx-auto flex w-full max-w-[860px] gap-2 overflow-x-auto pb-1 sm:justify-center">

@@ -358,7 +358,7 @@ function GroupDetail() {
         <span className="truncate text-sm font-semibold text-white/60">Groups</span>
       </div>
 
-      <main className="pb-16">
+      <main className="pb-28 md:pb-16">
 
         {/* ── Hero card ── */}
         <section className="mx-auto w-full max-w-[1220px] px-4 pt-3 sm:px-6 sm:pt-5 lg:px-8">

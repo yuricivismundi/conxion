@@ -161,7 +161,7 @@ export default function NotificationsPage() {
     <div className="min-h-screen bg-[#06070b] text-slate-100">
       <PullToRefreshIndicator pullY={pullY} refreshing={ptr} />
       <Nav />
-      <main className="mx-auto w-full max-w-[1280px] px-4 pb-16 pt-7 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[1280px] px-4 pb-28 pt-7 sm:pb-16 sm:px-6 lg:px-8">
         <header className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-3xl font-black text-white">Notifications</h1>

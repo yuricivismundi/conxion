@@ -8028,7 +8028,7 @@ function MessagesPageContent() {
                   <button
                     aria-label="New Message"
                     onClick={() => setComposeOpen(true)}
-                    className="flex size-10 items-center justify-center rounded-full bg-[#0df2f2]/10 text-[#0df2f2] transition-colors hover:bg-[#0df2f2]/20"
+                    className="flex size-11 items-center justify-center rounded-full bg-[#0df2f2]/10 text-[#0df2f2] transition-colors hover:bg-[#0df2f2]/20"
                   >
                     <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
                       edit_square
@@ -8510,10 +8510,10 @@ function MessagesPageContent() {
                         setActiveThreadToken(null);
                         router.replace(buildInboxUrl({ threadToken: null }));
                       }}
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/20 text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100 md:hidden"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/20 text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100 md:hidden"
                       aria-label="Back to inbox"
                     >
-                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
                         arrow_back
                       </span>
                     </button>
@@ -9815,9 +9815,9 @@ function MessagesPageContent() {
                           type="button"
                           onClick={() => void sendActiveMessage()}
                           disabled={sending || composerDisabled || threadBodyLen === 0}
-                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0df2f2] text-[#052328] transition-colors hover:bg-[#0be0e0] disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0df2f2] text-[#052328] transition-colors hover:bg-[#0be0e0] disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
                             send
                           </span>
                         </button>

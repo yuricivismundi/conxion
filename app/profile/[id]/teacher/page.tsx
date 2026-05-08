@@ -245,10 +245,10 @@ export default async function TeacherProfilePage({
     <div className="min-h-screen bg-[#0e0e0e] text-white overflow-x-hidden">
       <Nav />
 
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 pb-24">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 pb-32 md:pb-24">
 
         {/* ── Hero ────────────────────────────────────────────────────────── */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-12 mb-24">
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
           {/* Left: photo */}
           <div className="lg:col-span-5">
             <div className="relative">
@@ -264,11 +264,11 @@ export default async function TeacherProfilePage({
                       alt={displayName}
                       width={600}
                       height={520}
-                      className="w-full h-[520px] object-cover"
+                      className="w-full h-[340px] sm:h-[440px] lg:h-[520px] object-cover"
                       priority
                     />
                   ) : (
-                    <div className="w-full h-[520px] bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center">
+                    <div className="w-full h-[340px] sm:h-[440px] lg:h-[520px] bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center">
                       <span className="text-8xl font-black text-zinc-600">
                         {displayName.charAt(0).toUpperCase()}
                       </span>
@@ -298,7 +298,7 @@ export default async function TeacherProfilePage({
           {/* Right: info */}
           <div className="lg:col-span-7 flex flex-col justify-center">
             {/* Name */}
-            <h1 className="font-black text-5xl sm:text-6xl lg:text-7xl tracking-tighter text-white mt-4 leading-none">
+            <h1 className="font-black text-4xl sm:text-6xl lg:text-7xl tracking-tighter text-white mt-3 lg:mt-4 leading-none">
               {displayName}
             </h1>
 
@@ -348,9 +348,9 @@ export default async function TeacherProfilePage({
         />
 
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
-        <section className="mb-24">
+        <section className="mb-12 sm:mb-24">
           <div className="mb-6">
-            <h2 className="font-black text-4xl tracking-tighter text-white">Session Availability</h2>
+            <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
           </div>
           <div className="rounded-[28px] overflow-hidden" style={{ background: "#242428" }}>
@@ -359,9 +359,9 @@ export default async function TeacherProfilePage({
         </section>
 
         {/* ── Weekly Classes ──────────────────────────────────────────────── */}
-        <section className="mb-24">
-          <div className="mb-12">
-            <h2 className="font-black text-4xl tracking-tighter text-white">Weekly Classes</h2>
+        <section className="mb-12 sm:mb-24">
+          <div className="mb-8 sm:mb-12">
+            <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Weekly Classes</h2>
             <p className="text-zinc-500 mt-3">Ongoing group classes open for enrollment.</p>
           </div>
           {regularClasses.length === 0 ? (
@@ -376,7 +376,7 @@ export default async function TeacherProfilePage({
                   key={cls.id}
                   className="bg-zinc-900/40 backdrop-blur-xl flex flex-col md:flex-row items-start md:items-center justify-between p-6 rounded-2xl group hover:bg-zinc-900/60 transition-colors border border-white/5"
                 >
-                  <div className="flex items-center gap-10">
+                  <div className="flex items-center gap-5 sm:gap-10">
                     <div className="text-center min-w-[64px]">
                       <p className="font-black text-2xl text-[#c1fffe]">
                         {cls.weekday != null ? WEEKDAY_SHORT[cls.weekday] : "–"}
@@ -416,10 +416,10 @@ export default async function TeacherProfilePage({
         </section>
 
         {/* ── Global Stage Presence (event teaching) ───────────────────────── */}
-        <section className="mb-24">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
+        <section className="mb-12 sm:mb-24">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16">
             <div className="lg:col-span-4">
-              <h2 className="font-black text-5xl tracking-tighter leading-none mb-6 text-white">
+              <h2 className="font-black text-4xl sm:text-5xl tracking-tighter leading-none mb-4 sm:mb-6 text-white">
                 Global<br />Stage<br />Presence
               </h2>
               <p className="text-zinc-500 leading-relaxed">

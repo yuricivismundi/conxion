@@ -64,26 +64,24 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-4 pt-6">
+      <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 pt-6">
         <button
           type="button"
           onClick={() => setBookingOpen(true)}
-          className="bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
+          className="bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
         >
           {bookingSuccessMsg ?? "Book Session"}
           <span className="material-symbols-outlined text-[18px]">event_available</span>
         </button>
 
-        {/* Request Info — gradient fill */}
         <button
           type="button"
           onClick={() => setRequestInfoOpen(true)}
-          className="bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
+          className="border border-white/20 bg-white/[0.04] text-white px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center justify-center gap-2 hover:bg-white/[0.08] transition-colors"
         >
           Request Info
           <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
         </button>
-
       </div>
 
       <RequestInfoModal

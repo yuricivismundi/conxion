@@ -607,7 +607,7 @@ export default function TripsPage({ onCanCreate, externalQuery, externalStatusFi
     <div className={embeddedInActivity ? "font-sans text-white" : "min-h-screen bg-[#0A0A0A] font-sans text-white"}>
       {embeddedInActivity ? null : <Nav />}
 
-      <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1180px] px-4 pb-16 pt-7 sm:px-6 lg:px-8"}>
+      <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1180px] px-4 pb-28 pt-7 sm:pb-16 sm:px-6 lg:px-8"}>
         {error ? (
           <div className="mb-4 rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
         ) : null}
@@ -799,7 +799,11 @@ export default function TripsPage({ onCanCreate, externalQuery, externalStatusFi
 
       {createOpen ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/78 px-0 py-0 backdrop-blur-md sm:items-center sm:px-4 sm:py-6">
-          <div className="relative flex max-h-[92dvh] w-full max-w-[620px] flex-col overflow-hidden rounded-t-[30px] border border-[#00F5FF]/16 bg-[#0e1417] text-white shadow-[0_28px_100px_rgba(0,0,0,0.55)] sm:rounded-[30px]">
+          <div className="relative flex max-h-[92dvh] w-full max-w-[620px] flex-col overflow-hidden rounded-t-[28px] border border-[#00F5FF]/16 bg-[#0e1417] text-white shadow-[0_28px_100px_rgba(0,0,0,0.55)] sm:rounded-[30px]">
+            {/* Drag handle for mobile bottom sheet */}
+            <div className="flex justify-center pt-3 pb-0 sm:hidden">
+              <div className="h-1 w-10 rounded-full bg-white/20" />
+            </div>
             <button
               type="button"
               onClick={() => {

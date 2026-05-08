@@ -424,7 +424,7 @@ export default function AccountSettingsPage() {
     return (
       <div className="min-h-screen bg-[#06070b] text-slate-100">
         <Nav />
-        <main className="mx-auto w-full max-w-[860px] px-4 pb-16 pt-6 sm:px-6">
+        <main className="mx-auto w-full max-w-[860px] px-4 pb-28 pt-6 sm:px-6 md:pb-16">
           <div className="space-y-5 animate-pulse">
             <div className="flex items-center gap-4">
               <div className="h-16 w-16 rounded-full bg-white/[0.05]" />
@@ -472,7 +472,7 @@ export default function AccountSettingsPage() {
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
       <Nav />
-      <main className="mx-auto w-full max-w-[860px] px-4 pb-20 pt-6 sm:px-6">
+      <main className="mx-auto w-full max-w-[860px] px-4 pb-28 pt-6 sm:px-6 md:pb-20">
         {error ? (
           <div className="mb-5 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
         ) : null}
@@ -499,12 +499,13 @@ export default function AccountSettingsPage() {
               <h1 className="truncate text-2xl font-black text-white">{me?.displayName ?? "Member"}</h1>
               <p className="text-xs text-white/40">{locationLabel}</p>
             </div>
-            <div className="hidden sm:flex flex-col gap-2 shrink-0">
-              <Link href={me ? `/profile/${me.userId}` : "/me/edit"} className="rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-white/70 hover:text-white transition-colors text-center">
+            <div className="flex flex-col gap-2 shrink-0">
+              <Link href={me ? `/profile/${me.userId}` : "/me/edit"} className="hidden sm:block rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-white/70 hover:text-white transition-colors text-center">
                 View profile
               </Link>
-              <button type="button" onClick={() => void handleLogOut()} disabled={loggingOut} className="rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-white/50 hover:text-white/80 transition-colors disabled:opacity-50">
-                {loggingOut ? "Logging out…" : "Log out"}
+              <button type="button" onClick={() => void handleLogOut()} disabled={loggingOut} className="rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/50 hover:text-white/80 transition-colors disabled:opacity-50 min-h-[44px] sm:min-h-0">
+                {loggingOut ? "…" : <span className="material-symbols-outlined sm:hidden text-[18px]">logout</span>}
+                <span className="hidden sm:inline">{loggingOut ? "Logging out…" : "Log out"}</span>
               </button>
             </div>
           </div>

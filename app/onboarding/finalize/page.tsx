@@ -400,7 +400,7 @@ export default function OnboardingFinalizePage() {
                     key={l}
                     type="button"
                     onClick={() => removeLang(l)}
-                    className="rounded-full bg-[#00F5FF] px-4 py-1.5 text-sm font-bold text-[#121212] hover:opacity-90"
+                    className="rounded-full bg-[#00F5FF] px-4 py-2 min-h-[44px] text-sm font-bold text-[#121212] hover:opacity-90"
                     title="Remove"
                   >
                     {l} <span className="ml-1">×</span>

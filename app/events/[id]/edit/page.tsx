@@ -530,7 +530,7 @@ export default function EditEventPage() {
     <div className="min-h-screen bg-[#05070c] text-slate-100">
       <Nav />
 
-      <main className="mx-auto w-full max-w-[640px] px-4 pb-14 pt-7 sm:px-6">
+      <main className="mx-auto w-full max-w-[640px] px-4 pb-28 pt-7 sm:pb-14 sm:px-6">
         <div className="mb-4 space-y-2">
           <DismissibleBanner message={error} tone="error" onDismiss={() => setError(null)} />
           <DismissibleBanner message={info} tone="info" onDismiss={() => setInfo(null)} />

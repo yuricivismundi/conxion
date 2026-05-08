@@ -288,7 +288,7 @@ export default function TeacherBookingFlow({
   function renderCalendarGrid() {
     if (loading) {
       return (
-        <div className="grid gap-3 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
               <div className="mb-4 h-4 w-24 animate-pulse rounded-full bg-white/[0.06]" />
@@ -533,7 +533,7 @@ export default function TeacherBookingFlow({
 
   if (variant === "inline") {
     return (
-      <div className="p-8 sm:p-10">
+      <div className="p-4 sm:p-8 lg:p-10">
 
         <div className="space-y-6">
           {renderStateBanners()}

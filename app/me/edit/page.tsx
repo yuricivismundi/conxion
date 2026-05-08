@@ -1567,7 +1567,7 @@ function EditMePage() {
     return (
       <div className="min-h-screen bg-[#05080f] text-slate-100">
         <Nav />
-        <div className="mx-auto max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1240px] px-4 pb-28 pt-8 sm:px-6 lg:px-8">
           <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
             <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-5 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
               <div className="mx-auto h-56 w-56 animate-pulse rounded-3xl bg-white/10 sm:h-64 sm:w-64" />

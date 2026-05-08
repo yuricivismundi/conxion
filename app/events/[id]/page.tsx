@@ -1204,7 +1204,7 @@ export default function EventDetailsPage() {
     return (
       <div className="min-h-screen bg-[#18191a] text-white">
         <Nav />
-        <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
+        <main className="mx-auto w-full max-w-[1320px] px-4 pb-28 pt-7 sm:pb-12 sm:px-6 lg:px-8">
           <div className="animate-pulse space-y-6">
             <div className="h-[310px] rounded-[24px] bg-white/[0.04] sm:h-[370px] lg:h-[420px]" />
             <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_360px]">
@@ -1255,7 +1255,7 @@ export default function EventDetailsPage() {
         <span className="truncate text-sm font-semibold text-white/60">Events</span>
       </div>
 
-      <main id="main-content" className="pb-12">
+      <main id="main-content" className="pb-28 md:pb-12">
         <section className="mx-auto w-full max-w-[1220px] px-4 pt-3 sm:px-6 sm:pt-5 lg:px-8">
           <div className="rounded-[20px] border border-white/8 bg-[#1b1d21] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
             {/* Cover — image centered, date badge absolute left-bottom */}
@@ -1318,9 +1318,9 @@ export default function EventDetailsPage() {
             ) : null}
 
             {/* Info section */}
-            <div className="px-5 py-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
+            <div className="px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="min-w-0">
                   <h1 className="text-[22px] font-bold leading-tight text-white sm:text-[26px]">
                     {event.title}
                   </h1>
@@ -1404,7 +1404,7 @@ export default function EventDetailsPage() {
                           }}
                           disabled={actionBusy}
                           className={cx(
-                            "inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                            "inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-semibold transition",
                             responseToneClass(currentResponseState),
                             actionBusy && "cursor-not-allowed opacity-60"
                           )}

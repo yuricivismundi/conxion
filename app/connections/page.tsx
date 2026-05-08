@@ -2935,7 +2935,7 @@ function ConnectionsPageContent() {
                         <span className="text-[10px] font-semibold text-white/70">{connectionsCount}</span>
                       </div>
                     ) : null}
-                    <div className="flex min-h-[196px] md:hidden">
+                    <div className="flex min-h-[210px] md:hidden">
                       <div className="relative w-[42%] shrink-0 border-r border-white/10">
                         <button
                           type="button"
@@ -3042,14 +3042,14 @@ function ConnectionsPageContent() {
                         <div className="mt-3 grid grid-cols-2 gap-2">
                           <Link
                             href={`/profile/${encodeURIComponent(m.id)}`}
-                            className="inline-flex min-h-[40px] items-center justify-center rounded-full border border-white/10 px-4 py-2 text-center text-[10px] font-semibold uppercase tracking-widest transition-colors hover:bg-white/5"
+                            className="inline-flex min-h-[44px] items-center justify-center rounded-full border border-white/10 px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-widest transition-colors hover:bg-white/5"
                             title="View profile"
                           >
                             View
                           </Link>
                           {discoverMode === "hosts" ? (
                             <button
-                              className="flex min-h-[40px] items-center justify-center whitespace-nowrap rounded-full px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#0A0A0A]"
+                              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-full px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#0A0A0A]"
                               style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
                               onClick={() => {
                                 requestHostingAccess({
@@ -3065,7 +3065,7 @@ function ConnectionsPageContent() {
                             </button>
                           ) : (
                             <button
-                              className="flex min-h-[40px] items-center justify-center gap-2 rounded-full px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
+                              className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-[11px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
                               style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
                               onClick={() => {
                                 openConnect({
@@ -3078,7 +3078,7 @@ function ConnectionsPageContent() {
                                 });
                               }}
                             >
-                              <span className="text-[12px] font-black leading-none">+</span>
+                              <span className="text-[13px] font-black leading-none">+</span>
                               Connect
                             </button>
                           )}
@@ -4666,7 +4666,7 @@ export default function ConnectionsPage() {
       fallback={
         <div className="min-h-screen bg-[#0A0A0A] text-white">
           <Nav />
-          <main className="mx-auto w-full max-w-[1320px] px-4 pb-10 pt-6 sm:px-6 sm:pt-8 lg:px-8">
+          <main className="mx-auto w-full max-w-[1320px] px-4 pb-28 pt-6 sm:pb-10 sm:px-6 sm:pt-8 lg:px-8">
             <section className="border-b border-white/6 pb-3 sm:pb-4">
               <div
                 className="mx-auto flex w-full max-w-none items-center gap-3 overflow-x-auto px-1 pb-1 sm:max-w-[560px] sm:justify-center sm:gap-8 sm:overflow-visible sm:px-0 sm:pb-0"

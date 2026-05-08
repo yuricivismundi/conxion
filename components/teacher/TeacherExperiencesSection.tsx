@@ -111,9 +111,9 @@ function ServicesMarquee({ blocks }: { blocks: TeacherInfoBlock[] }) {
   function onPointerUp() { isDragging.current = false; }
 
   return (
-    <section className="mb-24 overflow-hidden">
-      <div className="mb-8">
-        <h2 className="font-black text-4xl tracking-tighter leading-none text-white">Services</h2>
+    <section className="mb-12 sm:mb-24 overflow-hidden">
+      <div className="mb-6 sm:mb-8">
+        <h2 className="font-black text-3xl sm:text-4xl tracking-tighter leading-none text-white">Services</h2>
       </div>
       <div
         className="cursor-grab active:cursor-grabbing"
@@ -160,16 +160,16 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
     <>
       {/* ── Biography · Videos (tabbed) ─────────────────────────────────────── */}
       {showSection && (
-        <section className="mb-24">
+        <section className="mb-12 sm:mb-24">
           {/* Tab header row */}
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between mb-6 sm:mb-8">
             {/* Left: Biography tab */}
             <div className="flex items-center gap-4 flex-wrap">
               {showBioTab && (
                 <button
                   type="button"
                   onClick={() => setTab("about")}
-                  className={`min-h-[44px] font-black text-4xl tracking-tighter leading-none transition-colors ${
+                  className={`min-h-[44px] font-black text-2xl sm:text-4xl tracking-tighter leading-none transition-colors ${
                     tab === "about" ? "text-white" : "text-zinc-600 hover:text-zinc-400"
                   }`}
                 >
@@ -193,7 +193,7 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
               <button
                 type="button"
                 onClick={() => setTab("videos")}
-                className={`min-h-[44px] flex items-center gap-2 font-black text-4xl tracking-tighter leading-none transition-colors ${
+                className={`min-h-[44px] flex items-center gap-2 font-black text-2xl sm:text-4xl tracking-tighter leading-none transition-colors ${
                   tab === "videos" ? "text-white" : "text-zinc-600 hover:text-zinc-400"
                 }`}
               >

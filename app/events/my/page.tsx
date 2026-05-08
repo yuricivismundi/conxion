@@ -663,7 +663,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
     return (
       <div className={embeddedInActivity ? "text-white" : "min-h-screen bg-[#05070c] text-white"}>
         {embeddedInActivity ? null : <Nav />}
-        <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8"}>
+        <main className={embeddedInActivity ? "w-full" : "mx-auto w-full max-w-[1320px] px-4 pb-28 pt-7 sm:pb-12 sm:px-6 lg:px-8"}>
           <div className="animate-pulse space-y-5">
             <div className="h-20 rounded-[28px] bg-white/[0.04]" />
             <div className="h-28 rounded-[24px] bg-white/[0.04]" />

@@ -317,7 +317,7 @@ export default function Nav({ title }: NavProps) {
             <Link
               href={accountHref}
               className={cx(
-                "group relative flex min-h-10 items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors",
+                "group relative hidden sm:flex min-h-10 items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors",
                 myProfileActive ? "text-white" : "text-gray-500 hover:text-white"
               )}
             >
@@ -345,7 +345,7 @@ export default function Nav({ title }: NavProps) {
               >
                 <span className="material-symbols-outlined text-[22px] group-hover:text-[#22d3ee]">settings</span>
                 <span className="hidden sm:inline">{t("nav.settings")}</span>
-                <span className="material-symbols-outlined text-lg">expand_more</span>
+                <span className="material-symbols-outlined text-lg hidden sm:inline">expand_more</span>
               </button>
 
               {menuOpen ? (
@@ -412,12 +412,12 @@ export default function Nav({ title }: NavProps) {
                     key={`mobile-${tab.href}`}
                     href={tab.href}
                     className={cx(
-                      "relative flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-colors active:scale-95",
-                      active ? "bg-cyan-300/10 text-white" : "text-gray-400 hover:text-white"
+                      "relative flex min-h-[60px] flex-col items-center justify-center gap-[3px] rounded-2xl px-1 py-2 transition-colors active:scale-95",
+                      active ? "bg-cyan-300/12 text-white" : "text-gray-400 hover:text-white"
                     )}
                   >
-                    <span className={cx("material-symbols-outlined text-[21px]", active ? "text-[#22d3ee]" : "")}>{tab.icon}</span>
-                    <span className="max-w-full truncate text-[10px] leading-none">{tab.label}</span>
+                    <span className={cx("material-symbols-outlined text-[22px]", active ? "text-[#22d3ee]" : "")}>{tab.icon}</span>
+                    <span className={cx("max-w-full truncate text-[11px] leading-none font-medium", active ? "text-white" : "text-gray-400")}>{tab.label}</span>
                     {showMessagesBadge ? (
                       <span className="absolute right-1.5 top-1.5 rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-1.5 py-[1px] text-[9px] font-black text-black">
                         {unreadMessageThreads > 99 ? "99+" : unreadMessageThreads}

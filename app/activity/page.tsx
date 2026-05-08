@@ -219,7 +219,7 @@ function ActivityPageSkeleton() {
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
       <Nav />
-      <main className="flex flex-1 justify-center px-4 py-5 sm:px-6 md:py-6 lg:px-12 xl:px-20">
+      <main className="flex flex-1 justify-center px-4 pb-28 pt-5 sm:px-6 sm:pb-6 md:py-6 lg:px-12 xl:px-20">
         <div className="flex w-full max-w-[1200px] flex-col gap-5">
           <section className="border-b border-white/[0.07] pb-0">
             <div className="flex flex-col gap-5 pb-5 md:flex-row md:items-center md:justify-between">
@@ -311,7 +311,7 @@ function ActivityPageContent() {
     <div className="min-h-screen bg-[#06070b] text-slate-100">
       <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       <Nav />
-      <main className="flex flex-1 justify-center px-4 py-5 sm:px-6 md:py-6 lg:px-12 xl:px-20">
+      <main className="flex flex-1 justify-center px-4 pb-28 pt-5 sm:px-6 sm:pb-6 md:py-6 lg:px-12 xl:px-20">
         <div className="flex w-full max-w-[1200px] flex-col gap-5">
           <section className="border-b border-white/[0.07] pb-0">
             <div className="flex flex-col gap-5 pb-5 md:flex-row md:items-center md:justify-between">

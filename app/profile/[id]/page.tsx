@@ -652,7 +652,7 @@ function ProfilePageSkeleton() {
     <div className="min-h-screen bg-[#05070c] text-slate-100">
       <Nav />
 
-      <main className="mx-auto w-full max-w-[1280px] px-4 pb-16 pt-6 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[1280px] px-4 pb-28 pt-6 sm:pb-16 sm:px-6 lg:px-8">
         <section className="relative overflow-hidden rounded-[34px] bg-[#181818] shadow-[0_28px_80px_rgba(0,0,0,0.42)]">
           <div className="h-[96px] bg-[linear-gradient(98deg,#0b1017_0%,#101927_35%,#151f36_68%,#1a1431_100%)] sm:h-[128px]" />
 
@@ -2602,7 +2602,7 @@ function MemberProfilePage() {
         </div>
       )}
 
-      <main className={cx("mx-auto w-full max-w-[1280px] px-4 pt-3 sm:px-6 sm:pt-6 lg:px-8", !isSelf ? "pb-20" : "pb-16")}>
+      <main className={cx("mx-auto w-full max-w-[1280px] px-4 pt-3 sm:px-6 sm:pt-6 lg:px-8", !isSelf ? "pb-28 md:pb-20" : "pb-28 md:pb-16")}>
         {toasts.length ? (
           <div className="pointer-events-none fixed left-1/2 top-[74px] z-[95] flex w-[min(94vw,560px)] -translate-x-1/2 flex-col gap-2">
             {toasts.map((toast) => (
@@ -2729,29 +2729,29 @@ function MemberProfilePage() {
                       <button
                         type="button"
                         onClick={() => void shareProfile()}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
                         aria-label="Share profile"
                       >
-                        <span className="material-symbols-outlined text-[18px]">share</span>
+                        <span className="material-symbols-outlined text-[20px]">share</span>
                       </button>
                       <Link
                         href="/notifications"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
                         aria-label="Open notifications"
                       >
-                        <span className="material-symbols-outlined text-[18px]">notifications</span>
+                        <span className="material-symbols-outlined text-[20px]">notifications</span>
                       </Link>
                       <button
                         type="button"
                         onClick={() => setMobileSettingsOpen(true)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/20 bg-black/30 text-white/90 hover:bg-black/45"
                         aria-label="Open settings menu"
                       >
-                        <span className="material-symbols-outlined text-[18px]">settings</span>
+                        <span className="material-symbols-outlined text-[20px]">settings</span>
                       </button>
                       <Link
                         href="/me/edit"
-                        className="inline-flex min-h-10 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                        className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110"
                       >
                         Edit profile
                       </Link>
