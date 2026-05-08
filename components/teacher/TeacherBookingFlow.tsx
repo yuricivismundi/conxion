@@ -329,12 +329,12 @@ export default function TeacherBookingFlow({
                   Available
                 </span>
               ) : (
-                <span className="text-[9px] uppercase tracking-widest text-white/20">No slots</span>
+                <span className="text-[9px] uppercase tracking-widest text-white/40">No slots</span>
               )}
             </div>
             <div className="mb-1 grid grid-cols-7 gap-0.5 px-3 text-center">
               {["M", "T", "W", "T", "F", "S", "S"].map((label, i) => (
-                <span key={i} className="py-1 text-[9px] font-bold uppercase tracking-widest text-white/20">
+                <span key={i} className="py-1 text-[9px] font-bold uppercase tracking-widest text-white/50">
                   {label}
                 </span>
               ))}
@@ -356,7 +356,7 @@ export default function TeacherBookingFlow({
                         ? "scale-110 shadow-[0_0_12px_rgba(13,242,242,0.35)] text-[#040a0f]"
                         : cell.available
                           ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#0df2f2]/30 hover:bg-[#0df2f2]/[0.08] hover:text-[#0df2f2]"
-                          : "text-white/[0.18] cursor-default",
+                          : "text-white/40 cursor-default",
                     ].join(" ")}
                     style={
                       selectedDate === cell.date
@@ -491,8 +491,8 @@ export default function TeacherBookingFlow({
     return (
       <section className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">{labelPrefix}</label>
-          <span className="text-[10px] text-white/20">{Math.max(0, NOTE_LIMIT - note.length)}/{NOTE_LIMIT}</span>
+          <label className="text-[10px] font-bold uppercase tracking-widest text-white/60">{labelPrefix}</label>
+          <span className="text-[10px] text-white/40">{Math.max(0, NOTE_LIMIT - note.length)}/{NOTE_LIMIT}</span>
         </div>
         <textarea
           value={note}
@@ -544,11 +544,11 @@ export default function TeacherBookingFlow({
 
           <aside className="rounded-2xl border border-white/[0.07] p-5" style={{ background: "#181c20" }}>
             <div className="mb-4">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">Selected date</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Selected date</p>
               <h3 className="mt-2 text-2xl font-black text-white">
                 {selectedDate ? (availableDates.find((slot) => slot.date === selectedDate)?.dateLabel ?? selectedDate) : "Choose a date"}
               </h3>
-              <p className="mt-2 text-sm text-zinc-500">
+              <p className="mt-2 text-sm text-white/50">
                 {selectedDate ? "Pick a time slot and send the request from here." : "Use the calendar to explore available bookable dates."}
               </p>
             </div>
