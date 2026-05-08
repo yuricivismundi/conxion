@@ -534,9 +534,6 @@ export default function TeacherBookingFlow({
   if (variant === "inline") {
     return (
       <div className="p-8 sm:p-10">
-        <div className="mb-8">
-          <h2 className="font-black text-4xl tracking-tighter text-white">Book your class</h2>
-        </div>
 
         <div className="space-y-6">
           {renderStateBanners()}

@@ -348,8 +348,14 @@ export default async function TeacherProfilePage({
         />
 
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
-        <section className="mb-24 rounded-[28px] overflow-hidden" style={{ background: "linear-gradient(135deg,#0e0e1a 0%,#130d1f 40%,#0a1218 100%)" }}>
-          <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
+        <section className="mb-24">
+          <div className="mb-6">
+            <h2 className="font-black text-4xl tracking-tighter text-white">Session Availability</h2>
+            <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
+          </div>
+          <div className="rounded-[28px] overflow-hidden" style={{ background: "#242428" }}>
+            <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
+          </div>
         </section>
 
         {/* ── Weekly Classes ──────────────────────────────────────────────── */}
