@@ -2,6 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import ProfileCompletionNudge from "@/components/ProfileCompletionNudge";
+import { discoverVisitedKey } from "@/components/FirstStepsCard";
 import {
   getCachedCitiesOfCountry,
   getCachedCountriesAll,
@@ -250,7 +252,7 @@ const LEVEL_SHORT_LABEL: Record<Level, string> = {
   Improver: "Imp",
   Intermediate: "Int",
   Advanced: "Adv",
-  "Teacher/Competitor": "Pro",
+  "Teacher/Competitor": "Exp",
 };
 
 type Interest = ProfileInterest;
@@ -1428,6 +1430,9 @@ function ConnectionsPageContent() {
         }
         if (user) {
           meId = user.id;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(discoverVisitedKey(meId), "1");
+          }
           const { data: myProfile } = await supabase
             .from("profiles")
             .select("city,country,roles,languages,dance_skills,verified,verified_label")
@@ -2682,6 +2687,7 @@ function ConnectionsPageContent() {
       <Nav />
 
       <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8">
+        <ProfileCompletionNudge />
         {uiInfo ? (
           <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-[#00F5FF]/35 bg-[#00F5FF]/10 p-3 text-sm text-[#B8FBFF]">
             <span>{uiInfo}</span>

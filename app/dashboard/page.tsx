@@ -4,6 +4,9 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import ConfirmationDialog from "@/components/ConfirmationDialog";
+import FirstStepsCard from "@/components/FirstStepsCard";
+import StudentBookingsHistory from "@/components/teacher/StudentBookingsHistory";
 import Nav from "@/components/Nav";
 import Avatar from "@/components/Avatar";
 import { useDashboardEmbedMode } from "@/components/dashboard/DashboardEmbedMode";
@@ -795,6 +798,7 @@ function DashboardPageContent({
   const [moveForm, setMoveForm] = useState<MoveFormState>(EMPTY_MOVE_FORM);
   const [addingMove, setAddingMove] = useState(false);
   const [busyMoveId, setBusyMoveId] = useState<string | null>(null);
+  const [pendingLearnMove, setPendingLearnMove] = useState<{ move: DanceMoveUser; targetStatus: DanceMoveStatus; options?: { showUndo?: boolean; source?: "button" | "drag" | "undo" } } | null>(null);
   const [activeMoveId, setActiveMoveId] = useState<string | null>(null);
   const [moveDetailForm, setMoveDetailForm] = useState<MoveDetailFormState>(EMPTY_MOVE_DETAIL_FORM);
   const [movePracticeLogs, setMovePracticeLogs] = useState<DanceMovePracticeLog[]>([]);
@@ -1489,9 +1493,8 @@ function DashboardPageContent({
     if (targetStatus === "learned" && options?.source === "drag" && typeof window !== "undefined") {
       const alreadyConfirmed = window.localStorage.getItem(LEARNED_CONFIRM_KEY) === "1";
       if (!alreadyConfirmed) {
-        const ok = window.confirm("Mark this move as Learned?");
-        if (!ok) return;
-        window.localStorage.setItem(LEARNED_CONFIRM_KEY, "1");
+        setPendingLearnMove({ move, targetStatus, options });
+        return;
       }
     }
 
@@ -2143,6 +2146,9 @@ function DashboardPageContent({
               </div>
             </section>
             ) : null}
+
+            {!showOnlyGrowth ? <FirstStepsCard /> : null}
+            {!showOnlyGrowth ? <StudentBookingsSection /> : null}
 
             <section
               id="growth"
@@ -3834,7 +3840,33 @@ function DashboardPageContent({
           </div>
         )}
       </main>
+      <ConfirmationDialog
+        open={Boolean(pendingLearnMove)}
+        title="Mark as Learned?"
+        description="This move will move to your Learned list. You won't be reminded to practice it."
+        confirmLabel="Mark Learned"
+        onCancel={() => setPendingLearnMove(null)}
+        onConfirm={() => {
+          if (pendingLearnMove) {
+            window.localStorage.setItem(LEARNED_CONFIRM_KEY, "1");
+            void updateMoveStatus(pendingLearnMove.move, "learned", pendingLearnMove.options);
+          }
+          setPendingLearnMove(null);
+        }}
+      />
     </div>
+  );
+}
+
+function StudentBookingsSection() {
+  return (
+    <section className="rounded-3xl border border-white/[0.07] bg-white/[0.02] p-5 sm:p-6">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="material-symbols-outlined text-[18px] text-white/40">event_available</span>
+        <h2 className="text-base font-bold text-white/80">My Booking Requests</h2>
+      </div>
+      <StudentBookingsHistory />
+    </section>
   );
 }
 
