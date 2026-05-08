@@ -7387,6 +7387,20 @@ function MessagesPageContent() {
     return rows;
   }, [activeLastReadAt, meId, visibleActiveMessages]);
 
+  // Latest message id per booking_id — only that card shows action buttons
+  const latestBookingMessageId = useMemo(() => {
+    const latest: Record<string, string> = {};
+    activeMessages.forEach((msg) => {
+      if (msg.contextTag !== "teacher_booking") return;
+      const bId = asString((asRecord(msg.metadata)).booking_id);
+      if (!bId) return;
+      if (!latest[bId] || msg.createdAt > activeMessages.find((m) => m.id === latest[bId])!.createdAt) {
+        latest[bId] = msg.id;
+      }
+    });
+    return latest;
+  }, [activeMessages]);
+
   const parsedMessagesById = useMemo(() => {
     const map: Record<string, { replyToId: string | null; postTag: string | null; text: string }> = {};
     activeMessages.forEach((message) => {
@@ -7642,6 +7656,29 @@ function MessagesPageContent() {
                 ? { ...t, preview: row.body ?? "", updatedAt: row.created_at }
                 : t
             )].sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
+          );
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "thread_messages",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            id: string;
+            status_tag?: string;
+            metadata?: unknown;
+          };
+          setActiveMessages((prev) =>
+            prev.map((m) =>
+              m.id === row.id
+                ? { ...m, statusTag: normalizeStatusTag(row.status_tag), metadata: parseContextMetadata(row.metadata) }
+                : m
+            )
           );
         }
       )
@@ -9074,6 +9111,7 @@ function MessagesPageContent() {
                           const bBookingId = asString(bmeta.booking_id);
                           const isTeacher = meId === bTeacherId;
                           const isStudent = meId === bStudentId;
+                          const isLatestCard = bBookingId ? latestBookingMessageId[bBookingId] === message.id : false;
                           const statusLabel = STATUS_LABELS[messageStatusTag];
                           const statusColor =
                             messageStatusTag === "accepted" ? "text-emerald-300" :
@@ -9101,7 +9139,7 @@ function MessagesPageContent() {
                                   )}
                                   {bNote && <p className="mt-1 text-xs text-white/40 line-clamp-2">{bNote}</p>}
                                 </div>
-                                {messageStatusTag === "pending" && (isTeacher || isStudent) && bBookingId && (
+                                {messageStatusTag === "pending" && (isTeacher || isStudent) && bBookingId && isLatestCard && (
                                   <div className="mt-4 flex gap-2">
                                     {isTeacher && (
                                       <>
@@ -9141,7 +9179,7 @@ function MessagesPageContent() {
                                     )}
                                   </div>
                                 )}
-                                {messageStatusTag === "accepted" && (isTeacher || isStudent) && bBookingId && (
+                                {messageStatusTag === "accepted" && (isTeacher || isStudent) && bBookingId && isLatestCard && (
                                   <div className="mt-4">
                                     <button type="button"
                                       onClick={async () => {

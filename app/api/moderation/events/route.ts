@@ -1,3 +1,4 @@
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { NextResponse } from "next/server";
 import { sendAdminThreadNotice } from "@/lib/admin/communication";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
@@ -82,6 +83,7 @@ function buildEventNotice(params: {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     const eventId = typeof body?.eventId === "string" ? body.eventId : "";

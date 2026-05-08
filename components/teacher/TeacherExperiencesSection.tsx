@@ -75,8 +75,9 @@ function ServicesMarquee({ blocks }: { blocks: TeacherInfoBlock[] }) {
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartOffset = useRef(0);
-  // Duplicate for seamless loop
-  const doubled = [...blocks, ...blocks];
+  // Repeat enough copies to always fill a wide viewport seamlessly
+  const minCopies = Math.max(2, Math.ceil(6 / blocks.length));
+  const doubled = Array.from({ length: minCopies }, () => blocks).flat();
 
   useEffect(() => {
     const track = trackRef.current;

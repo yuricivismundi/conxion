@@ -1,3 +1,4 @@
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { dispatchReferencePromptEmails } from "@/lib/email/reference-prompts";
@@ -1321,6 +1322,7 @@ async function ensureReferenceContextEligibility(params: {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const body = await req.json().catch(() => null);
     const connectionIdInput = typeof body?.connectionId === "string" ? body.connectionId : "";

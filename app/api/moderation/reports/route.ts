@@ -1,3 +1,4 @@
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendAdminThreadNotice } from "@/lib/admin/communication";
@@ -69,6 +70,7 @@ function buildReportNotice(params: {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const body = await req.json().catch(() => null);
     const reportId = typeof body?.reportId === "string" ? body.reportId : "";
