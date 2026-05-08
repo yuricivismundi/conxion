@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { requireServiceInquiryAuth, jsonError } from "@/lib/service-inquiries/server";
 import { formatShortDate, formatShortTime } from "@/lib/teacher-bookings";
+import { ensureTeacherBookingThread, upsertTeacherBookingContext, emitTeacherBookingEvent } from "@/lib/teacher-bookings/thread";
 
 export const runtime = "nodejs";
 
@@ -46,7 +47,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
     const bookingRes = await auth.serviceClient
       .from("teacher_session_bookings")
-      .select("id,teacher_id,student_id,availability_id,service_type,session_date,session_time,status")
+      .select("id,teacher_id,student_id,availability_id,service_type,session_date,session_time,duration_min,note,status")
       .eq("id", bookingId)
       .maybeSingle();
     if (bookingRes.error) throw bookingRes.error;
@@ -60,6 +61,8 @@ export async function POST(req: Request, { params }: RouteParams) {
       service_type: string;
       session_date: string;
       session_time: string;
+      duration_min: number | null;
+      note: string | null;
       status: string;
     };
 
@@ -107,6 +110,13 @@ export async function POST(req: Request, { params }: RouteParams) {
       body: `${actorName} cancelled the private class booking for ${dateLabel} at ${timeLabel}.`,
       metadata: { bookingId: booking.id },
     });
+
+    // Best-effort: emit cancelled event to thread
+    try {
+      const threadId = await ensureTeacherBookingThread({ serviceClient: auth.serviceClient, teacherId: booking.teacher_id, studentId: booking.student_id, actorUserId: auth.userId });
+      await upsertTeacherBookingContext({ serviceClient: auth.serviceClient, threadId, meta: { bookingId: booking.id, teacherId: booking.teacher_id, studentId: booking.student_id, serviceType: booking.service_type, sessionDate: booking.session_date, sessionTime: booking.session_time, durationMin: booking.duration_min ?? null, note: booking.note ?? null }, statusTag: "cancelled" });
+      await emitTeacherBookingEvent({ serviceClient: auth.serviceClient, threadId, senderId: auth.userId, body: `${actorName} cancelled the booking for ${dateLabel} at ${timeLabel}.`, statusTag: "cancelled", metadata: { booking_id: booking.id } });
+    } catch { /* non-fatal */ }
 
     return NextResponse.json({ ok: true, status: "cancelled" });
   } catch (error) {

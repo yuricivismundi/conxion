@@ -79,7 +79,7 @@ import { DismissibleBanner } from "@/components/DismissibleBanner";
 
 type ThreadKind = "connection" | "trip" | "direct" | "event" | "group";
 type FilterTab = "all" | "active" | "pending" | "archived";
-type InboxKindFilter = "all" | "connection" | "event" | "group";
+type InboxKindFilter = "all" | "connection" | "event" | "group" | "booking";
 type MessagingState = "inactive" | "active" | "archived";
 
 type ThreadContextTag =
@@ -89,7 +89,8 @@ type ThreadContextTag =
   | "event_chat"
   | "regular_chat"
   | "activity"
-  | "service_inquiry";
+  | "service_inquiry"
+  | "teacher_booking";
 type ThreadStatusTag =
   | "pending"
   | "accepted"
@@ -654,6 +655,7 @@ const CONTEXT_LABELS: Record<ThreadContextTag, string> = {
   activity: "Activity",
   service_inquiry: "Teaching services",
   regular_chat: "Chat",
+  teacher_booking: "Booking",
 };
 
 const STATUS_LABELS: Record<ThreadStatusTag, string> = {
@@ -674,6 +676,7 @@ function contextGroupLabel(tag: ThreadContextTag) {
   if (tag === "hosting_request") return "Request hosting";
   if (tag === "event_chat") return "Events";
   if (tag === "service_inquiry") return "Teaching services";
+  if (tag === "teacher_booking") return "Bookings";
   if (tag === "activity") return "Connections";
   return "Connections";
 }
@@ -694,6 +697,7 @@ function normalizeContextTag(value: string | null | undefined, fallback: ThreadC
   if (value === "event_chat") return value;
   if (value === "activity") return value;
   if (value === "service_inquiry") return value;
+  if (value === "teacher_booking") return value;
   if (value === "regular_chat") return value;
   return fallback;
 }
@@ -730,6 +734,7 @@ const CHAT_UNLOCK_CONTEXT_TAGS: ThreadContextTag[] = [
   "event_chat",
   "activity",
   "service_inquiry",
+  "teacher_booking",
 ];
 
 function isAcceptedInteractionStatus(status: ThreadStatusTag) {
@@ -749,6 +754,7 @@ function contextToneClasses(tag: ThreadContextTag) {
   if (tag === "event_chat") return "border-sky-300/35 bg-sky-300/10 text-sky-100";
   if (tag === "activity") return "border-cyan-300/35 bg-[linear-gradient(90deg,rgba(0,245,255,0.14),rgba(255,0,255,0.08))] text-cyan-100";
   if (tag === "service_inquiry") return "border-amber-300/35 bg-amber-300/10 text-amber-100";
+  if (tag === "teacher_booking") return "border-violet-300/35 bg-violet-300/10 text-violet-100";
   return "border-white/20 bg-white/[0.05] text-slate-200";
 }
 
@@ -1161,6 +1167,7 @@ function parseInboxKindFilter(rawKind: string | null): InboxKindFilter | null {
   if (rawKind === "connection") return "connection";
   if (rawKind === "event") return "event";
   if (rawKind === "group") return "group";
+  if (rawKind === "booking") return "booking";
   return null;
 }
 
@@ -1344,6 +1351,7 @@ function inboxKindLabel(kind: InboxKindFilter) {
   if (kind === "connection") return "Connections";
   if (kind === "event") return "Events";
   if (kind === "group") return "Groups";
+  if (kind === "booking") return "Bookings";
   return "All types";
 }
 
@@ -6550,6 +6558,7 @@ function MessagesPageContent() {
       if (kindFilter === "all") return true;
       if (kindFilter === "event") return thread.kind === "event";
       if (kindFilter === "group") return thread.kind === "group";
+      if (kindFilter === "booking") return thread.contextTag === "teacher_booking";
       return thread.kind !== "event" && thread.kind !== "group";
     });
   }, [kindFilter, threads]);
@@ -6583,6 +6592,7 @@ function MessagesPageContent() {
       connection: threads.filter((thread) => thread.kind !== "event" && thread.kind !== "group").length,
       event: threads.filter((thread) => thread.kind === "event").length,
       group: threads.filter((thread) => thread.kind === "group").length,
+      booking: threads.filter((thread) => thread.contextTag === "teacher_booking").length,
     }),
     [threads]
   );
@@ -6592,6 +6602,7 @@ function MessagesPageContent() {
       connection: kindCounts.connection,
       event: Math.max(kindCounts.event, threadQuotaSummary?.eventJoined ?? 0),
       group: Math.max(kindCounts.group, threadQuotaSummary?.groupJoined ?? 0),
+      booking: kindCounts.booking,
     }),
     [kindCounts, threadQuotaSummary?.eventJoined, threadQuotaSummary?.groupJoined]
   );
@@ -6623,6 +6634,13 @@ function MessagesPageContent() {
     if (kindFilter === "group") {
       return [
         { key: "active", label: "Joined" },
+        { key: "pending", label: "Requests" },
+        { key: "all", label: "All" },
+      ] as const;
+    }
+    if (kindFilter === "booking") {
+      return [
+        { key: "active", label: "Accepted" },
         { key: "pending", label: "Requests" },
         { key: "all", label: "All" },
       ] as const;
@@ -8066,6 +8084,7 @@ function MessagesPageContent() {
                       { key: "connection", label: "Connections", count: visibleKindCounts.connection },
                       { key: "event", label: "Events", count: visibleKindCounts.event },
                       { key: "group", label: "Groups", count: visibleKindCounts.group },
+                      { key: "booking", label: "Bookings", count: visibleKindCounts.booking },
                     ] as const).map((option) => {
                       const selected = kindFilter === option.key && activeTab !== "archived";
                       return (
@@ -9038,6 +9057,105 @@ function MessagesPageContent() {
                                     </div>
                                   ) : null}
                                 </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (messageContextTag === "teacher_booking") {
+                          const bmeta = asRecord(message.metadata);
+                          const bDate = asString(bmeta.session_date || bmeta.booking_date);
+                          const bTime = asString(bmeta.session_time || bmeta.booking_time);
+                          const bDuration = typeof bmeta.duration_min === "number" ? bmeta.duration_min : null;
+                          const bNote = asString(bmeta.note);
+                          const bService = asString(bmeta.service_type);
+                          const bTeacherId = asString(bmeta.teacher_id);
+                          const bStudentId = asString(bmeta.student_id);
+                          const bBookingId = asString(bmeta.booking_id);
+                          const isTeacher = meId === bTeacherId;
+                          const isStudent = meId === bStudentId;
+                          const statusLabel = STATUS_LABELS[messageStatusTag];
+                          const statusColor =
+                            messageStatusTag === "accepted" ? "text-emerald-300" :
+                            messageStatusTag === "declined" || messageStatusTag === "cancelled" ? "text-rose-300" :
+                            "text-amber-300";
+                          return (
+                            <div key={row.key} ref={(node) => { messageRefs.current[message.id] = node; }} className="mx-auto w-full max-w-lg">
+                              <div className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-[#1a1025] p-4">
+                                <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#a855f7,#ec4899)" }} />
+                                <div className="mb-3 flex items-center justify-between gap-2">
+                                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-violet-300">
+                                    <span className="material-symbols-outlined text-[13px]">event_available</span>
+                                    Private class booking
+                                  </span>
+                                  <span className={`text-[10px] font-bold uppercase tracking-[0.12em] ${statusColor}`}>{statusLabel}</span>
+                                </div>
+                                <div className="space-y-1 text-sm text-white/80">
+                                  {bService && <p className="font-semibold text-white capitalize">{bService.replace(/_/g, " ")}</p>}
+                                  {bDate && (
+                                    <p className="flex items-center gap-1.5 text-white/60">
+                                      <span className="material-symbols-outlined text-[13px]">calendar_month</span>
+                                      {bDate}{bTime ? ` at ${bTime.slice(0, 5)}` : ""}
+                                      {bDuration ? ` · ${bDuration} min` : ""}
+                                    </p>
+                                  )}
+                                  {bNote && <p className="mt-1 text-xs text-white/40 line-clamp-2">{bNote}</p>}
+                                </div>
+                                {messageStatusTag === "pending" && (isTeacher || isStudent) && bBookingId && (
+                                  <div className="mt-4 flex gap-2">
+                                    {isTeacher && (
+                                      <>
+                                        <button type="button"
+                                          onClick={async () => {
+                                            const { data: { session } } = await supabase.auth.getSession();
+                                            if (!session) return;
+                                            await fetch(`/api/teacher-bookings/${bBookingId}/respond`, { method: "POST", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ action: "accept" }) });
+                                            if (meId && activeThreadToken) void loadThreadByToken(activeThreadToken, meId);
+                                          }}
+                                          className="flex-1 rounded-xl bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] py-2 text-xs font-black uppercase tracking-widest text-zinc-900 hover:brightness-110">
+                                          Accept
+                                        </button>
+                                        <button type="button"
+                                          onClick={async () => {
+                                            const { data: { session } } = await supabase.auth.getSession();
+                                            if (!session) return;
+                                            await fetch(`/api/teacher-bookings/${bBookingId}/respond`, { method: "POST", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ action: "decline" }) });
+                                            if (meId && activeThreadToken) void loadThreadByToken(activeThreadToken, meId);
+                                          }}
+                                          className="rounded-xl border border-rose-400/30 bg-rose-400/[0.07] px-4 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/15">
+                                          Decline
+                                        </button>
+                                      </>
+                                    )}
+                                    {isStudent && (
+                                      <button type="button"
+                                        onClick={async () => {
+                                          const { data: { session } } = await supabase.auth.getSession();
+                                          if (!session) return;
+                                          await fetch(`/api/teacher-bookings/${bBookingId}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" } });
+                                          if (meId && activeThreadToken) void loadThreadByToken(activeThreadToken, meId);
+                                        }}
+                                        className="rounded-xl border border-rose-400/30 bg-rose-400/[0.07] px-4 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/15">
+                                        Cancel request
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {messageStatusTag === "accepted" && (isTeacher || isStudent) && bBookingId && (
+                                  <div className="mt-4">
+                                    <button type="button"
+                                      onClick={async () => {
+                                        const { data: { session } } = await supabase.auth.getSession();
+                                        if (!session) return;
+                                        await fetch(`/api/teacher-bookings/${bBookingId}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" } });
+                                        if (meId && activeThreadToken) void loadThreadByToken(activeThreadToken, meId);
+                                      }}
+                                      className="w-full rounded-xl border border-rose-400/30 bg-rose-400/[0.07] px-4 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/15">
+                                      Cancel session
+                                    </button>
+                                  </div>
+                                )}
+                                <p className="mt-3 text-right text-[10px] text-white/25">{formatTime(message.createdAt)}</p>
                               </div>
                             </div>
                           );

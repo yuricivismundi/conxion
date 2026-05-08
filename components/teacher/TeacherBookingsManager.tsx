@@ -298,6 +298,39 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
     }
   }
 
+  if (loading) {
+    return (
+      <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 space-y-4">
+        <div className="space-y-2">
+          <div className="h-3 w-36 animate-pulse rounded-md bg-white/[0.07]" />
+          <div className="h-3 w-56 animate-pulse rounded-md bg-white/[0.04]" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-3 rounded-2xl border border-white/[0.06] p-4">
+            <div className="h-3 w-32 animate-pulse rounded bg-white/[0.06]" />
+            <div className="h-9 animate-pulse rounded-xl bg-white/[0.05]" />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="h-9 animate-pulse rounded-xl bg-white/[0.05]" />
+              <div className="h-9 animate-pulse rounded-xl bg-white/[0.05]" />
+            </div>
+            <div className="h-16 animate-pulse rounded-xl bg-white/[0.05]" />
+            <div className="h-9 w-24 animate-pulse rounded-xl bg-white/[0.05]" />
+          </div>
+          <div className="space-y-3 rounded-2xl border border-white/[0.06] p-4">
+            <div className="h-3 w-28 animate-pulse rounded bg-white/[0.06]" />
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-14 animate-pulse rounded-xl bg-white/[0.04]" />
+            ))}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[0.06] p-4 space-y-2">
+          <div className="h-3 w-32 animate-pulse rounded bg-white/[0.06]" />
+          <div className="h-16 animate-pulse rounded-xl bg-white/[0.04]" />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
       <div className="mb-5 flex items-center justify-between gap-3">

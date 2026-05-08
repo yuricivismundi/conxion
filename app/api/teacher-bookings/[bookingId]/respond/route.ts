@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { requireServiceInquiryAuth, jsonError } from "@/lib/service-inquiries/server";
 import { buildTeacherBookingCalendarUrl, formatShortDate, formatShortTime } from "@/lib/teacher-bookings";
+import { ensureTeacherBookingThread, upsertTeacherBookingContext, emitTeacherBookingEvent } from "@/lib/teacher-bookings/thread";
 
 export const runtime = "nodejs";
 
@@ -104,6 +105,13 @@ export async function POST(req: Request, { params }: RouteParams) {
         metadata: { bookingId: booking.id, teacherId: auth.userId },
       });
 
+      // Best-effort: emit declined event to thread
+      try {
+        const threadId = await ensureTeacherBookingThread({ serviceClient: auth.serviceClient, teacherId: booking.teacher_id, studentId: booking.student_id, actorUserId: auth.userId });
+        await upsertTeacherBookingContext({ serviceClient: auth.serviceClient, threadId, meta: { bookingId: booking.id, teacherId: booking.teacher_id, studentId: booking.student_id, serviceType: booking.service_type, sessionDate: booking.session_date, sessionTime: booking.session_time, durationMin: booking.duration_min, note: booking.note }, statusTag: "declined" });
+        await emitTeacherBookingEvent({ serviceClient: auth.serviceClient, threadId, senderId: auth.userId, body: `${tName} declined the booking request for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}.`, statusTag: "declined", metadata: { booking_id: booking.id } });
+      } catch { /* non-fatal */ }
+
       return NextResponse.json({ ok: true, status: "declined" });
     }
 
@@ -177,6 +185,13 @@ export async function POST(req: Request, { params }: RouteParams) {
       body: `${teacherName} accepted your private class on ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}.`,
       metadata: { bookingId: booking.id, teacherId: auth.userId, calendarUrl },
     });
+
+    // Best-effort: emit accepted event to thread
+    try {
+      const threadId = await ensureTeacherBookingThread({ serviceClient: auth.serviceClient, teacherId: booking.teacher_id, studentId: booking.student_id, actorUserId: auth.userId });
+      await upsertTeacherBookingContext({ serviceClient: auth.serviceClient, threadId, meta: { bookingId: booking.id, teacherId: booking.teacher_id, studentId: booking.student_id, serviceType: booking.service_type, sessionDate: booking.session_date, sessionTime: booking.session_time, durationMin: booking.duration_min, note: booking.note }, statusTag: "accepted" });
+      await emitTeacherBookingEvent({ serviceClient: auth.serviceClient, threadId, senderId: auth.userId, body: `${teacherName} accepted the booking for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}.`, statusTag: "accepted", metadata: { booking_id: booking.id, calendar_url: calendarUrl } });
+    } catch { /* non-fatal */ }
 
     return NextResponse.json({ ok: true, status: "accepted", calendarUrl });
   } catch (error) {

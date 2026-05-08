@@ -5,7 +5,14 @@ import {
   durationMinutesFromTimeRange,
   isDateWithinNextThreeMonths,
   isTeacherBookingServiceType,
+  formatShortDate,
+  formatShortTime,
 } from "@/lib/teacher-bookings";
+import {
+  ensureTeacherBookingThread,
+  upsertTeacherBookingContext,
+  emitTeacherBookingEvent,
+} from "@/lib/teacher-bookings/thread";
 
 export const runtime = "nodejs";
 
@@ -83,6 +90,44 @@ export async function POST(req: Request) {
       .select("id,teacher_id,student_id,availability_id,service_type,session_date,session_time,duration_min,note,status,created_at,accepted_at,declined_at")
       .single();
     if (insertRes.error) throw insertRes.error;
+
+    const booking = insertRes.data as {
+      id: string; teacher_id: string; student_id: string; service_type: string;
+      session_date: string; session_time: string; duration_min: number | null; note: string | null;
+    };
+
+    // Best-effort: create/reuse DM thread and emit booking card event
+    try {
+      const threadId = await ensureTeacherBookingThread({
+        serviceClient: auth.serviceClient,
+        teacherId: booking.teacher_id,
+        studentId: booking.student_id,
+        actorUserId: auth.userId,
+      });
+      await upsertTeacherBookingContext({
+        serviceClient: auth.serviceClient,
+        threadId,
+        meta: {
+          bookingId: booking.id,
+          teacherId: booking.teacher_id,
+          studentId: booking.student_id,
+          serviceType: booking.service_type,
+          sessionDate: booking.session_date,
+          sessionTime: booking.session_time,
+          durationMin: booking.duration_min,
+          note: booking.note,
+        },
+        statusTag: "pending",
+      });
+      await emitTeacherBookingEvent({
+        serviceClient: auth.serviceClient,
+        threadId,
+        senderId: auth.userId,
+        body: `Booking request for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}`,
+        statusTag: "pending",
+        metadata: { booking_id: booking.id },
+      });
+    } catch { /* non-fatal */ }
 
     return NextResponse.json({ ok: true, booking: insertRes.data });
   } catch (error) {
