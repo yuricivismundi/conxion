@@ -348,10 +348,8 @@ export default async function TeacherProfilePage({
         />
 
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
-        <section className="mb-24">
-          <div className="rounded-[28px] p-6 sm:p-8" style={{ background: "#1a1a1a" }}>
-            <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
-          </div>
+        <section className="mb-24 rounded-[28px] overflow-hidden" style={{ background: "linear-gradient(135deg,#0e0e1a 0%,#130d1f 40%,#0a1218 100%)" }}>
+          <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
         </section>
 
         {/* ── Weekly Classes ──────────────────────────────────────────────── */}
@@ -465,25 +463,6 @@ export default async function TeacherProfilePage({
           </div>
         </section>
 
-        {/* ── Bottom CTA ───────────────────────────────────────────────────── */}
-        <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-indigo-950/30 p-16 md:p-24 text-center">
-          <div className="relative z-10">
-            <h2 className="font-black text-5xl md:text-6xl tracking-tighter text-white mb-6">
-              Elevate Your Movement
-            </h2>
-            <p className="text-zinc-400 text-lg max-w-xl mx-auto mb-10">
-              Whether you are starting your journey or refining a professional career, let&apos;s craft your artistic path together.
-            </p>
-            <TeacherHeroActions
-              userId={id}
-              displayName={displayName}
-              avatarUrl={avatarUrl}
-              variant="cta"
-            />
-          </div>
-          <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-[#c1fffe]/[0.08] rounded-full blur-[100px]" />
-          <div className="absolute -top-24 -right-24 w-96 h-96 bg-[#ff51fa]/[0.08] rounded-full blur-[100px]" />
-        </section>
 
       </div>
     </div>

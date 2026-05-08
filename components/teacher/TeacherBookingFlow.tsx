@@ -533,15 +533,9 @@ export default function TeacherBookingFlow({
 
   if (variant === "inline") {
     return (
-      <div className="mb-24 rounded-2xl bg-zinc-950 p-8 sm:p-10">
-        <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="font-black text-4xl tracking-tighter text-white">Private Class Availability</h2>
-            <p className="mt-3 text-zinc-500">Check bookable dates for the next 3 months and send a request directly.</p>
-          </div>
-          <span className="inline-flex w-fit items-center rounded-full border border-cyan-300/20 bg-cyan-300/8 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100">
-            {serviceLabel(serviceType)}
-          </span>
+      <div className="p-8 sm:p-10">
+        <div className="mb-8">
+          <h2 className="font-black text-4xl tracking-tighter text-white">Book your class</h2>
         </div>
 
         <div className="space-y-6">
