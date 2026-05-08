@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Nav from "@/components/Nav";
+import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { supabase } from "@/lib/supabase/client";
 import {
   fetchNotifications,
@@ -53,6 +55,8 @@ export default function NotificationsPage() {
     }
     setLoading(false);
   }, []);
+
+  const { pullY, refreshing: ptr } = usePullToRefresh(refresh);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +159,7 @@ export default function NotificationsPage() {
 
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
+      <PullToRefreshIndicator pullY={pullY} refreshing={ptr} />
       <Nav />
       <main className="mx-auto w-full max-w-[1280px] px-4 pb-16 pt-7 sm:px-6 lg:px-8">
         <header className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">

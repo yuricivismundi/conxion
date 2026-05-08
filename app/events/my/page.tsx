@@ -206,11 +206,12 @@ function EventRelationshipCard({
         </div>
 
         {isHost ? (
-          <div className="mt-auto flex gap-2 border-t border-white/10 pt-3">
+          <div className="mt-auto flex gap-2 border-t border-white/[0.08] pt-3">
             <button
               type="button"
               onClick={() => onEditRequest ? onEditRequest(event.id) : (window.location.href = `/events/new?edit=${encodeURIComponent(event.id)}&returnTo=${encodeURIComponent("/events/my")}`)}
-              className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-300/16 px-4 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/24"
+              className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-[#071116] transition hover:opacity-90"
+              style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
             >
               <span className="material-symbols-outlined text-[18px]">{event.status === "draft" ? "edit" : "tune"}</span>
               {event.status === "draft" ? "Continue editing" : "Edit"}
@@ -219,7 +220,7 @@ function EventRelationshipCard({
               <button
                 type="button"
                 onClick={() => onDeleteRequest(event)}
-                className="inline-flex min-h-[40px] w-10 shrink-0 items-center justify-center rounded-xl border border-red-400/20 bg-red-400/[0.07] text-red-400 transition hover:bg-red-400/15"
+                className="inline-flex min-h-[40px] w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 transition hover:bg-red-500/20 hover:text-red-300"
                 title="Delete event"
               >
                 <span className="material-symbols-outlined text-[18px]">delete</span>
@@ -594,12 +595,16 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
             />
           ))}
         </div>
-        <button type="button" onClick={() => scroll("left")} className="absolute -left-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-[#121212] text-white/50 shadow-lg transition hover:border-white/25 hover:text-white">
-          <span className="material-symbols-outlined text-[18px]">chevron_left</span>
-        </button>
-        <button type="button" onClick={() => scroll("right")} className="absolute -right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-[#121212] text-white/50 shadow-lg transition hover:border-white/25 hover:text-white">
-          <span className="material-symbols-outlined text-[18px]">chevron_right</span>
-        </button>
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <button type="button" onClick={() => scroll("left")} className="inline-flex h-8 items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/50 transition hover:border-[#00F5FF]/30 hover:bg-[#00F5FF]/[0.06] hover:text-[#00F5FF]">
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            Prev
+          </button>
+          <button type="button" onClick={() => scroll("right")} className="inline-flex h-8 items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/50 transition hover:border-[#00F5FF]/30 hover:bg-[#00F5FF]/[0.06] hover:text-[#00F5FF]">
+            Next
+            <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+          </button>
+        </div>
       </div>
     );
   }
@@ -749,7 +754,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
             <section className="space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-black text-white">Joining</h2>
+                  <h2 className="text-lg font-black text-white">{activityJoinView === "joining" ? "Joining" : "Interested"}</h2>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
                     {activityJoinView === "joining" ? activityEventRows.joining.length : activityEventRows.interested.length}
                   </span>
@@ -781,7 +786,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
             <section className="space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-black text-white">Drafts</h2>
+                  <h2 className="text-lg font-black text-white">{activityDraftView === "drafts" ? "Drafts" : "Past"}</h2>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
                     {activityDraftView === "drafts" ? activityEventRows.drafts.length : activityEventRows.past.length}
                   </span>
@@ -1115,7 +1120,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
             <section className="space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-black text-white">Joining</h2>
+                  <h2 className="text-lg font-black text-white">{activityJoinView === "joining" ? "Joining" : "Interested"}</h2>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
                     {activityJoinView === "joining" ? activityEventRows.joining.length : activityEventRows.interested.length}
                   </span>
@@ -1139,7 +1144,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
             <section className="space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-black text-white">Drafts</h2>
+                  <h2 className="text-lg font-black text-white">{activityDraftView === "drafts" ? "Drafts" : "Past"}</h2>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
                     {activityDraftView === "drafts" ? activityEventRows.drafts.length : activityEventRows.past.length}
                   </span>

@@ -1,17 +1,21 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import { normalizePublicAppUrl } from "@/lib/public-app-url";
+import { haptic } from "@/lib/haptic";
 import Nav from "@/components/Nav";
+import { useToast } from "@/components/Toast";
+import EventHeroImage from "@/components/events/EventHeroImage";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
 import CreateGroupFromEventModal from "@/components/CreateGroupFromEventModal";
 import { getPlanIdFromMeta, getPlanLimits } from "@/lib/billing/limits";
 import { fetchVisibleConnections } from "@/lib/connections/read-model";
-import { buildOsmEmbedUrl, type OsmGeocodeResult } from "@/lib/maps/osm";
+import { buildOsmEmbedUrl } from "@/lib/maps/osm";
+import type { MapboxPlaceResult } from "@/lib/maps/mapbox";
 import { supabase } from "@/lib/supabase/client";
 import {
   type EventMemberRecord,
@@ -30,7 +34,7 @@ import {
   pickEventFallbackHeroUrl,
   pickEventHeroUrl,
 } from "@/lib/events/model";
-import { eventAccessTypeShortLabel, eventThreadTabLabel, isEventDiscoverable } from "@/lib/events/access";
+import { canPostToEventThread, eventAccessTypeShortLabel, eventThreadTabLabel, isEventDiscoverable } from "@/lib/events/access";
 import { cx } from "@/lib/cx";
 
 type EventAction = "join" | "request" | "cancel_request" | "leave" | "interested" | "not_interested";
@@ -58,6 +62,14 @@ type InviteConnection = {
 };
 
 const ACTION_TOAST_MS = 3000;
+const POST_TAG_REGEX = /\[\[post_tag:(update|announcement|ticket|reminder)\]\]\n?/;
+
+function parseDiscussionBody(raw: string) {
+  const match = raw.match(POST_TAG_REGEX);
+  const postTag = match ? match[1] : undefined;
+  const body = postTag ? raw.replace(POST_TAG_REGEX, "") : raw;
+  return { postTag, body };
+}
 
 
 function cleanParam(value: string | null | undefined) {
@@ -102,7 +114,7 @@ function responseLabel(state: EventResponseState | null) {
 }
 
 function responseToneClass(state: EventResponseState | null) {
-  if (state === "going") return "border-emerald-300/35 bg-emerald-400/18 text-emerald-50 hover:bg-emerald-400/24";
+  if (state === "going") return "border-cyan-300/35 bg-[linear-gradient(90deg,rgba(0,245,255,0.16),rgba(255,0,255,0.12))] text-cyan-50 hover:brightness-110";
   if (state === "waitlist") return "border-amber-300/35 bg-amber-400/18 text-amber-50 hover:bg-amber-400/24";
   if (state === "request_sent") return "border-fuchsia-300/35 bg-fuchsia-400/18 text-fuchsia-50 hover:bg-fuchsia-400/24";
   if (state === "interested") {
@@ -191,6 +203,7 @@ export default function EventDetailsPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const eventId = typeof params?.id === "string" ? params.id : "";
+  const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -202,6 +215,7 @@ export default function EventDetailsPage() {
   const [meId, setMeId] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [groupMonthlyLimit, setGroupMonthlyLimit] = useState<number | null>(null);
+  const [groupsUsedThisMonth, setGroupsUsedThisMonth] = useState<number>(0);
 
   const [event, setEvent] = useState<EventRecord | null>(null);
   const [suggestedEvents, setSuggestedEvents] = useState<EventRecord[]>([]);
@@ -234,14 +248,32 @@ export default function EventDetailsPage() {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportNote, setReportNote] = useState("");
-  const [heroSrc, setHeroSrc] = useState<string | null>(null);
-  const [mapLocation, setMapLocation] = useState<OsmGeocodeResult | null>(null);
+  const [mapLocation, setMapLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [mapDialogOpen, setMapDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const shareBtnRef = useRef<HTMLButtonElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const responseBtnRef = useRef<HTMLButtonElement>(null);
+  const [shareBtnRect, setShareBtnRect] = useState<DOMRect | null>(null);
+  const [moreBtnRect, setMoreBtnRect] = useState<DOMRect | null>(null);
+  const [responseBtnRect, setResponseBtnRect] = useState<DOMRect | null>(null);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteSearch, setInviteSearch] = useState("");
+  const [inviteSelected, setInviteSelected] = useState<Record<string, true>>({});
+  const [inviteSendBusy, setInviteSendBusy] = useState(false);
   const [responseMenuOpen, setResponseMenuOpen] = useState(false);
   const [inviteBusyUserId, setInviteBusyUserId] = useState<string | null>(null);
-  const [activeEventTab, setActiveEventTab] = useState<"details" | "people" | "thread">("details");
+  const [activeEventTab, setActiveEventTab] = useState<"details" | "discussion">("details");
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [discussionMessages, setDiscussionMessages] = useState<Array<{ id: string; senderId: string; body: string; createdAt: string; postTag?: string }>>([]);
+  const [discussionLoading, setDiscussionLoading] = useState(false);
+  const [discussionBody, setDiscussionBody] = useState("");
+  const [discussionPostTag, setDiscussionPostTag] = useState<"update" | "announcement" | "ticket" | "reminder">("update");
+  const [discussionSending, setDiscussionSending] = useState(false);
+  const [discussionThreadId, setDiscussionThreadId] = useState<string | null>(null);
+  const discussionLoadedRef = useRef(false);
   const loadRequestIdRef = useRef(0);
   const suggestedEventsScrollerRef = useRef<HTMLDivElement | null>(null);
 
@@ -264,16 +296,41 @@ export default function EventDetailsPage() {
   }, [host?.userId, inviteConnections, requestLinkedMemberQuery]);
 
   useEffect(() => {
-    if (!shareDialogOpen && !mapDialogOpen) return;
+    if (!shareDialogOpen && !mapDialogOpen && !shareMenuOpen && !moreMenuOpen && !inviteModalOpen) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setShareDialogOpen(false);
         setMapDialogOpen(false);
+        setShareMenuOpen(false);
+        setMoreMenuOpen(false);
+        setInviteModalOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mapDialogOpen, shareDialogOpen]);
+  }, [mapDialogOpen, shareDialogOpen, shareMenuOpen, moreMenuOpen, inviteModalOpen]);
+
+  // Scroll-lock when any full-screen modal is open
+  useEffect(() => {
+    const anyOpen = shareDialogOpen || mapDialogOpen || inviteModalOpen;
+    if (anyOpen) {
+      document.body.classList.add("modal-open");
+    } else {
+      document.body.classList.remove("modal-open");
+    }
+    return () => { document.body.classList.remove("modal-open"); };
+  }, [shareDialogOpen, mapDialogOpen, inviteModalOpen]);
+
+  useEffect(() => {
+    if (!shareMenuOpen && !moreMenuOpen && !responseMenuOpen) return;
+    const closeMenus = () => {
+      setShareMenuOpen(false);
+      setMoreMenuOpen(false);
+      setResponseMenuOpen(false);
+    };
+    window.addEventListener("scroll", closeMenus, { passive: true, capture: true });
+    return () => window.removeEventListener("scroll", closeMenus, { capture: true });
+  }, [shareMenuOpen, moreMenuOpen, responseMenuOpen]);
 
   useEffect(() => {
     if (!actionInfo) return;
@@ -282,8 +339,13 @@ export default function EventDetailsPage() {
   }, [actionInfo]);
 
   async function copyShareLink() {
+    haptic(10);
     if (!shareUrl) return;
     try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ title: event?.title ?? "Event", url: shareUrl });
+        return;
+      }
       if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareUrl);
         setActionInfo("Event link copied.");
@@ -300,29 +362,12 @@ export default function EventDetailsPage() {
         return;
       }
       setActionError("Copy is not supported on this device.");
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setActionError("Could not copy the event link.");
     }
   }
 
-  async function shareEvent() {
-    if (!event || !shareUrl) return;
-    const prefersNativeShare =
-      typeof window !== "undefined" &&
-      typeof navigator !== "undefined" &&
-      typeof navigator.share === "function" &&
-      window.matchMedia("(max-width: 767px), (pointer: coarse)").matches;
-    try {
-      if (prefersNativeShare) {
-        await navigator.share({ title: event.title, url: shareUrl });
-        return;
-      }
-      setShareDialogOpen(true);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
-      setActionError("Could not share event. Try again.");
-    }
-  }
 
   const scrollSuggestedEvents = useCallback((direction: "left" | "right") => {
     const container = suggestedEventsScrollerRef.current;
@@ -363,7 +408,7 @@ export default function EventDetailsPage() {
       if (authData.user) {
         const meta = (authData.user.user_metadata ?? {}) as Record<string, unknown>;
         const planId = getPlanIdFromMeta(meta, Boolean(meta.is_verified));
-        setGroupMonthlyLimit(getPlanLimits(planId).eventsPerMonth);
+        setGroupMonthlyLimit(getPlanLimits(planId).privateGroupsTotal);
       }
 
       const eventRes = userId
@@ -462,6 +507,7 @@ export default function EventDetailsPage() {
 
         const nextProfilesById = mapProfileRows((attendeeProfilesRes.data ?? []) as unknown[]);
         setProfilesById(nextProfilesById);
+        const seenUserIds = new Set<string>();
         setInviteConnections(
           inviteCandidates
             .map((connection) => {
@@ -475,7 +521,12 @@ export default function EventDetailsPage() {
                 avatarUrl: profile.avatarUrl,
               } satisfies InviteConnection;
             })
-            .filter((connection): connection is InviteConnection => Boolean(connection))
+            .filter((connection): connection is InviteConnection => {
+              if (!connection) return false;
+              if (seenUserIds.has(connection.userId)) return false;
+              seenUserIds.add(connection.userId);
+              return true;
+            })
         );
       } else {
         setProfilesById({});
@@ -548,38 +599,42 @@ export default function EventDetailsPage() {
       setSuggestedEventsLoading(true);
       try {
         const nowIso = new Date().toISOString();
+        const soonIso = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         const res = await supabase
           .from("events")
           .select("*")
           .eq("status", "published")
-          .gte("ends_at", nowIso)
+          .gte("starts_at", nowIso)
           .neq("id", event.id)
           .order("starts_at", { ascending: true })
-          .limit(36);
+          .limit(60);
         if (cancelled || res.error) {
           if (!cancelled) setSuggestedEvents([]);
           return;
         }
 
-        const currentStyles = new Set(event.styles.map((style) => style.trim().toLowerCase()).filter(Boolean));
+        const currentStyles = new Set(event.styles.map((s) => s.trim().toLowerCase()).filter(Boolean));
         const suggestions = mapEventRows((res.data ?? []) as unknown[])
           .filter((candidate) => candidate.id !== event.id && isEventDiscoverable(candidate.accessType))
           .map((candidate) => {
-            const candidateStyles = candidate.styles.map((style) => style.trim().toLowerCase()).filter(Boolean);
-            const sharedStyles = candidateStyles.filter((style) => currentStyles.has(style)).length;
+            const candidateStyles = candidate.styles.map((s) => s.trim().toLowerCase()).filter(Boolean);
+            const sharedStyles = candidateStyles.filter((s) => currentStyles.has(s)).length;
             const sameCity = Boolean(event.city && candidate.city && event.city.toLowerCase() === candidate.city.toLowerCase());
             const sameCountry = Boolean(event.country && candidate.country && event.country.toLowerCase() === candidate.country.toLowerCase());
             const sameType = candidate.eventType.trim().toLowerCase() === event.eventType.trim().toLowerCase();
+            const upcomingSoon = candidate.startsAt <= soonIso;
+            // score: city match, style match, type, soon, popular (interested count as a proxy via member count)
             const score =
-              (sameCity ? 6 : 0) +
-              (sameCountry ? 3 : 0) +
-              sharedStyles * 2 +
-              (sameType ? 1 : 0);
+              (sameCity ? 10 : 0) +
+              (sameCountry && !sameCity ? 3 : 0) +
+              sharedStyles * 4 +
+              (sameType ? 2 : 0) +
+              (upcomingSoon ? 2 : 0);
             return { candidate, score };
           })
           .filter(({ score }) => score > 0)
           .sort((left, right) => right.score - left.score || new Date(left.candidate.startsAt).getTime() - new Date(right.candidate.startsAt).getTime())
-          .slice(0, 3)
+          .slice(0, 12)
           .map(({ candidate }) => candidate);
 
         if (!cancelled) setSuggestedEvents(suggestions);
@@ -690,7 +745,7 @@ export default function EventDetailsPage() {
   const mapsUrl = event ? buildMapsUrl(event) : null;
   const mapEmbedUrl = mapLocation ? buildOsmEmbedUrl(mapLocation.lat, mapLocation.lon) : null;
   const fallbackHeroUrl = event ? pickEventFallbackHeroUrl(event) : null;
-  const preferredHeroUrl = event ? (isHost && event.coverUrl ? event.coverUrl : pickEventHeroUrl(event)) : null;
+  const preferredHeroUrl = event ? pickEventHeroUrl(event) : null;
   const eventMemberLimit = event ? getEventMemberLimit(event) : null;
   const spotsLeft = eventMemberLimit === null ? null : Math.max(eventMemberLimit - counts.going, 0);
   const currentResponseState = responseStateFromParticipation(myMembership, myRequest);
@@ -727,43 +782,79 @@ export default function EventDetailsPage() {
     : "Organisers post broadcast updates for this event thread.";
 
   useEffect(() => {
-    setHeroSrc(preferredHeroUrl);
-  }, [preferredHeroUrl]);
+    if (activeEventTab !== "discussion" || !event) return;
+    if (discussionLoadedRef.current) return;
+    discussionLoadedRef.current = true;
+
+    let cancelled = false;
+    async function loadDiscussion() {
+      if (!event) return;
+      setDiscussionLoading(true);
+      try {
+        const threadRes = await supabase
+          .from("threads")
+          .select("id")
+          .eq("event_id", event.id)
+          .maybeSingle();
+        if (cancelled || !threadRes.data?.id) { setDiscussionLoading(false); return; }
+        const threadId = threadRes.data.id as string;
+        setDiscussionThreadId(threadId);
+        const msgRes = await supabase
+          .from("thread_messages")
+          .select("id,sender_id,body,created_at")
+          .eq("thread_id", threadId)
+          .in("status_tag", ["active", "approved"])
+          .order("created_at", { ascending: true })
+          .limit(50);
+        if (!cancelled) {
+          setDiscussionMessages(
+            (msgRes.data ?? []).map((m: { id: string; sender_id: string; body: string; created_at: string }) => {
+              const parsed = parseDiscussionBody(m.body ?? "");
+              return { id: m.id, senderId: m.sender_id, body: parsed.body, createdAt: m.created_at, postTag: parsed.postTag };
+            })
+          );
+        }
+      } catch {
+        // best effort
+      } finally {
+        if (!cancelled) setDiscussionLoading(false);
+      }
+    }
+    void loadDiscussion();
+    return () => { cancelled = true; };
+  }, [activeEventTab, event]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadMapLocation() {
-      if (!event) {
-        setMapLocation(null);
-        return;
-      }
+      if (!event) { setMapLocation(null); return; }
 
       const venue = cleanParam(event.venueName);
       const address = cleanParam(event.venueAddress);
       const city = cleanParam(event.city);
       const country = cleanParam(event.country);
       const query = [venue, address, city, country].filter(Boolean).join(", ");
-      if (query.trim().length < 5) {
-        setMapLocation(null);
-        return;
-      }
+      if (query.trim().length < 3) { setMapLocation(null); return; }
 
       try {
-        const searchParams = new URLSearchParams({
-          q: query,
-          venue,
-          address,
-          city,
-          country,
+        const sessionToken = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
+        const suggestRes = await fetch(`/api/geocode/mapbox?${new URLSearchParams({ q: query, session_token: sessionToken })}`, { cache: "no-store" });
+        const suggestJson = (await suggestRes.json().catch(() => null)) as { ok?: boolean; suggestions?: { mapboxId: string }[] } | null;
+        const firstId = suggestJson?.suggestions?.[0]?.mapboxId;
+        if (!firstId || cancelled) { setMapLocation(null); return; }
+
+        const retrieveRes = await fetch("/api/geocode/mapbox", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mapbox_id: firstId, session_token: sessionToken }),
         });
-        const response = await fetch(`/api/geocode/search?${searchParams.toString()}`, { cache: "no-store" });
-        const json = (await response.json().catch(() => null)) as { ok?: boolean; results?: OsmGeocodeResult[] } | null;
-        if (!cancelled && response.ok && json?.ok && Array.isArray(json.results)) {
-          setMapLocation(json.results[0] ?? null);
-          return;
+        const retrieveJson = (await retrieveRes.json().catch(() => null)) as { ok?: boolean; result?: MapboxPlaceResult } | null;
+        if (!cancelled && retrieveJson?.ok && retrieveJson.result) {
+          setMapLocation({ lat: retrieveJson.result.lat, lon: retrieveJson.result.lon });
+        } else if (!cancelled) {
+          setMapLocation(null);
         }
-        if (!cancelled) setMapLocation(null);
       } catch {
         if (!cancelled) setMapLocation(null);
       }
@@ -804,9 +895,45 @@ export default function EventDetailsPage() {
       return;
     }
 
+    haptic(10);
     setActionBusy(true);
     setActionError(null);
     setActionInfo(null);
+
+    // ── Optimistic update ─────────────────────────────────────────────────────
+    // Snapshot current state so we can roll back if the API fails
+    const prevMembership = myMembership;
+    const prevRequest = myRequest;
+    const prevMembers = members;
+
+    if (meId && action !== "request_sent_to_interested") {
+      if (action === "join") {
+        const optimistic = buildLocalMembershipRecord(myMembership, { eventId: currentEventId, userId: meId, status: "going" });
+        setMyMembership(optimistic);
+        setMembers((prev) => upsertLocalMembership(prev, optimistic));
+        setMyRequest(null);
+      } else if (action === "leave") {
+        setMyMembership(null);
+        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
+      } else if (action === "interested") {
+        const optimistic = buildLocalMembershipRecord(myMembership, { eventId: currentEventId, userId: meId, status: "interested" });
+        setMyMembership(optimistic);
+        setMembers((prev) => upsertLocalMembership(prev, optimistic));
+      } else if (action === "not_interested") {
+        setMyMembership(null);
+        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
+      } else if (action === "cancel_request") {
+        setMyRequest(null);
+        setMyMembership(null);
+        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
+      } else if (action === "request") {
+        const optimistic = buildLocalRequestRecord(myRequest, { eventId: currentEventId, requesterId: meId, requestId: null, status: "pending" });
+        setMyRequest(optimistic);
+        setMyMembership(null);
+        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     async function postEventAction(nextAction: EventAction, nextNote?: string) {
       const response = await fetch(`/api/events/${encodeURIComponent(currentEventId)}/join`, {
@@ -829,8 +956,6 @@ export default function EventDetailsPage() {
         request_id?: string | null;
       } | null;
       if (!response.ok || !json?.ok) {
-        setActionBusy(false);
-        setActionError(json?.error ?? "Action failed.");
         return null;
       }
       return json;
@@ -840,60 +965,47 @@ export default function EventDetailsPage() {
       action === "request_sent_to_interested"
         ? ((await postEventAction("cancel_request")) ? await postEventAction("interested") : null)
         : await postEventAction(action, requestNoteOverride);
-    if (!json) return;
 
-    const nextMembershipStatus: EventMemberRecord["status"] | null =
-      action === "join"
-        ? json?.status === "waitlist"
-          ? "waitlist"
-          : "going"
-        : action === "leave" || action === "request" || action === "cancel_request"
-          ? null
-          : action === "not_interested"
-            ? "not_interested"
-            : "interested";
+    if (!json) {
+      // Roll back optimistic update
+      setMyMembership(prevMembership);
+      setMyRequest(prevRequest);
+      setMembers(prevMembers);
+      setActionError("Action failed. Please try again.");
+      setActionBusy(false);
+      return;
+    }
 
+    // Reconcile optimistic state with server response (e.g. waitlist vs going)
     if (meId) {
-      if (action === "request") {
-        const nextRequest = buildLocalRequestRecord(myRequest, {
-          eventId: currentEventId,
-          requesterId: meId,
-          requestId: typeof json.request_id === "string" ? json.request_id : null,
-          status: "pending",
-        });
-        setMyRequest(nextRequest);
-        setMyMembership(null);
-        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
-      } else if (action === "cancel_request") {
+      if (action === "join") {
+        const confirmedStatus = json.status === "waitlist" ? "waitlist" : "going";
+        const confirmed = buildLocalMembershipRecord(myMembership, { eventId: currentEventId, userId: meId, status: confirmedStatus });
+        setMyMembership(confirmed);
+        setMembers((prev) => upsertLocalMembership(prev, confirmed));
+      } else if (action === "request" && typeof json.request_id === "string") {
+        const confirmed = buildLocalRequestRecord(null, { eventId: currentEventId, requesterId: meId, requestId: json.request_id, status: "pending" });
+        setMyRequest(confirmed);
+      } else if (action === "request_sent_to_interested" && meId) {
+        const optimistic = buildLocalMembershipRecord(null, { eventId: currentEventId, userId: meId, status: "interested" });
+        setMyMembership(optimistic);
+        setMembers((prev) => upsertLocalMembership(prev, optimistic));
         setMyRequest(null);
-        setMyMembership(null);
-        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
-      } else if (action === "leave") {
-        setMyMembership(null);
-        setMembers((prev) => removeLocalMembership(prev, { eventId: currentEventId, userId: meId }));
-      } else if (nextMembershipStatus) {
-        const nextMembership = buildLocalMembershipRecord(myMembership, {
-          eventId: currentEventId,
-          userId: meId,
-          status: nextMembershipStatus,
-        });
-        setMyMembership(nextMembership);
-        setMembers((prev) => upsertLocalMembership(prev, nextMembership));
-        if (action === "join" || action === "request_sent_to_interested") {
-          setMyRequest(null);
-        }
       }
     }
 
-    if (action === "join") {
-      setActionInfo(json?.status === "waitlist" ? "You're on the waitlist for this event." : "You're joining this event.");
-    }
-    if (action === "request") setActionInfo("Invite request sent.");
-    if (action === "cancel_request") setActionInfo("Request cancelled.");
-    if (action === "leave") setActionInfo("You left this event.");
-    if (action === "interested") setActionInfo("Marked as interested.");
-    if (action === "request_sent_to_interested") setActionInfo("Marked as interested.");
-    if (action === "not_interested") setActionInfo("Selection cleared.");
+    // Show toast confirmation
+    const toastMessages: Partial<Record<EventAction | "request_sent_to_interested", string>> = {
+      join: json.status === "waitlist" ? "You're on the waitlist." : "You're joining this event!",
+      leave: "You've left this event.",
+      request: "Invite request sent.",
+      cancel_request: "Request cancelled.",
+      interested: "Marked as interested.",
+      request_sent_to_interested: "Marked as interested.",
+      not_interested: "Selection cleared.",
+    };
+    const msg = toastMessages[action];
+    if (msg) toast(msg, action === "leave" || action === "cancel_request" || action === "not_interested" ? "info" : "success");
 
     setResponseMenuOpen(false);
     setRequestLinkedMemberUserId("");
@@ -988,6 +1100,65 @@ export default function EventDetailsPage() {
     }
   }
 
+  async function sendBulkInvites(userIds: string[]) {
+    if (!event || userIds.length === 0) return;
+    setInviteSendBusy(true);
+    setActionError(null);
+    const newSent: Record<string, true> = {};
+    for (const userId of userIds) {
+      if (sentInviteUserIds[userId]) continue;
+      try {
+        const rpc = await supabase.rpc("send_event_invitation", {
+          p_event_id: event.id,
+          p_recipient_id: userId,
+          p_note: null,
+        });
+        if (!rpc.error) newSent[userId] = true;
+      } catch {
+        // continue sending others
+      }
+    }
+    setSentInviteUserIds((prev) => ({ ...prev, ...newSent }));
+    setInviteSendBusy(false);
+    setInviteModalOpen(false);
+    setInviteSelected({});
+    setInviteSearch("");
+    const count = Object.keys(newSent).length;
+    if (count > 0) setActionInfo(`${count} invite${count === 1 ? "" : "s"} sent.`);
+  }
+
+  async function sendDiscussionMessage() {
+    if (!event || !discussionThreadId || !discussionBody.trim() || discussionSending) return;
+    setDiscussionSending(true);
+    const bodyText = discussionBody.trim();
+    const tag = discussionPostTag;
+    const tagPrefix = isHost ? `[[post_tag:${tag}]]\n` : "";
+    const outboundBody = `${tagPrefix}${bodyText}`;
+    try {
+      const { data, error } = await supabase.rpc("cx_send_inbox_message", {
+        p_thread_id: discussionThreadId,
+        p_connection_id: null,
+        p_body: outboundBody,
+      });
+      if (!error) {
+        const payload = data && typeof data === "object" ? data as Record<string, unknown> : {};
+        const msgId = typeof payload.messageId === "string" ? payload.messageId
+          : typeof payload.message_id === "string" ? payload.message_id
+          : typeof data === "string" ? data
+          : `local-${crypto.randomUUID()}`;
+        setDiscussionMessages((prev) => [
+          ...prev,
+          { id: msgId, senderId: meId ?? "", body: bodyText, createdAt: new Date().toISOString(), postTag: isHost ? tag : undefined },
+        ]);
+        setDiscussionBody("");
+      }
+    } catch {
+      // best effort
+    } finally {
+      setDiscussionSending(false);
+    }
+  }
+
   async function handleSubmitFeedback() {
     if (!event) return;
     if (!isAuthenticated || !accessToken) {
@@ -1071,144 +1242,150 @@ export default function EventDetailsPage() {
     <div className="min-h-screen bg-[#18191a] text-slate-100">
       <Nav />
 
-      <main className="pb-12">
-        <section className="mx-auto w-full max-w-[1220px] px-4 pt-5 sm:px-6 lg:px-8">
-          <div className="overflow-hidden rounded-[24px] border border-white/8 bg-[#1b1d21] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
-            <div className="mx-auto max-w-[920px] px-3 pt-3 sm:px-5 sm:pt-5">
-              <div className="overflow-hidden rounded-[18px] bg-[#0f1113]">
-                <div
-                  className="relative w-full bg-[#0c1118]"
-                  style={{ aspectRatio: String(1920 / 1005) }}
-                >
-                  {heroSrc ? (
-                    <>
-                      <img
-                        src={heroSrc}
-                        alt={event.title}
-                        className="h-full w-full object-cover"
-                        referrerPolicy="no-referrer"
-                        onError={() => {
-                          if (fallbackHeroUrl && heroSrc !== fallbackHeroUrl) {
-                            setHeroSrc(fallbackHeroUrl);
-                            return;
-                          }
-                          setHeroSrc(null);
-                        }}
-                      />
-                    </>
-                  ) : (
-                    <div className="h-full w-full bg-[#0f121a]" />
-                  )}
+      {/* Mobile back button */}
+      <div className="flex items-center gap-2 px-4 pt-3 md:hidden">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          aria-label="Go back"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/70 active:scale-95 transition"
+        >
+          <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+        </button>
+        <span className="truncate text-sm font-semibold text-white/60">Events</span>
+      </div>
+
+      <main id="main-content" className="pb-12">
+        <section className="mx-auto w-full max-w-[1220px] px-4 pt-3 sm:px-6 sm:pt-5 lg:px-8">
+          <div className="rounded-[20px] border border-white/8 bg-[#1b1d21] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
+            {/* Cover — image centered, date badge absolute left-bottom */}
+            <div className="relative px-3 pt-0">
+              {/* Ambient glow */}
+              <div className="pointer-events-none absolute inset-x-3 top-0 bottom-0 scale-110 overflow-hidden rounded-[16px] blur-3xl opacity-70">
+                {preferredHeroUrl && <Image src={preferredHeroUrl} alt="" aria-hidden fill className="object-cover" sizes="100vw" />}
+              </div>
+              {/* Date badge — absolute, left side, bottom-aligned with image */}
+              <div className="absolute bottom-0 left-3 z-10 overflow-hidden rounded-xl shadow-lg" style={{ width: 64 }}>
+                <div className="bg-[linear-gradient(90deg,#22d3ee,#d946ef)] py-1 text-center text-[9px] font-bold uppercase tracking-[0.12em] text-[#06121a]">
+                  {monthToken(event.startsAt)}
                 </div>
+                <div className="bg-[#111316] py-2 text-center">
+                  <div className="text-[30px] font-black leading-none text-white">{dayToken(event.startsAt)}</div>
+                </div>
+              </div>
+              {/* Main cover image — centered */}
+              <div className="relative mx-auto overflow-hidden rounded-[16px] bg-[#0c1118]" style={{ aspectRatio: "16/9", maxHeight: 400, maxWidth: 700 }}>
+                <EventHeroImage
+                  primarySrc={preferredHeroUrl}
+                  fallbackSrc={fallbackHeroUrl}
+                  alt={event.title}
+                  className="h-full w-full object-cover"
+                />
+                {isHost && event.coverStatus && event.coverStatus !== "approved" ? (
+                  <div className="absolute bottom-2.5 right-2.5">
+                    <span className={cx(
+                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                      event.coverStatus === "pending"
+                        ? "border border-amber-400/30 bg-amber-400/15 text-amber-200"
+                        : event.coverStatus === "rejected"
+                          ? "border border-rose-400/30 bg-rose-400/15 text-rose-200"
+                          : "border border-white/15 bg-white/10 text-white/70"
+                    )}>
+                      <span className="material-symbols-outlined text-[12px]">
+                        {event.coverStatus === "pending" ? "schedule" : event.coverStatus === "rejected" ? "block" : "image"}
+                      </span>
+                      {event.coverStatus === "pending" ? "Review Pending" : event.coverStatus === "rejected" ? "Cover Rejected" : `Cover ${event.coverStatus}`}
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </div>
 
-            <div className="relative border-t border-white/8 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-              {heroSrc ? (
-                <>
-                  <div
-                    className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-[0.18] blur-2xl scale-110"
-                    style={{ backgroundImage: `url('${heroSrc.replace(/'/g, "\\'")}')` }}
-                  />
-                  <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(10,16,24,0.92)_0%,rgba(16,23,31,0.88)_42%,rgba(30,18,38,0.9)_100%)]" />
-                </>
-              ) : null}
-              <div className="relative grid gap-4 lg:grid-cols-[84px_minmax(0,1fr)_auto] lg:items-start">
-                <div className="hidden lg:block">
-                  <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#202327]">
-                    <div className="bg-[linear-gradient(90deg,#22d3ee,#d946ef)] px-4 py-1 text-center text-[10px] font-bold uppercase tracking-[0.18em] text-[#06121a]">
-                      {monthToken(event.startsAt)}
-                    </div>
-                    <div className="bg-[linear-gradient(180deg,rgba(34,211,238,0.14),rgba(217,70,239,0.08))] px-4 py-3 text-center">
-                      <div className="text-[34px] font-black leading-none text-white">{dayToken(event.startsAt)}</div>
-                    </div>
+            {/* Rejection notice for host */}
+            {isHost && event.coverStatus === "rejected" ? (
+              <div className="mx-3 mb-3 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px] text-rose-400">block</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-rose-300">Cover photo rejected</p>
+                    {event.coverReviewNote ? (
+                      <p className="mt-0.5 text-xs text-rose-200/70">{event.coverReviewNote}</p>
+                    ) : null}
+                    <p className="mt-1 text-xs text-slate-400">Please upload a new cover image that meets requirements. Your event will go live once a suitable cover is approved.</p>
                   </div>
                 </div>
+              </div>
+            ) : null}
 
-                <div className="min-w-0">
-                  <div className="hidden flex-wrap items-center gap-2 sm:flex lg:hidden">
-                    <div className="inline-flex items-center overflow-hidden rounded-xl border border-white/10 bg-[#202327]">
-                      <span className="bg-[linear-gradient(90deg,#22d3ee,#d946ef)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#06121a]">
-                        {monthToken(event.startsAt)}
-                      </span>
-                      <span className="bg-[linear-gradient(180deg,rgba(34,211,238,0.14),rgba(217,70,239,0.08))] px-3 py-1 text-sm font-black text-white">{dayToken(event.startsAt)}</span>
-                    </div>
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[#b8c7da]">
-                      {new Intl.DateTimeFormat("en-US", {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "numeric",
-                      }).format(new Date(event.startsAt))}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className={cx("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(event.eventType))}>
-                      {event.eventType}
-                    </span>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/65">
-                      {eventAccessTypeShortLabel(event.accessType)}
-                    </span>
-                    {event.styles.slice(0, 3).map((style) => (
-                      <span
-                        key={style}
-                        className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/65"
-                      >
-                        {style}
-                      </span>
-                    ))}
-                  </div>
-
-                  <h1 className="mt-3 text-[26px] font-extrabold leading-tight tracking-tight text-white sm:text-[30px] lg:text-[34px]">
+            {/* Info section */}
+            <div className="px-5 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-[22px] font-bold leading-tight text-white sm:text-[26px]">
                     {event.title}
                   </h1>
-
-                  <div className="mt-3 space-y-2 text-[15px] text-slate-300">
-                    <p className="font-medium text-slate-200">{event.venueName || "Venue details"}</p>
-                    <p className="inline-flex items-start gap-2">
-                      <span className="material-symbols-outlined mt-0.5 text-[18px] text-slate-400">calendar_month</span>
-                      <span>{formatEventRange(event.startsAt, event.endsAt)}</span>
-                    </p>
-                    <p className="inline-flex items-start gap-2">
-                      <span className="material-symbols-outlined mt-0.5 text-[18px] text-slate-400">location_on</span>
-                      <span>{[event.venueAddress || event.venueName, event.city, event.country].filter(Boolean).join(", ")}</span>
+                  <div className="mt-1 space-y-0.5">
+                    {(event.venueName || event.city) ? (
+                      <p className="text-sm text-slate-300">{[event.venueName, event.city, event.country].filter(Boolean).join(", ")}</p>
+                    ) : null}
+                    <p className="inline-flex items-center gap-1 text-sm font-semibold text-cyan-400">
+                      <span className="material-symbols-outlined text-[14px]">calendar_month</span>
+                      {formatEventRange(event.startsAt, event.endsAt)}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-2 lg:min-w-[250px] lg:items-end">
+                <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                   {actionError ? (
-                    <div className="w-full rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100 lg:max-w-[320px]">
+                    <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
                       {actionError}
                     </div>
                   ) : null}
-                  <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResponseMenuOpen(false);
-                        void shareEvent();
-                      }}
-                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">share</span>
-                      Share
-                    </button>
-                    {isAuthenticated && (isHost || currentResponseState === "going" || currentResponseState === "interested" || currentResponseState === "waitlist") ? (
+                  <div className="flex flex-wrap gap-2">
+                    {/* Share button with dropdown */}
+                    <div className="relative">
                       <button
+                        ref={shareBtnRef}
                         type="button"
-                        onClick={() => setCreateGroupOpen(true)}
-                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-300 hover:bg-cyan-400/20"
+                        onClick={() => {
+                          setResponseMenuOpen(false);
+                          setMoreMenuOpen(false);
+                          setShareMenuOpen((open) => {
+                            if (!open && shareBtnRef.current) setShareBtnRect(shareBtnRef.current.getBoundingClientRect());
+                            return !open;
+                          });
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white hover:bg-white/[0.08]"
                       >
-                        <span className="material-symbols-outlined text-[18px]">group_add</span>
-                        Create Group
+                        <span className="material-symbols-outlined text-[17px]">share</span>
+                        Share
+                        <span className="material-symbols-outlined text-[15px]">expand_more</span>
                       </button>
-                    ) : null}
+                      {shareMenuOpen && shareBtnRect && typeof document !== "undefined" ? createPortal(
+                        <div
+                          className="fixed z-[200] w-[220px] rounded-2xl border border-white/10 bg-[#202327] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
+                          style={{ top: shareBtnRect.bottom + 8, right: window.innerWidth - shareBtnRect.right }}
+                        >
+                          <button type="button" onClick={() => { setShareMenuOpen(false); void copyShareLink(); }} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-white hover:bg-white/6">
+                            <span className="material-symbols-outlined text-[18px]">link</span>
+                            Share link
+                          </button>
+                          {isAuthenticated && inviteConnections.length > 0 && canInviteConnections ? (
+                            <button type="button" onClick={() => { setShareMenuOpen(false); setInviteModalOpen(true); }} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-white hover:bg-white/6">
+                              <span className="material-symbols-outlined text-[18px]">person_add</span>
+                              Invite connections
+                            </button>
+                          ) : null}
+                        </div>,
+                        document.body
+                      ) : null}
+                    </div>
+
+                    {/* Response button (non-host) */}
                     {!isHost ? (
                       <div className="relative">
                         <button
+                          ref={responseBtnRef}
                           type="button"
                           onClick={() => {
                             if (!isAuthenticated) {
@@ -1219,12 +1396,15 @@ export default function EventDetailsPage() {
                               void handleAction("interested");
                               return;
                             }
-                            setResponseMenuOpen((open) => !open);
+                            setResponseMenuOpen((open) => {
+                              if (!open && responseBtnRef.current) setResponseBtnRect(responseBtnRef.current.getBoundingClientRect());
+                              return !open;
+                            });
                             setActionError(null);
                           }}
                           disabled={actionBusy}
                           className={cx(
-                            "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition",
+                            "inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-semibold transition",
                             responseToneClass(currentResponseState),
                             actionBusy && "cursor-not-allowed opacity-60"
                           )}
@@ -1238,8 +1418,9 @@ export default function EventDetailsPage() {
                           ) : null}
                         </button>
 
-                        {responseMenuOpen ? (
-                          <div className="absolute right-0 top-[52px] z-20 w-[260px] rounded-2xl border border-white/10 bg-[#202327] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)]">
+                        {responseMenuOpen && responseBtnRect && typeof document !== "undefined" ? createPortal(
+                          <div className="fixed z-[200] w-[260px] rounded-2xl border border-white/10 bg-[#202327] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
+                            style={{ top: responseBtnRect.bottom + 8, right: window.innerWidth - responseBtnRect.right }}>
                             <button
                               type="button"
                               onClick={() => {
@@ -1314,119 +1495,166 @@ export default function EventDetailsPage() {
                                     : "not_interested"
                                 );
                               }}
-                              className={cx(
-                                "flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm",
-                                "text-white hover:bg-white/6"
-                              )}
+                              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white hover:bg-white/6"
                             >
                               <span className="flex items-center gap-2">
                                 <span className="material-symbols-outlined text-[18px]">cancel</span>
                                 Not interested
                               </span>
                             </button>
-                          </div>
+                          </div>,
+                          document.body
                         ) : null}
                       </div>
                     ) : null}
-                    {isHost ? (
-                      <>
-                        {event.accessType === "request" && (
-                          <Link
-                            href={`/events/${event.id}/inbox`}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#2374e1] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#2d7ff0]"
-                          >
-                            Manage Requests
-                          </Link>
-                        )}
-                        <Link
-                          href={`/events/new?edit=${encodeURIComponent(event.id)}&returnTo=${encodeURIComponent(`/events/${event.id}`)}`}
-                          className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#2d3035] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#373a40]"
-                        >
-                          Edit Event
-                        </Link>
-                        <Link
-                          href={`/events/new?from=${encodeURIComponent(JSON.stringify({
-                            title: event.title,
-                            eventType: event.eventType,
-                            eventAccessType: event.accessType,
-                            chatMode: event.chatMode,
-                            visibility: event.visibility,
-                            city: event.city,
-                            country: event.country,
-                            venueName: event.venueName,
-                            venueAddress: event.venueAddress,
-                            description: event.description,
-                            styles: event.styles,
-                            capacity: event.capacity,
-                            showGuestList: event.showGuestList,
-                            guestsCanInvite: event.guestsCanInvite,
-                            approveMessages: event.approveMessages,
-                          }))}`}
-                          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#2d3035] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#373a40]"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">content_copy</span>
-                          Duplicate
-                        </Link>
-                      </>
-                    ) : !isAuthenticated ? (
+
+                    {/* Host: Manage Requests */}
+                    {isHost && event.accessType === "request" ? (
+                      <Link
+                        href={`/events/${event.id}/inbox`}
+                        className="inline-flex items-center justify-center rounded-xl bg-[#2374e1] px-3 py-2 text-sm font-bold text-white hover:bg-[#2d7ff0]"
+                      >
+                        Manage Requests
+                      </Link>
+                    ) : null}
+
+                    {/* Sign in (unauthenticated) */}
+                    {!isHost && !isAuthenticated ? (
                       <Link
                         href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#2374e1] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#2d7ff0]"
+                        className="inline-flex items-center justify-center rounded-xl bg-[#2374e1] px-3 py-2 text-sm font-bold text-white hover:bg-[#2d7ff0]"
                       >
                         Sign in to Join
                       </Link>
                     ) : null}
-                    {!isHost ? (
+
+
+                    {/* ••• More menu */}
+                    <div className="relative">
                       <button
+                        ref={moreBtnRef}
                         type="button"
                         onClick={() => {
                           setResponseMenuOpen(false);
-                          setReportModalOpen(true);
-                          setActionError(null);
+                          setShareMenuOpen(false);
+                          setMoreMenuOpen((open) => {
+                            if (!open && moreBtnRef.current) setMoreBtnRect(moreBtnRef.current.getBoundingClientRect());
+                            return !open;
+                          });
                         }}
-                        disabled={actionBusy}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-[#2d3035] text-white hover:bg-[#373a40] disabled:opacity-60"
-                        aria-label="Report event"
-                        title="Report event"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/12 bg-[#2d3035] text-white hover:bg-[#373a40]"
+                        aria-label="More options"
+                        title="More options"
                       >
-                        <span className="material-symbols-outlined text-[18px]">flag</span>
+                        <span className="material-symbols-outlined text-[18px]">more_horiz</span>
                       </button>
-                    ) : null}
+                      {moreMenuOpen && moreBtnRect && typeof document !== "undefined" ? createPortal(
+                        <div className="fixed z-[200] w-[220px] rounded-2xl border border-white/10 bg-[#202327] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
+                          style={{ top: moreBtnRect.bottom + 8, right: window.innerWidth - moreBtnRect.right }}>
+                          {isHost ? (
+                            <>
+                              <Link
+                                href={`/events/new?edit=${encodeURIComponent(event.id)}&returnTo=${encodeURIComponent(`/events/${event.id}`)}`}
+                                onClick={() => setMoreMenuOpen(false)}
+                                className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-white hover:bg-white/6"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">edit</span>
+                                Edit Event
+                              </Link>
+                              <Link
+                                href={`/events/new?from=${encodeURIComponent(JSON.stringify({
+                                  title: event.title,
+                                  eventType: event.eventType,
+                                  eventAccessType: event.accessType,
+                                  chatMode: event.chatMode,
+                                  visibility: event.visibility,
+                                  city: event.city,
+                                  country: event.country,
+                                  venueName: event.venueName,
+                                  venueAddress: event.venueAddress,
+                                  description: event.description,
+                                  styles: event.styles,
+                                  capacity: event.capacity,
+                                  showGuestList: event.showGuestList,
+                                  guestsCanInvite: event.guestsCanInvite,
+                                  approveMessages: event.approveMessages,
+                                }))}`}
+                                onClick={() => setMoreMenuOpen(false)}
+                                className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-white hover:bg-white/6"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">content_copy</span>
+                                Duplicate
+                              </Link>
+                            </>
+                          ) : null}
+                          {isAuthenticated && (isHost || currentResponseState === "going" || currentResponseState === "interested" || currentResponseState === "waitlist") ? (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setMoreMenuOpen(false);
+                                if (meId) {
+                                  const { count } = await supabase
+                                    .from("groups")
+                                    .select("id", { count: "exact", head: true })
+                                    .eq("host_user_id", meId);
+                                  setGroupsUsedThisMonth(count ?? 0);
+                                }
+                                setCreateGroupOpen(true);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-white hover:bg-white/6"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">group_add</span>
+                              Create Group
+                            </button>
+                          ) : null}
+                          <a
+                              href={`https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title)}&dates=${encodeURIComponent(event.startsAt.replace(/[-:]/g, "").split(".")[0] + "Z")}/${encodeURIComponent((event.endsAt ?? event.startsAt).replace(/[-:]/g, "").split(".")[0] + "Z")}&details=${encodeURIComponent(event.description ?? "")}&location=${encodeURIComponent([event.venueName, event.venueAddress, event.city, event.country].filter(Boolean).join(", "))}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => setMoreMenuOpen(false)}
+                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-white hover:bg-white/6"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">calendar_month</span>
+                              Add to calendar
+                            </a>
+                          {!isHost && isAuthenticated ? (
+                            <>
+                              <div className="my-1 border-t border-white/8" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMoreMenuOpen(false);
+                                  setReportModalOpen(true);
+                                  setActionError(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-rose-400 hover:bg-white/6"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">flag</span>
+                                Report event
+                              </button>
+                            </>
+                          ) : null}
+                        </div>,
+                        document.body
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400 lg:justify-end">
-                    {isAuthenticated && myMembership && myMembership.status !== "not_interested" ? (
-                      <p>
-                        Status: <span className="font-semibold text-white">{statusLabel(myMembership.status)}</span>
-                      </p>
-                    ) : null}
-                    {isAuthenticated && !myMembership && myRequest ? (
-                      <p>
-                        Request: <span className="font-semibold text-white">{statusLabel(myRequest.status)}</span>
-                      </p>
-                    ) : null}
-                    {isHost ? (
-                      <p>
-                        Pending requests: <span className="font-semibold text-white">{pendingRequestsCount}</span>
-                      </p>
-                    ) : null}
-                    {spotsLeft !== null ? (
-                      <p>
-                        Spots left: <span className="font-semibold text-white">{spotsLeft}</span>
-                      </p>
-                    ) : null}
-                  </div>
+                  {spotsLeft !== null ? (
+                    <p className="mt-1 text-xs text-slate-400">
+                      Spots left: <span className="font-semibold text-white">{spotsLeft}</span>
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="mx-auto mt-5 w-full max-w-[1220px] px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-[#1b1d21] p-2">
+        <section className="mx-auto mt-4 w-full max-w-[1220px] px-4 sm:px-6 lg:px-8">
+          <div className="flex border-b border-white/10">
             {[
               { key: "details" as const, label: "Details", icon: "info" },
-              { key: "people" as const, label: "People", icon: "groups" },
-              { key: "thread" as const, label: threadTabLabel, icon: threadTabLabel === "Chat" ? "forum" : "campaign" },
+              { key: "discussion" as const, label: "Discussion", icon: event.chatMode === "discussion" || event.accessType === "private_group" ? "forum" : "campaign" },
             ].map((tab) => {
               const selected = activeEventTab === tab.key;
               return (
@@ -1435,13 +1663,13 @@ export default function EventDetailsPage() {
                   type="button"
                   onClick={() => setActiveEventTab(tab.key)}
                   className={cx(
-                    "inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition sm:flex-none sm:px-4",
+                    "inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold transition-colors border-b-2 -mb-px",
                     selected
-                      ? "bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] text-[#071116]"
-                      : "border border-white/10 bg-white/[0.03] text-white/72 hover:bg-white/[0.07] hover:text-white"
+                      ? "border-[#00F5FF] text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
                   )}
                 >
-                  <span className="material-symbols-outlined text-[18px]">{tab.icon}</span>
+                  <span className="material-symbols-outlined text-[17px]">{tab.icon}</span>
                   {tab.label}
                 </button>
               );
@@ -1451,127 +1679,271 @@ export default function EventDetailsPage() {
 
         <section className="mx-auto mt-5 grid w-full max-w-[1220px] grid-cols-1 gap-5 px-4 sm:px-6 xl:grid-cols-[minmax(0,2fr)_360px] lg:px-8">
           <div className="order-1 space-y-6 xl:order-1">
-            {activeEventTab === "thread" ? (
+            {activeEventTab === "discussion" ? (
               <>
-                <article className={`${panelClass} p-5 sm:p-6`}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{threadTabLabel}</p>
-                    <h2 className="mt-2 text-[22px] font-bold text-white">{threadHeading}</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-300">{threadDescription}</p>
+                {/* Discussion chat thread */}
+                <article className={`${panelClass} overflow-hidden`}>
+                  <div className="flex items-center justify-between border-b border-white/8 px-5 py-3.5">
+                    <h2 className="text-[17px] font-bold text-white">{threadHeading}</h2>
+                    <Link
+                      href={`/messages?thread=${encodeURIComponent(`event:${event.id}`)}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-white"
+                    >
+                      Open full
+                      <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+                    </Link>
                   </div>
-                  <Link
-                    href={`/messages?thread=${encodeURIComponent(`event:${event.id}`)}`}
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] px-4 py-2.5 text-sm font-bold text-[#071116] hover:brightness-110"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">{threadTabLabel === "Chat" ? "forum" : "campaign"}</span>
-                    Open {threadTabLabel}
-                  </Link>
-                </div>
-                {event.chatMode === "broadcast" ? (
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
-                    Broadcast mode: only organisers can post here.
+
+                  {/* Messages area */}
+                  <div className="flex max-h-[420px] min-h-[160px] flex-col gap-3 overflow-y-auto px-5 py-4 scrollbar-subtle">
+                    {discussionLoading ? (
+                      <div className="flex flex-col gap-3">
+                        {Array.from({ length: 3 }).map((_, i) => (
+                          <div key={i} className={`flex gap-2 ${i % 2 === 0 ? "" : "flex-row-reverse"}`}>
+                            <div className="h-8 w-8 shrink-0 rounded-full bg-white/[0.06] animate-pulse" />
+                            <div className={`h-10 w-[55%] rounded-2xl bg-white/[0.06] animate-pulse`} />
+                          </div>
+                        ))}
+                      </div>
+                    ) : discussionMessages.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-center">
+                        <span className="material-symbols-outlined text-[36px] text-slate-600">
+                          {event.chatMode === "discussion" || event.accessType === "private_group" ? "forum" : "campaign"}
+                        </span>
+                        <p className="mt-2 text-sm text-slate-500">{threadDescription}</p>
+                      </div>
+                    ) : (
+                      discussionMessages.map((msg) => {
+                        const isMe = msg.senderId === meId;
+                        const isHostMsg = msg.senderId === host?.userId;
+                        const senderProfile = profilesById[msg.senderId] ?? null;
+                        const senderName = senderProfile?.displayName ?? (isHostMsg ? host?.displayName : null) ?? "Member";
+                        const avatarUrl = senderProfile?.avatarUrl ?? (isHostMsg ? host?.avatarUrl : null) ?? null;
+                        const postTagLabel: Record<string, string> = { update: "📣 Update", announcement: "🎉 Announcement", ticket: "🎟 Tickets", reminder: "⏰ Reminder" };
+                        return (
+                          <div key={msg.id} className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
+                            <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full bg-[#121722]">
+                              {avatarUrl ? (
+                                <Image src={avatarUrl} alt={senderName} fill className="object-cover" sizes="32px" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-cyan-100">
+                                  {senderName.slice(0, 1).toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                            <div className={`flex max-w-[72%] flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}>
+                              {!isMe ? (
+                                <span className="px-1 text-[11px] text-slate-500">{senderName}{isHostMsg ? <span className="ml-1 text-[10px] font-semibold text-cyan-300/70">· Host</span> : null}</span>
+                              ) : null}
+                              {msg.postTag && postTagLabel[msg.postTag] ? (
+                                <span className="mb-0.5 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+                                  {postTagLabel[msg.postTag]}
+                                </span>
+                              ) : null}
+                              <div className={cx(
+                                "rounded-2xl px-3.5 py-2 text-[14px] leading-snug whitespace-pre-wrap break-words",
+                                isMe
+                                  ? "bg-[linear-gradient(90deg,#00c8cc,#b430d8)] text-white rounded-br-sm"
+                                  : "bg-white/[0.07] text-slate-100 rounded-bl-sm"
+                              )}>
+                                {msg.body}
+                              </div>
+                              <span className="px-1 text-[10px] text-slate-600">
+                                {new Date(msg.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
-                ) : null}
-                {event.chatMode === "discussion" && event.accessType !== "private_group" ? (
-                  <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">
-                    Attendee chat is enabled. Guests get one message each{event.approveMessages ? ", and new messages require organiser approval." : "."}
-                  </div>
-                ) : null}
+
+                  {/* Composer */}
+                  {isAuthenticated && canPostToEventThread({ accessType: event.accessType, chatMode: event.chatMode, isHost }) ? (
+                    <div className="border-t border-white/8 px-4 py-3">
+                      {isHost ? (
+                        <div className="space-y-2.5">
+                          {/* Post type tags */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {([
+                              { key: "update" as const, label: "📣 Update", icon: "campaign" },
+                              { key: "announcement" as const, label: "🎉 Announcement", icon: "celebration" },
+                              { key: "ticket" as const, label: "🎟 Tickets", icon: "confirmation_number" },
+                              { key: "reminder" as const, label: "⏰ Reminder", icon: "alarm" },
+                            ]).map((tag) => (
+                              <button
+                                key={tag.key}
+                                type="button"
+                                onClick={() => setDiscussionPostTag(tag.key)}
+                                className={cx(
+                                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
+                                  discussionPostTag === tag.key
+                                    ? "border-cyan-400/40 bg-cyan-400/15 text-cyan-200"
+                                    : "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.07] hover:text-white"
+                                )}
+                              >
+                                {tag.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="relative">
+                            <textarea
+                              rows={3}
+                              value={discussionBody}
+                              onChange={(e) => setDiscussionBody(e.target.value.slice(0, 600))}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                                  e.preventDefault();
+                                  void sendDiscussionMessage();
+                                }
+                              }}
+                              placeholder="Share an update, ticket link, schedule change…"
+                              className="w-full resize-none rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/40 focus:outline-none"
+                            />
+                            <span className="absolute bottom-2 right-3 text-[10px] text-slate-600">{discussionBody.length}/600</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <p className="text-[11px] text-slate-600">⌘↵ to post</p>
+                            <button
+                              type="button"
+                              onClick={() => void sendDiscussionMessage()}
+                              disabled={!discussionBody.trim() || discussionSending}
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] px-4 py-2 text-sm font-bold text-[#071116] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">send</span>
+                              {discussionSending ? "Posting…" : "Post"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-end gap-2">
+                          <textarea
+                            rows={2}
+                            value={discussionBody}
+                            onChange={(e) => setDiscussionBody(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                void sendDiscussionMessage();
+                              }
+                            }}
+                            placeholder="Write a message…"
+                            className="flex-1 resize-none rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/40 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void sendDiscussionMessage()}
+                            disabled={!discussionBody.trim() || discussionSending}
+                            className="h-10 w-10 shrink-0 rounded-xl bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] flex items-center justify-center text-[#071116] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">send</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : !isAuthenticated ? (
+                    <div className="border-t border-white/8 px-4 py-3">
+                      <Link
+                        href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
+                        className="block w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-sm text-slate-400 hover:bg-white/[0.07]"
+                      >
+                        Sign in to participate
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="border-t border-white/8 px-4 py-3">
+                      <p className="text-center text-xs text-slate-500">
+                        {event.chatMode === "broadcast" ? "Only organisers can post in broadcast mode." : "Join this event to participate."}
+                      </p>
+                    </div>
+                  )}
                 </article>
 
                 {(suggestedEventsLoading || suggestedEvents.length > 0) ? (
-                  <article className={`${panelClass} p-5 sm:p-6`}>
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
-                        <h3 className="mt-2 text-[22px] font-bold text-white">Keep exploring</h3>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => scrollSuggestedEvents("left")}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
-                          aria-label="Scroll suggested events left"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => scrollSuggestedEvents("right")}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
-                          aria-label="Scroll suggested events right"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                        </button>
-                        <Link
-                          href="/events"
-                          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
-                        >
-                          Explore all events
-                        </Link>
-                      </div>
+                  <article className={`${panelClass} overflow-hidden`}>
+                    <div className="flex items-center justify-between px-5 py-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
+                      <Link
+                        href="/events"
+                        className="text-xs font-semibold text-slate-400 hover:text-white"
+                      >
+                        Explore all →
+                      </Link>
                     </div>
 
                     {suggestedEventsLoading ? (
-                      <div className="mt-5 flex gap-4 overflow-hidden">
+                      <div className="flex gap-4 overflow-hidden px-5 pb-5">
                         {Array.from({ length: 3 }).map((_, index) => (
-                          <div key={index} className="w-[286px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
-                            <div className="h-36 bg-white/[0.05]" />
-                            <div className="space-y-3 p-4">
-                              <div className="h-3 w-20 rounded bg-white/[0.08]" />
-                              <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
-                              <div className="h-4 w-2/3 rounded bg-white/[0.06]" />
+                          <div key={index} className="w-[220px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
+                            <div className="h-28 bg-white/[0.05]" />
+                            <div className="space-y-2 p-3">
+                              <div className="h-3 w-16 rounded bg-white/[0.08]" />
+                              <div className="h-4 w-3/4 rounded bg-white/[0.08]" />
+                              <div className="h-3 w-1/2 rounded bg-white/[0.06]" />
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div
-                        ref={suggestedEventsScrollerRef}
-                        className="no-scrollbar mt-5 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
-                      >
-                        {suggestedEvents.map((suggested) => {
-                          const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
-                          const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
-                          return (
-                            <Link
-                              key={suggested.id}
-                              href={`/events/${suggested.id}`}
-                              className="group w-[286px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/10 bg-[#202327] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
-                            >
-                              <div className="relative h-36 overflow-hidden bg-[#0f1218]">
-                                {hero ? (
-                                  <img
-                                    src={hero}
-                                    alt={suggested.title}
-                                    className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <div className="h-full w-full bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(217,70,239,0.08))]" />
-                                )}
-                                <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
-                                <div className="absolute left-3 top-3 flex items-center gap-2">
-                                  <span className={cx("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(suggested.eventType))}>
-                                    {suggested.eventType}
-                                  </span>
+                      <div className="relative overflow-hidden pb-5">
+                        <div
+                          className="flex gap-3 px-4"
+                          style={{
+                            animation: suggestedEvents.length > 3 ? "marquee-left 60s linear infinite" : undefined,
+                            width: suggestedEvents.length > 3 ? "max-content" : undefined,
+                          }}
+                        >
+                          {(suggestedEvents.length > 3 ? [...suggestedEvents, ...suggestedEvents] : suggestedEvents).map((suggested, idx) => {
+                            const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
+                            const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
+                            const startDate = new Date(suggested.startsAt);
+                            const weekday = startDate.toLocaleDateString("en-US", { weekday: "short" });
+                            const month = startDate.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+                            const day = startDate.getDate();
+                            const timeStr = startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+                            const now = new Date();
+                            const daysUntil = Math.ceil((startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                            const upcomingLabel = daysUntil <= 7 ? "THIS WEEK" : daysUntil <= 30 ? "UPCOMING" : "UPCOMING";
+                            return (
+                              <Link
+                                key={`${suggested.id}-${idx}`}
+                                href={`/events/${suggested.id}`}
+                                className="group relative flex w-[200px] shrink-0 flex-col overflow-hidden rounded-2xl border border-cyan-300/12 bg-[#121212] shadow-[0_4px_16px_rgba(0,0,0,0.3)] transition hover:border-cyan-300/28"
+                              >
+                                {/* Top: image — half of card */}
+                                <div className="relative h-[100px] shrink-0 overflow-hidden bg-[#0d0f12]">
+                                  {hero ? (
+                                    <Image src={hero} alt="" fill className="object-cover opacity-80 transition group-hover:opacity-95" sizes="200px" />
+                                  ) : (
+                                    <div className="h-full w-full bg-[linear-gradient(135deg,#0d1520,#1a0d24)]" />
+                                  )}
+                                  <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/40" />
                                 </div>
-                              </div>
-                              <div className="space-y-2 p-4">
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                                  {new Intl.DateTimeFormat("en-US", {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "numeric",
-                                  }).format(new Date(suggested.startsAt))}
-                                </p>
-                                <h4 className="line-clamp-2 text-lg font-bold leading-tight text-white">{suggested.title}</h4>
-                                <p className="line-clamp-1 text-sm text-slate-300">{location || "Location announced soon"}</p>
-                              </div>
-                            </Link>
-                          );
-                        })}
+                                {/* Bottom: date + content */}
+                                <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-3 py-2">
+                                  <div className="mb-1 flex items-center gap-1.5">
+                                    <span className="text-[11px] font-black text-white">{month} {day}</span>
+                                    <span className="text-[10px] font-semibold uppercase text-slate-500">{weekday}</span>
+                                  </div>
+                                  <p className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-cyan-300">
+                                    {upcomingLabel}{suggested.eventType ? ` · ${suggested.eventType}` : ""}
+                                  </p>
+                                  <h4 className="line-clamp-2 text-[12px] font-bold leading-snug text-white">{suggested.title}</h4>
+                                  <p className="flex items-center gap-0.5 text-[11px] text-slate-500">
+                                    <span className="material-symbols-outlined text-[11px] text-cyan-300/50">location_on</span>
+                                    <span className="truncate">{location || "Location TBA"}</span>
+                                  </p>
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                        {suggestedEvents.length > 3 ? (
+                          <>
+                            <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#1b1d21] to-transparent" />
+                            <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#1b1d21] to-transparent" />
+                          </>
+                        ) : null}
                       </div>
                     )}
                   </article>
@@ -1579,337 +1951,229 @@ export default function EventDetailsPage() {
               </>
             ) : null}
 
-            {activeEventTab === "people" ? (
-              <article className={`${panelClass} p-5 sm:p-6`}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">People</p>
-                    <h2 className="mt-2 text-[22px] font-bold text-white">Who is around this event</h2>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 sm:min-w-[360px]">
-                    <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Joining</p>
-                      <p className="mt-2 text-2xl font-black text-white">{counts.going}</p>
-                    </div>
-                    <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Interested</p>
-                      <p className="mt-2 text-2xl font-black text-white">{counts.interested}</p>
-                    </div>
-                    <div className="rounded-2xl bg-[#202327] px-4 py-4 text-center">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Waitlist</p>
-                      <p className="mt-2 text-2xl font-black text-white">{counts.waitlist}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {!isAuthenticated ? (
-                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-4">
-                    <p className="text-sm text-slate-300">Sign in to see people joining, friend activity, and member identities.</p>
-                    <Link
-                      href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-                      className="inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                    >
-                      Sign in
-                    </Link>
-                  </div>
-                ) : (
-                  <div className="mt-5 space-y-5">
-                    <div className="grid gap-4 lg:grid-cols-3">
-                      <div className="rounded-2xl border border-white/8 bg-black/20 p-4 lg:col-span-2">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <h3 className="text-sm font-semibold text-white">Joining</h3>
-                          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">{joiningMembers.length}</span>
-                        </div>
-                        {joiningMembers.length > 0 ? (
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            {joiningMembers.map((member) => {
-                              const profile = profilesById[member.userId] ?? null;
-                              return (
-                                <div key={member.id} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3">
-                                  <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-[#121722]">
-                                    {profile?.avatarUrl ? (
-                                      <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
-                                    ) : (
-                                      <div className="flex h-full w-full items-center justify-center text-xs font-bold text-cyan-100">
-                                        {(profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-semibold text-white">{profile?.displayName ?? "Member"}</p>
-                                    <p className="truncate text-xs text-slate-400">
-                                      {member.status === "host" ? "Host" : [profile?.city, profile?.country].filter(Boolean).join(", ") || "Guest"}
-                                    </p>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-slate-400">No one has joined yet.</p>
-                        )}
-                      </div>
-
-                      <div className="space-y-4">
-                        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold text-white">Interested</h3>
-                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">{interestedMembers.length}</span>
-                          </div>
-                          {interestedMembers.length > 0 ? (
-                            <div className="space-y-3">
-                              {interestedMembers.slice(0, 5).map((member) => {
-                                const profile = profilesById[member.userId] ?? null;
-                                return (
-                                  <div key={member.id} className="flex items-center gap-3">
-                                    <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-[#121722]">
-                                      {profile?.avatarUrl ? (
-                                        <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
-                                      ) : (
-                                        <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-cyan-100">
-                                          {(profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="truncate text-sm font-semibold text-white">{profile?.displayName ?? "Member"}</p>
-                                      <p className="truncate text-xs text-slate-400">{[profile?.city, profile?.country].filter(Boolean).join(", ") || "Interested attendee"}</p>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-400">No interested members yet.</p>
-                          )}
-                        </div>
-
-                        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold text-white">Waitlist</h3>
-                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">{waitlistMembers.length}</span>
-                          </div>
-                          {waitlistMembers.length > 0 ? (
-                            <div className="space-y-3">
-                              {waitlistMembers.slice(0, 5).map((member) => {
-                                const profile = profilesById[member.userId] ?? null;
-                                return (
-                                  <div key={member.id} className="flex items-center gap-3">
-                                    <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-[#121722]">
-                                      {profile?.avatarUrl ? (
-                                        <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
-                                      ) : (
-                                        <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-cyan-100">
-                                          {(profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="truncate text-sm font-semibold text-white">{profile?.displayName ?? "Member"}</p>
-                                      <p className="truncate text-xs text-slate-400">{[profile?.city, profile?.country].filter(Boolean).join(", ") || "Waiting for a spot"}</p>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-400">Nobody on the waitlist.</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </article>
-            ) : null}
-
             {activeEventTab === "details" ? (
               <>
                 <article className={`${panelClass} overflow-hidden`}>
-              <div className="border-b border-white/8 px-5 py-4 sm:px-6">
-                <h2 className="text-[22px] font-bold text-white">Details</h2>
-              </div>
-              <div className="space-y-6 px-5 py-5 sm:px-6 sm:py-6">
-                {isAuthenticated && (isHost || event.showGuestList) ? (
-                  <div className="space-y-3">
-                    <p className="text-sm text-slate-400">
-                      {respondedCount} responded
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex -space-x-3">
-                        {visibleAttendees.length > 0 ? (
-                          visibleAttendees.map((entry) => (
-                            <div
-                              key={entry.member.id}
-                              title={entry.profile?.displayName ?? "Member"}
-                              className="h-10 w-10 overflow-hidden rounded-full border-2 border-[#18191a] bg-[#121722]"
-                            >
-                              {entry.profile?.avatarUrl ? (
-                                <img src={entry.profile.avatarUrl} alt={entry.profile.displayName} className="h-full w-full object-cover" />
-                              ) : (
-                                <div className="flex h-full w-full items-center justify-center text-xs font-bold text-cyan-100">
-                                  {(entry.profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
-                                </div>
-                              )}
+                  <div className="border-b border-white/8 px-5 py-4">
+                    <h2 className="text-[20px] font-bold text-white">Details</h2>
+                  </div>
+                  <div className="space-y-3 px-5 py-4">
+
+                    {/* People responded */}
+                    {(isHost || event.showGuestList) && respondedCount > 0 ? (
+                      <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined shrink-0 text-[20px] text-slate-400">group</span>
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                          <div className="flex -space-x-2">
+                            {visibleAttendees.map((entry) => (
+                              <div key={entry.member.id} title={entry.profile?.displayName ?? "Member"} className="relative h-7 w-7 overflow-hidden rounded-full border-2 border-[#1b1d21] bg-[#121722]">
+                                {entry.profile?.avatarUrl ? (
+                                  <Image src={entry.profile.avatarUrl} alt={entry.profile.displayName} fill className="object-cover" sizes="28px" />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-[9px] font-bold text-cyan-100">
+                                    {(entry.profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                            {counts.going > visibleAttendees.length ? (
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#1b1d21] bg-[#202327] text-[9px] font-bold text-white">
+                                +{counts.going - visibleAttendees.length}
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="text-[14px] text-slate-300">{respondedCount} people responded</p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Location */}
+                    {(event.venueName || event.venueAddress || event.city) ? (
+                      <div className="flex items-start gap-3">
+                        <span className="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-slate-400">location_on</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[15px] font-semibold text-white">
+                            {event.venueName || [event.venueAddress, event.city, event.country].filter(Boolean).join(", ")}
+                          </p>
+                          {event.venueName && (event.venueAddress || event.city) ? (
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span className="text-sm text-slate-400">
+                                {[event.venueAddress, event.city, event.country].filter(Boolean).join(", ")}
+                              </span>
+                              {mapsUrl ? (
+                                <a href={mapsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs font-semibold text-sky-400 hover:text-sky-300">
+                                  <span className="material-symbols-outlined text-[13px]">route</span>
+                                  Get directions
+                                </a>
+                              ) : null}
                             </div>
-                          ))
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#18191a] bg-[#121722] text-cyan-100">
-                            <span className="material-symbols-outlined text-[18px]">groups</span>
+                          ) : mapsUrl ? (
+                            <a href={mapsUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-flex items-center gap-0.5 text-xs font-semibold text-sky-400 hover:text-sky-300">
+                              <span className="material-symbols-outlined text-[13px]">route</span>
+                              Get directions
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Tickets / Links */}
+                    {isAuthenticated && event.links.length > 0 ? (
+                      event.links.map((link, index) => (
+                        <div key={`${link.url}-${index}`} className="flex items-start gap-3">
+                          <span className="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-slate-400">
+                            {link.type === "ticket" || link.label.toLowerCase().includes("ticket") ? "confirmation_number" : "link"}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[15px] font-semibold text-white">{link.label}</p>
+                            <a href={link.url} target="_blank" rel="noreferrer" className="truncate text-sm text-sky-400 hover:text-sky-300">
+                              {link.url.replace(/^https?:\/\//, "")}
+                            </a>
                           </div>
-                        )}
-                        {counts.going > visibleAttendees.length ? (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#18191a] bg-[#202327] text-xs font-bold text-white">
-                            +{counts.going - visibleAttendees.length}
-                          </div>
-                        ) : null}
+                        </div>
+                      ))
+                    ) : !isAuthenticated && event.links.length > 0 ? (
+                      <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined shrink-0 text-[20px] text-slate-400">lock</span>
+                        <div className="min-w-0">
+                          <p className="text-[14px] text-slate-300">Links visible to members. <Link href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`} className="font-semibold text-cyan-400 hover:text-cyan-300">Sign in</Link></p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Access / visibility */}
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined shrink-0 text-[20px] text-slate-400">
+                        {event.accessType === "private_group" ? "lock" : event.accessType === "request" ? "how_to_reg" : "public"}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="text-[15px] font-semibold text-white">
+                          {event.accessType === "private_group" ? "Private group" : event.accessType === "request" ? "Request to join" : "Public event"}
+                        </span>
+                        <span className="ml-1.5 text-sm text-slate-400">
+                          {event.accessType === "private_group" ? "· Members only" : event.accessType === "request" ? "· Host approves" : "· Open to anyone on ConXion"}
+                        </span>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm text-slate-400">Sign in to see who is joining or interested.</p>
-                    <Link
-                      href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-                      className="inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                    >
-                      Sign in
-                    </Link>
-                  </div>
-                )}
 
-                <p className="text-[15px] leading-7 text-slate-200">
-                  {event.description?.trim() || "The host has not added a detailed description yet."}
-                </p>
+                    {/* Description */}
+                    {event.description?.trim() ? (
+                      <p className="pt-1 text-[15px] leading-7 text-slate-200 whitespace-pre-wrap">
+                        {event.description.trim()}
+                      </p>
+                    ) : null}
 
-                {!isAuthenticated ? (
-                  <div className="border-t border-white/8 pt-5">
-                    <h3 className="mb-2 text-lg font-bold text-white">External Links</h3>
-                    <p className="mb-4 text-sm text-slate-300">Links to tickets and socials are available for members only.</p>
-                    <Link
-                      href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-                      className="inline-flex rounded-full bg-[#2374e1] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2d7ff0]"
-                    >
-                      Sign in to unlock links
-                    </Link>
-                  </div>
-                ) : event.links.length > 0 ? (
-                  <div className="border-t border-white/8 pt-5">
-                    <h3 className="mb-4 text-lg font-bold text-white">External Links</h3>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {event.links.map((link, index) => (
-                        <a
-                          key={`${link.url}-${index}`}
-                          href={link.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center justify-between rounded-xl bg-[#202327] px-4 py-3 text-sm text-slate-200 hover:bg-[#262a2f] hover:text-white"
-                        >
-                          <span className="truncate">
-                            <span className="font-semibold">{link.label}</span>
-                            <span className="ml-1 text-slate-400">({link.type})</span>
-                          </span>
-                          <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                        </a>
+                    {/* Tags */}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {(event.city || event.country) ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+                          <span className="material-symbols-outlined text-[12px]">location_on</span>
+                          {[event.city, event.country].filter(Boolean).join(", ")}
+                        </span>
+                      ) : null}
+                      {event.eventType ? (
+                        <span className={cx("rounded-full border px-2.5 py-1 text-[11px] font-semibold", typeBadge(event.eventType))}>
+                          {event.eventType}
+                        </span>
+                      ) : null}
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+                        {event.accessType === "private_group" ? "Private" : event.accessType === "request" ? "Request" : "Public"}
+                      </span>
+                      {event.styles.map((style) => (
+                        <span key={style} className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-2.5 py-1 text-[11px] font-semibold text-cyan-200">
+                          {style}
+                        </span>
                       ))}
                     </div>
+
                   </div>
-                ) : null}
-              </div>
                 </article>
 
                 {(suggestedEventsLoading || suggestedEvents.length > 0) ? (
-                  <article className={`${panelClass} p-5 sm:p-6`}>
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
-                        <h3 className="mt-2 text-[22px] font-bold text-white">Keep exploring</h3>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => scrollSuggestedEvents("left")}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
-                          aria-label="Scroll suggested events left"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => scrollSuggestedEvents("right")}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-white hover:bg-white/[0.08]"
-                          aria-label="Scroll suggested events right"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                        </button>
-                        <Link
-                          href="/events"
-                          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08]"
-                        >
-                          Explore all events
-                        </Link>
-                      </div>
+                  <article className={`${panelClass} overflow-hidden`}>
+                    <div className="flex items-center justify-between px-5 py-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Suggested events</p>
+                      <Link
+                        href="/events"
+                        className="text-xs font-semibold text-slate-400 hover:text-white"
+                      >
+                        Explore all →
+                      </Link>
                     </div>
 
                     {suggestedEventsLoading ? (
-                      <div className="mt-5 flex gap-4 overflow-hidden">
+                      <div className="flex gap-4 overflow-hidden px-5 pb-5">
                         {Array.from({ length: 3 }).map((_, index) => (
-                          <div key={index} className="w-[286px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
-                            <div className="h-36 bg-white/[0.05]" />
-                            <div className="space-y-3 p-4">
-                              <div className="h-3 w-20 rounded bg-white/[0.08]" />
-                              <div className="h-5 w-3/4 rounded bg-white/[0.08]" />
-                              <div className="h-4 w-2/3 rounded bg-white/[0.06]" />
+                          <div key={index} className="w-[220px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse">
+                            <div className="h-28 bg-white/[0.05]" />
+                            <div className="space-y-2 p-3">
+                              <div className="h-3 w-16 rounded bg-white/[0.08]" />
+                              <div className="h-4 w-3/4 rounded bg-white/[0.08]" />
+                              <div className="h-3 w-1/2 rounded bg-white/[0.06]" />
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div
-                        ref={suggestedEventsScrollerRef}
-                        className="no-scrollbar mt-5 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
-                      >
-                        {suggestedEvents.map((suggested) => {
-                          const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
-                          const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
-                          return (
-                            <Link
-                              key={suggested.id}
-                              href={`/events/${suggested.id}`}
-                              className="group w-[286px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/10 bg-[#202327] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
-                            >
-                              <div className="relative h-36 overflow-hidden bg-[#0f1218]">
-                                {hero ? (
-                                  <img
-                                    src={hero}
-                                    alt={suggested.title}
-                                    className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <div className="h-full w-full bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(217,70,239,0.08))]" />
-                                )}
-                                <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
-                                <div className="absolute left-3 top-3 flex items-center gap-2">
-                                  <span className={cx("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", typeBadge(suggested.eventType))}>
-                                    {suggested.eventType}
-                                  </span>
+                      <div className="relative overflow-hidden pb-5">
+                        <div
+                          className="flex gap-3 px-4"
+                          style={{
+                            animation: suggestedEvents.length > 3 ? "marquee-left 60s linear infinite" : undefined,
+                            width: suggestedEvents.length > 3 ? "max-content" : undefined,
+                          }}
+                        >
+                          {(suggestedEvents.length > 3 ? [...suggestedEvents, ...suggestedEvents] : suggestedEvents).map((suggested, idx) => {
+                            const hero = pickEventHeroUrl(suggested) || pickEventFallbackHeroUrl(suggested);
+                            const location = [suggested.city, suggested.country].filter(Boolean).join(", ");
+                            const startDate = new Date(suggested.startsAt);
+                            const weekday = startDate.toLocaleDateString("en-US", { weekday: "short" });
+                            const month = startDate.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+                            const day = startDate.getDate();
+                            const timeStr = startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+                            const now = new Date();
+                            const daysUntil = Math.ceil((startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                            const upcomingLabel = daysUntil <= 7 ? "THIS WEEK" : daysUntil <= 30 ? "UPCOMING" : "UPCOMING";
+                            return (
+                              <Link
+                                key={`${suggested.id}-${idx}`}
+                                href={`/events/${suggested.id}`}
+                                className="group relative flex w-[200px] shrink-0 flex-col overflow-hidden rounded-2xl border border-cyan-300/12 bg-[#121212] shadow-[0_4px_16px_rgba(0,0,0,0.3)] transition hover:border-cyan-300/28"
+                              >
+                                {/* Top: image — half of card */}
+                                <div className="relative h-[100px] shrink-0 overflow-hidden bg-[#0d0f12]">
+                                  {hero ? (
+                                    <Image src={hero} alt="" fill className="object-cover opacity-80 transition group-hover:opacity-95" sizes="200px" />
+                                  ) : (
+                                    <div className="h-full w-full bg-[linear-gradient(135deg,#0d1520,#1a0d24)]" />
+                                  )}
+                                  <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/40" />
                                 </div>
-                              </div>
-                              <div className="space-y-2 p-4">
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                                  {new Intl.DateTimeFormat("en-US", {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "numeric",
-                                  }).format(new Date(suggested.startsAt))}
-                                </p>
-                                <h4 className="line-clamp-2 text-lg font-bold leading-tight text-white">{suggested.title}</h4>
-                                <p className="line-clamp-1 text-sm text-slate-300">{location || "Location announced soon"}</p>
-                              </div>
-                            </Link>
-                          );
-                        })}
+                                {/* Bottom: date + content */}
+                                <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-3 py-2">
+                                  <div className="mb-1 flex items-center gap-1.5">
+                                    <span className="text-[11px] font-black text-white">{month} {day}</span>
+                                    <span className="text-[10px] font-semibold uppercase text-slate-500">{weekday}</span>
+                                  </div>
+                                  <p className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-cyan-300">
+                                    {upcomingLabel}{suggested.eventType ? ` · ${suggested.eventType}` : ""}
+                                  </p>
+                                  <h4 className="line-clamp-2 text-[12px] font-bold leading-snug text-white">{suggested.title}</h4>
+                                  <p className="flex items-center gap-0.5 text-[11px] text-slate-500">
+                                    <span className="material-symbols-outlined text-[11px] text-cyan-300/50">location_on</span>
+                                    <span className="truncate">{location || "Location TBA"}</span>
+                                  </p>
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                        {suggestedEvents.length > 3 ? (
+                          <>
+                            <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#1b1d21] to-transparent" />
+                            <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#1b1d21] to-transparent" />
+                          </>
+                        ) : null}
                       </div>
                     )}
                   </article>
@@ -2028,23 +2292,7 @@ export default function EventDetailsPage() {
 
           <aside className="order-2 space-y-6 xl:order-2">
             <article className={`overflow-hidden ${panelClass}`}>
-              <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Location</p>
-                  <p className="mt-1 text-base font-semibold text-white">{event.venueName || "Venue details"}</p>
-                </div>
-                {mapEmbedUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => setMapDialogOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white hover:bg-white/[0.08]"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">open_in_full</span>
-                    Expand
-                  </button>
-                ) : null}
-              </div>
-              <div className="h-44 bg-[#202327]">
+              <div className="relative h-64 bg-[#202327]">
                 {mapLocation ? (
                   <iframe
                     title="Event map"
@@ -2058,13 +2306,17 @@ export default function EventDetailsPage() {
                     <span className="material-symbols-outlined text-5xl text-cyan-300/45">location_on</span>
                   </div>
                 )}
+                {/* Cover attribution bar + show venue info */}
+                <div className="absolute bottom-0 left-0 right-0 bg-[#1a1c20] px-4 py-3">
+                  {event.venueName ? <p className="text-sm font-semibold text-white">{event.venueName}</p> : null}
+                  <p className="text-xs text-slate-400">
+                    {isAuthenticated
+                      ? [event.venueAddress, event.city, event.country].filter(Boolean).join(", ")
+                      : [event.city, event.country].filter(Boolean).join(", ")}
+                  </p>
+                </div>
               </div>
-              <div className="p-4">
-                <p className="mt-1 text-sm text-slate-300">
-                  {isAuthenticated
-                    ? [event.venueAddress, event.city, event.country].filter(Boolean).join(", ")
-                    : [event.city, event.country].filter(Boolean).join(", ")}
-                </p>
+              <div className="px-4 pb-4 pt-3">
                 {!isAuthenticated ? (
                   <Link
                     href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
@@ -2093,8 +2345,8 @@ export default function EventDetailsPage() {
                 <div className="mt-4 border-t border-white/8 pt-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Hosted by</p>
                   <div className="mt-3 flex items-center gap-3">
-                    <div className="h-12 w-12 overflow-hidden rounded-full bg-[#15171a]">
-                      {host?.avatarUrl ? <img src={host.avatarUrl} alt={host.displayName} className="h-full w-full object-cover" /> : null}
+                    <div className="relative h-12 w-12 overflow-hidden rounded-full bg-[#15171a]">
+                      {host?.avatarUrl ? <Image src={host.avatarUrl} alt={host.displayName} fill className="object-cover" sizes="48px" /> : null}
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-white">{host?.displayName ?? "Event host"}</p>
@@ -2106,12 +2358,6 @@ export default function EventDetailsPage() {
             </article>
 
             <article className={`${accentPanelClass} p-5`}>
-              {isHost && event.coverUrl && event.coverStatus !== "approved" ? (
-                <div className="mb-3 rounded-xl border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
-                  Cover review status: {event.coverStatus}.
-                </div>
-              ) : null}
-
               <div className="mb-4">
                 <h3 className="text-lg font-bold text-white">Guests</h3>
               </div>
@@ -2138,10 +2384,10 @@ export default function EventDetailsPage() {
                             <div
                               key={entry.member.id}
                               title={entry.profile?.displayName ?? "Member"}
-                              className="h-11 w-11 overflow-hidden rounded-full border-2 border-[#202327] bg-[#121722]"
+                              className="relative h-11 w-11 overflow-hidden rounded-full border-2 border-[#202327] bg-[#121722]"
                             >
                               {entry.profile?.avatarUrl ? (
-                                <img src={entry.profile.avatarUrl} alt={entry.profile.displayName} className="h-full w-full object-cover" />
+                                <Image src={entry.profile.avatarUrl} alt={entry.profile.displayName} fill className="object-cover" sizes="44px" />
                               ) : (
                                 <div className="flex h-full w-full items-center justify-center text-xs font-bold text-cyan-100">
                                   {(entry.profile?.displayName ?? "M").slice(0, 1).toUpperCase()}
@@ -2166,13 +2412,13 @@ export default function EventDetailsPage() {
 
                   {popularWithFriends.length > 0 ? (
                     <div className="rounded-2xl bg-[#202327] p-4">
-                      <h4 className="text-sm font-semibold text-white">Popular with friends</h4>
+                      <h4 className="text-sm font-semibold text-white">Connections Attending</h4>
                       <div className="mt-3 space-y-3">
                         {popularWithFriends.map((entry) => (
                           <div key={entry.member.id} className="flex items-center gap-3">
-                            <div className="h-10 w-10 overflow-hidden rounded-full border border-white/20 bg-[#121722]">
+                            <div className="relative h-10 w-10 overflow-hidden rounded-full border border-white/20 bg-[#121722]">
                               {entry.profile?.avatarUrl ? (
-                                <img src={entry.profile.avatarUrl} alt={entry.profile.displayName} className="h-full w-full object-cover" />
+                                <Image src={entry.profile.avatarUrl} alt={entry.profile.displayName} fill className="object-cover" sizes="40px" />
                               ) : null}
                             </div>
                             <div className="min-w-0 flex-1">
@@ -2187,16 +2433,16 @@ export default function EventDetailsPage() {
 
                   {inviteConnections.length > 0 && canInviteConnections ? (
                     <div className="rounded-2xl bg-[#202327] p-4">
-                      <h4 className="text-sm font-semibold text-white">Invite your connections</h4>
+                      <h4 className="text-sm font-semibold text-white">Go with friends</h4>
                       <div className="mt-3 space-y-3">
                         {inviteConnections.slice(0, 5).map((connection) => {
                           const alreadySent = Boolean(sentInviteUserIds[connection.userId]);
                           const busy = inviteBusyUserId === connection.userId;
                           return (
                             <div key={connection.connectionId} className="flex items-center gap-3">
-                              <div className="h-10 w-10 overflow-hidden rounded-full border border-white/20 bg-[#121722]">
+                              <div className="relative h-10 w-10 overflow-hidden rounded-full border border-white/20 bg-[#121722]">
                                 {connection.avatarUrl ? (
-                                  <img src={connection.avatarUrl} alt={connection.displayName} className="h-full w-full object-cover" />
+                                  <Image src={connection.avatarUrl} alt={connection.displayName} fill className="object-cover" sizes="40px" />
                                 ) : null}
                               </div>
                               <div className="min-w-0 flex-1">
@@ -2231,21 +2477,6 @@ export default function EventDetailsPage() {
           </aside>
         </section>
 
-        <div className="mx-auto mt-8 w-full max-w-[1320px] px-4 sm:px-6 lg:px-8">
-          <Link
-            href="/events"
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-white/82 hover:bg-white/[0.07]"
-          >
-            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-            Back to events
-          </Link>
-        </div>
-
-        {actionInfo ? (
-          <div className="pointer-events-none fixed bottom-5 right-5 z-[82] max-w-sm rounded-2xl border border-cyan-300/35 bg-[#0f1a1f]/95 px-4 py-3 text-sm text-cyan-50 shadow-[0_14px_40px_rgba(0,0,0,0.42)] backdrop-blur">
-            {actionInfo}
-          </div>
-        ) : null}
       </main>
 
       <ConfirmationDialog
@@ -2406,39 +2637,196 @@ export default function EventDetailsPage() {
           attendees={groupModalAttendees}
           connections={groupModalConnections}
           monthlyLimit={groupMonthlyLimit}
+          groupsUsed={groupsUsedThisMonth}
         />
       )}
 
-      {shareDialogOpen && typeof document !== "undefined"
+      {inviteModalOpen && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-0 z-[141] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
-              onClick={() => setShareDialogOpen(false)}
+              className="fixed inset-0 z-[141] flex items-end justify-center bg-black/75 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
+              onClick={() => { setInviteModalOpen(false); setInviteSelected({}); setInviteSearch(""); }}
             >
               <div
-                className="w-full max-w-sm rounded-2xl border border-white/12 bg-[#0f1419] p-4 shadow-2xl"
+                className="sheet-up flex w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-white/12 bg-[#0f1419] shadow-2xl sm:rounded-3xl"
+                style={{ maxHeight: "min(680px, 92vh)" }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1 truncate rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/80">
-                    {shareDisplayUrl}
-                  </div>
+                {/* Drag handle — mobile only */}
+                <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                  <h2 className="text-base font-bold text-white">Invite people</h2>
                   <button
                     type="button"
-                    onClick={() => { void copyShareLink(); setShareDialogOpen(false); }}
-                    className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">content_copy</span>
-                    Copy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShareDialogOpen(false)}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 text-white/50 hover:text-white"
+                    onClick={() => { setInviteModalOpen(false); setInviteSelected({}); setInviteSearch(""); }}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/60 hover:text-white"
                     aria-label="Close"
                   >
                     <span className="material-symbols-outlined text-[18px]">close</span>
                   </button>
+                </div>
+
+                {/* Search */}
+                <div className="border-b border-white/8 px-4 py-3">
+                  <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2.5">
+                    <span className="material-symbols-outlined text-[18px] text-slate-400">search</span>
+                    <input
+                      type="text"
+                      value={inviteSearch}
+                      onChange={(e) => setInviteSearch(e.target.value)}
+                      placeholder="Search for people..."
+                      className="flex-1 bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
+                      autoFocus
+                    />
+                    {inviteSearch ? (
+                      <button type="button" onClick={() => setInviteSearch("")} className="text-slate-400 hover:text-white">
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Connection list */}
+                <div className="flex-1 overflow-y-auto">
+                  {(() => {
+                    const query = inviteSearch.trim().toLowerCase();
+                    const filtered = inviteConnections.filter((c) =>
+                      !query || [c.displayName, c.subtitle].join(" ").toLowerCase().includes(query)
+                    );
+                    const selectedCount = Object.keys(inviteSelected).length;
+                    const allFilteredSelected = filtered.length > 0 && filtered.every((c) => inviteSelected[c.userId] || sentInviteUserIds[c.userId]);
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center justify-center gap-2 py-12 text-slate-500">
+                          <span className="material-symbols-outlined text-4xl">person_search</span>
+                          <p className="text-sm">No connections found</p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="px-2 py-2">
+                        <div className="flex items-center justify-between px-3 py-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                            Your connections
+                          </p>
+                          {filtered.some((c) => !sentInviteUserIds[c.userId]) ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (allFilteredSelected) {
+                                  setInviteSelected({});
+                                } else {
+                                  const next: Record<string, true> = {};
+                                  filtered.forEach((c) => { if (!sentInviteUserIds[c.userId]) next[c.userId] = true; });
+                                  setInviteSelected(next);
+                                }
+                              }}
+                              className="text-xs font-semibold text-cyan-400 hover:text-cyan-300"
+                            >
+                              {allFilteredSelected ? "Deselect all" : "Select all"}
+                            </button>
+                          ) : null}
+                        </div>
+                        {filtered.map((connection) => {
+                          const alreadySent = Boolean(sentInviteUserIds[connection.userId]);
+                          const selected = Boolean(inviteSelected[connection.userId]);
+                          return (
+                            <button
+                              key={connection.userId}
+                              type="button"
+                              disabled={alreadySent}
+                              onClick={() => {
+                                if (alreadySent) return;
+                                setInviteSelected((prev) => {
+                                  const next = { ...prev };
+                                  if (next[connection.userId]) delete next[connection.userId];
+                                  else next[connection.userId] = true;
+                                  return next;
+                                });
+                              }}
+                              className={cx(
+                                "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition",
+                                alreadySent ? "opacity-50 cursor-default" : "hover:bg-white/[0.05]"
+                              )}
+                            >
+                              <div className="relative shrink-0">
+                                {connection.avatarUrl ? (
+                                  <img
+                                    src={connection.avatarUrl}
+                                    alt={connection.displayName}
+                                    className="h-10 w-10 rounded-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400/30 to-fuchsia-500/30 text-sm font-bold text-white">
+                                    {connection.displayName.charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold text-white">{connection.displayName}</p>
+                                {connection.subtitle ? (
+                                  <p className="truncate text-xs text-slate-400">{connection.subtitle}</p>
+                                ) : null}
+                              </div>
+                              <div className="shrink-0">
+                                {alreadySent ? (
+                                  <span className="text-xs font-semibold text-emerald-400">Sent</span>
+                                ) : (
+                                  <div className={cx(
+                                    "flex h-5 w-5 items-center justify-center rounded-full border-2 transition",
+                                    selected
+                                      ? "border-transparent bg-[linear-gradient(90deg,#22d3ee,#d946ef)]"
+                                      : "border-white/25 bg-transparent"
+                                  )}>
+                                    {selected ? <span className="material-symbols-outlined text-[13px] text-[#06121a] font-bold">check</span> : null}
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {selectedCount > 0 ? (
+                          <p className="px-3 pt-1 pb-0 text-xs text-slate-500">{selectedCount} selected</p>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between border-t border-white/8 px-5 py-4">
+                  <button
+                    type="button"
+                    onClick={() => { void copyShareLink(); }}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white hover:bg-white/[0.08]"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">link</span>
+                    Copy invite link
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setInviteModalOpen(false); setInviteSelected({}); setInviteSearch(""); }}
+                      className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white hover:bg-white/[0.08]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Object.keys(inviteSelected).length === 0 || inviteSendBusy}
+                      onClick={() => void sendBulkInvites(Object.keys(inviteSelected))}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[linear-gradient(90deg,#22d3ee,#d946ef)] px-4 py-2 text-sm font-bold text-[#06121a] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                    >
+                      {inviteSendBusy ? (
+                        <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                      ) : null}
+                      Send invites
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>,
@@ -2449,13 +2837,14 @@ export default function EventDetailsPage() {
       {mapDialogOpen && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-0 z-[142] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm"
+              className="fixed inset-0 z-[142] flex items-end justify-center bg-black/75 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
               onClick={() => setMapDialogOpen(false)}
             >
               <div
-                className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/12 bg-[#0f1419] shadow-2xl"
+                className="sheet-up flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-white/12 bg-[#0f1419] shadow-2xl sm:rounded-3xl"
                 onClick={(e) => e.stopPropagation()}
               >
+                <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-base font-semibold text-white">{event.venueName || "Event map"}</p>

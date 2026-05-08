@@ -2587,7 +2587,22 @@ function MemberProfilePage() {
     <div className="min-h-screen bg-[#05070c] text-slate-100">
       <Nav />
 
-      <main className={cx("mx-auto w-full max-w-[1280px] px-4 pt-6 sm:px-6 lg:px-8", !isSelf ? "pb-20" : "pb-16")}>
+      {/* Mobile back button */}
+      {!isSelf && (
+        <div className="flex items-center gap-2 px-4 pt-3 md:hidden">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/70 active:scale-95 transition"
+          >
+            <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+          </button>
+          <span className="truncate text-sm font-semibold text-white/60">Back</span>
+        </div>
+      )}
+
+      <main className={cx("mx-auto w-full max-w-[1280px] px-4 pt-3 sm:px-6 sm:pt-6 lg:px-8", !isSelf ? "pb-20" : "pb-16")}>
         {toasts.length ? (
           <div className="pointer-events-none fixed left-1/2 top-[74px] z-[95] flex w-[min(94vw,560px)] -translate-x-1/2 flex-col gap-2">
             {toasts.map((toast) => (

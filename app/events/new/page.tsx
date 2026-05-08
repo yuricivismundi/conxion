@@ -154,7 +154,7 @@ function CreateEventForm() {
   const [eventAccessType, setEventAccessType] = useState<EventAccessType>(isGroupCreate ? "private_group" : "public");
   const [chatMode, setChatMode] = useState<EventChatMode>(isGroupCreate ? "discussion" : "broadcast");
   const [showGuestList, setShowGuestList] = useState(true);
-  const [guestsCanInvite, setGuestsCanInvite] = useState(false);
+  const [guestsCanInvite, setGuestsCanInvite] = useState(true);
   const [approveMessages, setApproveMessages] = useState(false);
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");

@@ -412,7 +412,7 @@ export default function Nav({ title }: NavProps) {
                     key={`mobile-${tab.href}`}
                     href={tab.href}
                     className={cx(
-                      "relative flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-colors",
+                      "relative flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-colors active:scale-95",
                       active ? "bg-cyan-300/10 text-white" : "text-gray-400 hover:text-white"
                     )}
                   >

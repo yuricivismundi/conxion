@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
+import ConfirmationDialog from "@/components/ConfirmationDialog";
 import StripeCheckoutDialog from "@/components/billing/StripeCheckoutDialog";
 import Nav from "@/components/Nav";
 import { buildAccountDeactivatedMetadata } from "@/lib/auth/account-status";
@@ -146,6 +147,7 @@ export default function AccountSettingsPage() {
   const [reports, setReports] = useState<MyReport[]>([]);
   const [busyBlockedConnectionId, setBusyBlockedConnectionId] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [busyVisibility, setBusyVisibility] = useState<string | null>(null);
   const [blockedPage, setBlockedPage] = useState(0);
@@ -388,8 +390,6 @@ export default function AccountSettingsPage() {
   };
 
   const handleDeactivateAccount = async () => {
-    const confirmed = window.confirm("Deactivate this account now? Signing in again later will reactivate it automatically.");
-    if (!confirmed) return;
     setDeactivating(true);
     setError(null);
     try {
@@ -698,7 +698,7 @@ export default function AccountSettingsPage() {
               >
                 <button
                   type="button"
-                  onClick={() => void handleDeactivateAccount()}
+                  onClick={() => setDeactivateConfirmOpen(true)}
                   disabled={deactivating}
                   className="inline-flex min-h-11 items-center rounded-lg border border-rose-400/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-400/20 disabled:opacity-50 transition-colors"
                 >
@@ -722,6 +722,16 @@ export default function AccountSettingsPage() {
 
         </div>
       </main>
+      <ConfirmationDialog
+        open={deactivateConfirmOpen}
+        title="Deactivate account?"
+        description="Signing in again later will reactivate it automatically."
+        confirmLabel="Deactivate"
+        confirmVariant="danger"
+        busy={deactivating}
+        onCancel={() => setDeactivateConfirmOpen(false)}
+        onConfirm={() => { setDeactivateConfirmOpen(false); void handleDeactivateAccount(); }}
+      />
       <StripeCheckoutDialog
         open={Boolean(checkoutPlanId)}
         title="Upgrade to Plus"

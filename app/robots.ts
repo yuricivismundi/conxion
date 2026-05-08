@@ -6,6 +6,15 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
+      disallow: [
+        "/admin/",
+        "/api/",
+        "/auth/",
+        "/me/",
+        "/onboarding/",
+        "/notifications",
+        "/messages",
+      ],
     },
     host: readPublicAppUrl(),
     sitemap: absolutePublicAppUrl("/sitemap.xml"),

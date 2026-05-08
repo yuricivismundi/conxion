@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { resolveClientPublicAppUrl } from "@/lib/public-app-url";
 import { supabase } from "@/lib/supabase/client";
@@ -70,7 +71,7 @@ export default function AuthRecoveryPage() {
           />
           <div className="relative rounded-[1.5rem] border p-5 sm:p-8 shadow-2xl" style={{ backgroundColor: "#121212", borderColor: BRAND.border }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/branding/CONXION-3-tight.png" alt="ConXion" className="mx-auto h-20 w-auto select-none sm:h-24" />
+            <Image src="/branding/CONXION-3-tight.png" alt="ConXion" width={160} height={80} className="mx-auto select-none" priority />
 
             {error ? (
               <div

@@ -449,6 +449,8 @@ export default function OnboardingProfilePage() {
               onChange={(e) => setDisplayName(e.target.value.slice(0, MAX_DISPLAY_NAME_LENGTH))}
               maxLength={MAX_DISPLAY_NAME_LENGTH}
               placeholder="e.g. Maria Dance"
+              autoComplete="name"
+              autoCapitalize="words"
               className="mt-2 w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
             />
             <div className="mt-1 text-right text-xs text-white/45">

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import { buildRateLimitKey, consumeRateLimit } from "@/lib/security/rate-limit";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 
 function getBearerToken(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
@@ -22,6 +24,7 @@ function normalizeChatMode(value: unknown): "discussion" | "broadcast" {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const token = getBearerToken(req);
     if (!token) {
@@ -34,6 +37,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
     }
     const userId = authData.user.id;
+
+    // Rate limit: 5 group creates per hour per user
+    const rlKey = buildRateLimitKey(req, "group:create", userId);
+    const rl = consumeRateLimit({ key: rlKey, limit: 5, windowMs: 60 * 60 * 1000 });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Too many requests. Try again in ${rl.retryAfterSec}s.` },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } }
+      );
+    }
 
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     const title = typeof body?.title === "string" ? body.title.trim() : "";

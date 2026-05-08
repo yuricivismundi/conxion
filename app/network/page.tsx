@@ -3,8 +3,11 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { useRouter, useSearchParams } from "next/navigation";
 import Avatar from "@/components/Avatar";
+import ConfirmationDialog from "@/components/ConfirmationDialog";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
 import VerifiedBadge from "@/components/VerifiedBadge";
@@ -880,7 +883,9 @@ function NetworkPageContent() {
   });
 
   const [busyContactId, setBusyContactId] = useState<string | null>(null);
+  const [contactToRemove, setContactToRemove] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const { pullY, refreshing } = usePullToRefresh(() => setRefreshKey((k) => k + 1));
 
   useEffect(() => {
     if (activeTab !== "references" || !meId) return;
@@ -1902,11 +1907,11 @@ function NetworkPageContent() {
 
   async function removeContact(contactId: string) {
     if (!meId) return;
-    const ok = window.confirm("Remove this contact from your Network?");
-    if (!ok) return;
-
     setBusyContactId(contactId);
     setError(null);
+
+    const prevContacts = contacts;
+    setContacts((prev) => prev.filter((c) => c.id !== contactId));
 
     const target = contactsById[contactId];
     const deleteQuery = supabase.from("dance_contacts").delete().eq("user_id", meId);
@@ -1917,8 +1922,7 @@ function NetworkPageContent() {
 
     if (res.error) {
       setError(res.error.message);
-    } else {
-      setRefreshKey((value) => value + 1);
+      setContacts(prevContacts);
     }
 
     setBusyContactId(null);
@@ -1926,6 +1930,7 @@ function NetworkPageContent() {
 
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
+      <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       <Nav />
       <main className="flex flex-1 justify-center px-4 py-5 sm:px-6 md:py-6 lg:px-12 xl:px-20">
         <div className="flex w-full max-w-[1200px] flex-col gap-5">
@@ -1947,27 +1952,19 @@ function NetworkPageContent() {
                     </h1>
                     <p className="text-[11px] uppercase tracking-widest text-white/40">Your global dance network overview</p>
                   </div>
-                  <div className="hidden sm:grid grid-cols-3 gap-5 sm:grid-cols-5 md:gap-8">
-                    <div>
-                      <p className="font-['Epilogue'] text-2xl font-bold text-[#c1fffe]">{followingCount}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Following</p>
-                    </div>
-                    <div>
-                      <p className="font-['Epilogue'] text-2xl font-bold text-[#ff51fa]">{followersCount}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Followers</p>
-                    </div>
-                    <div>
-                      <p className="font-['Epilogue'] text-2xl font-bold text-[#c1fffe]/70">{Object.values(tripByUser).length}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Travelling</p>
-                    </div>
-                    <div>
-                      <p className="font-['Epilogue'] text-2xl font-bold text-white/50">{Object.values(hostingByUser).filter((h) => h.canHost).length}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Hosting</p>
-                    </div>
-                    <div>
-                      <p className="font-['Epilogue'] text-2xl font-bold text-[#00f5f5]">{eventActivities.length}</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Events</p>
-                    </div>
+                  <div className="hidden sm:flex flex-wrap gap-2">
+                    {[
+                      { label: "Following", value: followingCount, color: "#00F5FF" },
+                      { label: "Followers", value: followersCount, color: "#FF00FF" },
+                      { label: "Travelling", value: Object.values(tripByUser).length, color: "#00F5FF" },
+                      { label: "Hosting", value: Object.values(hostingByUser).filter((h) => h.canHost).length, color: "#c1fffe" },
+                      { label: "Events", value: eventActivities.length, color: "#00F5FF" },
+                    ].map((stat) => (
+                      <div key={stat.label} className="flex items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-2">
+                        <span className="font-['Epilogue'] text-lg font-black" style={{ color: stat.color }}>{stat.value}</span>
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-white/35">{stat.label}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 {/* Profile-style tabs */}
@@ -2184,36 +2181,30 @@ function NetworkPageContent() {
                     const row1 = filtered.slice(0, Math.ceil(filtered.length / 2));
                     const row2 = filtered.slice(Math.ceil(filtered.length / 2));
                     const renderActivityCard = (item: ActivityItem) => (
-                      <div key={item.key} className="flex w-[210px] shrink-0 items-center gap-2.5 py-1.5">
-                        <Link href={`/profile/${item.userId}`} className="shrink-0">
-                          <div className="h-9 w-9 rounded-full bg-cover bg-center" style={{ backgroundImage: item.avatarUrl ? `url(${item.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
-                        </Link>
+                      <Link key={item.key} href={item.href} className="group/act flex w-[220px] shrink-0 items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 transition hover:border-[#00F5FF]/20 hover:bg-white/[0.05]">
+                        <div className="h-11 w-11 shrink-0 rounded-full bg-cover bg-center ring-1 ring-white/10" style={{ backgroundImage: item.avatarUrl ? `url(${item.avatarUrl})` : "linear-gradient(135deg,rgba(0,245,255,0.25),rgba(255,0,255,0.25))" }} />
                         <div className="min-w-0 flex-1">
-                          <Link href={`/profile/${item.userId}`}>
-                            <p className="truncate text-sm font-semibold text-white leading-tight">{item.displayName}</p>
-                          </Link>
-                          <Link href={item.href} className="group/act block mt-0.5">
-                            <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 group-hover/act:text-[#c1fffe] transition-colors">
-                              <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>
-                                {item.kind === "trip" ? "flight_takeoff" : "calendar_month"}
-                              </span>
-                              <span className="truncate">{item.label}</span>
-                            </p>
-                            {item.sub ? <p className="text-[10px] text-white/40 truncate">{item.sub}</p> : null}
-                          </Link>
+                          <p className="truncate text-[13px] font-black text-white leading-tight">{item.displayName}</p>
+                          <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-white/50 group-hover/act:text-[#00F5FF] transition-colors">
+                            <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>
+                              {item.kind === "trip" ? "flight_takeoff" : "calendar_month"}
+                            </span>
+                            <span className="truncate">{item.label}</span>
+                          </p>
+                          {item.sub ? <p className="text-[11px] text-white/30 truncate">{item.sub}</p> : null}
                         </div>
-                      </div>
+                      </Link>
                     );
                     return (
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                          <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                        <div className="flex items-center justify-between">
+                          <h2 className="flex items-center gap-2.5 text-[15px] font-black uppercase tracking-widest text-white">
                             <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>groups</span>
                             Following activity
                           </h2>
                           <div className="flex gap-1">
-                            <button onClick={() => scrollRow(scrollFollowingRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
-                            <button onClick={() => scrollRow(scrollFollowingRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                            <button onClick={() => scrollRow(scrollFollowingRef, "left")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollFollowingRef, "right")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
                           </div>
                         </div>
                         <div ref={scrollFollowingRef} className="no-scrollbar overflow-x-auto pb-1">
@@ -2242,14 +2233,14 @@ function NetworkPageContent() {
                     if (travellers.length === 0) return null;
                     return (
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                          <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                        <div className="flex items-center justify-between">
+                          <h2 className="flex items-center gap-2.5 text-[15px] font-black uppercase tracking-widest text-white">
                             <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
                             Travelling now
                           </h2>
                           <div className="flex gap-1">
-                            <button onClick={() => scrollRow(scrollTravelRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
-                            <button onClick={() => scrollRow(scrollTravelRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                            <button onClick={() => scrollRow(scrollTravelRef, "left")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollTravelRef, "right")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
                           </div>
                         </div>
                         <div ref={scrollTravelRef} className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
@@ -2261,15 +2252,15 @@ function NetworkPageContent() {
                                 (trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")
                               : "";
                             return (
-                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[200px] shrink-0 items-center gap-2.5 py-1.5 hover:opacity-80 transition-opacity">
-                                <div className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="group/tr flex w-[220px] shrink-0 items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 transition hover:border-[#00F5FF]/20 hover:bg-white/[0.05]">
+                                <div className="h-11 w-11 shrink-0 rounded-full bg-cover bg-center ring-1 ring-white/10" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(0,245,255,0.25),rgba(255,0,255,0.25))" }} />
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white leading-tight">{prof.displayName}</p>
-                                  <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 mt-0.5">
+                                  <p className="truncate text-[13px] font-black text-white leading-tight">{prof.displayName}</p>
+                                  <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-white/50 group-hover/tr:text-[#00F5FF] transition-colors">
                                     <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
                                     <span className="truncate">{trip.city}{trip.country ? `, ${trip.country}` : ""}</span>
                                   </p>
-                                  {dateStr ? <p className="text-[10px] text-white/40 truncate">{dateStr}</p> : null}
+                                  {dateStr ? <p className="text-[11px] text-white/30 truncate">{dateStr}</p> : null}
                                 </div>
                               </Link>
                             );
@@ -2298,8 +2289,8 @@ function NetworkPageContent() {
                         <div className="flex items-center justify-between">
                           <h2 className="font-['Epilogue'] text-xl font-bold text-white">Dancers in your city</h2>
                           <div className="flex gap-1">
-                            <button onClick={() => scrollRow(scrollCityRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
-                            <button onClick={() => scrollRow(scrollCityRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                            <button onClick={() => scrollRow(scrollCityRef, "left")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollCityRef, "right")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
                           </div>
                         </div>
                         <div ref={scrollCityRef} className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
@@ -2311,15 +2302,15 @@ function NetworkPageContent() {
                                 (trip.endDate ? ` – ${new Date(trip.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")
                               : "";
                             return (
-                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[200px] shrink-0 items-center gap-2.5 py-1.5 hover:opacity-80 transition-opacity">
-                                <div className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="group/city flex w-[220px] shrink-0 items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 transition hover:border-[#00F5FF]/20 hover:bg-white/[0.05]">
+                                <div className="h-11 w-11 shrink-0 rounded-full bg-cover bg-center ring-1 ring-white/10" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(0,245,255,0.25),rgba(255,0,255,0.25))" }} />
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white leading-tight">{prof.displayName}</p>
-                                  <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 mt-0.5">
+                                  <p className="truncate text-[13px] font-black text-white leading-tight">{prof.displayName}</p>
+                                  <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-white/50 group-hover/city:text-[#00F5FF] transition-colors">
                                     <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>location_on</span>
                                     <span className="truncate">{trip.city}{trip.country ? `, ${trip.country}` : ""}</span>
                                   </p>
-                                  {dateStr ? <p className="text-[10px] text-white/40 truncate">{dateStr}</p> : null}
+                                  {dateStr ? <p className="text-[11px] text-white/30 truncate">{dateStr}</p> : null}
                                 </div>
                               </Link>
                             );
@@ -2341,15 +2332,15 @@ function NetworkPageContent() {
                       : eventActivities;
                     return filteredEvents.length > 0 ? (
                     <div className="space-y-5">
-                      <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                        <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                      <div className="flex items-center justify-between">
+                        <h2 className="flex items-center gap-2.5 text-[15px] font-black uppercase tracking-widest text-white">
                           <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>calendar_month</span>
                           Attending Events
                         </h2>
                         <div className="flex items-center gap-2">
                           <div className="flex gap-1">
-                            <button onClick={() => scrollRow(scrollEventsRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
-                            <button onClick={() => scrollRow(scrollEventsRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                            <button onClick={() => scrollRow(scrollEventsRef, "left")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollEventsRef, "right")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
                           </div>
                           <Link href="/events" className="text-xs font-bold uppercase tracking-wider text-white/40 hover:text-[#ff51fa] transition-colors">Explore all</Link>
                         </div>
@@ -2364,30 +2355,25 @@ function NetworkPageContent() {
                             : "";
                           const isSoon = ev.startDate && new Date(ev.startDate).getTime() - Date.now() < 14 * 86400_000;
                           return (
-                            <div key={ev.eventId} className="min-w-[240px] shrink-0 snap-start flex flex-col gap-3 py-1">
+                            <Link key={ev.eventId} href={`/events/${ev.eventId}`} className="group/ev flex w-[260px] shrink-0 flex-col gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 transition hover:border-[#00F5FF]/20 hover:bg-white/[0.05]">
                               <div>
-                                <Link href={`/events/${ev.eventId}`} className="inline-flex items-center gap-2 flex-wrap">
-                                  <h3 className="font-['Epilogue'] text-base font-bold leading-tight text-white hover:text-[#c1fffe] transition-colors">{ev.title}</h3>
-                                  {null}
-                                </Link>
-                                <p className="mt-0.5 text-xs font-medium text-white/50">{[dateStr, endStr].filter(Boolean).join(" ")}{ev.city ? ` · ${ev.city}` : ""}</p>
+                                <h3 className="font-['Epilogue'] text-[14px] font-black leading-tight text-white group-hover/ev:text-[#00F5FF] transition-colors">{ev.title}</h3>
+                                <p className="mt-1 flex items-center gap-1 text-[11px] text-white/40">
+                                  <span className="material-symbols-outlined text-[11px]" style={{ fontVariationSettings: "'FILL' 1" }}>calendar_month</span>
+                                  {[dateStr, endStr].filter(Boolean).join(" ")}{ev.city ? ` · ${ev.city}` : ""}
+                                </p>
                               </div>
                               <div className="flex items-center gap-2">
-                                <div className="flex -space-x-1.5">
+                                <div className="flex -space-x-2">
                                   {ev.attendees.slice(0, 4).map((a) => (
-                                    <div
-                                      key={a.userId}
-                                      title={a.displayName}
-                                      className="h-6 w-6 rounded-full border border-black/60 bg-cover bg-center"
-                                      style={{ backgroundImage: a.avatarUrl ? `url(${a.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.3),rgba(255,81,250,0.3))" }}
-                                    />
+                                    <div key={a.userId} title={a.displayName} className="h-7 w-7 rounded-full border-2 border-[#0c0d13] bg-cover bg-center" style={{ backgroundImage: a.avatarUrl ? `url(${a.avatarUrl})` : "linear-gradient(135deg,rgba(0,245,255,0.3),rgba(255,0,255,0.3))" }} />
                                   ))}
                                 </div>
-                                <span className="text-xs text-white/50">
-                                  {ev.attendees.length > 4 ? `+${ev.attendees.length - 4} ` : ""}{ev.attendees.length === 1 ? ev.attendees[0].displayName : `${ev.attendees.length} connections going`}
+                                <span className="text-[11px] font-semibold text-white/45">
+                                  {ev.attendees.length > 4 ? `+${ev.attendees.length - 4} · ` : ""}{ev.attendees.length === 1 ? ev.attendees[0].displayName : `${ev.attendees.length} going`}
                                 </span>
                               </div>
-                            </div>
+                            </Link>
                           );
                         })}
                       </div>
@@ -2410,14 +2396,14 @@ function NetworkPageContent() {
                     if (hosts.length === 0) return null;
                     return (
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                          <h2 className="flex items-center gap-2 font-['Epilogue'] text-xl font-bold text-white">
+                        <div className="flex items-center justify-between">
+                          <h2 className="flex items-center gap-2.5 text-[15px] font-black uppercase tracking-widest text-white">
                             <span className="material-symbols-outlined text-[#c1fffe]" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
                             Hosting available
                           </h2>
                           <div className="flex gap-1">
-                            <button onClick={() => scrollRow(scrollHostingRef, "left")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
-                            <button onClick={() => scrollRow(scrollHostingRef, "right")} className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
+                            <button onClick={() => scrollRow(scrollHostingRef, "left")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_left</span></button>
+                            <button onClick={() => scrollRow(scrollHostingRef, "right")} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/40 transition hover:border-[#00F5FF]/30 hover:text-[#00F5FF]"><span className="material-symbols-outlined text-[16px]">chevron_right</span></button>
                           </div>
                         </div>
                         <div ref={scrollHostingRef} className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
@@ -2425,15 +2411,15 @@ function NetworkPageContent() {
                             const prof = conn.profile!;
                             const hosting = hostingByUser[conn.otherUserId]!;
                             return (
-                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="flex w-[200px] shrink-0 items-center gap-2.5 py-1.5 hover:opacity-80 transition-opacity">
-                                <div className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(193,255,254,0.2),rgba(255,81,250,0.2))" }} />
+                              <Link key={conn.id} href={`/profile/${prof.userId}`} className="group/host flex w-[220px] shrink-0 items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 transition hover:border-[#FF00FF]/20 hover:bg-white/[0.05]">
+                                <div className="h-11 w-11 shrink-0 rounded-full bg-cover bg-center ring-1 ring-white/10" style={{ backgroundImage: prof.avatarUrl ? `url(${prof.avatarUrl})` : "linear-gradient(135deg,rgba(0,245,255,0.25),rgba(255,0,255,0.25))" }} />
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white leading-tight">{prof.displayName}</p>
-                                  <p className="flex items-center gap-1 truncate text-[11px] font-medium text-white/60 mt-0.5">
+                                  <p className="truncate text-[13px] font-black text-white leading-tight">{prof.displayName}</p>
+                                  <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-white/50 group-hover/host:text-[#FF00FF] transition-colors">
                                     <span className="material-symbols-outlined text-[11px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
                                     <span className="truncate">{prof.city ? `${prof.city}${prof.country ? `, ${prof.country}` : ""}` : "Open to host"}</span>
                                   </p>
-                                  {hosting.hostingStatus ? <p className="text-[10px] text-white/40 truncate">{hosting.hostingStatus}</p> : null}
+                                  {hosting.hostingStatus ? <p className="text-[11px] text-white/30 truncate">{hosting.hostingStatus}</p> : null}
                                 </div>
                               </Link>
                             );
@@ -2741,7 +2727,7 @@ function NetworkPageContent() {
                               {profile?.verified ? <VerifiedBadge size={14} /> : null}
                             </div>
                             <p className="truncate text-[11px] text-[#7FEFF8]/80">{cityLabel}</p>
-                            <p className="truncate text-[10px] text-slate-500">{roleLabel}</p>
+                            <p className="truncate text-[12px] text-slate-500">{roleLabel}</p>
                           </div>
                           <ConnectionCardMenu
                             connId={item.id}
@@ -2838,7 +2824,7 @@ function NetworkPageContent() {
                                   <p className="truncate text-sm font-semibold text-white">{card.displayName}</p>
                                 )}
                                 <p className="truncate text-[11px] text-[#7FEFF8]/80">{cityLabel}</p>
-                                <p className="truncate text-[10px] text-slate-500">{roleLabel}</p>
+                                <p className="truncate text-[12px] text-slate-500">{roleLabel}</p>
                               </div>
                               <FollowingCardMenu
                                 contactId={card.id}
@@ -2910,6 +2896,20 @@ function NetworkPageContent() {
                         </div>
                       ))}
                     </div>
+                  ) : filteredContactCards.length === 0 && contacts.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center">
+                      <span className="material-symbols-outlined text-4xl text-white/20">contacts</span>
+                      <p className="mt-3 text-sm font-semibold text-white/40">No contacts yet</p>
+                      <p className="mt-1 text-xs text-white/25">Add dancers you meet — even without a ConXion account.</p>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddModal(true)}
+                        className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,#00F5FF,#FF00FF)] px-5 py-2.5 text-sm font-bold text-[#071116]"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">person_add</span>
+                        Add contact
+                      </button>
+                    </div>
                   ) : filteredContactCards.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-white/15 bg-black/20 px-3 py-8 text-center text-sm text-slate-500">
                       No contacts match the current filters.
@@ -2952,14 +2952,14 @@ function NetworkPageContent() {
                                 )}
                               </div>
                               <p className="truncate text-[11px] text-[#7FEFF8]/80">{cityLabel}</p>
-                              <p className="truncate text-[10px] text-slate-500">{roleLabel}</p>
+                              <p className="truncate text-[12px] text-slate-500">{roleLabel}</p>
                             </div>
                             <ContactCardMenu
                               card={card}
                               busyContactId={busyContactId}
                               onEditContact={() => openEditModal(card)}
                               onEditNote={() => openEditModal(card)}
-                              onRemove={() => void removeContact(card.id)}
+                              onRemove={() => setContactToRemove(card.id)}
                             />
                           </div>
                         );
@@ -3201,6 +3201,16 @@ function NetworkPageContent() {
           </div>
         </div>
       ) : null}
+      <ConfirmationDialog
+        open={Boolean(contactToRemove)}
+        title="Remove contact?"
+        description="This person will be removed from your Network."
+        confirmLabel="Remove"
+        confirmVariant="danger"
+        busy={Boolean(contactToRemove && busyContactId === contactToRemove)}
+        onCancel={() => setContactToRemove(null)}
+        onConfirm={() => { const id = contactToRemove; setContactToRemove(null); if (id) void removeContact(id); }}
+      />
     </div>
   );
 }

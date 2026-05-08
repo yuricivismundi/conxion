@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { EVENT_COVER_ACCEPT_MIME, MAX_UPLOADED_COVER_SIZE_BYTES } from "@/lib/events/cover-upload";
 import { getAvatarStorageUrl } from "@/lib/avatar-storage";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 
 export const runtime = "nodejs";
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
     }
 
     const supabase = getSupabaseUserClient(token);
-    const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr || !authData.user) {
       return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
     }
@@ -52,7 +53,8 @@ export async function POST(req: Request) {
 
     const extension = inferExtension(file);
     const path = `${authData.user.id}/${prefix}-${randomUUID()}.${extension}`;
-    const upload = await supabase.storage.from("avatars").upload(path, file, {
+    const service = getSupabaseServiceClient();
+    const upload = await service.storage.from("avatars").upload(path, file, {
       upsert: true,
       contentType: file.type || "image/jpeg",
       cacheControl: "3600",

@@ -3,6 +3,9 @@
 
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import PaginationControls from "@/components/PaginationControls";
@@ -666,6 +669,8 @@ function EventsExplorePageContent() {
     void loadData();
   }, [loadData]);
 
+  const { pullY, refreshing } = usePullToRefresh(loadData);
+
   const memberStatusByEvent = useMemo(() => {
     const map: Record<string, EventMemberRecord> = {};
     myMemberships.forEach((membership) => {
@@ -743,11 +748,14 @@ function EventsExplorePageContent() {
     [effectiveDatePreset, effectiveCustomDateFrom, effectiveCustomDateTo]
   );
 
+  const debouncedQuery = useDebounce(query, 300);
+
   const filteredEvents = useMemo(() => {
-    const queryText = isAuthenticated ? query.trim().toLowerCase() : "";
+    const queryText = isAuthenticated ? debouncedQuery.trim().toLowerCase() : "";
 
     return events.filter((event) => {
       if (!isEventDiscoverable(event.accessType)) return false;
+      if (event.coverStatus === "rejected") return false;
       if (modeFilter !== "all" && event.accessType !== modeFilter) return false;
       if (typeFilter !== "all" && event.eventType !== typeFilter) return false;
       if (styleFilter !== "all") {
@@ -1159,7 +1167,7 @@ function EventsExplorePageContent() {
                         return (
                           <div key={member.id} className="h-7 w-7 overflow-hidden rounded-full border border-[#121212] bg-[#1f2a2f]">
                             {profile?.avatarUrl ? (
-                              <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+                              <img src={profile.avatarUrl} alt={profile.displayName} loading="lazy" className="h-full w-full object-cover" />
                             ) : (
                               <div className="flex h-full w-full items-center justify-center text-[10px] font-bold text-cyan-100">
                                 {(profile?.displayName ?? "F").slice(0, 1).toUpperCase()}
@@ -1335,6 +1343,7 @@ function EventsExplorePageContent() {
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white">
+      <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       <Nav />
 
       <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8" onClick={closeMenus}>

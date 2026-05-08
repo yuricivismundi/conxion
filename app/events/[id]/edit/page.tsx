@@ -23,7 +23,8 @@ import {
 } from "@/lib/events/access";
 import { mapEventRows } from "@/lib/events/model";
 import { validateEventCoverSourceFile } from "@/lib/events/cover-upload";
-import { buildOsmEmbedUrl, type OsmGeocodeResult } from "@/lib/maps/osm";
+import MapboxLocationSearch from "@/components/maps/MapboxLocationSearch";
+import type { MapboxPlaceResult } from "@/lib/maps/mapbox";
 import { supabase } from "@/lib/supabase/client";
 
 type EventLinkDraft = {
@@ -94,10 +95,6 @@ function resolveCountryEntry(countries: CountryEntry[], value: string) {
   );
 }
 
-function exactStreetAddress(result: OsmGeocodeResult) {
-  const parts = [result.address.road, result.address.houseNumber].filter(Boolean);
-  return parts.join(" ").trim();
-}
 
 export default function EditEventPage() {
   const router = useRouter();
@@ -140,16 +137,12 @@ export default function EditEventPage() {
   const [capacity, setCapacity] = useState<number | "">("");
   const [links, setLinks] = useState<EventLinkDraft[]>([]);
   const [ticketsUrl, setTicketsUrl] = useState("");
-  const [locationResults, setLocationResults] = useState<OsmGeocodeResult[]>([]);
-  const [locationSearchBusy, setLocationSearchBusy] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<OsmGeocodeResult | null>(null);
-  const [locationSearchFeedback, setLocationSearchFeedback] = useState<string | null>(null);
+  const [locationQuery, setLocationQuery] = useState("");
 
   const coverInputRef = useRef<HTMLInputElement | null>(null);
 
   const trimmedDescription = description.trim();
   const descriptionLength = trimmedDescription.length;
-  const locationSearchQuery = [venueName, venueAddress, city, country].map((value) => value.trim()).filter(Boolean).join(", ");
   const cityMenuOptions = useMemo(() => cityOptions.slice(0, 500), [cityOptions]);
   const visibleAccessOptions = useMemo(
     () =>
@@ -327,12 +320,6 @@ export default function EditEventPage() {
     }
     return Boolean(title.trim() && city.trim() && country.trim() && startsAtLocal && endsAtLocal && isValidWindow);
   }, [city, country, endsAtLocal, eventAccessType, isValidWindow, startsAtLocal, title]);
-
-  function resetLocationSearchState() {
-    setLocationResults([]);
-    setSelectedLocation(null);
-    setLocationSearchFeedback(null);
-  }
 
   async function onPickCover(file: File | null) {
     if (!file) return;
@@ -525,59 +512,6 @@ export default function EditEventPage() {
     }
   }
 
-  async function lookupAddress() {
-    if (locationSearchQuery.length < 5) {
-      setError("Add venue or address details first.");
-      return;
-    }
-
-    setLocationSearchBusy(true);
-    setLocationSearchFeedback(null);
-    setInfo(null);
-
-    try {
-      const searchParams = new URLSearchParams({
-        q: locationSearchQuery,
-        venue: venueName.trim(),
-        address: venueAddress.trim(),
-        city: city.trim(),
-        country: country.trim(),
-        countryCode: selectedCountryIso,
-      });
-      const response = await fetch(`/api/geocode/search?${searchParams.toString()}`, { cache: "no-store" });
-      const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; results?: OsmGeocodeResult[] } | null;
-      if (!response.ok || !json?.ok) {
-        throw new Error(json?.error ?? "Could not locate this address.");
-      }
-
-      const results = Array.isArray(json.results) ? json.results : [];
-      setLocationResults(results);
-      setSelectedLocation(results[0] ?? null);
-
-      if (results[0]) {
-        const resolvedStreet = exactStreetAddress(results[0]);
-        if (resolvedStreet) setVenueAddress(resolvedStreet);
-        const resolvedCity =
-          results[0].address.city ??
-          results[0].address.town ??
-          results[0].address.village ??
-          results[0].address.municipality ??
-          results[0].address.county;
-        if (resolvedCity) setCity(resolvedCity);
-        if (results[0].address.country) setCountry(results[0].address.country);
-        setLocationSearchFeedback(`Found ${results.length} possible match${results.length === 1 ? "" : "es"}. Select the exact place below.`);
-      } else {
-        setLocationSearchFeedback("No exact match yet. Try street + number without the venue name, or confirm the city and country first.");
-      }
-    } catch (lookupError) {
-      setLocationResults([]);
-      setSelectedLocation(null);
-      setLocationSearchFeedback(lookupError instanceof Error ? lookupError.message : "Could not locate this address.");
-    } finally {
-      setLocationSearchBusy(false);
-    }
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen bg-[#05070c] text-white">
@@ -596,86 +530,78 @@ export default function EditEventPage() {
     <div className="min-h-screen bg-[#05070c] text-slate-100">
       <Nav />
 
-      <main className="mx-auto w-full max-w-[980px] px-4 pb-14 pt-7 sm:px-6 lg:px-8">
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Edit Event</h1>
-          <p className="mt-2 text-slate-300">Use the same premium event builder flow to update covers, location, and timing.</p>
-        </header>
-
-        <div className="mb-5 space-y-2">
+      <main className="mx-auto w-full max-w-[640px] px-4 pb-14 pt-7 sm:px-6">
+        <div className="mb-4 space-y-2">
           <DismissibleBanner message={error} tone="error" onDismiss={() => setError(null)} />
           <DismissibleBanner message={info} tone="info" onDismiss={() => setInfo(null)} />
         </div>
 
-        <div className="space-y-8 rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_35%),linear-gradient(180deg,rgba(11,18,25,0.96),rgba(5,7,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.36)] sm:p-8">
-          <section className="space-y-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-white">Event Cover</h2>
-                <p className="text-sm text-slate-400">Upload it once, then zoom and position the exact banner crop before save.</p>
-              </div>
-              <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
-                Current status: {statusMode}
-              </div>
+        <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#14161c] shadow-[0_28px_80px_rgba(0,0,0,0.5)]">
+          {/* Header row */}
+          <div className="flex items-center justify-between px-5 py-4">
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold text-white">Edit Event</h1>
+              <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                statusMode === "published"
+                  ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-300"
+                  : "border-amber-400/40 bg-amber-400/15 text-amber-300"
+              }`}>
+                {statusMode === "published" ? "Published" : "Draft"}
+              </span>
             </div>
-            <input
-              ref={coverInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(event) => {
-                void onPickCover(event.target.files?.[0] ?? null);
-                event.currentTarget.value = "";
-              }}
-            />
+            <Link href={`/events/${encodeURIComponent(eventId)}`} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-slate-300 hover:bg-white/20">
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </Link>
+          </div>
 
-            <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[#091217]">
-              {coverUrl ? (
-                <div className="p-4 sm:p-5">
-                  <div className="relative h-56 overflow-hidden rounded-[24px] border border-white/10 bg-[#10242a] sm:h-72">
-                    <img src={coverUrl} alt="Event cover preview" className="h-full w-full object-cover" />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-4 py-4">
-                      <p className="text-sm font-semibold text-white">Cover preview</p>
-                      <p className="text-xs text-slate-200">This leads the event page header and ambient background.</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => coverInputRef.current?.click()}
-                      className="rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                    >
-                      {uploadingCover ? "Uploading..." : "Change cover"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCoverUrl("")}
-                      className="rounded-full border border-white/20 bg-black/25 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/35"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-4 px-4 py-10 text-center sm:px-6">
-                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-white/5">
-                    <span className="material-symbols-outlined text-[30px] text-slate-300">add_photo_alternate</span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-base font-semibold text-white">Upload event cover</p>
-                    <p className="text-sm text-slate-400">Use a 1.91:1 cover, ideally 1920 × 1005. Keep key text centered for mobile crops.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => coverInputRef.current?.click()}
-                    className="rounded-full border border-cyan-300/35 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/25"
-                  >
-                    {uploadingCover ? "Uploading..." : "Choose image"}
-                  </button>
-                </div>
-              )}
+          {/* Cover — flush, full-width */}
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(event) => {
+              void onPickCover(event.target.files?.[0] ?? null);
+              event.currentTarget.value = "";
+            }}
+          />
+          {coverUrl ? (
+            <div className="relative h-56 bg-black sm:h-72">
+              <img src={coverUrl} alt="Event cover" className="h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+              <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className="flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-sm font-semibold text-white backdrop-blur-sm hover:bg-black/85"
+                >
+                  <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
+                  {uploadingCover ? "Uploading..." : "Change photo"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCoverUrl("")}
+                  className="flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-sm font-semibold text-white backdrop-blur-sm hover:bg-black/85"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                  Remove
+                </button>
+              </div>
             </div>
-          </section>
+          ) : (
+            <button
+              type="button"
+              onClick={() => coverInputRef.current?.click()}
+              className="flex h-44 w-full flex-col items-center justify-center gap-2 bg-[#1e2028] text-center hover:bg-[#22242c]"
+            >
+              <span className="material-symbols-outlined text-[36px] text-slate-400">add_photo_alternate</span>
+              <p className="text-sm font-semibold text-slate-300">{uploadingCover ? "Uploading..." : "Add cover photo"}</p>
+            </button>
+          )}
+
+          {/* Form body */}
+          <div className="space-y-5 px-5 py-6">
 
           <section className="space-y-4">
             <h2 className="text-lg font-bold text-white">Essentials</h2>
@@ -778,6 +704,19 @@ export default function EditEventPage() {
 
           <section className="space-y-4">
             <h2 className="text-lg font-bold text-white">When & Where</h2>
+            <MapboxLocationSearch
+              value={locationQuery}
+              onChange={setLocationQuery}
+              onSelect={(result: MapboxPlaceResult) => {
+                setVenueName(result.name);
+                setVenueAddress(result.address);
+                setCity(result.city);
+                setCountry(result.country);
+                setLocationQuery(result.fullAddress || result.name);
+              }}
+              onClear={() => { setCity(""); setCountry(""); setVenueName(""); setVenueAddress(""); setLocationQuery(""); }}
+              placeholder="Search venue or city to autofill…"
+            />
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Country</span>
@@ -791,7 +730,6 @@ export default function EditEventPage() {
                     onSelect={(nextCountry) => {
                       setCountry(nextCountry);
                       setCity("");
-                      resetLocationSearchState();
                     }}
                     buttonClassName="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white"
                   />
@@ -802,7 +740,6 @@ export default function EditEventPage() {
                     onChange={(event) => {
                       setCountry(event.target.value);
                       setCity("");
-                      resetLocationSearchState();
                     }}
                     className="hidden w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 pr-11 text-white focus:border-cyan-300/35 focus:outline-none sm:block"
                   >
@@ -834,7 +771,6 @@ export default function EditEventPage() {
                       customValueLabel={(value) => `Use "${value}"`}
                       onSelect={(nextCity) => {
                         setCity(nextCity);
-                        resetLocationSearchState();
                       }}
                       buttonClassName="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white disabled:opacity-55"
                     />
@@ -844,7 +780,6 @@ export default function EditEventPage() {
                   value={city}
                   onChange={(event) => {
                     setCity(event.target.value);
-                    resetLocationSearchState();
                   }}
                   list={selectedCountryIso && cityMenuOptions.length > 0 ? "event-edit-city-options" : undefined}
                   disabled={!selectedCountryIso}
@@ -875,7 +810,6 @@ export default function EditEventPage() {
                   value={venueName}
                   onChange={(event) => {
                     setVenueName(event.target.value.slice(0, MAX_VENUE_NAME_LENGTH));
-                    resetLocationSearchState();
                   }}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
                 />
@@ -888,85 +822,11 @@ export default function EditEventPage() {
                   value={venueAddress}
                   onChange={(event) => {
                     setVenueAddress(event.target.value.slice(0, MAX_VENUE_ADDRESS_LENGTH));
-                    resetLocationSearchState();
                   }}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
                   placeholder="Start with street and number, then confirm the exact result"
                 />
                 <div className="text-right text-xs text-slate-500">{venueAddress.length}/{MAX_VENUE_ADDRESS_LENGTH}</div>
-
-                <div className="mt-3 rounded-2xl border border-white/10 bg-[#0d1419] p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Exact address search</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">
-                        We try the exact venue + street first, then broader fallback matches automatically so the map can lock faster.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void lookupAddress()}
-                      disabled={locationSearchBusy}
-                      className="inline-flex items-center justify-center rounded-xl border border-cyan-300/30 bg-cyan-300/12 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/18 disabled:opacity-60"
-                    >
-                      {locationSearchBusy ? "Searching..." : "Search exact place"}
-                    </button>
-                  </div>
-
-                  {locationSearchFeedback ? (
-                    <p className={`mt-3 text-xs leading-5 ${locationResults.length > 0 ? "text-cyan-100" : "text-amber-200"}`}>
-                      {locationSearchFeedback}
-                    </p>
-                  ) : null}
-
-                  {locationResults.length > 0 ? (
-                    <div className="mt-4 grid max-h-64 gap-2 overflow-y-auto overscroll-contain pr-1">
-                      {locationResults.map((result) => (
-                        <button
-                          key={`${result.lat}-${result.lon}-${result.displayName}`}
-                          type="button"
-                          onClick={() => {
-                            setSelectedLocation(result);
-                            const resolvedStreet = exactStreetAddress(result);
-                            if (resolvedStreet) setVenueAddress(resolvedStreet);
-                            const resolvedCity =
-                              result.address.city ??
-                              result.address.town ??
-                              result.address.village ??
-                              result.address.municipality ??
-                              result.address.county;
-                            if (resolvedCity) setCity(resolvedCity);
-                            if (result.address.country) setCountry(result.address.country);
-                            setLocationSearchFeedback("Map preview updated from the selected address.");
-                          }}
-                          className={`rounded-2xl border px-4 py-3 text-left text-sm ${
-                            selectedLocation?.displayName === result.displayName
-                              ? "border-cyan-300/35 bg-cyan-300/12 text-cyan-50"
-                              : "border-white/10 bg-white/[0.03] text-white/85 hover:bg-white/[0.06]"
-                          }`}
-                        >
-                          {result.displayName}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {selectedLocation ? (
-                    <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-[#0f171c]">
-                      <iframe
-                        title="Event location preview"
-                        src={buildOsmEmbedUrl(selectedLocation.lat, selectedLocation.lon)}
-                        className="h-56 w-full border-0"
-                        loading="lazy"
-                        referrerPolicy="no-referrer-when-downgrade"
-                      />
-                      <div className="border-t border-white/10 px-4 py-3">
-                        <p className="text-sm font-semibold text-white">{selectedLocation.displayName}</p>
-                        <p className="mt-1 text-xs text-slate-400">Selected result will be used as the map preview on the event page.</p>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
               </label>
 
               <div className="space-y-3 rounded-2xl border border-white/10 bg-[#0c1419] p-4">
@@ -1103,6 +963,7 @@ export default function EditEventPage() {
                   value={capacity}
                   onChange={(event) => setCapacity(event.target.value ? Number(event.target.value) : "")}
                   disabled={!hasCapacity}
+                  aria-label="Max capacity"
                   placeholder="Enter max capacity"
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-slate-500 disabled:opacity-50"
                 />
@@ -1208,41 +1069,32 @@ export default function EditEventPage() {
             )}
           </section>
 
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-black/20 p-4 sm:p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-white">Finish</h2>
-                <p className="text-sm text-slate-400">Keep it as a draft while you refine it, or publish the updated version now.</p>
-              </div>
-              <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
-                {statusMode === "draft" ? "Currently draft" : "Currently published"}
-              </div>
-            </div>
+          </div>{/* end form body */}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <Link href={`/events/${encodeURIComponent(eventId)}`} className="text-sm font-semibold text-slate-400 hover:text-white">
-                Cancel
-              </Link>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => void submitEvent("draft")}
-                  disabled={submitting || uploadingCover || !canSaveDraft}
-                  className="rounded-full border border-white/15 bg-white/[0.05] px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.08] disabled:opacity-50"
-                >
-                  {submitting && statusMode === "draft" ? "Saving..." : "Save draft"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void submitEvent("published")}
-                  disabled={submitting || uploadingCover || !canPublish}
-                  className="rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-7 py-2.5 text-sm font-bold text-[#052328] hover:opacity-95 disabled:opacity-60"
-                >
-                  {submitting ? "Saving..." : uploadingCover ? "Uploading cover..." : statusMode === "draft" ? "Publish event" : "Save changes"}
-                </button>
-              </div>
+          {/* Footer */}
+          <div className="flex items-center justify-between border-t border-white/10 px-5 py-4">
+            <Link href={`/events/${encodeURIComponent(eventId)}`} className="text-sm font-semibold text-slate-400 hover:text-white">
+              Cancel
+            </Link>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void submitEvent("draft")}
+                disabled={submitting || uploadingCover || !canSaveDraft}
+                className="rounded-full border border-white/20 bg-white/[0.06] px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/[0.10] disabled:opacity-50"
+              >
+                {submitting && statusMode === "draft" ? "Saving..." : "Save draft"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitEvent("published")}
+                disabled={submitting || uploadingCover || !canPublish}
+                className="rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-7 py-2.5 text-sm font-bold text-[#052328] hover:opacity-95 disabled:opacity-60"
+              >
+                {submitting ? "Saving..." : uploadingCover ? "Uploading cover..." : statusMode === "draft" ? "Publish event" : "Save changes"}
+              </button>
             </div>
-          </section>
+          </div>
         </div>
       </main>
 

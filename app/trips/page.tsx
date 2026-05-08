@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import ConfirmationDialog from "@/components/ConfirmationDialog";
 import Nav from "@/components/Nav";
 import ActivityLimitPill from "@/components/activity/ActivityLimitPill";
 import PaginationControls from "@/components/PaginationControls";
@@ -120,7 +121,7 @@ function trimForm(form: TripFormState): TripFormState {
   };
 }
 
-export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean) => void } = {}) {
+export default function TripsPage({ onCanCreate, externalQuery, externalStatusFilter, externalPurposeFilter, onLimitInfo, onPurposeOptions }: { onCanCreate?: (can: boolean) => void; externalQuery?: string; externalStatusFilter?: TripStatusFilter; externalPurposeFilter?: string; onLimitInfo?: (info: { current: number; limit: number | null; isMonthly: boolean }) => void; onPurposeOptions?: (opts: string[]) => void } = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -132,6 +133,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [tripToDelete, setTripToDelete] = useState<TripItem | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [editingTripId, setEditingTripId] = useState<string | null>(null);
   const [editingTripRequestCount, setEditingTripRequestCount] = useState(0);
@@ -141,6 +143,9 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
   const [tripStatusFilter, setTripStatusFilter] = useState<TripStatusFilter>("active");
   const [tripPurposeFilter, setTripPurposeFilter] = useState("all");
   const [tripLimit, setTripLimit] = useState<number | null>(1);
+  const effectiveQuery = embeddedInActivity && externalQuery !== undefined ? externalQuery : tripQuery;
+  const effectiveStatusFilter = embeddedInActivity && externalStatusFilter !== undefined ? externalStatusFilter : tripStatusFilter;
+  const effectivePurposeFilter = embeddedInActivity && externalPurposeFilter !== undefined ? externalPurposeFilter : tripPurposeFilter;
   const [tripForm, setTripForm] = useState<TripFormState>(EMPTY_TRIP_FORM);
   const [countriesAll, setCountriesAll] = useState<CountryEntry[]>(() => getCachedCountriesAll());
   const [citiesByCountryIso, setCitiesByCountryIso] = useState<Record<string, string[]>>({});
@@ -229,12 +234,12 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
     [customTripPurposes]
   );
   const filteredTrips = useMemo(() => {
-    const queryText = tripQuery.trim().toLowerCase();
+    const queryText = effectiveQuery.trim().toLowerCase();
     return trips.filter((trip) => {
       const isActive = trip.status === "active";
-      if (tripStatusFilter === "active" && !isActive) return false;
-      if (tripStatusFilter === "past" && isActive) return false;
-      if (tripPurposeFilter !== "all" && travelIntentReasonLabel(trip.purpose) !== tripPurposeFilter) return false;
+      if (effectiveStatusFilter === "active" && !isActive) return false;
+      if (effectiveStatusFilter === "past" && isActive) return false;
+      if (effectivePurposeFilter !== "all" && travelIntentReasonLabel(trip.purpose) !== effectivePurposeFilter) return false;
       if (!queryText) return true;
       return [
         trip.destinationCity,
@@ -243,7 +248,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
         trip.note,
       ].filter(Boolean).join(" ").toLowerCase().includes(queryText);
     });
-  }, [tripPurposeFilter, tripQuery, trips, tripStatusFilter]);
+  }, [effectivePurposeFilter, effectiveQuery, trips, effectiveStatusFilter]);
   const activeTrips = useMemo(() => filteredTrips.filter((trip) => trip.status === "active"), [filteredTrips]);
   const pastTrips = useMemo(() => filteredTrips.filter((trip) => trip.status !== "active"), [filteredTrips]);
   const tripsCreatedThisMonth = useMemo(() => trips.filter((trip) => isThisUtcMonth(trip.createdAt)).length, [trips]);
@@ -259,8 +264,14 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
     () => pastTrips.slice((currentPastTripsPage - 1) * TRIPS_PAGE_SIZE, currentPastTripsPage * TRIPS_PAGE_SIZE),
     [currentPastTripsPage, pastTrips]
   );
-  const canCreate = tripLimit === null || activeTrips.length < tripLimit;
+  const canCreate = tripLimit === null || tripsCreatedThisMonth < tripLimit;
   useEffect(() => { onCanCreate?.(canCreate); }, [canCreate, onCanCreate]);
+  useEffect(() => {
+    onLimitInfo?.({ current: tripsCreatedThisMonth, limit: tripLimit, isMonthly: true });
+  }, [tripsCreatedThisMonth, tripLimit, onLimitInfo]);
+  useEffect(() => {
+    onPurposeOptions?.(tripPurposeOptions);
+  }, [tripPurposeOptions, onPurposeOptions]);
   const selectedCountryIso = useMemo(
     () => countriesAll.find((country) => country.name === tripForm.destinationCountry)?.isoCode ?? "",
     [countriesAll, tripForm.destinationCountry]
@@ -468,8 +479,6 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
 
   async function deleteTrip(trip: TripItem) {
     if (!userId) return;
-    if (!window.confirm(`Delete trip to ${trip.destinationCity || trip.destinationCountry || "this destination"}?`)) return;
-
     setDeleteBusyId(trip.id);
     setError(null);
 
@@ -493,19 +502,19 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
     return (
       <article
         className={[
-          "connections-card overflow-hidden rounded-[28px] border border-white/10 bg-[#101617] transition-all duration-200",
-          archived ? "opacity-80" : "hover:-translate-y-0.5 hover:border-[#00F5FF]/18 hover:shadow-[0_12px_36px_rgba(0,245,255,0.06)]",
+          "group/card overflow-hidden rounded-[24px] border border-white/[0.07] bg-[#0c0d13] transition-all duration-300",
+          archived ? "opacity-75" : "hover:-translate-y-1 hover:border-white/[0.14] hover:shadow-[0_20px_60px_rgba(0,0,0,0.6)]",
         ].join(" ")}
       >
-        {/* Hero — full-bleed, no padding, rounded only at top */}
-        <div className="relative h-[172px] overflow-hidden">
+        {/* Hero */}
+        <div className="relative h-[200px] overflow-hidden">
           <div className="absolute inset-0" style={{ backgroundImage: FALLBACK_GRADIENT }} />
           {(heroUrl || heroStorageFallback || heroFallback) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={heroUrl || heroStorageFallback || heroFallback}
               alt={`${trip.destinationCity || "Trip"} hero`}
-              className="absolute inset-0 h-full w-full object-cover"
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover/card:scale-105"
               loading="lazy"
               referrerPolicy="no-referrer"
               crossOrigin="anonymous"
@@ -515,81 +524,79 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
                 const target = event.currentTarget;
                 const fallbackStorage = target.dataset.fallbackStorage;
                 const fallback = target.dataset.fallback;
-                if (fallbackStorage && target.src !== fallbackStorage) {
-                  target.src = fallbackStorage;
-                  return;
-                }
-                if (fallback && target.src !== fallback) {
-                  target.src = fallback;
-                }
+                if (fallbackStorage && target.src !== fallbackStorage) { target.src = fallbackStorage; return; }
+                if (fallback && target.src !== fallback) { target.src = fallback; }
               }}
             />
           ) : null}
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,8,10,0.08),rgba(3,8,10,0.65)_60%,rgba(3,8,10,0.92))]" />
-          <div className="absolute inset-x-3 top-3 flex justify-end">
-            <div className="rounded-full border border-[#00F5FF]/22 bg-[#00F5FF]/12 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#b8fbff] backdrop-blur">
+          {/* Stronger gradient for legibility */}
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.1)_0%,rgba(0,0,0,0.45)_50%,rgba(0,0,0,0.88)_100%)]" />
+          {/* Top gradient bar */}
+          <div className="absolute inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#00F5FF,#FF00FF)]" />
+          {/* Purpose badge */}
+          <div className="absolute left-4 top-4">
+            <span className="rounded-full border border-[#00F5FF]/30 bg-black/50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#00F5FF] backdrop-blur-sm">
               {trip.purpose || "Trip"}
-            </div>
+            </span>
           </div>
-          <div className="absolute inset-x-4 bottom-4 text-center">
-            <div className="mx-auto max-w-[80%] text-[28px] font-extrabold tracking-tight text-[#9ef7ff] drop-shadow-[0_0_12px_rgba(0,245,255,0.26)]">
+          {/* City + country + dates */}
+          <div className="absolute inset-x-4 bottom-4">
+            <p className="text-[30px] font-black leading-none tracking-tight text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
               {trip.destinationCity || "Destination"}
-            </div>
+            </p>
             {trip.destinationCountry ? (
-              <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-white/72">
+              <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.2em] text-white/60">
                 {trip.destinationCountry}
-              </div>
+              </p>
             ) : null}
-            <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-3 py-1.5 backdrop-blur">
+            <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 backdrop-blur-sm">
               <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">calendar_month</span>
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/90">
-                {formatDateCompact(trip.startDate)} - {formatDateCompact(trip.endDate)}
+              <span className="text-[11px] font-bold tracking-wide text-white/90">
+                {formatDateCompact(trip.startDate)} – {formatDateCompact(trip.endDate)}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="p-3">
-          <div className="flex min-w-0 flex-col gap-3 px-1 pb-1 pt-1">
-            <p className="text-sm leading-6 text-white/72">
-              {trip.note || "No trip description yet."}
-            </p>
+        {/* Body */}
+        <div className="flex flex-col gap-3 p-4">
+          {trip.note ? (
+            <p className="line-clamp-2 text-[13px] leading-relaxed text-white/55">{trip.note}</p>
+          ) : null}
 
-            <div className={archived ? "mt-auto grid grid-cols-2 gap-2" : "mt-auto grid grid-cols-3 gap-2"}>
-              {!archived ? (
-                <button
-                  type="button"
-                  onClick={() => openEditModal(trip)}
-                  className="min-h-[38px] rounded-full border border-[#00F5FF]/30 bg-[#00F5FF]/12 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#b8fbff] transition hover:border-[#00F5FF]/50 hover:bg-[#00F5FF]/18 hover:text-white"
-                >
-                  Edit
-                </button>
-              ) : null}
+          <div className={archived ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}>
+            {!archived ? (
               <button
                 type="button"
-                onClick={() =>
-                  openCreateModal({
-                    destinationCity: trip.destinationCity,
-                    destinationCountry: trip.destinationCountry,
-                    startDate: trip.startDate,
-                    endDate: trip.endDate,
-                    purpose: trip.purpose,
-                    note: trip.note,
-                  })
-                }
-                className="min-h-[38px] rounded-full border border-cyan-300/20 bg-white/[0.04] px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 transition hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-white"
+                onClick={() => openEditModal(trip)}
+                className="min-h-[40px] rounded-xl text-[11px] font-black uppercase tracking-[0.1em] text-[#071116] transition hover:opacity-90"
+                style={{ backgroundImage: "linear-gradient(90deg,#00F5FF,#FF00FF)" }}
               >
-                Duplicate
+                Edit
               </button>
-              <button
-                type="button"
-                onClick={() => void deleteTrip(trip)}
-                disabled={deleteBusy}
-                className="min-h-[38px] rounded-full border border-[#ff7b7b]/20 bg-[#ff7b7b]/8 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#ffb3b3] transition hover:border-[#ff7b7b]/35 hover:bg-[#ff7b7b]/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deleteBusy ? "Deleting..." : "Delete"}
-              </button>
-            </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => openCreateModal({
+                destinationCity: trip.destinationCity,
+                destinationCountry: trip.destinationCountry,
+                startDate: trip.startDate,
+                endDate: trip.endDate,
+                purpose: trip.purpose,
+                note: trip.note,
+              })}
+              className="min-h-[40px] rounded-xl border border-white/10 bg-white/[0.05] text-[11px] font-black uppercase tracking-[0.1em] text-white/70 transition hover:bg-white/[0.09] hover:text-white"
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              onClick={() => setTripToDelete(trip)}
+              disabled={deleteBusy}
+              className="min-h-[40px] rounded-xl border border-red-500/25 bg-red-500/[0.07] text-[11px] font-black uppercase tracking-[0.1em] text-red-400 transition hover:bg-red-500/15 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deleteBusy ? "Deleting…" : "Delete"}
+            </button>
           </div>
         </div>
       </article>
@@ -651,59 +658,61 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
           </div>
         ) : (
           <section className="animate-fade-in space-y-8">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-end">
-              <ActivityLimitPill
-                label="Trips"
-                current={activeTrips.length}
-                limit={tripLimit}
-                compact
-                upgradeHint="Upgrade to Plus to have more active trips."
-              />
-              <label className="group relative w-full lg:max-w-[300px]">
-                <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
-                  search
-                </span>
-                <input
-                  type="text"
-                  value={tripQuery}
-                  onChange={(event) => setTripQuery(event.target.value)}
-                  placeholder="Search trips..."
-                  className="h-10 w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+            {!embeddedInActivity && (
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-end">
+                <ActivityLimitPill
+                  label="Trips"
+                  current={activeTrips.length}
+                  limit={tripLimit}
+                  compact
+                  upgradeHint="Upgrade to Plus to have more active trips."
                 />
-              </label>
-              <div className="relative w-full lg:w-[170px]">
-                <select
-                  value={tripStatusFilter}
-                  onChange={(event) => setTripStatusFilter((event.target.value as TripStatusFilter) || "active")}
-                  className="h-10 w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] px-4 pr-9 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
-                >
-                  <option value="active">Active</option>
-                  <option value="past">Past</option>
-                  <option value="all">All</option>
-                </select>
-                <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
-                  expand_more
-                </span>
+                <label className="group relative w-full lg:max-w-[300px]">
+                  <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
+                    search
+                  </span>
+                  <input
+                    type="text"
+                    value={tripQuery}
+                    onChange={(event) => setTripQuery(event.target.value)}
+                    placeholder="Search trips..."
+                    className="h-10 w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+                  />
+                </label>
+                <div className="relative w-full lg:w-[170px]">
+                  <select
+                    value={tripStatusFilter}
+                    onChange={(event) => setTripStatusFilter((event.target.value as TripStatusFilter) || "active")}
+                    className="h-10 w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] px-4 pr-9 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+                  >
+                    <option value="active">Active</option>
+                    <option value="past">Past</option>
+                    <option value="all">All</option>
+                  </select>
+                  <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
+                    expand_more
+                  </span>
+                </div>
+                <div className="relative w-full lg:w-[220px]">
+                  <select
+                    value={tripPurposeFilter}
+                    onChange={(event) => setTripPurposeFilter(event.target.value || "all")}
+                    className="h-10 w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] px-4 pr-9 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+                  >
+                    <option value="all">All reasons</option>
+                    {tripPurposeOptions.map((purpose) => (
+                      <option key={`trip-purpose-${purpose}`} value={purpose}>
+                        {purpose}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
+                    expand_more
+                  </span>
+                </div>
               </div>
-              <div className="relative w-full lg:w-[220px]">
-                <select
-                  value={tripPurposeFilter}
-                  onChange={(event) => setTripPurposeFilter(event.target.value || "all")}
-                  className="h-10 w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] px-4 pr-9 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
-                >
-                  <option value="all">All reasons</option>
-                  {tripPurposeOptions.map((purpose) => (
-                    <option key={`trip-purpose-${purpose}`} value={purpose}>
-                      {purpose}
-                    </option>
-                  ))}
-                </select>
-                <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
-                  expand_more
-                </span>
-              </div>
-            </div>
-            {tripStatusFilter !== "past" ? <div>
+            )}
+            {effectiveStatusFilter !== "past" ? <div>
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <h2 className="text-lg font-bold text-white">Active Trips</h2>
@@ -756,7 +765,7 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
               ) : null}
             </div> : null}
 
-            {tripStatusFilter !== "active" ? <div>
+            {effectiveStatusFilter !== "active" ? <div>
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-bold text-white">Past Trips</h2>
                 <p className="text-xs uppercase tracking-[0.14em] text-white/45">{pastTrips.length} archived</p>
@@ -980,6 +989,8 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
                     rows={4}
                     maxLength={600}
                     placeholder="Add what this trip is for and what kind of coordination is useful."
+                    autoComplete="off"
+                    autoCapitalize="sentences"
                     disabled={editingTripRequestCount > 0}
                     className="w-full rounded-2xl border border-white/10 bg-[#0b1012] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#00F5FF]/45 focus:ring-2 focus:ring-[#00F5FF]/12 disabled:cursor-not-allowed disabled:opacity-40"
                   />
@@ -1016,6 +1027,16 @@ export default function TripsPage({ onCanCreate }: { onCanCreate?: (can: boolean
           </div>
         </div>
       ) : null}
+      <ConfirmationDialog
+        open={Boolean(tripToDelete)}
+        title="Delete trip?"
+        description={`Delete trip to ${tripToDelete?.destinationCity || tripToDelete?.destinationCountry || "this destination"}? This cannot be undone.`}
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        busy={Boolean(tripToDelete && deleteBusyId === tripToDelete.id)}
+        onCancel={() => setTripToDelete(null)}
+        onConfirm={() => { const t = tripToDelete; setTripToDelete(null); if (t) void deleteTrip(t); }}
+      />
     </div>
   );
 }

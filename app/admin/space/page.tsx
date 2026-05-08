@@ -1267,7 +1267,7 @@ export default function AdminSpacePage() {
                         <div key={item.userId} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                           <div className="h-12 w-12 overflow-hidden rounded-2xl border border-white/10 bg-[#14202b]">
                             {item.avatarUrl ? (
-                              <img src={item.avatarUrl} alt={item.displayName} className="h-full w-full object-cover" />
+                              <img src={item.avatarUrl} alt={item.displayName} loading="lazy" className="h-full w-full object-cover" />
                             ) : null}
                           </div>
                           <ProfileIdentity profile={item} fallback={item.userId} />
@@ -1378,7 +1378,7 @@ export default function AdminSpacePage() {
                           <div key={profile.userId} className="rounded-2xl border border-white/10 bg-black/20 overflow-hidden">
                             <div className="aspect-square w-full overflow-hidden bg-[#14202b]">
                               {profile.avatarUrl ? (
-                                <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+                                <img src={profile.avatarUrl} alt={profile.displayName} loading="lazy" className="h-full w-full object-cover" />
                               ) : (
                                 <div className="flex h-full items-center justify-center text-xs text-slate-600">No image</div>
                               )}
@@ -1490,7 +1490,7 @@ export default function AdminSpacePage() {
                           <div key={event.eventId} className="rounded-[24px] border border-white/10 bg-black/20 overflow-hidden">
                             <div className="aspect-video w-full overflow-hidden bg-[#14202b]">
                               {event.coverUrl ? (
-                                <img src={event.coverUrl} alt={event.title} className="h-full w-full object-cover" />
+                                <img src={event.coverUrl} alt={event.title} loading="lazy" className="h-full w-full object-cover" />
                               ) : (
                                 <div className="flex h-full items-center justify-center text-xs text-slate-500">No cover image</div>
                               )}
@@ -2140,7 +2140,7 @@ export default function AdminSpacePage() {
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div className="flex min-w-0 items-center gap-3">
                                 {p.avatar_url ? (
-                                  <img src={p.avatar_url} alt={p.display_name} className="h-12 w-12 shrink-0 rounded-2xl object-cover border border-white/10" />
+                                  <img src={p.avatar_url} alt={p.display_name} loading="lazy" className="h-12 w-12 shrink-0 rounded-2xl object-cover border border-white/10" />
                                 ) : (
                                   <div className="h-12 w-12 shrink-0 rounded-2xl bg-white/[0.05] border border-white/10" />
                                 )}

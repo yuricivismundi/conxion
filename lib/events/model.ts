@@ -332,7 +332,7 @@ export function pickEventFallbackHeroUrl(event: Pick<EventRecord, "city" | "coun
 }
 
 export function pickEventHeroUrl(event: Pick<EventRecord, "coverUrl" | "coverStatus" | "city" | "country">) {
-  if (event.coverUrl && event.coverStatus === "approved") return event.coverUrl;
+  if (event.coverUrl && event.coverStatus !== "rejected") return event.coverUrl;
   return pickEventFallbackHeroUrl(event);
 }
 

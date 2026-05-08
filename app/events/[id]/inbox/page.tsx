@@ -1,7 +1,7 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
@@ -426,9 +426,9 @@ export default function EventInboxPage() {
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                         <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <div className="h-14 w-14 overflow-hidden rounded-full border border-white/20 bg-[#163036]">
+                          <div className="relative h-14 w-14 overflow-hidden rounded-full border border-white/20 bg-[#163036]">
                             {profile?.avatarUrl ? (
-                              <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+                              <Image src={profile.avatarUrl} alt={profile.displayName} fill className="object-cover" sizes="56px" />
                             ) : null}
                           </div>
 

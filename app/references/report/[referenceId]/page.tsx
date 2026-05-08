@@ -267,7 +267,7 @@ export default function ReferenceReportPage() {
               <div className="mt-3 flex items-start gap-4">
                 <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.04]">
                   {otherProfile?.avatarUrl ? (
-                    <img src={otherProfile.avatarUrl} alt={otherProfile.displayName} className="h-full w-full object-cover" />
+                    <img src={otherProfile.avatarUrl} alt={otherProfile.displayName} loading="lazy" className="h-full w-full object-cover" />
                   ) : (
                     <span className="text-sm font-bold text-white">{(otherProfile?.displayName ?? "M").slice(0, 2).toUpperCase()}</span>
                   )}

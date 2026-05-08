@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import MyEventsPage from "@/app/events/my/page";
@@ -273,6 +276,18 @@ function ActivityPageContent() {
   const activeTab = normalizeActivityTab(searchParams.get("tab"));
   const [canCreateAction, setCanCreateAction] = useState<boolean | null>(null);
   const [eventsSearch, setEventsSearch] = useState("");
+  const [groupQuery, setGroupQuery] = useState("");
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
+  const [groupLimitInfo, setGroupLimitInfo] = useState<{ current: number; limit: number | null } | null>(null);
+  const [tripQuery, setTripQuery] = useState("");
+  const [tripStatusFilter, setTripStatusFilter] = useState<"active" | "past" | "all">("active");
+  const [tripPurposeFilter, setTripPurposeFilter] = useState("all");
+  const [tripLimitInfo, setTripLimitInfo] = useState<{ current: number; limit: number | null; isMonthly: boolean } | null>(null);
+  const [tripPurposeOptions, setTripPurposeOptions] = useState<string[]>([]);
+  const [hostingCityQuery, setHostingCityQuery] = useState("");
+  const [hostingStatusFilter, setHostingStatusFilter] = useState<"current" | "past" | "all">("current");
+  const [panelKey, setPanelKey] = useState(0);
+  const { pullY, refreshing } = usePullToRefresh(() => { setPanelKey((k) => k + 1); });
 
   const primaryAction =
     activeTab === "trips"
@@ -294,6 +309,7 @@ function ActivityPageContent() {
 
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
+      <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       <Nav />
       <main className="flex flex-1 justify-center px-4 py-5 sm:px-6 md:py-6 lg:px-12 xl:px-20">
         <div className="flex w-full max-w-[1200px] flex-col gap-5">
@@ -306,6 +322,99 @@ function ActivityPageContent() {
               </div>
 
               {primaryAction ? <div className="flex flex-wrap items-center gap-2">
+                {activeTab === "events" && (
+                  <label className="group relative shrink-0">
+                    <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
+                    <input
+                      type="text"
+                      value={eventsSearch}
+                      onChange={(e) => setEventsSearch(e.target.value)}
+                      placeholder="Search events…"
+                      className="h-9 w-44 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-56 transition-all"
+                    />
+                  </label>
+                )}
+                {activeTab === "groups" && (
+                  <>
+                    {groupLimitInfo && (
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+                        Groups{" "}
+                        <span className={groupLimitInfo.limit !== null && groupLimitInfo.current >= groupLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
+                          {groupLimitInfo.current}/{groupLimitInfo.limit ?? "∞"}
+                        </span>
+                      </span>
+                    )}
+                    <label className="group relative shrink-0">
+                      <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
+                      <input
+                        type="text"
+                        value={groupQuery}
+                        onChange={(e) => setGroupQuery(e.target.value)}
+                        placeholder="Search groups…"
+                        className="h-9 w-40 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-52 transition-all"
+                      />
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={groupFilter}
+                        onChange={(e) => setGroupFilter((e.target.value as GroupFilter) || "all")}
+                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                      >
+                        <option value="all">All</option>
+                        <option value="admin">Admin</option>
+                        <option value="member">Member</option>
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
+                    </div>
+                  </>
+                )}
+                {activeTab === "trips" && (
+                  <>
+                    {tripLimitInfo && (
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
+                        This month{" "}
+                        <span className={tripLimitInfo.limit !== null && tripLimitInfo.current >= tripLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
+                          {tripLimitInfo.current}/{tripLimitInfo.limit ?? "∞"}
+                        </span>
+                      </span>
+                    )}
+                    <label className="group relative shrink-0">
+                      <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
+                      <input
+                        type="text"
+                        value={tripQuery}
+                        onChange={(e) => setTripQuery(e.target.value)}
+                        placeholder="Search trips…"
+                        className="h-9 w-52 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-64 transition-all"
+                      />
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={tripStatusFilter}
+                        onChange={(e) => setTripStatusFilter((e.target.value as "active" | "past" | "all") || "active")}
+                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                      >
+                        <option value="active">Active</option>
+                        <option value="past">Past</option>
+                        <option value="all">All</option>
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
+                    </div>
+                    <div className="relative">
+                      <select
+                        value={tripPurposeFilter}
+                        onChange={(e) => setTripPurposeFilter(e.target.value || "all")}
+                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                      >
+                        <option value="all">All reasons</option>
+                        {tripPurposeOptions.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
+                    </div>
+                  </>
+                )}
                 {isLocked ? (
                   <div className="group relative inline-flex">
                     <span
@@ -329,6 +438,32 @@ function ActivityPageContent() {
                   </Link>
                 )}
               </div> : null}
+              {activeTab === "hosting" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="group relative shrink-0">
+                    <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">location_on</span>
+                    <input
+                      type="text"
+                      value={hostingCityQuery}
+                      onChange={(e) => setHostingCityQuery(e.target.value)}
+                      placeholder="City or country…"
+                      className="h-9 w-48 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-60 transition-all"
+                    />
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={hostingStatusFilter}
+                      onChange={(e) => setHostingStatusFilter((e.target.value as "current" | "past" | "all") || "current")}
+                      className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                    >
+                      <option value="current">Current</option>
+                      <option value="past">Past</option>
+                      <option value="all">All</option>
+                    </select>
+                    <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4">
@@ -351,40 +486,26 @@ function ActivityPageContent() {
                   );
                 })}
               </div>
-              {activeTab === "events" ? (
-                <label className="group relative mb-1 shrink-0">
-                  <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
-                  <input
-                    type="text"
-                    value={eventsSearch}
-                    onChange={(e) => setEventsSearch(e.target.value)}
-                    placeholder="Search events…"
-                    className="h-9 w-72 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50"
-                  />
-                </label>
-              ) : null}
             </div>
           </section>
 
-          {activeTab === "events" ? <MyEventsPage onCanCreate={setCanCreateAction} searchQuery={eventsSearch} /> : null}
-          {activeTab === "trips" ? <TripsPage onCanCreate={setCanCreateAction} /> : null}
-          {activeTab === "groups" ? <GroupsPanel onCanCreate={setCanCreateAction} /> : null}
-          {activeTab === "hosting" ? <HostingPanel /> : null}
+          {activeTab === "events" ? <MyEventsPage key={panelKey} onCanCreate={setCanCreateAction} searchQuery={eventsSearch} /> : null}
+          {activeTab === "trips" ? <TripsPage key={panelKey} onCanCreate={setCanCreateAction} externalQuery={tripQuery} externalStatusFilter={tripStatusFilter} externalPurposeFilter={tripPurposeFilter} onLimitInfo={setTripLimitInfo} onPurposeOptions={setTripPurposeOptions} /> : null}
+          {activeTab === "groups" ? <GroupsPanel key={panelKey} onCanCreate={setCanCreateAction} externalQuery={groupQuery} externalFilter={groupFilter} onLimitInfo={setGroupLimitInfo} /> : null}
+          {activeTab === "hosting" ? <HostingPanel key={panelKey} externalCityQuery={hostingCityQuery} externalStatusFilter={hostingStatusFilter} /> : null}
         </div>
       </main>
     </div>
   );
 }
 
-function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) {
+function GroupsPanel({ onCanCreate, externalQuery = "", externalFilter = "all", onLimitInfo }: { onCanCreate?: (can: boolean) => void; externalQuery?: string; externalFilter?: GroupFilter; onLimitInfo?: (info: { current: number; limit: number | null }) => void }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [memberships, setMemberships] = useState<GroupMemberRecord[]>([]);
-  const [groupQuery, setGroupQuery] = useState("");
-  const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   const [groupLimit, setGroupLimit] = useState<number | null>(5);
 
   const loadGroups = useCallback(async () => {
@@ -400,7 +521,7 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
     const userId = authData.user.id;
     const billingState = getBillingAccountState({ userMetadata: authData.user.user_metadata });
     setMeId(userId);
-    setGroupLimit(getPlanLimits(billingState.currentPlanId).privateGroupsPerMonth);
+    setGroupLimit(getPlanLimits(billingState.currentPlanId).privateGroupsTotal);
 
     // Fetch all group_members rows for this user to find which groups they belong to
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -501,21 +622,22 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
   }, [memberships]);
 
   const filteredGroups = useMemo(() => {
-    const queryText = groupQuery.trim().toLowerCase();
+    const queryText = externalQuery.trim().toLowerCase();
     return groups.filter((group) => {
       const isHost = group.hostUserId === meId;
-      if (groupFilter === "admin" && !isHost) return false;
-      if (groupFilter === "member" && isHost) return false;
+      if (externalFilter === "admin" && !isHost) return false;
+      if (externalFilter === "member" && isHost) return false;
       if (!queryText) return true;
       return [group.title, group.city, group.country, group.chatMode].filter(Boolean).join(" ").toLowerCase().includes(queryText);
     });
-  }, [groupFilter, groupQuery, groups, meId]);
-  const hostedGroupsThisMonth = useMemo(
-    () => groups.filter((group) => group.hostUserId === meId && isThisMonth(group.createdAt)).length,
+  }, [externalFilter, externalQuery, groups, meId]);
+  const hostedGroupsTotal = useMemo(
+    () => groups.filter((group) => group.hostUserId === meId).length,
     [groups, meId]
   );
-  const canCreateGroup = groupLimit === null || hostedGroupsThisMonth < groupLimit;
+  const canCreateGroup = groupLimit === null || hostedGroupsTotal < groupLimit;
   useEffect(() => { onCanCreate?.(canCreateGroup); }, [canCreateGroup, onCanCreate]);
+  useEffect(() => { onLimitInfo?.({ current: hostedGroupsTotal, limit: groupLimit }); }, [hostedGroupsTotal, groupLimit, onLimitInfo]);
 
   if (loading) {
     return (
@@ -533,60 +655,6 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
 
   return (
     <section className="space-y-4">
-      {/* Top bar */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        {canCreateGroup ? (
-          <Link
-            href="/groups/new"
-            className="inline-flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,#6ee7f9,#d946ef)] px-5 py-2.5 text-sm font-bold text-[#06121a] shadow-[0_4px_16px_rgba(217,70,239,0.25)] transition hover:brightness-110 shrink-0"
-          >
-            <span className="material-symbols-outlined text-[18px]">add</span>
-            Create Group
-          </Link>
-        ) : (
-          <div className="group relative inline-flex shrink-0">
-            <span className="inline-flex cursor-not-allowed items-center gap-2 rounded-xl bg-white/10 px-5 py-2.5 text-sm font-bold text-white/35">
-              <span className="material-symbols-outlined text-[18px]">lock</span>
-              Create Group
-            </span>
-            <span className="pointer-events-none absolute bottom-full left-1/2 z-[200] mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1a1a2e] border border-white/10 px-3 py-1.5 text-[12px] font-semibold text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-              Upgrade to Plus to create more groups
-            </span>
-          </div>
-        )}
-        <ActivityLimitPill
-          label="Groups"
-          current={hostedGroupsThisMonth}
-          limit={groupLimit}
-          compact
-          upgradeHint="Upgrade to Plus to create more private groups this month."
-        />
-        <div className="flex flex-1 gap-2 sm:justify-end">
-          <label className="group relative flex-1 sm:max-w-[260px]">
-            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
-            <input
-              type="text"
-              value={groupQuery}
-              onChange={(e) => setGroupQuery(e.target.value)}
-              placeholder="Search groups..."
-              className="h-9 w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50"
-            />
-          </label>
-          <div className="relative">
-            <select
-              value={groupFilter}
-              onChange={(e) => setGroupFilter((e.target.value as GroupFilter) || "all")}
-              className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-8 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
-            >
-              <option value="all">All</option>
-              <option value="admin">Admin</option>
-              <option value="member">Member</option>
-            </select>
-            <span className="material-symbols-outlined pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
-          </div>
-        </div>
-      </div>
-
       {groups.length === 0 ? (
         <div className="rounded-[28px] border border-dashed border-white/12 bg-white/[0.03] p-10 text-center">
           <span className="material-symbols-outlined text-5xl text-white/20">groups</span>
@@ -601,45 +669,79 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
           <h3 className="mt-3 text-xl font-bold text-white">No groups match</h3>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0d1117]">
-          {filteredGroups.map((group, idx) => {
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {filteredGroups.map((group) => {
             const isHost = group.hostUserId === meId;
             const memberCount = Math.max(memberCountByGroup[group.id] ?? 0, isHost ? 1 : 0);
+            const fillPct = group.maxMembers ? Math.min(100, Math.round((memberCount / group.maxMembers) * 100)) : 0;
             const location = [group.city, group.country].filter(Boolean).join(", ");
             return (
               <Link
                 key={group.id}
                 href={`/groups/${group.id}`}
-                className={`flex items-center gap-4 px-4 py-4 transition hover:bg-white/[0.04] ${idx !== 0 ? "border-t border-white/[0.06]" : ""}`}
+                className="group relative flex flex-col overflow-hidden rounded-[20px] border border-white/[0.07] bg-[#0c0d13] transition hover:border-white/[0.14] hover:shadow-[0_8px_40px_rgba(0,0,0,0.5)]"
               >
-                {/* Thumbnail */}
-                {group.coverUrl ? (
-                  <img src={group.coverUrl} alt={group.title} className="h-12 w-12 shrink-0 rounded-xl object-cover" />
-                ) : (
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,rgba(0,245,255,0.15),rgba(217,70,239,0.15))] text-cyan-300">
-                    <span className="material-symbols-outlined text-[22px]">groups</span>
-                  </span>
-                )}
+                {/* Top gradient bar */}
+                <div className="h-[3px] w-full bg-[linear-gradient(90deg,#00F5FF,#FF00FF)]" />
 
-                {/* Info */}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-bold text-white">{group.title}</p>
-                  <div className="mt-0.5 flex items-center gap-3 text-xs text-white/40">
-                    <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px]">person</span>
-                      {memberCount}/{group.maxMembers} members
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px]">forum</span>
+                <div className="flex flex-1 flex-col gap-4 p-5">
+                  {/* Header row */}
+                  <div className="flex items-center gap-3">
+                    {/* Avatar */}
+                    {group.coverUrl ? (
+                      <img src={group.coverUrl} alt={group.title} loading="lazy" className="h-[72px] w-[72px] shrink-0 rounded-[16px] object-cover ring-1 ring-white/10" />
+                    ) : (
+                      <span className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-[16px] bg-[linear-gradient(135deg,rgba(0,245,255,0.14),rgba(255,0,255,0.14))] ring-1 ring-white/[0.08]">
+                        <span className="material-symbols-outlined text-[34px] text-[#00F5FF]">groups</span>
+                      </span>
+                    )}
+
+                    {/* Title + time */}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[15px] font-black leading-tight text-white">{group.title}</p>
+                      {location ? <p className="mt-0.5 truncate text-[11px] text-white/35">{location}</p> : null}
+                      <p className="mt-0.5 text-[11px] text-white/25">{formatRelativeTime(group.updatedAt)}</p>
+                    </div>
+                  </div>
+
+                  {/* Badges row */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isHost ? (
+                      <span className="rounded-full border border-[#00F5FF]/30 bg-[linear-gradient(90deg,rgba(0,245,255,0.12),rgba(255,0,255,0.12))] px-2.5 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#00F5FF]">
+                        Admin
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                        Member
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold text-white/40">
+                      <span className="material-symbols-outlined text-[11px]">forum</span>
                       {group.chatMode === "discussion" ? "Open discussion" : "Broadcast"}
                     </span>
                   </div>
-                </div>
 
-                {/* Last activity + arrow */}
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className="text-[11px] text-white/30">{formatRelativeTime(group.updatedAt)}</span>
-                  <span className="material-symbols-outlined text-[20px] text-white/20">chevron_right</span>
+                  {/* Member fill bar */}
+                  <div className="mt-auto space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-[11px] text-white/40">
+                        <span className="material-symbols-outlined text-[12px]">group</span>
+                        {memberCount} / {group.maxMembers} members
+                      </span>
+                      <span className={`text-[11px] font-bold tabular-nums ${fillPct >= 80 ? "text-amber-300" : "text-white/30"}`}>{fillPct}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${fillPct}%`,
+                          backgroundImage: fillPct >= 80
+                            ? "linear-gradient(90deg,#f59e0b,#ef4444)"
+                            : "linear-gradient(90deg,#00F5FF,#FF00FF)",
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </Link>
             );
@@ -650,7 +752,7 @@ function GroupsPanel({ onCanCreate }: { onCanCreate?: (can: boolean) => void }) 
   );
 }
 
-function HostingPanel() {
+function HostingPanel({ externalCityQuery = "", externalStatusFilter = "current" }: { externalCityQuery?: string; externalStatusFilter?: HostingStatusFilter }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -661,8 +763,6 @@ function HostingPanel() {
   const [requests, setRequests] = useState<HostingRequestItem[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, LiteProfile>>({});
   const [tripsById, setTripsById] = useState<Record<string, TripSummary>>({});
-  const [hostingStatusFilter, setHostingStatusFilter] = useState<HostingStatusFilter>("current");
-  const [hostingCityQuery, setHostingCityQuery] = useState("");
   const [sentHostingView, setSentHostingView] = useState<HostingSentView>("request_hosting");
   const [hostingRequestsLimit, setHostingRequestsLimit] = useState<number | null>(10);
   const [hostingOffersLimit, setHostingOffersLimit] = useState<number | null>(5);
@@ -835,12 +935,12 @@ function HostingPanel() {
   }
 
   const filteredRequests = useMemo(() => {
-    const queryText = hostingCityQuery.trim().toLowerCase();
+    const queryText = externalCityQuery.trim().toLowerCase();
     return requests.filter((request) => {
       const status = request.status.toLowerCase();
       const isCurrent = status === "pending" || status === "accepted";
-      if (hostingStatusFilter === "current" && !isCurrent) return false;
-      if (hostingStatusFilter === "past" && isCurrent) return false;
+      if (externalStatusFilter === "current" && !isCurrent) return false;
+      if (externalStatusFilter === "past" && isCurrent) return false;
       if (!queryText) return true;
       const senderProfile = profilesById[request.senderUserId];
       const recipientProfile = profilesById[request.recipientUserId];
@@ -854,7 +954,7 @@ function HostingPanel() {
         trip?.destinationCountry,
       ].filter(Boolean).join(" ").toLowerCase().includes(queryText);
     });
-  }, [hostingCityQuery, hostingStatusFilter, profilesById, requests, tripsById]);
+  }, [externalCityQuery, externalStatusFilter, profilesById, requests, tripsById]);
 
   const incoming = filteredRequests.filter((request) => request.recipientUserId === meId);
   const sentRequestHosting = filteredRequests.filter((request) => request.senderUserId === meId && request.requestType === "request_hosting");
@@ -873,45 +973,67 @@ function HostingPanel() {
 
   if (loading) {
     return (
-      <div className="space-y-3">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <div key={`activity-hosting-sk-${index}`} className="h-32 animate-pulse rounded-2xl border border-white/10 bg-white/[0.04]" />
-        ))}
+      <div className="space-y-6">
+        {/* Incoming section skeleton */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-52 animate-pulse rounded-lg bg-white/[0.08]" />
+            <div className="h-6 w-8 animate-pulse rounded-full bg-white/[0.06]" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={`sk-hosting-in-${i}`} className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0c0d13]">
+                <div className="flex gap-3 p-4">
+                  <div className="h-16 w-16 shrink-0 animate-pulse rounded-xl bg-white/[0.08]" />
+                  <div className="flex-1 space-y-2 pt-1">
+                    <div className="h-3 w-24 animate-pulse rounded bg-[#00F5FF]/20" />
+                    <div className="h-5 w-36 animate-pulse rounded bg-white/[0.1]" />
+                    <div className="h-3 w-28 animate-pulse rounded bg-white/[0.06]" />
+                  </div>
+                </div>
+                <div className="space-y-1.5 px-4 pb-2">
+                  <div className="h-3 w-40 animate-pulse rounded bg-white/[0.06]" />
+                  <div className="h-3 w-32 animate-pulse rounded bg-white/[0.06]" />
+                </div>
+                <div className="flex gap-2 p-4 pt-3">
+                  <div className="h-10 w-16 animate-pulse rounded-full bg-[#00F5FF]/20" />
+                  <div className="h-10 flex-1 animate-pulse rounded-full bg-white/[0.06]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Sent section skeleton */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-16 animate-pulse rounded-lg bg-white/[0.08]" />
+            <div className="h-6 w-8 animate-pulse rounded-full bg-white/[0.06]" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={`sk-hosting-sent-${i}`} className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0c0d13]">
+                <div className="flex gap-3 p-4">
+                  <div className="h-16 w-16 shrink-0 animate-pulse rounded-xl bg-white/[0.08]" />
+                  <div className="flex-1 space-y-2 pt-1">
+                    <div className="h-3 w-24 animate-pulse rounded bg-[#00F5FF]/20" />
+                    <div className="h-5 w-36 animate-pulse rounded bg-white/[0.1]" />
+                    <div className="h-3 w-28 animate-pulse rounded bg-white/[0.06]" />
+                  </div>
+                </div>
+                <div className="flex gap-2 p-4 pt-0">
+                  <div className="h-10 w-16 animate-pulse rounded-full bg-[#00F5FF]/20" />
+                  <div className="h-10 flex-1 animate-pulse rounded-full bg-white/[0.06]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-end">
-        <label className="group relative w-full lg:max-w-[260px]">
-          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
-            location_on
-          </span>
-          <input
-            type="text"
-            value={hostingCityQuery}
-            onChange={(event) => setHostingCityQuery(event.target.value)}
-            placeholder="City or country..."
-            className="h-10 w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
-          />
-        </label>
-        <div className="relative w-full lg:w-[150px]">
-          <select
-            value={hostingStatusFilter}
-            onChange={(event) => setHostingStatusFilter((event.target.value as HostingStatusFilter) || "current")}
-            className="h-10 w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] px-4 pr-9 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
-          >
-            <option value="current">Current</option>
-            <option value="past">Past</option>
-            <option value="all">All</option>
-          </select>
-          <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">
-            expand_more
-          </span>
-        </div>
-      </div>
-
       {error ? <div className="rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div> : null}
       {info ? <div className="rounded-2xl border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">{info}</div> : null}
 
@@ -953,7 +1075,7 @@ function HostingPanel() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 {selectedSentHostingLimit !== null ? (
                   <ActivityLimitPill
-                    label={sentHostingView === "request_hosting" ? "Request hosting" : "Offer hosting"}
+                    label={sentHostingView === "request_hosting" ? "Request hosting/mo" : "Offer hosting/mo"}
                     current={selectedSentHostingUsage}
                     limit={selectedSentHostingLimit}
                     compact
@@ -1087,7 +1209,7 @@ function HostingRequestList({
                     <div className="relative w-[38%] shrink-0 border-r border-white/10 bg-white/5">
                       {otherProfile?.avatarUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={otherProfile.avatarUrl} alt={profileName(otherProfile)} className="h-full w-full object-cover" />
+                        <img src={otherProfile.avatarUrl} alt={profileName(otherProfile)} loading="lazy" className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,rgba(0,245,255,0.12),rgba(255,0,255,0.08))] text-3xl font-black text-white/70">
                           {profileName(otherProfile).slice(0, 1).toUpperCase()}
@@ -1243,7 +1365,7 @@ function HostingRequestList({
               placeholder="Reason for cancellation (required)"
               className="mt-3 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-amber-300/40 focus:outline-none"
             />
-            <p className="mt-1 text-right text-[10px] text-white/35">
+            <p className="mt-1 text-right text-[12px] text-white/35">
               {cancelNote.length}/200
             </p>
             <div className="mt-2 flex gap-2">

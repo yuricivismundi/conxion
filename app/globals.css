@@ -31,6 +31,59 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── Mobile touch polish ── */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent double-tap zoom on all interactive elements */
+a, button, [role="button"], input, textarea, select, label {
+  touch-action: manipulation;
+}
+
+/* iOS momentum scrolling on scroll containers */
+.overflow-y-auto, .overflow-auto, .overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Scroll-lock when a modal/sheet is open */
+body.modal-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Pull-to-refresh spin */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Bottom-sheet slide-up animation */
+@keyframes sheet-up {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.sheet-up {
+  animation: sheet-up 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* Reduced motion: disable all animations/transitions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Safe-area bottom padding utility */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* globals.css */
 .material-symbols-outlined,
 .material-icons,
@@ -118,6 +171,12 @@ body {
 .animate-fade-in-grid > *:nth-child(7)  { animation-delay: 150ms; }
 .animate-fade-in-grid > *:nth-child(8)  { animation-delay: 170ms; }
 .animate-fade-in-grid > *:nth-child(n+9){ animation-delay: 190ms; }
+
+/* Infinite left-scroll marquee for suggested events */
+@keyframes marquee-left {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
 
 /* Hide scrollbars but keep scroll behavior */
 .no-scrollbar::-webkit-scrollbar {

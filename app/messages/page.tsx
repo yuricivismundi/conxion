@@ -2,10 +2,20 @@
 
 import dynamic from "next/dynamic";
 import { Suspense, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image, { type ImageLoaderProps } from "next/image";
 import Link from "next/link";
 import TeacherInquiryCard from "@/components/messages/TeacherInquiryCard";
+import {
+  SidebarAccordion,
+  SidebarInfoRow,
+  SidebarPersonCard,
+  SidebarAvatarStrip,
+  SidebarActionRow,
+  type SidebarProfilePreview,
+} from "@/components/messages/SidebarWidgets";
 import Nav from "@/components/Nav";
 import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
 import BookSessionModal from "@/components/teacher/BookSessionModal";
@@ -261,14 +271,6 @@ type EventSidebarSettingsDraft = {
   guestsCanInvite: boolean;
 };
 
-type SidebarProfilePreview = {
-  userId: string;
-  displayName: string;
-  avatarUrl: string | null;
-  city: string;
-  country: string;
-};
-
 type ContactSidebarData = {
   userId: string;
   displayName: string;
@@ -460,149 +462,6 @@ const EMPTY_CONNECT_REQUEST_MODAL: ConnectRequestModalState = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LINKABLE_ACTIVITY_TYPES = new Set<ActivityType>(LINKED_MEMBER_ACTIVITY_TYPES);
 
-function SidebarAccordion({
-  title,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <div className="border-t border-white/[0.07]">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between py-3 text-left"
-      >
-        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/40">{title}</span>
-        <svg
-          className={`h-3 w-3 text-white/30 transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2.5}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open ? <div className="pb-3">{children}</div> : null}
-    </div>
-  );
-}
-
-function SidebarInfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[12px] text-white/70">
-      <span>{label}</span>
-      <span className="text-right font-semibold text-white">{value}</span>
-    </div>
-  );
-}
-
-function SidebarPersonCard({
-  person,
-  roleLabel,
-  showMeta = true,
-  href,
-  className = "",
-}: {
-  person: SidebarProfilePreview;
-  roleLabel?: string;
-  showMeta?: boolean;
-  href?: string;
-  className?: string;
-}) {
-  const content = (
-    <div className={`flex items-center gap-3 ${className}`}>
-      <div className="h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-white/[0.04]">
-        {person.avatarUrl ? (
-          <img src={person.avatarUrl} alt={person.displayName} className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm font-bold text-cyan-100">
-            {person.displayName.slice(0, 1).toUpperCase()}
-          </div>
-        )}
-      </div>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-white">{person.displayName}</p>
-        {showMeta ? (
-          <p className="truncate text-[11px] text-white/45">
-            {roleLabel ? `${roleLabel} · ` : ""}
-            {[person.city, person.country].filter(Boolean).join(", ") || "Member"}
-          </p>
-        ) : null}
-      </div>
-    </div>
-  );
-
-  if (href) {
-    return (
-      <Link href={href} className="block transition hover:opacity-90">
-        {content}
-      </Link>
-    );
-  }
-
-  return content;
-}
-
-function SidebarAvatarStrip({
-  people,
-  emptyText,
-  showMeta = true,
-  maxVisibleRows = 5,
-}: {
-  people: SidebarProfilePreview[];
-  emptyText: string;
-  showMeta?: boolean;
-  maxVisibleRows?: number;
-}) {
-  if (people.length === 0) {
-    return <p className="text-[12px] text-white/45">{emptyText}</p>;
-  }
-
-  return (
-    <div
-      className="space-y-2 overflow-y-auto pr-1"
-      style={{ maxHeight: `${maxVisibleRows * 48}px` }}
-    >
-        {people.map((person) => (
-          <SidebarPersonCard key={person.userId} person={person} showMeta={showMeta} />
-        ))}
-    </div>
-  );
-}
-
-function SidebarActionRow({
-  icon,
-  title,
-  subtitle,
-  onClick,
-}: {
-  icon: string;
-  title: string;
-  subtitle?: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-start gap-3 rounded-xl px-0.5 py-1.5 text-left transition hover:text-cyan-100"
-    >
-      <span className="material-symbols-outlined mt-0.5 text-[18px] text-white/70">{icon}</span>
-      <span className="min-w-0">
-        <span className="block text-[13px] font-medium text-white">{title}</span>
-        {subtitle ? <span className="block text-[11px] leading-relaxed text-white/45">{subtitle}</span> : null}
-      </span>
-    </button>
-  );
-}
-
 function formatSidebarEventRange(startsAt: string, endsAt: string | null) {
   const start = new Date(startsAt);
   const end = endsAt ? new Date(endsAt) : null;
@@ -649,6 +508,7 @@ const REPORT_REASON_OPTIONS = [
 ];
 
 const REPLY_MARKER_REGEX = /^\[\[reply:([a-zA-Z0-9_-]+)\]\]\n?/;
+const POST_TAG_REGEX = /\[\[post_tag:(update|announcement|ticket|reminder)\]\]\n?/;
 
 function buildComposeTargets(
   rows: VisibleConnectionLite[],
@@ -1341,13 +1201,13 @@ function formatDaysLeft(days: number) {
 
 function parseReplyPayload(body: string) {
   const raw = body ?? "";
-  const match = raw.match(REPLY_MARKER_REGEX);
-  if (!match) {
-    return { replyToId: null as string | null, text: raw };
-  }
-  const replyToId = match[1] ?? null;
-  const text = raw.replace(REPLY_MARKER_REGEX, "");
-  return { replyToId, text };
+  const replyMatch = raw.match(REPLY_MARKER_REGEX);
+  const replyToId = replyMatch ? (replyMatch[1] ?? null) : null;
+  const withoutReply = replyToId ? raw.replace(REPLY_MARKER_REGEX, "") : raw;
+  const tagMatch = withoutReply.match(POST_TAG_REGEX);
+  const postTag = tagMatch ? (tagMatch[1] ?? null) : null;
+  const text = postTag ? withoutReply.replace(POST_TAG_REGEX, "") : withoutReply;
+  return { replyToId, postTag, text };
 }
 
 function toSingleLineText(value: string, max = 140) {
@@ -1678,6 +1538,7 @@ function MessagesPageContent() {
   const [threadContextsByDbId, setThreadContextsByDbId] = useState<Record<string, ThreadContextItem[]>>({});
   const [activeFallbackContext, setActiveFallbackContext] = useState<ThreadContextItem | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const { pullY, refreshing: ptrRefreshing } = usePullToRefresh(() => setReloadTick((t) => t + 1));
   const [meId, setMeId] = useState<string | null>(null);
   const [activeThreadToken, setActiveThreadToken] = useState<string | null>(null);
   const [activeMeta, setActiveMeta] = useState<ActiveThreadMeta | null>(null);
@@ -1711,14 +1572,36 @@ function MessagesPageContent() {
     [activityDraft.activityType]
   );
   const activitySupportsLinkedMember = LINKABLE_ACTIVITY_TYPES.has(activityDraft.activityType);
+  const pendingActivityUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    threads.forEach((t) => {
+      if ((t.hasPendingRequest || t.statusTag === "pending") && t.otherUserId) {
+        ids.add(t.otherUserId);
+      }
+    });
+    return ids;
+  }, [threads]);
+
   const filteredActivityLinkedConnectionOptions = useMemo(() => {
     const query = activityLinkedMemberQuery.trim().toLowerCase();
-    const options = activityLinkedConnectionOptions.filter((option) => option.userId !== activeMeta?.otherUserId);
+    const options = activityLinkedConnectionOptions.filter(
+      (option) => option.userId !== activeMeta?.otherUserId && !pendingActivityUserIds.has(option.userId)
+    );
     if (!query) return options;
     return options.filter((option) => [option.displayName, option.city, option.country].join(" ").toLowerCase().includes(query));
-  }, [activeMeta?.otherUserId, activityLinkedConnectionOptions, activityLinkedMemberQuery]);
+  }, [activeMeta?.otherUserId, activityLinkedConnectionOptions, activityLinkedMemberQuery, pendingActivityUserIds]);
   const [threadDbSupported, setThreadDbSupported] = useState(true);
   const [threadBody, setThreadBody] = useState("");
+  const threadBodyRef = useRef("");
+  const [threadBodyLen, setThreadBodyLen] = useState(0);
+  const counterRef = useRef<HTMLSpanElement | null>(null);
+  const postBtnRef = useRef<HTMLButtonElement | null>(null);
+  const postBtnEventRef = useRef<HTMLButtonElement | null>(null);
+  const syncComposerLen = useCallback((len: number) => {
+    if (counterRef.current) counterRef.current.textContent = `${len}/600`;
+    if (postBtnRef.current) postBtnRef.current.disabled = len === 0;
+    if (postBtnEventRef.current) postBtnEventRef.current.disabled = len === 0;
+  }, []);
   const [sending, setSending] = useState(false);
   const [threadInfo, setThreadInfo] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
@@ -1846,6 +1729,8 @@ function MessagesPageContent() {
     Record<string, Record<string, MessageReactionAggregate[]>>
   >({});
   const [composerEmojiOpen, setComposerEmojiOpen] = useState(false);
+  const [eventPostTag, setEventPostTag] = useState<"update" | "announcement" | "ticket" | "reminder">("update");
+  const [eventPostTagOpen, setEventPostTagOpen] = useState(false);
   const [, setPeerTyping] = useState(false);
   const [meAvatarUrl, setMeAvatarUrl] = useState<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
@@ -1938,6 +1823,7 @@ function MessagesPageContent() {
   const threadDraftsRef = useRef<Record<string, string>>({});
   const previousThreadsRef = useRef<Record<string, { updatedAt: string; unreadCount: number }>>({});
   const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const realtimeChatChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const threadLoadRequestIdRef = useRef(0);
   const typingLastSentAtRef = useRef(0);
 
@@ -2058,7 +1944,6 @@ function MessagesPageContent() {
               .from("groups")
               .select("id", { count: "exact", head: true })
               .eq("host_user_id", viewerId)
-              .gte("created_at", monthStart.toISOString())
           : Promise.resolve({ count: 0, error: null }),
       ]);
       const isVerified = (profileRes.data as { verified?: boolean } | null)?.verified === true;
@@ -2084,7 +1969,7 @@ function MessagesPageContent() {
         eventCreated,
         eventLimit: planLimits.eventsPerMonth ?? null,
         groupCreated,
-        groupLimit: planLimits.privateGroupsPerMonth ?? null,
+        groupLimit: planLimits.privateGroupsTotal ?? null,
         eventJoined: prev?.eventJoined ?? 0,
         groupJoined: prev?.groupJoined ?? 0,
       }));
@@ -2386,6 +2271,14 @@ function MessagesPageContent() {
   }, [threads]);
 
   useEffect(() => {
+    const unread = threads
+      .filter((t) => t.threadId !== activeThreadToken)
+      .reduce((sum, t) => sum + (t.unreadCount ?? 0), 0);
+    document.title = unread > 0 ? `(${unread}) ConXion` : "ConXion";
+    return () => { document.title = "ConXion"; };
+  }, [threads, activeThreadToken]);
+
+  useEffect(() => {
     setMutedUntilByThread((prev) => {
       const entries = Object.entries(prev);
       const next = entries.filter(([, until]) => toTime(until) > clockMs);
@@ -2412,10 +2305,15 @@ function MessagesPageContent() {
 
       if (res.error) {
         const lower = res.error.message.toLowerCase();
+        const status = (res.error as { code?: string; status?: number }).status ?? 0;
         if (
+          status === 400 ||
+          status === 404 ||
           lower.includes("relation") ||
           lower.includes("schema cache") ||
           lower.includes("does not exist") ||
+          lower.includes("could not find") ||
+          lower.includes("column") ||
           lower.includes("permission denied")
         ) {
           setReactionsServerSupported(false);
@@ -3270,7 +3168,7 @@ function MessagesPageContent() {
           statusTag: primaryContext?.statusTag ?? "active",
           title,
           subtitle: [location, date].filter(Boolean).join(" • ") || "Event",
-          avatarUrl: mappedEvent ? pickEventHeroUrl(mappedEvent) || pickEventFallbackHeroUrl(mappedEvent) || null : null,
+          avatarUrl: mappedEvent?.coverUrl && mappedEvent.coverStatus !== "rejected" ? mappedEvent.coverUrl : null,
           badge: eventThreadTabLabel(eventAccessType),
           otherUserId: null,
           connectionId: null,
@@ -3675,7 +3573,7 @@ function MessagesPageContent() {
               city: row.city ?? "",
               country: row.country ?? "",
               startsAt: row.startsAt,
-              coverUrl: pickEventHeroUrl(row) || pickEventFallbackHeroUrl(row) || null,
+              coverUrl: (row.coverUrl && row.coverStatus !== "rejected") ? row.coverUrl : null,
               eventType: row.eventType,
               description: row.description ?? null,
             };
@@ -4282,6 +4180,10 @@ function MessagesPageContent() {
       setHighlightedMessageId(null);
       setComposerEmojiOpen(false);
       setThreadBody("");
+      threadBodyRef.current = "";
+      setThreadBodyLen(0);
+      syncComposerLen(0);
+      if (composerTextareaRef.current) composerTextareaRef.current.value = "";
       setMessageReactions({});
       return;
     }
@@ -4291,7 +4193,12 @@ function MessagesPageContent() {
     setReplyTo(null);
     setHighlightedMessageId(null);
     setComposerEmojiOpen(false);
-    setThreadBody(threadDraftsRef.current[activeThreadToken] ?? "");
+    const draft = threadDraftsRef.current[activeThreadToken] ?? "";
+    setThreadBody(draft);
+    threadBodyRef.current = draft;
+    setThreadBodyLen(draft.length);
+    syncComposerLen(draft.length);
+    if (composerTextareaRef.current) composerTextareaRef.current.value = draft;
     void loadThreadByToken(activeThreadToken, meId);
   }, [activeThreadToken, loadThreadByToken, meId, reloadTick]);
 
@@ -4702,13 +4609,14 @@ function MessagesPageContent() {
   useEffect(() => {
     if (!activeThreadToken) return;
     setThreadDrafts((prev) => {
+      const body = threadBodyRef.current;
       const current = prev[activeThreadToken] ?? "";
-      if (current === threadBody) return prev;
+      if (current === body) return prev;
       const next = { ...prev };
-      if (threadBody.trim().length === 0) {
+      if (body.trim().length === 0) {
         delete next[activeThreadToken];
       } else {
-        next[activeThreadToken] = threadBody;
+        next[activeThreadToken] = body;
       }
       return next;
     });
@@ -4722,7 +4630,7 @@ function MessagesPageContent() {
   }, [activeThreadToken]);
 
   const sendActiveMessage = useCallback(async () => {
-    const text = threadBody.trim();
+    const text = threadBodyRef.current.trim();
     if (!text || !meId || !activeMeta) return;
     const currentComposerLockReason = composerLockReasonRef.current;
     if (currentComposerLockReason) {
@@ -4738,7 +4646,9 @@ function MessagesPageContent() {
     const isServiceInquiryFollowup = Boolean(
       currentCanSendFreeServiceInquiryFollowup && activeMeta.serviceInquiryId
     );
-    const outboundText = replyTo ? `[[reply:${replyTo.id}]]\n${text}` : text;
+    const isEventHostPost = activeMeta.kind === "event" && activeMeta.isEventHost;
+    const tagPrefix = isEventHostPost ? `[[post_tag:${eventPostTag}]]\n` : "";
+    const outboundText = replyTo ? `[[reply:${replyTo.id}]]\n${tagPrefix}${text}` : `${tagPrefix}${text}`;
     setSending(true);
     setThreadError(null);
     const optimisticId = `local-${crypto.randomUUID()}`;
@@ -4765,6 +4675,10 @@ function MessagesPageContent() {
       );
     }
     setThreadBody("");
+    threadBodyRef.current = "";
+    setThreadBodyLen(0);
+    syncComposerLen(0);
+    if (composerTextareaRef.current) composerTextareaRef.current.value = "";
 
     try {
       if (isServiceInquiryFollowup && activeMeta.serviceInquiryId) {
@@ -4905,7 +4819,6 @@ function MessagesPageContent() {
     refreshMessagingSummary,
     replyTo,
     resolveAccessToken,
-    threadBody,
   ]);
 
   const submitActivityInvite = useCallback(async () => {
@@ -5003,13 +4916,41 @@ function MessagesPageContent() {
             : thread
         )
       );
+      // If a linked member was added, also send the same invite to their thread
+      const linkedMemberId = activitySupportsLinkedMember ? activityDraft.linkedMemberUserId || null : null;
+      if (linkedMemberId) {
+        try {
+          const linkedMemberThread = threads.find((t) => t.otherUserId === linkedMemberId);
+          if (linkedMemberThread) {
+            await fetch("/api/activities", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({
+                threadId: linkedMemberThread.dbThreadId || linkedMemberThread.threadId || undefined,
+                recipientUserId: linkedMemberId,
+                activityType: activityDraft.activityType,
+                note: activityDraft.note || null,
+                startAt,
+                endAt,
+                linkedMemberUserId: activeMeta.otherUserId,
+              }),
+            });
+          }
+        } catch {
+          // Non-fatal: primary invite already sent
+        }
+      }
+
       setThreadInfo(`${activityTypeLabel(activityDraft.activityType)} request sent.`);
     } catch (e: unknown) {
       setActivityComposerError(e instanceof Error ? e.message : "Failed to create activity.");
     } finally {
       setActivityBusy(false);
     }
-  }, [activeMeta, activityDraft, activeThreadToken, activitySupportsLinkedMember, meId, resolveAccessToken]);
+  }, [activeMeta, activityDraft, activeThreadToken, activitySupportsLinkedMember, meId, resolveAccessToken, threads]);
 
   const submitReport = useCallback(async () => {
     if (!activeMeta?.connectionId) return;
@@ -6356,6 +6297,9 @@ function MessagesPageContent() {
         ? "Only organisers can post in this event thread."
         : "You need to be a member of this event to post.";
     }
+    if (activeMeta.kind === "event" && activeMeta.canPostToEventThread) {
+      return null;
+    }
     if (acceptedInteractionContexts.length > 0) {
       if (
         acceptedInteractionContexts.some(
@@ -6431,6 +6375,7 @@ function MessagesPageContent() {
     composerLockReasonRef.current = composerLockReason;
   }, [composerLockReason]);
   const composerDisabled = Boolean(composerLockReason || concurrentLimitReachedForStart || monthlyLimitReachedForStart);
+  const showEventHostComposer = Boolean(activeMeta?.kind === "event" && activeMeta?.isEventHost && !composerDisabled);
   const canCreateActivity = Boolean(
     activeMeta?.otherUserId &&
       !interactionBlocked &&
@@ -6533,16 +6478,19 @@ function MessagesPageContent() {
     if (activeMessages.some((message) => (message.messageType ?? "text") === "text")) return;
 
     const existingDraft = threadDraftsRef.current[activeThreadToken] ?? "";
-    if (existingDraft.trim() || threadBody.trim()) return;
+    if (existingDraft.trim() || threadBodyRef.current.trim()) return;
 
     setThreadBody(acceptedStarterMessage);
+    threadBodyRef.current = acceptedStarterMessage;
+    setThreadBodyLen(acceptedStarterMessage.length);
+    syncComposerLen(acceptedStarterMessage.length);
+    if (composerTextareaRef.current) composerTextareaRef.current.value = acceptedStarterMessage;
   }, [
     acceptedStarterContext,
     acceptedStarterMessage,
     activeMessages,
     activeThreadToken,
     chatActivated,
-    threadBody,
   ]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -6767,18 +6715,17 @@ function MessagesPageContent() {
     void (async () => {
       setConnectionEventsFeedLoading(true);
       try {
-        const connRes = await supabase
-          .from("connections")
-          .select("requester_id,target_id")
-          .or(`requester_id.eq.${meId},target_id.eq.${meId}`)
-          .eq("status", "accepted")
-          .is("blocked_by", null)
-          .limit(200);
-        if (connRes.error) throw new Error(connRes.error.message);
+        const [asRequester, asTarget] = await Promise.all([
+          supabase.from("connections").select("requester_id,target_id").eq("requester_id", meId).eq("status", "accepted").limit(200),
+          supabase.from("connections").select("requester_id,target_id").eq("target_id", meId).eq("status", "accepted").limit(200),
+        ]);
+        if (asRequester.error) throw new Error(asRequester.error.message);
+        if (asTarget.error) throw new Error(asTarget.error.message);
 
+        const allConnRows = [...(asRequester.data ?? []), ...(asTarget.data ?? [])] as Array<{ requester_id?: string; target_id?: string }>;
         const connUserIds = Array.from(
           new Set(
-            ((connRes.data ?? []) as Array<{ requester_id?: string; target_id?: string }>)
+            allConnRows
               .map((row) => (row.requester_id === meId ? row.target_id ?? "" : row.requester_id ?? ""))
               .filter(Boolean)
           )
@@ -6853,7 +6800,7 @@ function MessagesPageContent() {
               city: eventRow.city ?? null,
               country: eventRow.country ?? null,
               startsAt: eventRow.startsAt ?? null,
-              coverUrl: pickEventHeroUrl(eventRow) || pickEventFallbackHeroUrl(eventRow) || null,
+              coverUrl: (eventRow.coverUrl && eventRow.coverStatus !== "rejected") ? eventRow.coverUrl : null,
               attendeeCount: connUsers.length,
               connectionNames: connUsers.slice(0, 3).map((uid) => nameById[uid] ?? "Member"),
               connectionAvatars: connUsers.slice(0, 3).map((uid) => avatarById[uid] ?? null),
@@ -6881,33 +6828,22 @@ function MessagesPageContent() {
 
     void (async () => {
       try {
-        const [organizerRes, connectionRes, memberRes] = await Promise.all([
+        const [organizerRes, connAsReq, connAsTarget, memberRes] = await Promise.all([
           activeCurrentEvent.hostUserId
-            ? supabase
-                .from("profiles")
-                .select("user_id,display_name,avatar_url,city,country")
-                .eq("user_id", activeCurrentEvent.hostUserId)
-                .maybeSingle()
+            ? supabase.from("profiles").select("user_id,display_name,avatar_url,city,country").eq("user_id", activeCurrentEvent.hostUserId).maybeSingle()
             : Promise.resolve({ data: null, error: null }),
-          supabase
-            .from("connections")
-            .select("requester_id,target_id")
-            .or(`requester_id.eq.${meId},target_id.eq.${meId}`)
-            .eq("status", "accepted")
-            .is("blocked_by", null)
-            .limit(300),
-          supabase
-            .from("event_members")
-            .select("user_id,status")
-            .eq("event_id", activeCurrentEvent.id)
-            .in("status", ["host", "going", "waitlist"])
-            .limit(300),
+          supabase.from("connections").select("requester_id,target_id").eq("requester_id", meId).eq("status", "accepted").limit(300),
+          supabase.from("connections").select("requester_id,target_id").eq("target_id", meId).eq("status", "accepted").limit(300),
+          supabase.from("event_members").select("user_id,status").eq("event_id", activeCurrentEvent.id).in("status", ["host", "going", "waitlist"]).limit(300),
         ]);
 
         if (cancelled) return;
         if (organizerRes.error) throw organizerRes.error;
-        if (connectionRes.error) throw connectionRes.error;
+        if (connAsReq.error) throw connAsReq.error;
+        if (connAsTarget.error) throw connAsTarget.error;
         if (memberRes.error) throw memberRes.error;
+
+        const connectionRes = { data: [...(connAsReq.data ?? []), ...(connAsTarget.data ?? [])], error: null };
 
         const organizerRow = organizerRes.data as Record<string, unknown> | null;
         setActiveEventOrganizer(
@@ -7114,32 +7050,22 @@ function MessagesPageContent() {
 
     void (async () => {
       try {
-        const [organizerRes, connectionRes, memberRes] = await Promise.all([
+        const [organizerRes, connAsReqG, connAsTargetG, memberRes] = await Promise.all([
           activeCurrentGroup.hostUserId
-            ? supabase
-                .from("profiles")
-                .select("user_id,display_name,avatar_url,city,country")
-                .eq("user_id", activeCurrentGroup.hostUserId)
-                .maybeSingle()
+            ? supabase.from("profiles").select("user_id,display_name,avatar_url,city,country").eq("user_id", activeCurrentGroup.hostUserId).maybeSingle()
             : Promise.resolve({ data: null, error: null }),
-          supabase
-            .from("connections")
-            .select("requester_id,target_id")
-            .or(`requester_id.eq.${meId},target_id.eq.${meId}`)
-            .eq("status", "accepted")
-            .is("blocked_by", null)
-            .limit(300),
-          supabase
-            .from("group_members")
-            .select("user_id")
-            .eq("group_id", activeCurrentGroup.id)
-            .limit(300),
+          supabase.from("connections").select("requester_id,target_id").eq("requester_id", meId).eq("status", "accepted").limit(300),
+          supabase.from("connections").select("requester_id,target_id").eq("target_id", meId).eq("status", "accepted").limit(300),
+          supabase.from("group_members").select("user_id").eq("group_id", activeCurrentGroup.id).limit(300),
         ]);
 
         if (cancelled) return;
         if (organizerRes.error) throw organizerRes.error;
-        if (connectionRes.error) throw connectionRes.error;
+        if (connAsReqG.error) throw connAsReqG.error;
+        if (connAsTargetG.error) throw connAsTargetG.error;
         if (memberRes.error) throw memberRes.error;
+
+        const connectionRes = { data: [...(connAsReqG.data ?? []), ...(connAsTargetG.data ?? [])], error: null };
 
         const organizerRow = organizerRes.data as Record<string, unknown> | null;
         setActiveGroupOrganizer(
@@ -7444,7 +7370,7 @@ function MessagesPageContent() {
   }, [activeLastReadAt, meId, visibleActiveMessages]);
 
   const parsedMessagesById = useMemo(() => {
-    const map: Record<string, { replyToId: string | null; text: string }> = {};
+    const map: Record<string, { replyToId: string | null; postTag: string | null; text: string }> = {};
     activeMessages.forEach((message) => {
       map[message.id] = parseReplyPayload(message.body);
     });
@@ -7641,9 +7567,79 @@ function MessagesPageContent() {
     };
   }, [activeMeta, activeThreadToken, meId]);
 
+  // Realtime subscription — scoped to the currently opened thread only
+  useEffect(() => {
+    const threadId = activeMeta?.threadId ?? null;
+
+    if (realtimeChatChannelRef.current) {
+      void supabase.removeChannel(realtimeChatChannelRef.current);
+      realtimeChatChannelRef.current = null;
+    }
+
+    if (!threadId || !meId) return;
+
+    const channel = supabase
+      .channel(`dm-chat-${threadId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "thread_messages",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            id: string;
+            sender_id: string;
+            body: string;
+            created_at: string;
+            message_type?: string;
+            context_tag?: string;
+            status_tag?: string;
+            metadata?: unknown;
+          };
+          // Skip own messages — already added optimistically
+          if (row.sender_id === meId) return;
+          setActiveMessages((prev) => {
+            if (prev.some((m) => m.id === row.id)) return prev;
+            const incoming: MessageItem = {
+              id: row.id,
+              senderId: row.sender_id,
+              body: row.body ?? "",
+              createdAt: row.created_at,
+              messageType: normalizeMessageType(row.message_type),
+              contextTag: normalizeContextTag(row.context_tag),
+              statusTag: normalizeStatusTag(row.status_tag),
+              metadata: parseContextMetadata(row.metadata),
+              status: "sent",
+              localOnly: false,
+            };
+            return [...prev, incoming];
+          });
+          // Update thread preview in the sidebar
+          setThreads((prev) =>
+            [...prev.map((t) =>
+              t.threadId === activeThreadToken
+                ? { ...t, preview: row.body ?? "", updatedAt: row.created_at }
+                : t
+            )].sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
+          );
+        }
+      )
+      .subscribe();
+
+    realtimeChatChannelRef.current = channel;
+
+    return () => {
+      void supabase.removeChannel(channel);
+      realtimeChatChannelRef.current = null;
+    };
+  }, [activeMeta?.threadId, meId]);
+
   useEffect(() => {
     if (!meId || !activeMeta || !typingChannelRef.current) return;
-    const trimmed = threadBody.trim();
+    const trimmed = threadBodyRef.current.trim();
     if (!trimmed) return;
 
     const now = Date.now();
@@ -7655,7 +7651,7 @@ function MessagesPageContent() {
       event: "typing",
       payload: { userId: meId, at: now },
     });
-  }, [activeMeta, meId, threadBody]);
+  }, [activeMeta, meId, threadBodyLen]);
 
   useEffect(() => {
     if (
@@ -7934,6 +7930,7 @@ function MessagesPageContent() {
 
   return (
     <div className="font-sans flex h-[100dvh] max-h-[100svh] min-h-[100svh] flex-col overflow-hidden overscroll-none bg-[#08090c] text-white">
+      <PullToRefreshIndicator pullY={pullY} refreshing={ptrRefreshing} />
       <Nav />
 
       <main className="flex min-h-0 flex-1 overflow-hidden overscroll-none">
@@ -8197,14 +8194,21 @@ function MessagesPageContent() {
                         ].join(" ")}
                       >
                         {thread.avatarUrl ? (
-                          <Image
+                          <img
                             src={thread.avatarUrl}
                             alt={thread.title}
-                            fill
-                            sizes="48px"
-                            loader={remoteImageLoader}
-                            unoptimized
-                            className="object-cover"
+                            className="absolute inset-0 h-full w-full object-cover"
+                            onError={(e) => {
+                              const el = e.currentTarget;
+                              el.style.display = "none";
+                              const parent = el.parentElement;
+                              if (parent && !parent.querySelector(".avatar-fallback-icon")) {
+                                const fb = document.createElement("div");
+                                fb.className = "avatar-fallback-icon flex h-full w-full items-center justify-center text-cyan-100/80";
+                                fb.innerHTML = `<span class="material-symbols-outlined" style="font-size:14px">${thread.kind === "event" ? "event" : thread.kind === "group" ? "groups" : "person"}</span>`;
+                                parent.appendChild(fb);
+                              }
+                            }}
                           />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center text-cyan-100/80">
@@ -8480,32 +8484,37 @@ function MessagesPageContent() {
                         )}
                       </div>
                     </Link>
-                  ) : (
-                    <div
-                      className={[
-                        "relative h-10 w-10 shrink-0 overflow-hidden border border-white/10 bg-[#223838]",
-                        activeMeta.kind === "event" || activeMeta.kind === "group" ? "rounded-2xl" : "rounded-full",
-                      ].join(" ")}
-                    >
-                      {activeMeta.avatarUrl ? (
-                        <Image
-                          src={activeMeta.avatarUrl}
-                          alt={activeMeta.title}
-                          fill
-                          sizes="40px"
-                          loader={remoteImageLoader}
-                          unoptimized
-                          className="object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-cyan-100/80">
-                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-                            {activeMeta.kind === "event" ? "event" : activeMeta.kind === "group" ? "groups" : "person"}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  ) : (() => {
+                    const avatarContent = (
+                      <>
+                        {activeMeta.avatarUrl ? (
+                          <Image
+                            src={activeMeta.avatarUrl}
+                            alt={activeMeta.title}
+                            fill
+                            sizes="40px"
+                            loader={remoteImageLoader}
+                            unoptimized
+                            className="object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-cyan-100/80">
+                            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                              {activeMeta.kind === "event" ? "event" : activeMeta.kind === "group" ? "groups" : "person"}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    );
+                    const avatarClass = [
+                      "relative h-10 w-10 shrink-0 overflow-hidden border border-white/10 bg-[#223838]",
+                      activeMeta.kind === "event" || activeMeta.kind === "group" ? "rounded-2xl" : "rounded-full",
+                    ].join(" ");
+                    if (activeMeta.kind === "event" && activeMeta.eventId) {
+                      return <Link href={`/events/${activeMeta.eventId}`} className={`${avatarClass} transition-opacity hover:opacity-80`}>{avatarContent}</Link>;
+                    }
+                    return <div className={avatarClass}>{avatarContent}</div>;
+                  })()}
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       {activeMeta.otherUserId ? (
@@ -8890,7 +8899,12 @@ function MessagesPageContent() {
                             <button
                               key={starter}
                               type="button"
-                              onClick={() => setThreadBody(starter)}
+                              onClick={() => {
+                                threadBodyRef.current = starter;
+                                setThreadBodyLen(starter.length);
+                                syncComposerLen(starter.length);
+                                if (composerTextareaRef.current) composerTextareaRef.current.value = starter;
+                              }}
                               className="rounded-full border border-white/15 bg-black/20 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100"
                             >
                               {starter}
@@ -9137,6 +9151,16 @@ function MessagesPageContent() {
                               </button>
                             ) : null}
 
+                            {(() => {
+                              const parsed = parsedMessagesById[message.id] ?? parseReplyPayload(message.body);
+                              const pt = parsed.postTag;
+                              const ptLabels: Record<string, string> = { update: "📣 Update", announcement: "🎉 Announcement", ticket: "🎟 Tickets", reminder: "⏰ Reminder" };
+                              return pt && ptLabels[pt] ? (
+                                <span className={`mb-0.5 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-300 ${mine ? "self-end" : "self-start"}`}>
+                                  {ptLabels[pt]}
+                                </span>
+                              ) : null;
+                            })()}
                             <div className={`flex w-full items-center gap-1 ${mine ? "justify-end" : "justify-start"}`}>
                               <div
                                 className={[
@@ -9317,6 +9341,10 @@ function MessagesPageContent() {
                                       });
                                     }
                                     setThreadBody(failedParsed.text);
+                                    threadBodyRef.current = failedParsed.text;
+                                    setThreadBodyLen(failedParsed.text.length);
+                                    syncComposerLen(failedParsed.text.length);
+                                    if (composerTextareaRef.current) composerTextareaRef.current.value = failedParsed.text;
                                     setActiveMessages((prev) => prev.filter((item) => item.id !== message.id));
                                   }}
                                   className="text-[10px] text-rose-200 hover:text-rose-100 underline underline-offset-2"
@@ -9430,102 +9458,7 @@ function MessagesPageContent() {
                 ) : null}
               </div>
 
-                {activeMeta?.kind === "event" && (connectionEventsFeed.length > 0 || connectionEventsFeedLoading) ? (
-                  <div className="shrink-0 overflow-hidden border-t border-white/[0.06] bg-[rgba(8,9,12,0.97)] pt-2.5 pb-2">
-                    <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-white/25">Events your connections are attending</p>
-                    {connectionEventsFeedLoading ? (
-                      <div className="flex gap-2.5 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                        {[1, 2, 3, 4].map((i) => (
-                          <div key={i} className="h-[120px] w-[130px] shrink-0 animate-pulse rounded-xl bg-white/[0.04]" />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <div className="pointer-events-none absolute bottom-0 left-0 top-0 z-10 w-12 bg-gradient-to-r from-[rgba(8,9,12,1)] to-transparent" />
-                        <div className="pointer-events-none absolute bottom-0 right-0 top-0 z-10 w-12 bg-gradient-to-l from-[rgba(8,9,12,1)] to-transparent" />
-                        <div
-                          data-feed
-                          ref={connectionFeedRef}
-                          className="flex cursor-grab gap-3 overflow-x-scroll px-4 pb-1 select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                          style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
-                        >
-                          {[...connectionEventsFeed, ...connectionEventsFeed, ...connectionEventsFeed, ...connectionEventsFeed].map((ev, idx) => (
-                            <a
-                              key={`${ev.id}-${idx}`}
-                              href={`/events/${ev.id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              draggable={false}
-                              onClick={(e) => {
-                                if (connectionFeedRef.current?.dataset.dragged === "1") e.preventDefault();
-                              }}
-                              className="group relative w-[168px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0b10] shadow-[0_4px_20px_rgba(0,0,0,0.5)] transition-all duration-300 hover:border-cyan-300/30 hover:shadow-[0_4px_24px_rgba(13,242,242,0.12)]"
-                            >
-                              <div className="relative h-[152px] w-full">
-                                {ev.coverUrl ? (
-                                  <button
-                                    type="button"
-                                    className="absolute inset-0 h-full w-full"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      if (connectionFeedRef.current?.dataset.dragged !== "1") setFeedLightboxUrl(ev.coverUrl);
-                                    }}
-                                  >
-                                    <img src={ev.coverUrl} alt={ev.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-                                      <span className="material-symbols-outlined rounded-full bg-black/50 p-1 text-white/80 backdrop-blur-sm" style={{ fontSize: 18 }}>
-                                        open_in_full
-                                      </span>
-                                    </div>
-                                  </button>
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center bg-[#0e0e1c]">
-                                    <span className="material-symbols-outlined text-fuchsia-300/30" style={{ fontSize: 28 }}>
-                                      calendar_month
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
-                                {ev.startsAt ? (
-                                  <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white/80 backdrop-blur-sm">
-                                    {formatDateShort(ev.startsAt)}
-                                  </span>
-                                ) : null}
-                                <div className="absolute bottom-0 left-0 right-0 px-2.5 pb-2.5 pt-6">
-                                  <p className="line-clamp-2 text-[11px] font-bold leading-tight text-white drop-shadow-sm">{ev.title}</p>
-                                  {ev.connectionNames.length > 0 ? (
-                                    <div className="mt-1.5 flex items-center gap-1.5">
-                                      <div className="flex -space-x-1.5">
-                                        {ev.connectionAvatars.slice(0, 3).map((avatar, i) => (
-                                          <div key={i} className="h-4 w-4 overflow-hidden rounded-full border border-black/60 bg-[#1a2030] ring-1 ring-black/40">
-                                            {avatar ? (
-                                              <img src={avatar} alt="" className="h-full w-full object-cover" />
-                                            ) : (
-                                              <div className="flex h-full w-full items-center justify-center text-[7px] font-bold text-cyan-100">
-                                                {(ev.connectionNames[i] ?? "?").slice(0, 1).toUpperCase()}
-                                              </div>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
-                                      <p className="min-w-0 truncate text-[9px] font-medium text-cyan-300/70">
-                                        {ev.connectionNames[0]}
-                                        {ev.attendeeCount > 1 ? ` +${ev.attendeeCount - 1}` : ""}
-                                      </p>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {activeMeta?.kind !== "event" ? (
+                {(activeMeta?.kind !== "event" || (activeMeta?.canPostToEventThread && !showReadOnlyBroadcastFooter)) ? (
                 <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2.5 sm:p-3">
                 {replyTo ? (
                   <div className="mx-auto mb-2 max-w-4xl rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 flex items-start justify-between gap-3">
@@ -9582,6 +9515,75 @@ function MessagesPageContent() {
                       {chatFooterCta.helper}
                     </p>
                   </div>
+                ) : showEventHostComposer ? (
+                  /* Premium event host composer – dropdown tag + input + post */
+                  <div className="mx-auto w-full max-w-4xl">
+                    <div className="flex items-center gap-2">
+                      <div className="relative shrink-0" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setEventPostTagOpen(false); }}>
+                        <button
+                          type="button"
+                          onClick={() => setEventPostTagOpen((o) => !o)}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-2 text-[12px] font-medium text-cyan-200 transition hover:bg-white/[0.08]"
+                        >
+                          <span>{eventPostTag === "update" ? "📣" : eventPostTag === "announcement" ? "🎉" : eventPostTag === "ticket" ? "🎟" : "⏰"}</span>
+                          <span className="text-white/80">{eventPostTag === "update" ? "Update" : eventPostTag === "announcement" ? "Announcement" : eventPostTag === "ticket" ? "Tickets" : "Reminder"}</span>
+                          <span className="material-symbols-outlined text-white/30" style={{ fontSize: 13 }}>expand_more</span>
+                        </button>
+                        {eventPostTagOpen && (
+                          <div className="absolute bottom-full left-0 mb-1.5 z-50 min-w-[160px] overflow-hidden rounded-xl border border-white/10 bg-[#111318] shadow-xl">
+                            {([
+                              { key: "update" as const, label: "📣 Update" },
+                              { key: "announcement" as const, label: "🎉 Announcement" },
+                              { key: "ticket" as const, label: "🎟 Tickets" },
+                              { key: "reminder" as const, label: "⏰ Reminder" },
+                            ]).map((tag) => (
+                              <button
+                                key={tag.key}
+                                type="button"
+                                onMouseDown={(e) => { e.preventDefault(); setEventPostTag(tag.key); setEventPostTagOpen(false); }}
+                                className={`flex w-full items-center gap-2 px-3 py-2 text-[12px] transition hover:bg-white/[0.06] ${eventPostTag === tag.key ? "text-cyan-200" : "text-slate-300"}`}
+                              >
+                                {tag.label}
+                                {eventPostTag === tag.key && <span className="material-symbols-outlined ml-auto text-cyan-400" style={{ fontSize: 14 }}>check</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="relative flex-1">
+                        <input
+                          ref={composerTextareaRef as unknown as React.RefObject<HTMLInputElement>}
+                          type="text"
+                          defaultValue={threadBody}
+                          onChange={(e) => {
+                            const val = e.target.value.slice(0, 600);
+                            e.target.value = val;
+                            threadBodyRef.current = val;
+                            syncComposerLen(val.length);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              if (!sending) void sendActiveMessage();
+                            }
+                          }}
+                          placeholder="Share an update, ticket link, schedule change…"
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] py-2 pl-3 pr-12 text-sm text-white placeholder-slate-500 focus:border-cyan-400/40 focus:outline-none"
+                        />
+                        <span ref={counterRef} className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-600">0/600</span>
+                      </div>
+                      <button
+                        ref={postBtnEventRef}
+                        type="button"
+                        onClick={() => void sendActiveMessage()}
+                        disabled={sending || threadBodyLen === 0}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[linear-gradient(90deg,#00F5FF_0%,#FF00FF_100%)] px-4 py-2 text-sm font-bold text-[#071116] disabled:opacity-40"
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>send</span>
+                        {sending ? "…" : "Post"}
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <>
                     <div className="mx-auto flex max-w-4xl items-end gap-2">
@@ -9605,7 +9607,12 @@ function MessagesPageContent() {
                                   key={`composer-${emoji}`}
                                   type="button"
                                   onClick={() => {
-                                    setThreadBody((prev) => `${prev}${prev && !prev.endsWith(" ") ? " " : ""}${emoji}`);
+                                    const prev = threadBodyRef.current;
+                                    const next = `${prev}${prev && !prev.endsWith(" ") ? " " : ""}${emoji}`;
+                                    threadBodyRef.current = next;
+                                    setThreadBodyLen(next.length);
+                                    syncComposerLen(next.length);
+                                    if (composerTextareaRef.current) composerTextareaRef.current.value = next;
                                     setComposerEmojiOpen(false);
                                   }}
                                   className="rounded-lg px-1 py-1.5 text-lg transition-colors hover:bg-white/10"
@@ -9631,9 +9638,15 @@ function MessagesPageContent() {
                               : "Type a message..."
                           }
                           rows={1}
+                          maxLength={2000}
                           disabled={composerDisabled}
-                          value={threadBody}
-                          onChange={(e) => setThreadBody(e.target.value)}
+                          defaultValue={threadBody}
+                          onChange={(e) => {
+                            const val = e.target.value.slice(0, 2000);
+                            e.target.value = val;
+                            threadBodyRef.current = val;
+                            syncComposerLen(val.length);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
@@ -9642,9 +9655,10 @@ function MessagesPageContent() {
                           }}
                         />
                         <button
+                          ref={postBtnRef}
                           type="button"
                           onClick={() => void sendActiveMessage()}
-                          disabled={sending || composerDisabled || !threadBody.trim()}
+                          disabled={sending || composerDisabled || threadBodyLen === 0}
                           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0df2f2] text-[#052328] transition-colors hover:bg-[#0be0e0] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
@@ -9680,6 +9694,52 @@ function MessagesPageContent() {
                 )}
                 </footer>
                 ) : null}
+
+                {activeMeta?.kind === "event" && connectionEventsFeed.length > 0 ? (
+                  <div className="shrink-0 overflow-hidden border-t border-white/[0.06] bg-[rgba(8,9,12,0.97)] py-2">
+                    <div className="relative overflow-hidden">
+                      <div className="pointer-events-none absolute bottom-0 left-0 top-0 z-10 w-12 bg-gradient-to-r from-[rgba(8,9,12,1)] to-transparent" />
+                      <div className="pointer-events-none absolute bottom-0 right-0 top-0 z-10 w-12 bg-gradient-to-l from-[rgba(8,9,12,1)] to-transparent" />
+                      <div className="flex" style={{ animation: "marquee-left 40s linear infinite", willChange: "transform" }}>
+                        {[...connectionEventsFeed, ...connectionEventsFeed].map((ev, idx) => (
+                          <a key={`${ev.id}-${idx}`} href={`/events/${ev.id}`} target="_blank" rel="noopener noreferrer" draggable={false}
+                            className="group relative mx-1.5 w-[168px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0b10] shadow-[0_4px_20px_rgba(0,0,0,0.5)] transition-all duration-300 hover:border-cyan-300/30"
+                          >
+                            <div className="relative h-[152px] w-full">
+                              {ev.coverUrl ? (
+                                <img src={ev.coverUrl} alt={ev.title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-[#0e0e1c]">
+                                  <span className="material-symbols-outlined text-fuchsia-300/30" style={{ fontSize: 28 }}>calendar_month</span>
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+                              {ev.startsAt ? (
+                                <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white/80 backdrop-blur-sm">{formatDateShort(ev.startsAt)}</span>
+                              ) : null}
+                              <div className="absolute bottom-0 left-0 right-0 px-2.5 pb-2.5 pt-6">
+                                <p className="line-clamp-2 text-[11px] font-bold leading-tight text-white drop-shadow-sm">{ev.title}</p>
+                                {ev.connectionNames.length > 0 ? (
+                                  <div className="mt-1.5 flex items-center gap-1.5">
+                                    <div className="flex -space-x-1.5">
+                                      {ev.connectionAvatars.slice(0, 3).map((avatar, i) => (
+                                        <div key={i} className="h-4 w-4 overflow-hidden rounded-full border border-black/60 bg-[#1a2030]">
+                                          {avatar ? <img src={avatar} alt="" loading="lazy" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-[7px] font-bold text-cyan-100">{(ev.connectionNames[i] ?? "?").slice(0, 1).toUpperCase()}</div>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <p className="min-w-0 truncate text-[9px] font-medium text-cyan-300/70">{ev.connectionNames[0]}{ev.attendeeCount > 1 ? ` +${ev.attendeeCount - 1}` : ""}</p>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
               </div>
 
               <aside className="hidden xl:flex w-[340px] shrink-0 flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))]">
@@ -9688,11 +9748,12 @@ function MessagesPageContent() {
                     <div className="flex flex-col">
                       {activeCurrentEvent ? (
                         <Link href={`/events/${activeCurrentEvent.id}`} className="block shrink-0">
-                          {pickEventHeroUrl(activeCurrentEvent) ? (
+                          {activeCurrentEvent.coverUrl && activeCurrentEvent.coverStatus !== "rejected" ? (
                             <img
-                              src={pickEventHeroUrl(activeCurrentEvent)!}
+                              src={activeCurrentEvent.coverUrl}
                               alt={activeCurrentEvent.title}
                               className="h-44 w-full object-cover"
+                              onError={(e) => { e.currentTarget.style.display = "none"; }}
                             />
                           ) : (
                             <div className="flex h-44 w-full items-center justify-center bg-gradient-to-br from-[#0e2a2f] to-[#1a0d2e]">
@@ -10125,8 +10186,9 @@ function MessagesPageContent() {
       ) : null}
 
       {archiveToContinueOpen ? (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-lg rounded-[28px] border border-white/10 bg-[#101216] shadow-[0_30px_80px_rgba(0,0,0,0.5)]">
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="sheet-up w-full max-w-lg rounded-t-[28px] border border-white/10 bg-[#101216] shadow-[0_30px_80px_rgba(0,0,0,0.5)] sm:rounded-[28px]">
+            <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
               <div>
                 <p className="text-lg font-semibold text-white">Archive one to continue</p>
@@ -10309,7 +10371,7 @@ function MessagesPageContent() {
                   <span className="material-symbols-outlined text-[16px]">close</span>
                 </button>
               </div>
-              {activitySupportsLinkedMember && (
+              {activitySupportsLinkedMember && (filteredActivityLinkedConnectionOptions.length > 0 || activityDraft.linkedMemberUserId) && (
                 <button type="button" onClick={() => setActivityLinkedPickerOpen((prev) => !prev)}
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white/45 hover:text-white/80 transition-colors">
                   <span className="material-symbols-outlined text-[13px]">group_add</span>
@@ -10375,11 +10437,35 @@ function MessagesPageContent() {
               {/* Travel companion picker */}
               {activitySupportsLinkedMember && (activityDraft.linkedMemberUserId || activityLinkedPickerOpen) ? (
                 <div className="space-y-2">
-                  {activityDraft.linkedMemberUserId ? (
-                    <p className="text-xs text-[#0df2f2]/70">
-                      + {activityLinkedConnectionOptions.find((o) => o.userId === activityDraft.linkedMemberUserId)?.displayName ?? "Connection"}
-                    </p>
-                  ) : null}
+                  {activityDraft.linkedMemberUserId ? (() => {
+                    const member = activityLinkedConnectionOptions.find((o) => o.userId === activityDraft.linkedMemberUserId);
+                    return (
+                      <div className="flex items-center gap-3 rounded-2xl border border-[#0df2f2]/20 bg-[linear-gradient(90deg,rgba(13,204,242,0.08),rgba(217,59,255,0.06))] px-3 py-2.5">
+                        {member?.avatarUrl ? (
+                          <img src={member.avatarUrl} alt={member.displayName} className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-[#0df2f2]/30" />
+                        ) : (
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,rgba(13,204,242,0.25),rgba(217,59,255,0.25))] ring-2 ring-[#0df2f2]/20 text-[#0df2f2]">
+                            <span className="material-symbols-outlined text-[18px]">person</span>
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-[#0df2f2]/60">Added member</p>
+                          <p className="truncate text-sm font-black text-white">{member?.displayName ?? "Connection"}</p>
+                          {member && [member.city, member.country].filter(Boolean).join(", ") ? (
+                            <p className="truncate text-[11px] text-white/35">{[member.city, member.country].filter(Boolean).join(", ")}</p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActivityDraft((prev) => ({ ...prev, linkedMemberUserId: "" }))}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 transition hover:border-rose-400/30 hover:bg-rose-400/10 hover:text-rose-400"
+                          aria-label="Remove member"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">close</span>
+                        </button>
+                      </div>
+                    );
+                  })() : null}
                   {activityLinkedPickerOpen ? (
                     <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 space-y-2">
                       <input type="text" value={activityLinkedMemberQuery}

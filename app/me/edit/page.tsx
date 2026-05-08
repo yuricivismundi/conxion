@@ -40,6 +40,7 @@ import { USERNAME_MAX_LENGTH } from "@/lib/username/normalize";
 import { mapUsernameServerError, validateUsernameFormat } from "@/lib/username/validate";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { VERIFIED_VIA_PAYMENT_LABEL } from "@/lib/verification";
+import ConfirmationDialog from "@/components/ConfirmationDialog";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
 import { cx } from "@/lib/cx";
 
@@ -458,6 +459,7 @@ function EditMePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveStage, setSaveStage] = useState<"idle" | "saving" | "redirecting">("idle");
+  const [pendingNavTarget, setPendingNavTarget] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -530,6 +532,8 @@ function EditMePage() {
   useBodyScrollLock(Boolean(photoOpen || cropSource || saveStage !== "idle"));
 
   const [initialSnapshot, setInitialSnapshot] = useState("");
+  const [draftRestorePrompt, setDraftRestorePrompt] = useState(false);
+  const draftKey = meId ? `cx_edit_draft_${meId}` : null;
 
   const selectedStyles = useMemo(() => Object.keys(danceSkills).sort(styleSort), [danceSkills]);
   const roleOptions = useMemo(() => mergeKnownWithCurrent(ROLE_OPTIONS, roles), [roles]);
@@ -1052,7 +1056,15 @@ function EditMePage() {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Could not load your profile.");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          // Check for a saved draft after profile loads
+          const userId = (await supabase.auth.getUser()).data.user?.id;
+          if (userId) {
+            const saved = localStorage.getItem(`cx_edit_draft_${userId}`);
+            if (saved && saved !== currentSnapshot) setDraftRestorePrompt(true);
+          }
+        }
       }
     })();
 
@@ -1060,6 +1072,18 @@ function EditMePage() {
       cancelled = true;
     };
   }, [router]);
+
+  // Save draft to localStorage whenever there are unsaved changes
+  useEffect(() => {
+    if (!draftKey || !hasUnsavedChanges) return;
+    localStorage.setItem(draftKey, currentSnapshot);
+  }, [draftKey, hasUnsavedChanges, currentSnapshot]);
+
+  // Clear draft after a successful save
+  useEffect(() => {
+    if (!draftKey || hasUnsavedChanges) return;
+    localStorage.removeItem(draftKey);
+  }, [draftKey, hasUnsavedChanges]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -1095,11 +1119,10 @@ function EditMePage() {
         nextUrl.pathname === currentUrl.pathname && nextUrl.search === currentUrl.search && nextUrl.hash === currentUrl.hash;
       if (sameDestination) return;
 
-      const leave = window.confirm("You have unsaved changes. Leave this page?");
-      if (!leave) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      event.preventDefault();
+      event.stopPropagation();
+      const dest = anchor.getAttribute("href") ?? "";
+      setPendingNavTarget(dest);
     };
 
     document.addEventListener("click", onClickCapture, true);
@@ -1527,18 +1550,12 @@ function EditMePage() {
   }
 
   function handleLeaveToAccountSettings() {
-    if (hasUnsavedChanges) {
-      const leave = window.confirm("You have unsaved changes. Leave this page?");
-      if (!leave) return;
-    }
+    if (hasUnsavedChanges) { setPendingNavTarget("/account-settings"); return; }
     router.replace("/account-settings");
   }
 
   function handlePreviewPublic() {
-    if (hasUnsavedChanges) {
-      const leave = window.confirm("You have unsaved changes. Leave this page?");
-      if (!leave) return;
-    }
+    if (hasUnsavedChanges) { setPendingNavTarget(meId ? `/profile/${meId}` : null); return; }
     if (meId) {
       router.replace(`/profile/${meId}`);
       return;
@@ -1586,6 +1603,37 @@ function EditMePage() {
       <Nav />
 
       <main className="mx-auto max-w-[1240px] px-4 pb-28 pt-6 sm:px-6 lg:px-8">
+        {draftRestorePrompt && draftKey && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm">
+            <span className="text-amber-100">You have unsaved changes from a previous session.</span>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const saved = localStorage.getItem(draftKey);
+                  if (!saved) { setDraftRestorePrompt(false); return; }
+                  try {
+                    const data = JSON.parse(saved) as Record<string, unknown>;
+                    if (typeof data.displayName === "string") setDisplayName(data.displayName);
+                    if (typeof data.city === "string") setCity(data.city);
+                    if (typeof data.country === "string") setCountry(data.country);
+                  } catch { /* ignore */ }
+                  setDraftRestorePrompt(false);
+                }}
+                className="rounded-lg bg-amber-400/20 px-3 py-1.5 text-xs font-bold text-amber-100 hover:bg-amber-400/30"
+              >
+                Restore
+              </button>
+              <button
+                type="button"
+                onClick={() => { localStorage.removeItem(draftKey); setDraftRestorePrompt(false); }}
+                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-amber-100/60 hover:text-amber-100"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
         <form onSubmit={save} className="grid min-w-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
           <aside className="min-w-0 xl:self-start flex justify-center xl:block">
             <div className="w-52 sm:w-64 lg:w-72 overflow-hidden rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
@@ -1812,6 +1860,8 @@ function EditMePage() {
                     value={displayName}
                     onChange={(event) => setDisplayName(event.target.value.slice(0, MAX_DISPLAY_NAME_LENGTH))}
                     maxLength={MAX_DISPLAY_NAME_LENGTH}
+                    autoComplete="name"
+                    autoCapitalize="words"
                     className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
                     placeholder="How you appear to dancers"
                     data-testid="profile-edit-display-name"
@@ -2556,6 +2606,19 @@ function EditMePage() {
           </div>
         </div>
       ) : null}
+      <ConfirmationDialog
+        open={Boolean(pendingNavTarget)}
+        title="Leave without saving?"
+        description="You have unsaved changes that will be lost."
+        confirmLabel="Leave"
+        confirmVariant="danger"
+        onCancel={() => setPendingNavTarget(null)}
+        onConfirm={() => {
+          const dest = pendingNavTarget;
+          setPendingNavTarget(null);
+          if (dest) router.push(dest);
+        }}
+      />
     </div>
   );
 }

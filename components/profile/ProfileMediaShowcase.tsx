@@ -559,7 +559,7 @@ export default function ProfileMediaShowcase({ media, isOwner, onManage, ownerPh
                         style={{ maxHeight: desktopViewer ? "calc(100vh - 7rem)" : "82vh" }} />
                     )
                   ) : (
-                    <img key={lightboxItem.id} src={lightboxItem.publicUrl ?? ""} alt=""
+                    <img key={lightboxItem.id} src={lightboxItem.publicUrl ?? ""} alt="" loading="lazy"
                       className="block w-full bg-black object-contain" style={{ maxHeight: desktopViewer ? "calc(100vh - 7rem)" : "82vh" }} />
                   )}
                 </div>

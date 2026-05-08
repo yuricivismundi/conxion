@@ -26,7 +26,7 @@ async function searchNominatim(query: string, countryCode: string) {
   const response = await fetch(searchUrl, {
     headers: {
       "accept-language": "en",
-      "user-agent": "Conxion Events/1.0 (location lookup)",
+      "user-agent": "ConXion Events/1.0 (location lookup)",
     },
     cache: "no-store",
   });

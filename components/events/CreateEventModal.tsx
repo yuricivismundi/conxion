@@ -9,7 +9,8 @@ import {
   prepareEventCoverFile,
   validateEventCoverSourceFile,
 } from "@/lib/events/cover-upload";
-import { buildOsmEmbedUrl, normalizeOsmGeocodeResult, type OsmGeocodeResult } from "@/lib/maps/osm";
+import MapboxLocationSearch from "@/components/maps/MapboxLocationSearch";
+import type { MapboxPlaceResult } from "@/lib/maps/mapbox";
 import { CalendarPicker, TimePickerDropdown } from "@/components/ui/DateTimePicker";
 import { supabase } from "@/lib/supabase/client";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
@@ -42,23 +43,6 @@ function formatLocalDateTimeValue(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function exactStreetAddress(result: OsmGeocodeResult) {
-  const parts = [result.address.road, result.address.houseNumber].filter(Boolean);
-  return parts.join(" ").trim();
-}
-
-function geocodePlaceName(result: OsmGeocodeResult) {
-  return result.displayName.split(",")[0]?.trim() || result.address.city || result.address.town || result.address.village || result.address.country || "Selected place";
-}
-
-function geocodePlaceDetails(result: OsmGeocodeResult) {
-  const placeCity = result.address.city ?? result.address.town ?? result.address.village ?? result.address.municipality ?? "";
-  const placeCountry = result.address.country ?? "";
-  const streetAddress = exactStreetAddress(result);
-  return [streetAddress, placeCity, placeCountry]
-    .filter((segment, index, arr) => Boolean(segment) && arr.indexOf(segment) === index)
-    .join(" · ");
-}
 
 function plusHoursLocalDateTimeValue(hours: number) {
   const now = new Date();
@@ -189,11 +173,9 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
   const [venueName, setVenueName] = useState("");
   const [venueAddress, setVenueAddress] = useState("");
   const [locationQuery, setLocationQuery] = useState("");
-  const [locationResults, setLocationResults] = useState<OsmGeocodeResult[]>([]);
-  const [locationSearching, setLocationSearching] = useState(false);
-  const [locationDropOpen, setLocationDropOpen] = useState(false);
-  const [startsAtLocal, setStartsAtLocal] = useState(() => formatLocalDateTimeValue(new Date()));
-  const [endsAtLocal, setEndsAtLocal] = useState(() => plusHoursLocalDateTimeValue(3));
+  const [locationFullAddress, setLocationFullAddress] = useState("");
+  const [startsAtLocal, setStartsAtLocal] = useState("");
+  const [endsAtLocal, setEndsAtLocal] = useState("");
   const [description, setDescription] = useState("");
   const [coverUrl, setCoverUrl] = useState("");        // final uploaded URL
   const [coverFile, setCoverFile] = useState<File | null>(null); // raw local file
@@ -228,11 +210,6 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
   const [scheduledDates, setScheduledDates] = useState<ScheduledDateSelection[]>([]);
 
   // Location modal
-  const [locationModalOpen, setLocationModalOpen] = useState(false);
-  const [locationModalQuery, setLocationModalQuery] = useState("");
-  const [locationModalResults, setLocationModalResults] = useState<OsmGeocodeResult[]>([]);
-  const [locationModalSearching, setLocationModalSearching] = useState(false);
-  const [locationModalSelected, setLocationModalSelected] = useState<OsmGeocodeResult | null>(null);
 
   const trimmedDescription = description.trim();
   const descriptionLength = trimmedDescription.length;
@@ -314,45 +291,6 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
     return () => { cancelled = true; };
   }, [editEventId]);
 
-  // IP geolocation on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("https://ipapi.co/json/");
-        const data = (await res.json()) as { city?: string; country_name?: string; region?: string } | null;
-        if (data?.city && data?.country_name && !city) {
-          setCity(data.city);
-          setCountry(data.country_name);
-          setLocationQuery(`${data.city}, ${data.country_name}`);
-        }
-      } catch { /* silent — geolocation is best-effort */ }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Debounced business/location search
-  useEffect(() => {
-    const q = locationQuery.trim();
-    if (!q || q === `${city}, ${country}`) { setLocationResults([]); setLocationDropOpen(false); return; }
-    const timer = setTimeout(async () => {
-      setLocationSearching(true);
-      try {
-        const searchParams = new URLSearchParams({
-          q,
-          venue: q,
-          city: city.trim(),
-          country: country.trim(),
-        });
-        const res = await fetch(`/api/geocode/search?${searchParams.toString()}`, { cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as { ok?: boolean; results?: OsmGeocodeResult[] } | null;
-        const data = res.ok && json?.ok && Array.isArray(json.results) ? json.results : [];
-        setLocationResults(data);
-        setLocationDropOpen(data.length > 0);
-      } catch { setLocationResults([]); }
-      finally { setLocationSearching(false); }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [locationQuery, city, country]);
 
   // Cover file object URL + natural size
   useEffect(() => {
@@ -387,47 +325,23 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
     });
   }, [coverNaturalSize, coverFrameSize, coverPanX, coverPanY]);
 
-  // Business/location search for location modal
-  useEffect(() => {
-    const q = locationModalQuery.trim();
-    if (q.length < 2) { setLocationModalResults([]); return; }
-    setLocationModalSearching(true);
-    const timer = window.setTimeout(async () => {
-      try {
-        const searchParams = new URLSearchParams({
-          q,
-          venue: q,
-          city: city.trim(),
-          country: country.trim(),
-        });
-        const res = await fetch(`/api/geocode/search?${searchParams.toString()}`, { cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as { ok?: boolean; results?: OsmGeocodeResult[] } | null;
-        const data = res.ok && json?.ok && Array.isArray(json.results) ? json.results : [];
-        setLocationModalResults(data);
-      } catch {
-        setLocationModalResults([]);
-      } finally {
-        setLocationModalSearching(false);
-      }
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [city, country, locationModalQuery]);
-
+  // Only validate end time when it's actually set
   const isValidWindow = useMemo(() => {
     const start = toIsoOrNull(startsAtLocal);
     const end = toIsoOrNull(endsAtLocal);
-    return Boolean(start && end && start < end);
+    if (!end) return true; // end is optional
+    return Boolean(start && start < end);
   }, [endsAtLocal, startsAtLocal]);
 
   const canPublish = useMemo(() => Boolean(
-    title.trim() && eventType.trim() && city.trim() && country.trim() && venueName.trim() &&
-    startsAtLocal && endsAtLocal && isValidWindow &&
+    title.trim() && eventType.trim() && venueName.trim() &&
+    startsAtLocal && isValidWindow &&
     descriptionLength >= MIN_DESCRIPTION_LENGTH && descriptionLength <= MAX_DESCRIPTION_LENGTH
-  ), [city, country, descriptionLength, endsAtLocal, eventType, isValidWindow, startsAtLocal, title, venueName]);
+  ), [descriptionLength, eventType, isValidWindow, startsAtLocal, title, venueName]);
 
   const canSaveDraft = useMemo(() => Boolean(
-    title.trim() && city.trim() && country.trim() && startsAtLocal && endsAtLocal && isValidWindow
-  ), [city, country, endsAtLocal, isValidWindow, startsAtLocal, title]);
+    title.trim() && startsAtLocal && isValidWindow
+  ), [isValidWindow, startsAtLocal, title]);
 
   async function uploadCoverFile(file: File): Promise<string> {
     if (!accessToken) throw new Error("Missing auth session.");
@@ -458,9 +372,8 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
       const missing: string[] = [];
       if (!title.trim()) missing.push("title");
       if (!venueName.trim()) missing.push("venue");
-      if (!city.trim()) missing.push("city");
-      if (!country.trim()) missing.push("country");
-      if (!startsAtLocal || !endsAtLocal || !isValidWindow) missing.push("a valid start and end time");
+      if (!startsAtLocal) missing.push("a start date and time");
+      if (!isValidWindow) missing.push("a valid end time (must be after start)");
       if (descriptionLength < MIN_DESCRIPTION_LENGTH) missing.push(`description (${MIN_DESCRIPTION_LENGTH}+ chars)`);
       if (missing.length > 0) {
         setError(`To publish, add ${missing.join(", ")}.`);
@@ -496,6 +409,13 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
     const styles = stylesInput.split(",").map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0).slice(0, 12);
     const cleanedLinks = ticketsUrl.trim() ? [{ label: "Tickets", url: ticketsUrl.trim(), type: "tickets" }] : [];
 
+    // DB requires ends_at > starts_at — default to starts_at + 3h if not set
+    const resolvedEndsAt = endsAt || (() => {
+      const d = new Date(startsAt ?? "");
+      d.setHours(d.getHours() + 3);
+      return d.toISOString();
+    })();
+
     const payload = {
       title: title.trim(),
       description: description.trim(),
@@ -508,7 +428,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
       venueName: venueName.trim(),
       venueAddress: venueAddress.trim(),
       startsAt,
-      endsAt,
+      endsAt: resolvedEndsAt,
       capacity: hasCapacity && typeof capacity === "number" ? capacity : null,
       coverUrl: finalCoverUrl.trim(),
       links: cleanedLinks,
@@ -668,7 +588,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
                 }}
               />
             ) : coverUrl ? (
-              <img src={coverUrl} alt="Cover" className="h-full w-full object-cover pointer-events-none" />
+              <img src={coverUrl} alt="Cover" loading="lazy" className="h-full w-full object-cover pointer-events-none" />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#181b20]">
                 <span className="material-symbols-outlined text-[32px] text-white/15">image</span>
@@ -729,12 +649,15 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
 
               {/* Title */}
               <div>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value.slice(0, MAX_TITLE_LENGTH))}
-                  placeholder="Event title"
-                  className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-base font-semibold text-white placeholder:font-normal placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value.slice(0, MAX_TITLE_LENGTH))}
+                    placeholder="Event title"
+                    className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-base font-semibold text-white placeholder:font-normal placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-red-400">*</span>
+                </div>
                 <div className="mt-1 flex justify-between text-[11px]">
                   <span className={title.trim().length > 0 && title.trim().length < MIN_TITLE_LENGTH ? "text-amber-300" : "text-transparent"}>
                     Min {MIN_TITLE_LENGTH} chars
@@ -745,69 +668,30 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
 
               {/* Location + Access — equal halves */}
               <div className="grid grid-cols-2 gap-2">
-                {/* Location — inline search */}
-                <div className="relative">
-                  <div className={`flex h-full min-h-[56px] items-center rounded-xl border bg-black/30 transition ${locationDropOpen ? "border-[#00f5ff]/40" : "border-white/10 focus-within:border-white/20"}`}>
-                    <span className="material-symbols-outlined pointer-events-none ml-3 shrink-0 text-[18px] text-white/35">location_on</span>
-                    <input
-                      value={locationQuery}
-                      onChange={(e) => { setLocationQuery(e.target.value); if (!e.target.value) { setCity(""); setCountry(""); setVenueName(""); } }}
-                      onFocus={() => { if (locationResults.length > 0) setLocationDropOpen(true); }}
-                      placeholder="Add location"
-                      className="min-w-0 flex-1 bg-transparent py-3 pl-2.5 pr-2 text-sm text-white placeholder:text-slate-500 focus:outline-none"
-                    />
-                    {locationSearching
-                      ? <span className="mr-1 h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-[#00f5ff]" />
-                      : null}
-                    <button
-                      type="button"
-                      onClick={() => { setLocationModalOpen(true); setLocationModalQuery(locationQuery || city || ""); }}
-                      className="mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white/35 transition hover:bg-white/10 hover:text-white/70"
-                      title="Open map"
-                    >
-                      <span className="material-symbols-outlined text-[17px]">map</span>
-                    </button>
-                  </div>
-                  {locationDropOpen && locationResults.length > 0 && (
-                    <>
-                      <div className="fixed inset-0 z-[29]" onClick={() => setLocationDropOpen(false)} />
-                      <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-white/12 bg-[#181c20] shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
-                        {locationResults.map((r, i) => {
-                          const normalized = normalizeOsmGeocodeResult(r);
-                          if (!normalized) return null;
-                          const placeCity = normalized.address.city ?? normalized.address.town ?? normalized.address.village ?? normalized.address.municipality ?? "";
-                          const placeCountry = normalized.address.country ?? "";
-                          const placeName = normalized.displayName.split(",")[0]?.trim() ?? placeCity;
-                          const streetAddress = exactStreetAddress(normalized);
-                          const details = [streetAddress, placeCity, placeCountry].filter((s, idx, arr) => s && arr.indexOf(s) === idx).join(" · ");
-                          return (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => {
-                                setCity(placeCity);
-                                setCountry(placeCountry);
-                                setVenueName(placeName);
-                                setVenueAddress(streetAddress || normalized.displayName);
-                                setLocationQuery(placeName);
-                                setLocationDropOpen(false);
-                                setLocationResults([]);
-                              }}
-                              className="flex w-full items-center gap-3 border-b border-white/6 px-3 py-2.5 text-left last:border-0 hover:bg-white/5 transition"
-                            >
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/8 text-white/50">
-                                <span className="material-symbols-outlined text-[16px]">location_on</span>
-                              </span>
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-white">{placeName}</p>
-                                <p className="truncate text-[11px] text-slate-400">{details || normalized.displayName}</p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
+                {/* Location — Mapbox search */}
+                <div className="relative h-full">
+                  {locationFullAddress && (
+                    <p className="absolute bottom-full left-0 right-0 mb-1 truncate px-1 text-[11px] text-slate-400">
+                      {locationFullAddress}
+                    </p>
                   )}
+                  <MapboxLocationSearch
+                    value={locationQuery}
+                    onChange={(v) => { setLocationQuery(v); if (!v) setLocationFullAddress(""); }}
+                    onSelect={(result: MapboxPlaceResult) => {
+                      setVenueName(result.name);
+                      setVenueAddress(result.address);
+                      setCity(result.city);
+                      setCountry(result.country);
+                      setLocationQuery(result.name);
+                      setLocationFullAddress(result.fullAddress || result.name);
+                    }}
+                    onClear={() => { setCity(""); setCountry(""); setVenueName(""); setVenueAddress(""); setLocationQuery(""); setLocationFullAddress(""); }}
+                    placeholder="Add location"
+                    className="h-full"
+                    inputClassName="py-3"
+                  />
+                  {!locationQuery && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-red-400">*</span>}
                 </div>
 
                 {/* Access — FB-style dropdown */}
@@ -864,8 +748,9 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
 
               {/* Type + Dance Styles */}
               <div className="grid gap-2 grid-cols-2">
-                <label className="flex flex-col gap-0.5 rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 cursor-pointer hover:border-white/20">
+                <label className="relative flex flex-col gap-0.5 rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 cursor-pointer hover:border-white/20">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Type of event</span>
+                  <span className="absolute right-2.5 top-2 text-xs font-bold text-red-400">*</span>
                   <select
                     value={eventType}
                     onChange={(e) => setEventType(e.target.value)}
@@ -891,17 +776,23 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
               <div className="space-y-2">
                 {/* Start row: date | time | timezone */}
                 <div className="grid grid-cols-3 gap-2">
-                  <CalendarPicker
-                    label="Start date"
-                    value={localDatePart(startsAtLocal)}
-                    onChange={(d) => setStartsAtLocal(mergeLocalDateTime(d, localTimePart(startsAtLocal)))}
-                  />
-                  <TimePickerDropdown
-                    label="Start time"
-                    value={localTimePart(startsAtLocal)}
-                    dateValue={localDatePart(startsAtLocal)}
-                    onChange={(t) => setStartsAtLocal(mergeLocalDateTime(localDatePart(startsAtLocal), t))}
-                  />
+                  <div className="relative">
+                    <CalendarPicker
+                      label="Start date"
+                      value={localDatePart(startsAtLocal)}
+                      onChange={(d) => setStartsAtLocal(mergeLocalDateTime(d, localTimePart(startsAtLocal)))}
+                    />
+                    <span className="absolute right-2.5 top-2 text-xs font-bold text-red-400">*</span>
+                  </div>
+                  <div className="relative">
+                    <TimePickerDropdown
+                      label="Start time"
+                      value={localTimePart(startsAtLocal)}
+                      dateValue={localDatePart(startsAtLocal)}
+                      onChange={(t) => setStartsAtLocal(mergeLocalDateTime(localDatePart(startsAtLocal), t))}
+                    />
+                    <span className="absolute right-2.5 top-2 text-xs font-bold text-red-400">*</span>
+                  </div>
                   <label className="flex flex-col gap-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 cursor-pointer hover:border-white/20">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Time zone</span>
                     <select
@@ -970,16 +861,17 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
               </div>
 
               {/* Description */}
-              <div>
+              <div className="relative">
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value.slice(0, MAX_DESCRIPTION_LENGTH))}
                   rows={4}
-                  placeholder="Add details of event..."
+                  placeholder={`Add details of event... (min ${MIN_DESCRIPTION_LENGTH} characters)`}
                   className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/35 focus:outline-none"
                 />
+                {!description && <span className="pointer-events-none absolute right-3 top-3 text-sm font-bold text-red-400">*</span>}
                 <div className="mt-1 flex justify-between text-[11px]">
-                  <span className={descriptionLength > 0 && descriptionLength < MIN_DESCRIPTION_LENGTH ? "text-amber-200" : "text-transparent"}>
+                  <span className={descriptionLength > 0 && descriptionLength < MIN_DESCRIPTION_LENGTH ? "text-amber-200" : "text-slate-600"}>
                     Min {MIN_DESCRIPTION_LENGTH} chars
                   </span>
                   <span className={descriptionLength > MAX_DESCRIPTION_LENGTH * 0.9 ? "text-slate-400" : "text-slate-600"}>{descriptionLength}/{MAX_DESCRIPTION_LENGTH}</span>
@@ -1330,11 +1222,7 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
             >
               Cancel
             </button>
-            <div className="flex flex-col items-end gap-2">
-              <p className="text-[11px] text-slate-400">
-                Publish requires venue, city, country, start/end time, and a {MIN_DESCRIPTION_LENGTH}+ character description.
-              </p>
-              <div className="flex gap-2">
+            <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => void submitEvent("draft")}
@@ -1351,130 +1239,11 @@ export default function CreateEventModal({ onClose, onPublished, eventId: editEv
               >
                 {submitting ? "Saving…" : uploadingCover ? "Uploading…" : "Publish event"}
               </button>
-              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Location modal */}
-      {locationModalOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121414] shadow-[0_30px_60px_rgba(0,0,0,0.5)]">
-            <div className="h-px w-full bg-gradient-to-r from-[#0df2f2]/70 via-[#0df2f2]/20 to-[#f20db1]/70" />
-            <div className="relative flex items-center justify-center border-b border-white/8 px-6 py-4">
-              <h2 className="text-base font-bold text-white">Find a location</h2>
-              <button
-                type="button"
-                onClick={() => setLocationModalOpen(false)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-white/60 transition hover:bg-white/14 hover:text-white"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-            <div className="flex flex-col gap-4 p-5">
-              <div className="relative">
-                <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-white/35">search</span>
-                <input
-                  type="text"
-                  value={locationModalQuery}
-                  onChange={(e) => setLocationModalQuery(e.target.value)}
-                  placeholder="Search city, venue, address..."
-                  autoFocus
-                  className="w-full rounded-xl border border-white/12 bg-black/30 py-3 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:border-[#0df2f2]/40 focus:outline-none focus:ring-1 focus:ring-[#0df2f2]/20"
-                />
-                {locationModalSearching ? (
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#0df2f2]/60">Searching…</span>
-                ) : null}
-              </div>
-
-              {locationModalResults.length > 0 ? (
-                <div className="max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#0d0f10]">
-                  {locationModalResults.map((r, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        setLocationModalSelected(r);
-                        const resolvedCity = r.address.city ?? r.address.town ?? r.address.village ?? r.address.municipality ?? "";
-                        setLocationModalQuery([r.address.road, resolvedCity, r.address.country].filter(Boolean).join(", "));
-                        setLocationModalResults([]);
-                      }}
-                      className="flex w-full items-center gap-3 border-b border-white/5 px-4 py-3 text-left last:border-0 transition-colors hover:bg-[#0df2f2]/6"
-                    >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#0df2f2]/10">
-                        <span className="material-symbols-outlined text-[18px] text-[#0df2f2]/70">location_on</span>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">{geocodePlaceName(r)}</p>
-                        <p className="truncate text-[11px] text-white/35">{geocodePlaceDetails(r) || r.displayName}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="overflow-hidden rounded-xl border border-white/10" style={{ height: "208px" }}>
-                {locationModalSelected ? (
-                  <iframe
-                    key={`${locationModalSelected.lat},${locationModalSelected.lon}`}
-                    title="Location map"
-                    src={buildOsmEmbedUrl(locationModalSelected.lat, locationModalSelected.lon)}
-                    className="w-full border-0"
-                    style={{ height: "248px", marginBottom: "-40px" }}
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 bg-[#0d0f10]">
-                    <span className="material-symbols-outlined text-[40px] text-[#0df2f2]/25">map</span>
-                    <p className="text-sm text-white/30">Search for a location to preview the map</p>
-                  </div>
-                )}
-              </div>
-
-              {locationModalSelected ? (
-                <div className="flex items-center gap-2 rounded-xl border border-[#0df2f2]/20 bg-[#0df2f2]/8 px-3 py-2">
-                  <span className="material-symbols-outlined text-[16px] text-[#0df2f2]">check_circle</span>
-                  <p className="truncate text-sm font-semibold text-[#0df2f2]/90">{geocodePlaceName(locationModalSelected)}</p>
-                  <button type="button" onClick={() => { setLocationModalSelected(null); setLocationModalQuery(""); }} className="ml-auto shrink-0 text-white/30 hover:text-white">
-                    <span className="material-symbols-outlined text-[15px]">close</span>
-                  </button>
-                </div>
-              ) : null}
-
-              <div className="flex justify-end gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setLocationModalOpen(false)}
-                  className="rounded-xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-white/60 transition hover:border-white/20 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!locationModalSelected}
-                  onClick={() => {
-                    if (locationModalSelected) {
-                      const resolvedCity = locationModalSelected.address.city ?? locationModalSelected.address.town ?? locationModalSelected.address.village ?? locationModalSelected.address.municipality ?? "";
-                      if (resolvedCity) setCity(resolvedCity);
-                      if (locationModalSelected.address.country) setCountry(locationModalSelected.address.country);
-                      const street = exactStreetAddress(locationModalSelected);
-                      if (street) setVenueAddress(street);
-                      setVenueName(geocodePlaceName(locationModalSelected));
-                    }
-                    setLocationModalOpen(false);
-                    setLocationModalResults([]);
-                  }}
-                  className="rounded-xl px-5 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90 disabled:opacity-40"
-                  style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#d946ef 100%)" }}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }

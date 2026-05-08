@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { buildAccountReactivatedMetadata, getAccountDeactivatedAt } from "@/lib/auth/account-status";
@@ -201,7 +202,7 @@ function AuthCodeContent() {
           />
           <div className="relative rounded-[1.5rem] border p-5 sm:p-8 shadow-2xl" style={{ backgroundColor: "#121212", borderColor: BRAND.border }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/branding/CONXION-3-tight.png" alt="ConXion" className="mx-auto h-14 w-auto select-none sm:h-16" />
+            <Image src="/branding/CONXION-3-tight.png" alt="ConXion" width={120} height={56} className="mx-auto select-none" priority />
 
             <div className="mt-4 text-center">
               <h1 className="text-3xl font-bold text-white">Enter your code</h1>

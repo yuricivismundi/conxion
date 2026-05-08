@@ -370,7 +370,7 @@ export default function ConnectionDetailPage() {
               <div className="h-14 w-14 rounded-full bg-[#224949] overflow-hidden">
                 {otherAvatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={otherAvatarUrl} alt={otherName} className="h-full w-full object-cover" />
+                  <img src={otherAvatarUrl} alt={otherName} loading="lazy" className="h-full w-full object-cover" />
                 ) : null}
               </div>
               <div>
