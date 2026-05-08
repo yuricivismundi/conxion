@@ -58,25 +58,28 @@ export default function BookSessionModal({
         <button
           type="button"
           onClick={handleClose}
-          className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/40 transition-colors hover:text-white"
+          className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.05] text-white/35 transition-all hover:border-white/20 hover:text-white"
           aria-label="Close"
         >
           <span className="material-symbols-outlined text-[18px]">close</span>
         </button>
 
-        <div className="flex items-center gap-4 border-b border-white/[0.07] px-6 pb-5 pt-6">
-          <div
-            className="h-14 w-14 shrink-0 rounded-2xl border border-white/10 bg-cover bg-center"
-            style={{
-              backgroundImage: teacherPhotoUrl
-                ? `url(${teacherPhotoUrl})`
-                : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))",
-            }}
-          />
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{eyebrow}</p>
-            <h2 className="truncate text-xl font-extrabold leading-tight tracking-tight text-white">{title}</h2>
-            <p className="mt-0.5 text-[11px] text-white/35">{description}</p>
+        <div className="relative overflow-hidden border-b border-white/[0.06] px-6 pb-5 pt-6">
+          <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#0df2f2,#d93bff)" }} />
+          <div className="flex items-center gap-4">
+            <div
+              className="h-[60px] w-[60px] shrink-0 rounded-2xl border border-white/[0.12] bg-cover bg-center shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
+              style={{
+                backgroundImage: teacherPhotoUrl
+                  ? `url(${teacherPhotoUrl})`
+                  : "linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))",
+              }}
+            />
+            <div className="min-w-0">
+              <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/30">{eyebrow}</p>
+              <h2 className="mt-0.5 truncate text-[22px] font-black leading-tight tracking-tight text-white">{title}</h2>
+              <p className="mt-0.5 text-[11px] text-white/35">{description}</p>
+            </div>
           </div>
         </div>
 

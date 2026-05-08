@@ -354,24 +354,27 @@ export default async function TeacherProfilePage({
           </div>
         </section>
 
-        {/* ── Experiences + Videos (tabbed) ───────────────────────────────── */}
-        {teacherProfile.bio && (
-          <section className="mb-24">
-            <div className="max-w-5xl rounded-[32px] border border-white/6 bg-zinc-900/35 px-8 py-10 backdrop-blur-2xl sm:px-10">
-              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-500">Bio</p>
-              <p className="mt-5 text-lg leading-relaxed text-zinc-300 sm:text-[21px]">
-                {teacherProfile.bio}
-              </p>
-            </div>
-          </section>
-        )}
-
+        {/* ── Biography · Videos (tabbed) + Services + Booking ───────────── */}
         <TeacherExperiencesSection
           infoBlocks={infoBlocks}
           videos={profileMedia.filter((m) => m.kind === "video")}
+          bio={teacherProfile.bio}
+          languages={languages}
         />
 
-        <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
+        {/* ── Private Class Availability (compact, below services) ─────────── */}
+        <section className="mb-24">
+          <div className="mb-6 flex items-end justify-between gap-4">
+            <div>
+              <h2 className="font-black text-4xl tracking-tighter text-white">Book a Private Class</h2>
+              <p className="mt-2 text-zinc-500 text-sm">Pick a date and time slot, then send a request directly.</p>
+            </div>
+          </div>
+          <div className="rounded-[28px] border border-white/[0.07] p-6 sm:p-8"
+            style={{ background: "radial-gradient(circle at 0% 0%,rgba(147,51,234,0.07),transparent 50%),radial-gradient(circle at 100% 100%,rgba(255,81,250,0.07),transparent 50%),#111" }}>
+            <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
+          </div>
+        </section>
 
         {/* ── Weekly Classes ──────────────────────────────────────────────── */}
         <section className="mb-24">

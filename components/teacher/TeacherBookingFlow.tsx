@@ -264,17 +264,20 @@ export default function TeacherBookingFlow({
     return (
       <>
         {error ? (
-          <div className="rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+          <div className="flex items-start gap-3 rounded-2xl border border-rose-400/30 bg-rose-500/[0.08] px-4 py-3 text-sm text-rose-200">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px] text-rose-400">error</span>
             {error}
           </div>
         ) : null}
         {info ? (
-          <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">
+          <div className="flex items-start gap-3 rounded-2xl border border-[#0df2f2]/30 bg-[#0df2f2]/[0.07] px-4 py-3 text-sm text-[#0df2f2]">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px]">check_circle</span>
             {info}
           </div>
         ) : null}
         {isSelf ? (
-          <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] px-4 py-3 text-sm text-amber-200">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px] text-amber-400">info</span>
             This is your own teacher profile. Visitors can use this flow to request private classes.
           </div>
         ) : null}
@@ -285,54 +288,86 @@ export default function TeacherBookingFlow({
   function renderCalendarGrid() {
     if (loading) {
       return (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-sm text-white/45">
-          Loading availability...
+        <div className="grid gap-3 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <div className="mb-4 h-4 w-24 animate-pulse rounded-full bg-white/[0.06]" />
+              <div className="mb-2 grid grid-cols-7 gap-1">
+                {Array.from({ length: 7 }).map((_, j) => (
+                  <div key={j} className="aspect-square rounded-lg bg-white/[0.04]" />
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {Array.from({ length: 35 }).map((_, j) => (
+                  <div key={j} className="aspect-square animate-pulse rounded-lg bg-white/[0.03]" />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       );
     }
     if (availableDates.length === 0) {
       return (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-sm text-white/45">
-          No open booking dates yet.
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-12 text-center">
+          <span className="material-symbols-outlined text-[32px] text-white/20">calendar_month</span>
+          <p className="text-sm text-white/40">No open booking dates yet.</p>
         </div>
       );
     }
     return (
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-3">
         {calendarMonths.map((month) => (
-          <section key={month.label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">{month.label}</h3>
-              <span className="text-[10px] uppercase tracking-[0.16em] text-white/30">Available</span>
+          <section key={month.label} className="overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.025]">
+            <div className="flex items-center justify-between px-4 pb-3 pt-4">
+              <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
+              {month.cells.some((c) => c.available) ? (
+                <span
+                  className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest"
+                  style={{ background: "rgba(13,242,242,0.1)", color: "#0df2f2" }}
+                >
+                  Available
+                </span>
+              ) : (
+                <span className="text-[9px] uppercase tracking-widest text-white/20">No slots</span>
+              )}
             </div>
-            <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
-              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
-                <span key={label}>{label}</span>
+            <div className="mb-1 grid grid-cols-7 gap-0.5 px-3 text-center">
+              {["M", "T", "W", "T", "F", "S", "S"].map((label, i) => (
+                <span key={i} className="py-1 text-[9px] font-bold uppercase tracking-widest text-white/20">
+                  {label}
+                </span>
               ))}
             </div>
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid grid-cols-7 gap-0.5 px-3 pb-4">
               {month.cells.map((cell) =>
                 cell.date ? (
                   <button
                     key={cell.key}
                     type="button"
+                    disabled={!cell.available}
                     onClick={() => {
                       setSelectedDate(cell.date as string);
                       setSelectedAvailabilityId(firstAvailabilityIdForDate(slots, cell.date as string));
                     }}
                     className={[
-                      "aspect-square rounded-xl border text-sm font-semibold transition-colors",
+                      "aspect-square rounded-lg text-[12px] font-bold transition-all",
                       selectedDate === cell.date
-                        ? "border-cyan-300/45 bg-cyan-300/16 text-cyan-50"
+                        ? "scale-110 shadow-[0_0_12px_rgba(13,242,242,0.35)] text-[#040a0f]"
                         : cell.available
-                          ? "border-white/10 bg-white/[0.03] text-white hover:border-white/20 hover:bg-white/[0.06]"
-                          : "border-transparent bg-black/20 text-white/20",
+                          ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#0df2f2]/30 hover:bg-[#0df2f2]/[0.08] hover:text-[#0df2f2]"
+                          : "text-white/[0.18] cursor-default",
                     ].join(" ")}
+                    style={
+                      selectedDate === cell.date
+                        ? { background: "linear-gradient(135deg,#0df2f2,#d93bff)" }
+                        : undefined
+                    }
                   >
                     {dayNumber(cell.date)}
                   </button>
                 ) : (
-                  <div key={cell.key} className="aspect-square rounded-xl" />
+                  <div key={cell.key} className="aspect-square" />
                 )
               )}
             </div>
@@ -384,14 +419,16 @@ export default function TeacherBookingFlow({
   function renderSlotButtons(compact = false) {
     if (!selectedDate) {
       return (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-white/45">
+        <div className="flex items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-4 text-sm text-white/35">
+          <span className="material-symbols-outlined text-[16px]">schedule</span>
           Choose a date to see time slots.
         </div>
       );
     }
     if (slotsForSelectedDate.length === 0) {
       return (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-white/45">
+        <div className="flex items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-4 text-sm text-white/35">
+          <span className="material-symbols-outlined text-[16px]">event_busy</span>
           No open slots on this date.
         </div>
       );
@@ -404,24 +441,45 @@ export default function TeacherBookingFlow({
             type="button"
             onClick={() => setSelectedAvailabilityId(slot.availabilityId)}
             className={[
-              "w-full rounded-2xl border px-4 py-3 text-left transition-colors",
+              "group relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all",
               selectedAvailabilityId === slot.availabilityId
-                ? "border-fuchsia-300/40 bg-fuchsia-300/12 text-white"
-                : compact
-                  ? "border-white/[0.08] bg-white/[0.03] text-white/70 hover:border-white/15 hover:bg-white/[0.05]"
-                  : "border-white/10 bg-black/20 text-zinc-300 hover:border-white/20 hover:bg-black/30",
+                ? "border-[#d93bff]/40 text-white shadow-[0_0_20px_rgba(217,59,255,0.15)]"
+                : "border-white/[0.07] bg-white/[0.03] text-white/70 hover:border-white/[0.12] hover:bg-white/[0.05] hover:text-white",
             ].join(" ")}
+            style={
+              selectedAvailabilityId === slot.availabilityId
+                ? { background: "linear-gradient(135deg,rgba(13,242,242,0.1),rgba(217,59,255,0.12))" }
+                : undefined
+            }
           >
-            <div className="flex items-start justify-between gap-3">
+            {selectedAvailabilityId === slot.availabilityId && (
+              <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#0df2f2,#d93bff)" }} />
+            )}
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold">{slot.timeLabel || `${formatShortTime(slot.startTime)} - ${formatShortTime(slot.endTime)}`}</p>
-                {slot.duration ? <p className="mt-0.5 text-xs text-white/45">{slot.duration} min</p> : null}
+                <p className="text-sm font-black">{slot.timeLabel || `${formatShortTime(slot.startTime)} - ${formatShortTime(slot.endTime)}`}</p>
+                {slot.duration ? (
+                  <p className="mt-0.5 text-[11px] text-white/40">
+                    {slot.duration} min
+                  </p>
+                ) : null}
               </div>
-              {slot.note ? (
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-white/55">
-                  {slot.note}
-                </span>
-              ) : null}
+              <div className="flex items-center gap-2">
+                {slot.note ? (
+                  <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[10px] text-white/45">
+                    {slot.note}
+                  </span>
+                ) : null}
+                {selectedAvailabilityId === slot.availabilityId ? (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#0df2f2,#d93bff)" }}>
+                    <span className="material-symbols-outlined text-[12px] text-[#040a0f]">check</span>
+                  </span>
+                ) : (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] text-white/25 transition group-hover:border-white/25 group-hover:text-white/50">
+                    <span className="material-symbols-outlined text-[12px]">radio_button_unchecked</span>
+                  </span>
+                )}
+              </div>
             </div>
           </button>
         ))}
@@ -431,10 +489,10 @@ export default function TeacherBookingFlow({
 
   function renderNoteField(labelPrefix: string) {
     return (
-      <section className="space-y-1.5">
+      <section className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">{labelPrefix}</label>
-          <span className="text-[10px] text-white/25">{Math.max(0, NOTE_LIMIT - note.length)}/{NOTE_LIMIT}</span>
+          <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">{labelPrefix}</label>
+          <span className="text-[10px] text-white/20">{Math.max(0, NOTE_LIMIT - note.length)}/{NOTE_LIMIT}</span>
         </div>
         <textarea
           value={note}
@@ -445,10 +503,11 @@ export default function TeacherBookingFlow({
               ? `Add a quick note for ${teacherName}.`
               : `Share your level, goals, or anything ${teacherName} should know.`
           }
-          className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#0df2f2]/30 focus:bg-white/[0.06]"
+          className="w-full resize-none rounded-2xl border border-white/[0.07] bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition focus:border-[#0df2f2]/25 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(13,242,242,0.06)]"
         />
         {selectedSlot ? (
-          <p className="text-xs text-white/40">
+          <p className="flex items-center gap-1.5 text-[11px] text-white/35">
+            <span className="material-symbols-outlined text-[13px]">event</span>
             Requesting {selectedSlot.dateLabel || formatShortDate(selectedSlot.date)} at {selectedSlot.timeLabel || formatShortTime(selectedSlot.startTime)}.
           </p>
         ) : null}
@@ -549,29 +608,44 @@ export default function TeacherBookingFlow({
     <div className="space-y-5">
       {renderStateBanners()}
 
-      <section className="space-y-2.5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">1. Service</p>
+      <section className="space-y-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">1. Service</p>
         {SERVICE_OPTIONS.map((option) => (
           <div
             key={option.id}
-            className="rounded-2xl border border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 px-4 py-4 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
+            className="relative overflow-hidden rounded-2xl border border-[#0df2f2]/25 px-5 py-4"
+            style={{ background: "linear-gradient(135deg,rgba(13,242,242,0.07) 0%,rgba(217,59,255,0.07) 100%)" }}
           >
-            <p className="text-sm font-semibold text-white">{option.label}</p>
-            <p className="mt-1 text-xs leading-5 text-white/55">{option.description}</p>
+            <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#0df2f2,#d93bff)" }} />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-white">{option.label}</p>
+                <p className="mt-1 text-xs leading-5 text-white/50">{option.description}</p>
+              </div>
+              <span
+                className="mt-0.5 shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-[#0df2f2]"
+                style={{ background: "rgba(13,242,242,0.1)" }}
+              >
+                Selected
+              </span>
+            </div>
           </div>
         ))}
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_280px]">
-        <section className="space-y-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">2. Date</p>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_300px]">
+        <section className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">2. Date</p>
           {renderCalendarGrid()}
         </section>
 
-        <aside className="space-y-4 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+        <aside
+          className="space-y-4 rounded-2xl border border-white/[0.07] p-4"
+          style={{ background: "radial-gradient(circle at 50% 0%,rgba(13,242,242,0.04),transparent 60%),rgba(255,255,255,0.015)" }}
+        >
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">3. Slot</p>
-            <div className="mt-2">{renderSlotButtons(true)}</div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-white/30">3. Slot</p>
+            {renderSlotButtons(true)}
           </div>
 
           {renderNoteField("4. Note (optional)")}

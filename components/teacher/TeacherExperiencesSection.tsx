@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { TeacherInfoBlock, TeacherInfoBlockKind } from "@/lib/teacher-info/types";
-import { TEACHER_INFO_KIND_LABELS, getTeacherInfoTemplateText } from "@/lib/teacher-info/types";
+import { TEACHER_INFO_KIND_LABELS } from "@/lib/teacher-info/types";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
 
 function formatDuration(value: number | null) {
@@ -34,66 +34,14 @@ type Props = {
   languages?: string[];
 };
 
-// ─── Shared scrollable row ────────────────────────────────────────────────────
-
-function ScrollRow({ children, autoScroll }: { children: React.ReactNode; autoScroll: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const pausedRef = useRef(false);
-  const draggingRef = useRef(false);
-  const startXRef = useRef(0);
-  const startScrollRef = useRef(0);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !autoScroll) return;
-    let raf: number;
-    const speed = 0.6;
-    function step() {
-      if (!pausedRef.current && !draggingRef.current && el) {
-        el.scrollLeft += speed;
-        if (el.scrollLeft >= el.scrollWidth / 2) el.scrollLeft -= el.scrollWidth / 2;
-      }
-      raf = requestAnimationFrame(step);
-    }
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [autoScroll]);
-
-  function onPointerDown(e: React.PointerEvent) {
-    draggingRef.current = true;
-    startXRef.current = e.clientX;
-    startScrollRef.current = ref.current?.scrollLeft ?? 0;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    if (!draggingRef.current || !ref.current) return;
-    ref.current.scrollLeft = startScrollRef.current - (e.clientX - startXRef.current);
-  }
-  function onPointerUp() { draggingRef.current = false; }
-
-  return (
-    <div
-      ref={ref}
-      onMouseEnter={() => { pausedRef.current = true; }}
-      onMouseLeave={() => { pausedRef.current = false; }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      className="flex gap-5 overflow-x-hidden pb-2 cursor-grab active:cursor-grabbing select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      style={{ scrollBehavior: "auto" }}
-    >
-      {children}
-    </div>
-  );
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function TeacherExperiencesSection({ infoBlocks, videos, bio, languages }: Props) {
-  const showAboutTab = !!(bio || (languages && languages.length > 0));
+  const showBioTab = !!(bio || (languages && languages.length > 0));
   const showVideosTab = videos.length > 0;
-  const [tab, setTab] = useState<Tab>("about");
+  const showSection = showBioTab || showVideosTab;
+  const defaultTab: Tab = showBioTab ? "about" : "videos";
+  const [tab, setTab] = useState<Tab>(defaultTab);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [inlineVideoId, setInlineVideoId] = useState<string | null>(null);
 
@@ -110,27 +58,27 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
 
   const lightboxItem = lightboxIndex !== null ? (videos[lightboxIndex] ?? null) : null;
 
-  // Duplicate blocks for infinite loop
-  const loopedBlocks = infoBlocks.length > 0 ? [...infoBlocks, ...infoBlocks] : [];
-
   return (
     <>
-      {/* ── About · Videos (tabbed) ─────────────────────────────────────────── */}
-      {showAboutTab && (
+      {/* ── Biography · Videos (tabbed) ─────────────────────────────────────── */}
+      {showSection && (
         <section className="mb-24">
-          {/* Tab header: About + languages left, Videos right */}
-          <div className="flex items-center justify-between mb-10">
+          {/* Tab header row */}
+          <div className="flex items-center justify-between mb-8">
+            {/* Left: Biography tab */}
             <div className="flex items-center gap-4 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setTab("about")}
-                className={`min-h-[44px] font-black text-4xl tracking-tighter leading-none transition-colors ${
-                  tab === "about" ? "text-white" : "text-zinc-600 hover:text-zinc-400"
-                }`}
-              >
-                About
-              </button>
-              {languages && languages.length > 0 && (
+              {showBioTab && (
+                <button
+                  type="button"
+                  onClick={() => setTab("about")}
+                  className={`min-h-[44px] font-black text-4xl tracking-tighter leading-none transition-colors ${
+                    tab === "about" ? "text-white" : "text-zinc-600 hover:text-zinc-400"
+                  }`}
+                >
+                  Biography
+                </button>
+              )}
+              {languages && languages.length > 0 && tab === "about" && (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="material-symbols-outlined text-[#ff51fa] text-base">translate</span>
                   {languages.map((l) => (
@@ -141,29 +89,50 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
                 </div>
               )}
             </div>
+
+            {/* Right: Videos tab */}
             {showVideosTab && (
               <button
                 type="button"
                 onClick={() => setTab("videos")}
-                className={`min-h-[44px] font-black text-4xl tracking-tighter leading-none transition-colors ${
+                className={`min-h-[44px] flex items-center gap-2 font-black text-4xl tracking-tighter leading-none transition-colors ${
                   tab === "videos" ? "text-white" : "text-zinc-600 hover:text-zinc-400"
                 }`}
               >
+                <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  play_circle
+                </span>
                 Videos
               </button>
             )}
           </div>
 
-          {/* About content */}
-          {tab === "about" && bio && (
+          {/* Active tab indicator bar */}
+          <div className="relative mb-8 h-px bg-white/[0.06]">
+            <div
+              className="absolute top-0 h-px w-24 transition-all duration-300"
+              style={{
+                background: "linear-gradient(90deg,#0df2f2,#d93bff)",
+                left: tab === "about" ? 0 : "auto",
+                right: tab === "videos" ? 0 : "auto",
+              }}
+            />
+          </div>
+
+          {/* Biography content */}
+          {tab === "about" && (
             <div className="max-w-3xl">
-              <p className="text-zinc-400 text-lg leading-relaxed whitespace-pre-line">{bio}</p>
+              {bio ? (
+                <p className="text-zinc-400 text-lg leading-relaxed whitespace-pre-line">{bio}</p>
+              ) : (
+                <p className="text-zinc-600 text-sm">No biography added yet.</p>
+              )}
             </div>
           )}
 
-          {/* Videos content */}
+          {/* Videos content — 2 per row */}
           {tab === "videos" && showVideosTab && (
-            <div className="flex flex-wrap justify-center gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-[640px]">
               {videos.map((video, index) => {
                 const duration = formatDuration(video.durationSec);
                 const poster = video.thumbnailUrl;
@@ -171,7 +140,7 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
                 return (
                   <div
                     key={video.id}
-                    className="relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-900/40 w-[300px] h-[400px]"
+                    className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-zinc-900/40 aspect-[3/4]"
                   >
                     {isInlinePlaying && video.streamUid ? (
                       <iframe
@@ -197,13 +166,15 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
                     {!isInlinePlaying && (
                       <button type="button" onClick={() => setInlineVideoId(video.id)}
                         aria-label="Play video"
-                        className="absolute left-2 top-2 z-[2] inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors">
-                        <span className="material-symbols-outlined text-[17px]">play_arrow</span>
+                        className="absolute inset-0 z-[2] flex items-center justify-center group">
+                        <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white transition-all group-hover:scale-110 group-hover:bg-black/70">
+                          <span className="material-symbols-outlined text-[26px]" style={{ fontVariationSettings: "'FILL' 1" }}>play_arrow</span>
+                        </span>
                       </button>
                     )}
                     <button type="button" onClick={() => { setInlineVideoId(null); setLightboxIndex(index); }}
                       aria-label="Expand"
-                      className="absolute right-2 top-2 z-[2] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white/80 hover:bg-black/80 hover:text-white transition-colors">
+                      className="absolute right-2 top-2 z-[3] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white/70 hover:bg-black/80 hover:text-white transition-colors">
                       <span className="material-symbols-outlined text-[13px]">open_in_full</span>
                     </button>
                     {duration && !isInlinePlaying && (
@@ -221,68 +192,63 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
 
       {/* ── Services (always shown) ──────────────────────────────────────────── */}
       <section className="mb-24">
-        <div className="mb-10">
+        <div className="mb-8">
           <h2 className="font-black text-4xl tracking-tighter leading-none text-white">Services</h2>
+          <p className="mt-2 text-zinc-500 text-sm">Choose a session type and book directly.</p>
         </div>
-        {(
-          infoBlocks.length === 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {(["private_class", "group_class", "workshop"] as TeacherInfoBlockKind[]).map((kind) => (
+        {infoBlocks.length === 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {(["private_class", "group_class", "workshop"] as TeacherInfoBlockKind[]).map((kind) => (
+              <div
+                key={kind}
+                className="bg-zinc-900/20 p-8 rounded-2xl border border-white/5 border-dashed flex flex-col items-center justify-center gap-4 min-h-[160px]"
+              >
+                <p className="text-zinc-700 text-sm font-bold uppercase tracking-widest">{TEACHER_INFO_KIND_LABELS[kind]}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {infoBlocks.map((block) => {
+              const rawPrice = block.contentJson.priceText ?? null;
+              const ctaText = block.contentJson.ctaText;
+              const { final: finalPrice, original, saving } = rawPrice ? parsePrice(rawPrice) : { final: "", original: null, saving: null };
+              const isPromo = !!original;
+              return (
                 <div
-                  key={kind}
-                  className="bg-zinc-900/20 backdrop-blur-2xl p-8 rounded-2xl border border-white/5 border-dashed flex flex-col items-center justify-center gap-4 min-h-[200px]"
+                  key={block.id}
+                  className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-zinc-900/40 p-6 flex flex-col"
                 >
-                  <p className="text-zinc-700 text-sm font-bold uppercase tracking-widest">{TEACHER_INFO_KIND_LABELS[kind]}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <ScrollRow autoScroll>
-              {loopedBlocks.map((block, i) => {
-                const rawPrice = block.contentJson.priceText ?? null;
-                const ctaText = block.contentJson.ctaText;
-                const { final: finalPrice, original, saving } = rawPrice ? parsePrice(rawPrice) : { final: "", original: null, saving: null };
-                const isPromo = !!original;
-                return (
-                  <div
-                    key={`${block.id}-${i}`}
-                    className="bg-zinc-900/40 backdrop-blur-2xl p-7 rounded-2xl border border-white/5 flex-none w-[300px] flex flex-col"
-                  >
-                    <h3 className="font-bold text-lg mb-2 text-white leading-snug">{block.title}</h3>
-                    {block.shortSummary && (
-                      <p className="text-zinc-400 text-sm leading-relaxed mb-5 flex-1">
-                        {block.shortSummary}
-                      </p>
-                    )}
-
-                    {/* Price block */}
-                    {rawPrice ? (
-                      <div className="mt-auto pt-4 border-t border-white/5 space-y-2">
-                        {/* Discount badge — above price */}
-                        {saving && (
-                          <div className="inline-flex items-center gap-1.5 bg-[#ff51fa]/10 border border-[#ff51fa]/25 rounded-full px-3 py-1">
-                            <span className="material-symbols-outlined text-[#ff51fa] text-[12px]">sell</span>
-                            <span className="text-[#ff51fa] text-[11px] font-bold uppercase tracking-wide">Save {saving}</span>
-                          </div>
-                        )}
-                        {/* Price row */}
-                        <div className="flex items-baseline gap-2">
-                          <p className="text-[#ff51fa] font-black text-2xl tracking-tighter leading-none">{finalPrice}</p>
-                          {isPromo && original && (
-                            <p className="text-zinc-500 text-sm line-through">{original}</p>
-                          )}
+                  <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#9333ea,#ff51fa)" }} />
+                  <h3 className="font-black text-lg mb-2 text-white leading-snug">{block.title}</h3>
+                  {block.shortSummary && (
+                    <p className="text-zinc-400 text-sm leading-relaxed flex-1 mb-5">
+                      {block.shortSummary}
+                    </p>
+                  )}
+                  {rawPrice ? (
+                    <div className="mt-auto pt-4 border-t border-white/[0.06] space-y-1.5">
+                      {saving && (
+                        <div className="inline-flex items-center gap-1.5 bg-[#ff51fa]/10 border border-[#ff51fa]/20 rounded-full px-2.5 py-0.5">
+                          <span className="material-symbols-outlined text-[#ff51fa] text-[11px]">sell</span>
+                          <span className="text-[#ff51fa] text-[10px] font-bold uppercase tracking-wide">Save {saving}</span>
                         </div>
+                      )}
+                      <div className="flex items-baseline gap-2">
+                        <p className="text-[#ff51fa] font-black text-2xl tracking-tighter leading-none">{finalPrice}</p>
+                        {isPromo && original && (
+                          <p className="text-zinc-600 text-sm line-through">{original}</p>
+                        )}
                       </div>
-                    ) : ctaText ? (
-                      <p className="mt-auto pt-4 border-t border-white/5 text-[#ff51fa] font-black text-lg tracking-tighter">{ctaText}</p>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </ScrollRow>
-          )
+                    </div>
+                  ) : ctaText ? (
+                    <p className="mt-auto pt-4 border-t border-white/[0.06] text-[#ff51fa] font-black text-lg tracking-tighter">{ctaText}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         )}
-
       </section>
 
       {/* ── Lightbox ──────────────────────────────────────────────────────────── */}
