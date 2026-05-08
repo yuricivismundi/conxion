@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import DarkConnectModal from "@/components/DarkConnectModal";
 import BookSessionModal from "@/components/teacher/BookSessionModal";
 import RequestInfoModal from "@/components/teacher/RequestInfoModal";
 
@@ -13,7 +12,6 @@ type Props = {
 };
 
 export default function TeacherHeroActions({ userId, displayName, avatarUrl, variant = "hero" }: Props) {
-  const [connectOpen, setConnectOpen] = useState(false);
   const [requestInfoOpen, setRequestInfoOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState<string | null>(null);
@@ -86,23 +84,7 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
           <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
         </button>
 
-        {/* Connect — outlined, no gradient */}
-        <button
-          type="button"
-          onClick={() => setConnectOpen(true)}
-          className="border border-white/30 hover:border-white/60 bg-transparent text-white px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest transition-all hover:bg-white/5"
-        >
-          Connect
-        </button>
       </div>
-
-      <DarkConnectModal
-        open={connectOpen}
-        onClose={() => setConnectOpen(false)}
-        targetUserId={userId}
-        targetName={displayName}
-        targetPhotoUrl={avatarUrl}
-      />
 
       <RequestInfoModal
         open={requestInfoOpen}

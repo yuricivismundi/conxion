@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TeacherInfoBlock, TeacherInfoBlockKind } from "@/lib/teacher-info/types";
 import { TEACHER_INFO_KIND_LABELS } from "@/lib/teacher-info/types";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
@@ -33,6 +33,103 @@ type Props = {
   bio?: string | null;
   languages?: string[];
 };
+
+// ─── Services marquee ─────────────────────────────────────────────────────────
+
+function ServiceCard({ block }: { block: TeacherInfoBlock }) {
+  const rawPrice = block.contentJson.priceText ?? null;
+  const ctaText = block.contentJson.ctaText;
+  const { final: finalPrice, original, saving } = rawPrice ? parsePrice(rawPrice) : { final: "", original: null, saving: null };
+  const isPromo = !!original;
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-zinc-900/40 p-6 flex flex-col w-[280px] shrink-0 select-none">
+      <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#9333ea,#ff51fa)" }} />
+      <h3 className="font-black text-lg mb-2 text-white leading-snug">{block.title}</h3>
+      {block.shortSummary && (
+        <p className="text-zinc-400 text-sm leading-relaxed flex-1 mb-5">{block.shortSummary}</p>
+      )}
+      {rawPrice ? (
+        <div className="mt-auto pt-4 border-t border-white/[0.06] space-y-1.5">
+          {saving && (
+            <div className="inline-flex items-center gap-1.5 bg-[#ff51fa]/10 border border-[#ff51fa]/20 rounded-full px-2.5 py-0.5">
+              <span className="material-symbols-outlined text-[#ff51fa] text-[11px]">sell</span>
+              <span className="text-[#ff51fa] text-[10px] font-bold uppercase tracking-wide">Save {saving}</span>
+            </div>
+          )}
+          <div className="flex items-baseline gap-2">
+            <p className="text-[#ff51fa] font-black text-2xl tracking-tighter leading-none">{finalPrice}</p>
+            {isPromo && original && <p className="text-zinc-600 text-sm line-through">{original}</p>}
+          </div>
+        </div>
+      ) : ctaText ? (
+        <p className="mt-auto pt-4 border-t border-white/[0.06] text-[#ff51fa] font-black text-lg tracking-tighter">{ctaText}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ServicesMarquee({ blocks }: { blocks: TeacherInfoBlock[] }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const animRef = useRef<number | null>(null);
+  const offsetRef = useRef(0);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartOffset = useRef(0);
+  // Duplicate for seamless loop
+  const doubled = [...blocks, ...blocks];
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const cardW = 280 + 16; // width + gap
+    const half = cardW * blocks.length;
+
+    function step() {
+      if (!isDragging.current) {
+        offsetRef.current -= 0.5;
+        if (offsetRef.current <= -half) offsetRef.current += half;
+      }
+      if (track) track.style.transform = `translateX(${offsetRef.current}px)`;
+      animRef.current = requestAnimationFrame(step);
+    }
+    animRef.current = requestAnimationFrame(step);
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, [blocks.length]);
+
+  function onPointerDown(e: React.PointerEvent) {
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartOffset.current = offsetRef.current;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!isDragging.current) return;
+    const dx = e.clientX - dragStartX.current;
+    offsetRef.current = dragStartOffset.current + dx;
+  }
+  function onPointerUp() { isDragging.current = false; }
+
+  return (
+    <section className="mb-24 overflow-hidden">
+      <div className="mb-8">
+        <h2 className="font-black text-4xl tracking-tighter leading-none text-white">Services</h2>
+      </div>
+      <div
+        className="cursor-grab active:cursor-grabbing"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      >
+        <div ref={trackRef} className="flex gap-4 w-max">
+          {doubled.map((block, i) => (
+            <ServiceCard key={`${block.id}-${i}`} block={block} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -190,66 +287,8 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
         </section>
       )}
 
-      {/* ── Services (always shown) ──────────────────────────────────────────── */}
-      <section className="mb-24">
-        <div className="mb-8">
-          <h2 className="font-black text-4xl tracking-tighter leading-none text-white">Services</h2>
-          <p className="mt-2 text-zinc-500 text-sm">Choose a session type and book directly.</p>
-        </div>
-        {infoBlocks.length === 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {(["private_class", "group_class", "workshop"] as TeacherInfoBlockKind[]).map((kind) => (
-              <div
-                key={kind}
-                className="bg-zinc-900/20 p-8 rounded-2xl border border-white/5 border-dashed flex flex-col items-center justify-center gap-4 min-h-[160px]"
-              >
-                <p className="text-zinc-700 text-sm font-bold uppercase tracking-widest">{TEACHER_INFO_KIND_LABELS[kind]}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {infoBlocks.map((block) => {
-              const rawPrice = block.contentJson.priceText ?? null;
-              const ctaText = block.contentJson.ctaText;
-              const { final: finalPrice, original, saving } = rawPrice ? parsePrice(rawPrice) : { final: "", original: null, saving: null };
-              const isPromo = !!original;
-              return (
-                <div
-                  key={block.id}
-                  className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-zinc-900/40 p-6 flex flex-col"
-                >
-                  <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#9333ea,#ff51fa)" }} />
-                  <h3 className="font-black text-lg mb-2 text-white leading-snug">{block.title}</h3>
-                  {block.shortSummary && (
-                    <p className="text-zinc-400 text-sm leading-relaxed flex-1 mb-5">
-                      {block.shortSummary}
-                    </p>
-                  )}
-                  {rawPrice ? (
-                    <div className="mt-auto pt-4 border-t border-white/[0.06] space-y-1.5">
-                      {saving && (
-                        <div className="inline-flex items-center gap-1.5 bg-[#ff51fa]/10 border border-[#ff51fa]/20 rounded-full px-2.5 py-0.5">
-                          <span className="material-symbols-outlined text-[#ff51fa] text-[11px]">sell</span>
-                          <span className="text-[#ff51fa] text-[10px] font-bold uppercase tracking-wide">Save {saving}</span>
-                        </div>
-                      )}
-                      <div className="flex items-baseline gap-2">
-                        <p className="text-[#ff51fa] font-black text-2xl tracking-tighter leading-none">{finalPrice}</p>
-                        {isPromo && original && (
-                          <p className="text-zinc-600 text-sm line-through">{original}</p>
-                        )}
-                      </div>
-                    </div>
-                  ) : ctaText ? (
-                    <p className="mt-auto pt-4 border-t border-white/[0.06] text-[#ff51fa] font-black text-lg tracking-tighter">{ctaText}</p>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+      {/* ── Services — infinite auto-scroll marquee ─────────────────────────── */}
+      {infoBlocks.length > 0 && <ServicesMarquee blocks={infoBlocks} />}
 
       {/* ── Lightbox ──────────────────────────────────────────────────────────── */}
       {lightboxItem && (
