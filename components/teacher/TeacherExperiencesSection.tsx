@@ -132,7 +132,7 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
 
           {/* Videos content — 2 per row */}
           {tab === "videos" && showVideosTab && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-[640px]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-[640px] mx-auto">
               {videos.map((video, index) => {
                 const duration = formatDuration(video.durationSec);
                 const poster = video.thumbnailUrl;

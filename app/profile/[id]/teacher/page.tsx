@@ -299,11 +299,6 @@ export default async function TeacherProfilePage({
 
           {/* Right: info */}
           <div className="lg:col-span-7 flex flex-col justify-center">
-            {/* Teacher badge pill */}
-            <span className="inline-flex w-fit px-3 py-1 rounded-full bg-zinc-800 text-[#c1fffe] text-[10px] uppercase font-bold tracking-[0.2em]">
-              TEACHER
-            </span>
-
             {/* Name */}
             <h1 className="font-black text-5xl sm:text-6xl lg:text-7xl tracking-tighter text-white mt-4 leading-none">
               {displayName}
@@ -316,21 +311,13 @@ export default async function TeacherProfilePage({
               </p>
             )}
 
-            {/* Location + languages */}
-            {(profileRow.city || profileRow.country || languages.length > 0) && (
+            {/* Location */}
+            {(profileRow.city || profileRow.country) && (
               <div className="flex flex-wrap gap-8 mt-6 text-zinc-300 text-sm">
-                {(profileRow.city || profileRow.country) && (
-                  <span className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[#c1fffe] text-lg">location_on</span>
-                    {[profileRow.city, profileRow.country].filter(Boolean).join(", ")}
-                  </span>
-                )}
-                {languages.length > 0 && (
-                  <span className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[#ff51fa] text-lg">translate</span>
-                    {languages.join(", ")}
-                  </span>
-                )}
+                <span className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[#c1fffe] text-lg">location_on</span>
+                  {[profileRow.city, profileRow.country].filter(Boolean).join(", ")}
+                </span>
               </div>
             )}
 
