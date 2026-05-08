@@ -1,5 +1,5 @@
 export const TEACHER_BOOKING_SERVICE_TYPES = ["private_class"] as const;
-export const TEACHER_BOOKING_STATUSES = ["pending", "accepted", "declined"] as const;
+export const TEACHER_BOOKING_STATUSES = ["pending", "accepted", "declined", "cancelled"] as const;
 
 export type TeacherBookingServiceType = (typeof TEACHER_BOOKING_SERVICE_TYPES)[number];
 export type TeacherBookingStatus = (typeof TEACHER_BOOKING_STATUSES)[number];

@@ -1,8 +1,34 @@
 import { NextResponse } from "next/server";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { requireServiceInquiryAuth, jsonError } from "@/lib/service-inquiries/server";
-import { buildTeacherBookingCalendarUrl } from "@/lib/teacher-bookings";
+import { buildTeacherBookingCalendarUrl, formatShortDate, formatShortTime } from "@/lib/teacher-bookings";
 
 export const runtime = "nodejs";
+
+async function sendBookingNotificationBestEffort(params: {
+  service: ReturnType<typeof import("@/lib/supabase/service-role").getSupabaseServiceClient>;
+  recipientId: string;
+  actorId: string;
+  kind: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+}) {
+  const candidates = [
+    { user_id: params.recipientId, actor_id: params.actorId, kind: params.kind, title: params.title, body: params.body, metadata: params.metadata, is_read: false },
+    { user_id: params.recipientId, actor_id: params.actorId, kind: params.kind, title: params.title, message: params.body, metadata: params.metadata, is_read: false },
+    { user_id: params.recipientId, kind: params.kind, title: params.title, body: params.body, metadata: params.metadata },
+  ];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const table = (params.service as any).from("notifications");
+  try {
+    for (const payload of candidates) {
+      const { error } = await table.insert(payload);
+      if (!error) return;
+      if ((error.code === "23505") || (error.message ?? "").toLowerCase().includes("duplicate")) return;
+    }
+  } catch { /* best-effort */ }
+}
 
 type RespondPayload = {
   action?: unknown;
@@ -17,6 +43,7 @@ function asString(value: unknown) {
 }
 
 export async function POST(req: Request, { params }: RouteParams) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const auth = await requireServiceInquiryAuth(req);
     if ("error" in auth) return auth.error;
@@ -60,6 +87,23 @@ export async function POST(req: Request, { params }: RouteParams) {
         .update({ status: "declined", declined_at: nowIso } as never)
         .eq("id", booking.id);
       if (declineRes.error) throw declineRes.error;
+
+      const teacherProfileRes = await auth.serviceClient
+        .from("profiles")
+        .select("display_name")
+        .eq("user_id", auth.userId)
+        .maybeSingle();
+      const tName = asString((teacherProfileRes.data as { display_name?: string } | null)?.display_name) || "Teacher";
+      void sendBookingNotificationBestEffort({
+        service: auth.serviceClient,
+        recipientId: booking.student_id,
+        actorId: auth.userId,
+        kind: "teacher_booking_declined",
+        title: "Booking request declined",
+        body: `${tName} was unable to accept your booking request for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}.`,
+        metadata: { bookingId: booking.id, teacherId: auth.userId },
+      });
+
       return NextResponse.json({ ok: true, status: "declined" });
     }
 
@@ -122,6 +166,16 @@ export async function POST(req: Request, { params }: RouteParams) {
       startTime: booking.session_time,
       endTime,
       details: [booking.note, `Student: ${studentName}`].filter(Boolean).join("\n"),
+    });
+
+    void sendBookingNotificationBestEffort({
+      service: auth.serviceClient,
+      recipientId: booking.student_id,
+      actorId: auth.userId,
+      kind: "teacher_booking_accepted",
+      title: "Booking request accepted",
+      body: `${teacherName} accepted your private class on ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}.`,
+      metadata: { bookingId: booking.id, teacherId: auth.userId, calendarUrl },
     });
 
     return NextResponse.json({ ok: true, status: "accepted", calendarUrl });

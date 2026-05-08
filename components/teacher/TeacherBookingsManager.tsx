@@ -235,6 +235,31 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
     }
   }
 
+  async function handleCancel(bookingId: string) {
+    setRespondingId(bookingId);
+    setError(null);
+    setInfo(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Missing auth session. Please sign in again.");
+
+      const response = await fetch(`/api/teacher-bookings/${encodeURIComponent(bookingId)}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({}),
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Could not cancel this booking.");
+      setInfo("Booking cancelled.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not cancel booking.");
+    } finally {
+      setRespondingId(null);
+    }
+  }
+
   async function handleRespond(bookingId: string, action: "accept" | "decline") {
     setRespondingId(bookingId);
     setError(null);
@@ -422,7 +447,7 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
                     </a>
                   ) : null}
                 </div>
-                {booking.status === "pending" ? (
+                {booking.status === "pending" && (
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -441,7 +466,17 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
                       {respondingId === booking.id ? "Saving..." : "Accept"}
                     </button>
                   </div>
-                ) : null}
+                )}
+                {booking.status === "accepted" && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancel(booking.id)}
+                    disabled={respondingId === booking.id}
+                    className="rounded-xl border border-rose-400/30 bg-rose-400/[0.07] px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/15 disabled:opacity-60"
+                  >
+                    {respondingId === booking.id ? "Cancelling..." : "Cancel booking"}
+                  </button>
+                )}
               </div>
             </div>
           ))}

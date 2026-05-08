@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { requireServiceInquiryAuth, jsonError, singleLineTrimmed } from "@/lib/service-inquiries/server";
 import {
   durationMinutesFromTimeRange,
@@ -20,6 +21,7 @@ function asString(value: unknown) {
 }
 
 export async function POST(req: Request) {
+  if (!validateCsrfOrigin(req)) return csrfError();
   try {
     const auth = await requireServiceInquiryAuth(req);
     if ("error" in auth) return auth.error;
@@ -86,6 +88,39 @@ export async function POST(req: Request) {
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Could not create the booking request." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const auth = await requireServiceInquiryAuth(req);
+    if ("error" in auth) return auth.error;
+
+    const bookingsRes = await auth.serviceClient
+      .from("teacher_session_bookings")
+      .select("id,teacher_id,student_id,service_type,session_date,session_time,duration_min,note,status,created_at,accepted_at,declined_at")
+      .eq("student_id", auth.userId)
+      .order("session_date", { ascending: false })
+      .order("session_time", { ascending: false })
+      .limit(50);
+    if (bookingsRes.error) throw bookingsRes.error;
+
+    const teacherIds = [...new Set((bookingsRes.data ?? []).map((b: Record<string, unknown>) => b.teacher_id as string))];
+    let teacherProfiles: Array<{ user_id: string; display_name: string | null; avatar_url: string | null }> = [];
+    if (teacherIds.length > 0) {
+      const profilesRes = await auth.serviceClient
+        .from("profiles")
+        .select("user_id,display_name,avatar_url")
+        .in("user_id", teacherIds);
+      if (!profilesRes.error) teacherProfiles = (profilesRes.data ?? []) as typeof teacherProfiles;
+    }
+
+    return NextResponse.json({ ok: true, bookings: bookingsRes.data ?? [], teacherProfiles });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Could not load booking requests." },
       { status: 500 }
     );
   }
