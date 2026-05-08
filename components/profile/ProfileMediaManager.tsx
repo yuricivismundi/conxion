@@ -1630,7 +1630,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
             {previewItem.kind === "photo" ? (
               <img
                 src={previewItem.publicUrl ?? ""}
-                alt=""
+                alt="Profile photo preview"
                 className="block max-h-[90dvh] w-auto object-contain"
               />
             ) : (
