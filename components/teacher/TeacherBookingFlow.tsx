@@ -318,7 +318,7 @@ export default function TeacherBookingFlow({
     return (
       <div className="grid gap-3 lg:grid-cols-3">
         {calendarMonths.map((month) => (
-          <section key={month.label} className="overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.025]">
+          <section key={month.label} className="overflow-hidden rounded-2xl border border-white/[0.07]" style={{ background: "#181c20" }}>
             <div className="flex items-center justify-between px-4 pb-3 pt-4">
               <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
               {month.cells.some((c) => c.available) ? (
@@ -542,7 +542,7 @@ export default function TeacherBookingFlow({
         <div className="mt-6 grid gap-8 xl:grid-cols-[minmax(0,2fr)_360px]">
           <div className="space-y-6">{renderCalendarGrid()}</div>
 
-          <aside className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+          <aside className="rounded-2xl border border-white/[0.07] p-5" style={{ background: "#181c20" }}>
             <div className="mb-4">
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">Selected date</p>
               <h3 className="mt-2 text-2xl font-black text-white">
