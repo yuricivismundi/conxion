@@ -1378,14 +1378,12 @@ export async function GET(req: Request) {
     const hasMore = (data ?? []).length > limit;
     const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.created_at ?? "") : null;
 
-    const response: PaginationResponse<typeof items> & { ok: boolean } = {
+    return NextResponse.json({
       ok: true,
       items,
       cursor: nextCursor,
       hasMore,
-    };
-
-    return NextResponse.json(response);
+    });
   } catch (error: unknown) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Failed to load references." },
