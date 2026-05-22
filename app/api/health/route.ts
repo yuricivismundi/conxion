@@ -16,7 +16,7 @@ type HealthResponse = {
 
 export async function GET(): Promise<NextResponse<HealthResponse>> {
   const startTime = Date.now();
-  const checks = {
+  const checks: HealthResponse["checks"] = {
     database: { status: "healthy" as HealthStatus },
     environment: { status: "healthy" as HealthStatus },
   };
