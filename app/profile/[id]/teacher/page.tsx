@@ -248,12 +248,17 @@ export default async function TeacherProfilePage({
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 pb-32 md:pb-24">
 
+        {/* Profile Switcher - Top right of screen (desktop) */}
+        <div className="hidden lg:flex justify-end mb-3">
+          <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
+        </div>
+
         {/* ── Hero ────────────────────────────────────────────────────────── */}
         <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
           {/* Left: photo */}
           <div className="lg:col-span-5">
-            {/* Profile Switcher - Above photo (compact & discrete on all sizes) */}
-            <div className="flex justify-end mb-2">
+            {/* Profile Switcher - Above photo on mobile only */}
+            <div className="flex justify-end mb-2 lg:hidden">
               <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
             </div>
 
