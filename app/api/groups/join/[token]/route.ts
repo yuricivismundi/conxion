@@ -99,7 +99,7 @@ export async function POST(
     if (!alreadyMember) {
       const insertRes = await service
         .from("group_members")
-        .insert({ group_id: groupRow.id, user_id: userId, role: "member" });
+        .insert({ group_id: groupRow.id, user_id: userId, role: "member" } as never);
       if (insertRes.error) {
         return NextResponse.json({ ok: false, error: insertRes.error.message }, { status: 500 });
       }
