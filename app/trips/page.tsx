@@ -332,7 +332,9 @@ export default function TripsPage({ onCanCreate, externalQuery, externalStatusFi
         if (cancelled) return;
         setCitiesByCountryIso((prev) => ({ ...prev, [selectedCountryIso]: cities }));
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn('[get-cities] Failed to fetch cities:', err instanceof Error ? err.message : err);
+      });
 
     return () => {
       cancelled = true;

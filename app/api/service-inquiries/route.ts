@@ -6,8 +6,68 @@ import { requireServiceInquiryAuth, jsonError, singleLineTrimmed } from "@/lib/s
 import { ensureServiceInquiryThread, upsertServiceInquiryContext, emitServiceInquiryEvent } from "@/lib/service-inquiries/thread";
 import { isServiceInquiryKind, isServiceInquiryRequesterType, normalizeServiceInquiryRow } from "@/lib/service-inquiries/types";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
+import { encodeCursor, decodeCursor, validatePaginationLimit, PaginationResponse } from "@/lib/pagination/cursor";
 
 export const runtime = "nodejs";
+
+export async function GET(req: Request) {
+  try {
+    const auth = await requireServiceInquiryAuth(req);
+    if ("error" in auth) return auth.error;
+
+    const url = new URL(req.url);
+    const limit = validatePaginationLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor");
+    const filter = url.searchParams.get("filter") || "all"; // received, sent, all
+
+    const decodedCursor = cursor ? decodeCursor(cursor) : null;
+    const pageSize = limit + 1;
+
+    let query = auth.serviceClient.from("service_inquiries").select(
+      "id,requester_id,requester_type,recipient_id,inquiry_kind,message,city,requested_dates_text,status,created_at,updated_at"
+    );
+
+    if (filter === "received") {
+      query = query.eq("recipient_id", auth.userId);
+    } else if (filter === "sent") {
+      query = query.eq("requester_id", auth.userId);
+    } else {
+      // filter === "all"
+      query = query.or(`requester_id.eq.${auth.userId},recipient_id.eq.${auth.userId}`);
+    }
+
+    // Cursor-based pagination
+    if (decodedCursor?.id) {
+      query = query.lt("created_at", decodedCursor.sortValue as string).lt("id", decodedCursor.id);
+    }
+
+    query = query.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
+
+    const { data, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    const items = (data ?? []).slice(0, limit);
+    const hasMore = (data ?? []).length > limit;
+    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.created_at ?? "") : null;
+
+    const response: PaginationResponse<typeof items> & { ok: boolean } = {
+      ok: true,
+      items,
+      cursor: nextCursor,
+      hasMore,
+    };
+
+    return NextResponse.json(response);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load service inquiries." },
+      { status: 500 }
+    );
+  }
+}
 
 type CreateInquiryPayload = {
   recipientUserId?: unknown;

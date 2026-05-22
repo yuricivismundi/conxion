@@ -37,14 +37,16 @@ export async function POST(req: Request) {
       supabaseUser.rpc("cx_sync_reference_requests"),
     ]);
     if (activitySyncRes.error && !isMissingSchemaError(activitySyncRes.error.message)) {
-      return NextResponse.json({ ok: false, error: activitySyncRes.error.message });
+      console.error('[references-sync] Activity sync error:', activitySyncRes.error.message);
+      return NextResponse.json({ ok: false, error: "Could not sync reference data" });
     }
     if (
       syncRes.error &&
       !isMissingSchemaError(syncRes.error.message) &&
       !isRecoverableSyncError(syncRes.error.message)
     ) {
-      return NextResponse.json({ ok: false, error: syncRes.error.message });
+      console.error('[references-sync] Sync error:', syncRes.error.message);
+      return NextResponse.json({ ok: false, error: "Could not sync reference data" });
     }
 
     const email = await dispatchReferencePromptEmails({ userId: authData.user.id, limit: 100 });

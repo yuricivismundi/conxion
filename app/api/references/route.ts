@@ -2,6 +2,7 @@ import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { dispatchReferencePromptEmails } from "@/lib/email/reference-prompts";
+import { encodeCursor, decodeCursor, validatePaginationLimit, PaginationResponse } from "@/lib/pagination/cursor";
 import {
   normalizeReferenceContextTag,
   type ReferenceContextTag,
@@ -1319,6 +1320,78 @@ async function ensureReferenceContextEligibility(params: {
   }
 
   return false;
+}
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const limit = validatePaginationLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor");
+    const filter = url.searchParams.get("filter") || "received"; // received, given, all
+
+    const authHeader = req.headers.get("authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "Missing auth token." }, { status: 401 });
+    }
+
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    }) as SupabaseUserClient;
+
+    const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !authData.user) {
+      return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    const decodedCursor = cursor ? decodeCursor(cursor) : null;
+    const pageSize = limit + 1;
+
+    let query = supabase.from("references").select(
+      "id,reference_from_user_id,reference_to_user_id,reference_context_tag,reference_content,rating,public,created_at,updated_at"
+    );
+
+    if (filter === "received") {
+      query = query.eq("reference_to_user_id", authData.user.id);
+    } else if (filter === "given") {
+      query = query.eq("reference_from_user_id", authData.user.id);
+    } else {
+      // filter === "all"
+      query = query.or(`reference_to_user_id.eq.${authData.user.id},reference_from_user_id.eq.${authData.user.id}`);
+    }
+
+    // Cursor-based pagination
+    if (decodedCursor?.id) {
+      query = query.lt("created_at", decodedCursor.sortValue as string).lt("id", decodedCursor.id);
+    }
+
+    query = query.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
+
+    const { data, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    const items = (data ?? []).slice(0, limit);
+    const hasMore = (data ?? []).length > limit;
+    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.created_at ?? "") : null;
+
+    const response: PaginationResponse<typeof items> & { ok: boolean } = {
+      ok: true,
+      items,
+      cursor: nextCursor,
+      hasMore,
+    };
+
+    return NextResponse.json(response);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load references." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {

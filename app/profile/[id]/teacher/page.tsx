@@ -16,6 +16,7 @@ import {
 import { normalizeProfileMediaRow, sortProfileMedia } from "@/lib/profile-media/types";
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import TeacherExperiencesSection from "@/components/teacher/TeacherExperiencesSection";
+import TeacherOwnerActions from "@/components/teacher/TeacherOwnerActions";
 
 // ---------------------------------------------------------------------------
 // Supabase helper (public anon client — reads public data only)
@@ -252,6 +253,11 @@ export default async function TeacherProfilePage({
           {/* Left: photo */}
           <div className="lg:col-span-5">
             <div className="relative">
+              {/* Profile Switcher - Right side (Mobile only) */}
+              <div className="absolute -right-4 sm:-right-6 top-4 z-30 lg:hidden">
+                <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} />
+              </div>
+
               {/* Outer neon glow blur */}
               <div className="absolute inset-0 rounded-[22px] bg-gradient-to-br from-[#9333ea]/30 to-[#ff51fa]/40 blur-2xl -z-10 scale-110" />
 
@@ -326,15 +332,9 @@ export default async function TeacherProfilePage({
               avatarUrl={avatarUrl}
             />
 
-            {/* View social profile link */}
-            <div className="mt-4">
-              <Link
-                href={socialProfileHref}
-                className="inline-flex min-h-[44px] items-center gap-1 text-xs font-semibold uppercase tracking-widest text-[#0df2f2] opacity-70 hover:opacity-100 transition-opacity w-fit"
-              >
-                Social Profile
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-              </Link>
+            {/* Switch to Social Profile (Desktop) */}
+            <div className="hidden lg:flex flex-wrap items-center gap-3 mt-6">
+              <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} />
             </div>
           </div>
         </section>

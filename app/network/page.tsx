@@ -1999,7 +1999,7 @@ function NetworkPageContent() {
                   </div>
 
                   {showTopNetworkSearch ? (
-                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center xl:w-auto xl:flex-nowrap">
+                    <div className="flex w-full flex-row items-center gap-2 xl:w-auto xl:flex-nowrap">
                       <label
                         className={`group relative ${
                           isFeedSection
@@ -2080,22 +2080,10 @@ function NetworkPageContent() {
                             }
                             setShowContactFilters((value) => !value);
                           }}
-                          className={`inline-flex h-[42px] shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-bold transition sm:px-4 sm:text-sm ${
-                            isConnectionsSection
-                              ? showConnectionFilters || hasConnectionFilters
-                                ? "bg-[#00F5FF] text-[#0A0A0A]"
-                                : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                              : isFollowingSection
-                              ? showContactFilters || hasFollowingFilters
-                                ? "bg-[#00F5FF] text-[#0A0A0A]"
-                                : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                              : showContactFilters || hasContactFilters
-                              ? "bg-[#00F5FF] text-[#0A0A0A]"
-                              : "bg-[#00F5FF] text-[#0A0A0A] hover:opacity-90"
-                          }`}
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white/60 transition hover:text-white sm:h-[42px] sm:w-auto sm:gap-1.5 sm:rounded-full sm:border-0 sm:bg-[#00F5FF] sm:px-4 sm:text-[#0A0A0A] sm:hover:opacity-90"
                         >
                           <span className="material-symbols-outlined text-[18px]">tune</span>
-                          <span className="hidden sm:inline">Filters</span>
+                          <span className="hidden sm:inline text-sm font-bold">Filters</span>
                         </button>
                       ) : null}
                     </div>

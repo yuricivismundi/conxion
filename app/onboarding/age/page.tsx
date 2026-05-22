@@ -53,24 +53,23 @@ export default function OnboardingAgePage() {
       const confirmedAt = new Date().toISOString();
       writeOnboardingDraft({ ageConfirmed: true, ageConfirmedAt: confirmedAt });
 
-      router.replace("/onboarding/profile");
-
-      // Persist to auth user metadata in the background; local draft already unlocks onboarding.
-      void supabase.auth
-        .updateUser({
-          data: { age_confirmed: true, age_confirmed_at: confirmedAt },
-        })
-        .then((updateRes) => {
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const updateRes = await supabase.auth.updateUser({
+            data: { age_confirmed: true, age_confirmed_at: confirmedAt },
+          });
           if (updateRes.error) {
-            console.warn("[onboarding-age] metadata update failed", updateRes.error.message);
+            lastErr = new Error(updateRes.error.message);
+            continue;
           }
-        })
-        .catch((updateErr: unknown) => {
-          console.warn(
-            "[onboarding-age] metadata update failed",
-            updateErr instanceof Error ? updateErr.message : String(updateErr)
-          );
-        });
+          router.replace("/onboarding/profile");
+          return;
+        } catch (err: unknown) {
+          lastErr = err instanceof Error ? err : new Error(String(err));
+        }
+      }
+      throw lastErr || new Error("Failed to confirm age after 3 attempts");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not confirm age.");
     } finally {

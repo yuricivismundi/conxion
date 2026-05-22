@@ -715,7 +715,13 @@ function GroupDetail() {
               <button
                 type="button"
                 className="flex w-full items-center gap-3 px-5 py-3.5 text-sm font-medium text-white hover:bg-white/[0.05] active:bg-white/[0.08] transition"
-                onClick={() => { navigator.clipboard?.writeText(msgActionTarget.body).catch(() => {}); setMsgActionTarget(null); toast("Copied to clipboard", "success"); }}
+                onClick={() => {
+                  navigator.clipboard?.writeText(msgActionTarget.body).catch((err) => {
+                    console.warn('[clipboard-copy] Failed to copy message:', err);
+                  });
+                  setMsgActionTarget(null);
+                  toast("Copied to clipboard", "success");
+                }}
               >
                 <span className="material-symbols-outlined text-[20px] text-slate-400">content_copy</span>
                 Copy message

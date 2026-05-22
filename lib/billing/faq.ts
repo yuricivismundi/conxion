@@ -23,13 +23,21 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
   },
   {
     id: "active-chat-thread",
-    question: "What counts as an active chat thread?",
-    answer: "An active chat thread counts when you start a new conversation. Replies to incoming messages do not open a new thread.",
+    question: "What is a chat activation?",
+    answer:
+      "A chat activation is used when you start a new private conversation with someone. Starter includes 10 activations per calendar month, Plus includes 30. Once you activate a chat, it stays open for 30 days from the activation date — independent of the monthly reset. So a chat you activate on May 20 stays open until June 19, and still counts as one of your May activations, not June's.",
+  },
+  {
+    id: "activation-reset",
+    question: "When do my chat activations reset?",
+    answer:
+      "Activations reset on the 1st of every calendar month. For example, if you use 8 of your 10 in May, you get a fresh 10 on June 1 regardless of whether any open chat windows from May are still active.",
   },
   {
     id: "service-inquiries",
-    question: "Do service inquiries count as active chat threads?",
-    answer: "No. Requesting class information or a hosting stay does not count as an active chat thread.",
+    question: "Do activity requests, trips, or hosting count as chat activations?",
+    answer:
+      "No. When someone accepts your activity request, trip, or hosting offer, a chat window opens automatically for free — it does not consume one of your monthly activations. Only conversations you start directly with someone via 'Start Conversation' use an activation slot.",
   },
   {
     id: "connection-requests",
@@ -49,8 +57,9 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
   },
   {
     id: "chat-limit",
-    question: "What happens when I reach my active chat thread limit?",
-    answer: "You won’t be able to start more chat threads until your monthly limit resets or you upgrade to Plus.",
+    question: "What happens when I reach my monthly activation limit?",
+    answer:
+      "You won’t be able to start new conversations until your activations reset on the 1st of next month, or you upgrade to Plus for 30 activations per month. Chats you already activated stay open — only new starts are blocked.",
   },
   {
     id: "host-on-starter",
@@ -65,7 +74,8 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
   {
     id: "monthly-reset",
     question: "Do limits reset every month?",
-    answer: "Yes. Monthly limits for connection requests, active chat threads, trips, and events reset each month.",
+    answer:
+      "Yes. Connection requests, chat activations, trips, and events all reset on the 1st of each calendar month. Chat windows you already opened stay active for 30 days from when they were started — the reset only applies to how many new ones you can start.",
   },
   {
     id: "teacher-needs-plus",
@@ -87,6 +97,12 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
     id: "private-mode-connections",
     question: "If I enable Private mode, do my existing connections lose access?",
     answer: "No. Existing connections are never affected. Private mode only prevents new people from finding you in Discover or search. People you are already connected with or chatting with continue to see your profile normally.",
+  },
+  {
+    id: "event-invites-limit",
+    question: "How many event invites can I send per month?",
+    answer:
+      "On the Starter plan you can send up to 10 event invites per month. Plus members get unlimited event invites. You can only invite accepted connections, so the limit is there to keep invites meaningful rather than spammy. The counter resets at the start of each calendar month.",
   },
 ];
 

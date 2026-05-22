@@ -11,6 +11,21 @@ type UpdateActivityPayload = {
   action?: ActivityAction;
 };
 
+type EditActivityPayload = {
+  note?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+};
+
+function parseIsoOrNull(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
 function isActivityAction(value: unknown): value is ActivityAction {
   return value === "accept" || value === "decline" || value === "cancel";
 }
@@ -245,6 +260,55 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
       activity_id: current.id,
     };
 
+    const startDate = current.start_at ? current.start_at.slice(0, 10) : null;
+    const endDate = current.end_at ? current.end_at.slice(0, 10) : null;
+    const title = current.title ?? activityTypeLabel(current.activity_type);
+
+    // Create request-linked chat entitlement on acceptance (before status update)
+    if (nextStatus === "accepted" && current.thread_id && current.requester_id && current.recipient_id) {
+      const { opensAt, expiresAt } = computeActivityEntitlementWindow({
+        acceptedAt: new Date(),
+        startAt: current.start_at ?? null,
+        endAt: current.end_at ?? null,
+      });
+
+      let entitlementSuccess = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const entitlementRes = await (service as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }> }).rpc(
+            "cx_upsert_request_chat_entitlement",
+            {
+              p_thread_id: current.thread_id,
+              p_source_type: "activity_request",
+              p_source_id: current.id,
+              p_requester_user_id: current.requester_id,
+              p_responder_user_id: current.recipient_id,
+              p_opens_at: opensAt.toISOString(),
+              p_expires_at: expiresAt.toISOString(),
+            }
+          );
+          if (!entitlementRes.error) {
+            entitlementSuccess = true;
+            break;
+          }
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+          }
+        } catch (err) {
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+          }
+        }
+      }
+
+      if (!entitlementSuccess) {
+        return NextResponse.json(
+          { ok: false, error: "Could not establish chat window. Please try again." },
+          { status: 500 }
+        );
+      }
+    }
+
     const updateRes = await service
       .from("activities")
       .update({
@@ -263,10 +327,6 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     if (!updatedRow?.id) {
       return NextResponse.json({ ok: false, error: "Activity was not updated." }, { status: 409 });
     }
-
-    const startDate = current.start_at ? current.start_at.slice(0, 10) : null;
-    const endDate = current.end_at ? current.end_at.slice(0, 10) : null;
-    const title = current.title ?? activityTypeLabel(current.activity_type);
 
     // Best-effort: activity status is already updated in DB; don't fail if context upsert errors.
     const contextRes = await serviceRpc("cx_upsert_thread_context", {
@@ -287,31 +347,6 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
     if (contextRes.error) {
       // Log but don't fail — the activity status was already updated successfully.
       console.error("[activity action] cx_upsert_thread_context failed:", contextRes.error.message);
-    }
-
-    // Create request-linked chat entitlement on acceptance (best-effort)
-    if (nextStatus === "accepted" && current.thread_id && current.requester_id && current.recipient_id) {
-      try {
-        const { opensAt, expiresAt } = computeActivityEntitlementWindow({
-          acceptedAt: new Date(),
-          startAt: current.start_at ?? null,
-          endAt: current.end_at ?? null,
-        });
-        await (service as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }> }).rpc(
-          "cx_upsert_request_chat_entitlement",
-          {
-            p_thread_id: current.thread_id,
-            p_source_type: "activity_request",
-            p_source_id: current.id,
-            p_requester_user_id: current.requester_id,
-            p_responder_user_id: current.recipient_id,
-            p_opens_at: opensAt.toISOString(),
-            p_expires_at: expiresAt.toISOString(),
-          }
-        );
-      } catch {
-        // non-fatal — activity was already accepted
-      }
     }
 
     if (nextStatus === "cancelled") {
@@ -363,6 +398,140 @@ export async function POST(req: Request, context: { params: Promise<{ activityId
   } catch (error: unknown) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Failed to update activity." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: Request, context: { params: Promise<{ activityId: string }> }) {
+  try {
+    const { activityId } = await context.params;
+    if (!activityId) {
+      return NextResponse.json({ ok: false, error: "Missing activityId." }, { status: 400 });
+    }
+
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "Missing auth token." }, { status: 401 });
+    }
+
+    const body = (await req.json().catch(() => null)) as EditActivityPayload | null;
+
+    const supabaseUser = getSupabaseUserClient(token);
+    const service = getSupabaseServiceClient();
+    const serviceRpc = (fn: string, args?: Record<string, unknown>) =>
+      (service as unknown as {
+        rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      }).rpc(fn, args);
+
+    const { data: authData, error: authErr } = await supabaseUser.auth.getUser(token);
+    if (authErr || !authData.user) {
+      return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    const currentRes = await service
+      .from("activities")
+      .select("id,thread_id,requester_id,recipient_id,activity_type,status,title,note,start_at,end_at,metadata")
+      .eq("id", activityId)
+      .maybeSingle();
+    if (currentRes.error) {
+      return NextResponse.json({ ok: false, error: currentRes.error.message ?? "Failed to load activity." }, { status: 500 });
+    }
+
+    const current = currentRes.data as {
+      id?: string | null;
+      thread_id?: string | null;
+      requester_id?: string | null;
+      recipient_id?: string | null;
+      activity_type?: string | null;
+      status?: string | null;
+      title?: string | null;
+      note?: string | null;
+      start_at?: string | null;
+      end_at?: string | null;
+      metadata?: Record<string, unknown> | null;
+    } | null;
+
+    if (!current?.id || !current.thread_id || !current.requester_id || !current.recipient_id || !current.activity_type) {
+      return NextResponse.json({ ok: false, error: "Activity not found." }, { status: 404 });
+    }
+    if (current.status !== "pending") {
+      return NextResponse.json({ ok: false, error: "Only pending activity requests can be edited." }, { status: 409 });
+    }
+    if (authData.user.id !== current.requester_id) {
+      return NextResponse.json({ ok: false, error: "Only the requester can edit this activity." }, { status: 403 });
+    }
+
+    // Block edits once the activity date has passed (same rule as acceptance)
+    const closingTs = current.end_at ?? current.start_at ?? null;
+    if (closingTs) {
+      const dateStr = closingTs.slice(0, 10);
+      const closingMs = new Date(`${dateStr}T23:59:59.999Z`).getTime();
+      if (Date.now() > closingMs) {
+        return NextResponse.json(
+          { ok: false, error: "This activity request can no longer be edited. The activity date has already passed." },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Cooldown: min 1 min between edits to prevent spamming
+    const meta = current.metadata ?? {};
+    const lastEditedAt = typeof meta.last_edited_at === "string" ? new Date(meta.last_edited_at).getTime() : 0;
+    if (Date.now() - lastEditedAt < 60 * 1000) {
+      return NextResponse.json({ ok: false, error: "Please wait a moment before updating again." }, { status: 429 });
+    }
+
+    const note = typeof body?.note === "string" ? body.note.trim() : (current.note ?? null);
+    const startAt = body && "startAt" in body ? parseIsoOrNull(body.startAt) : (current.start_at ?? null);
+    const endAt = body && "endAt" in body ? parseIsoOrNull(body.endAt) : (current.end_at ?? null);
+
+    const nextMeta = { ...meta, last_edited_at: new Date().toISOString() };
+
+    const updateRes = await service
+      .from("activities")
+      .update({ note: note || null, start_at: startAt, end_at: endAt, metadata: nextMeta } as never)
+      .eq("id", activityId)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+
+    if (updateRes.error) {
+      return NextResponse.json({ ok: false, error: updateRes.error.message }, { status: 400 });
+    }
+
+    const title = current.title ?? activityTypeLabel(current.activity_type);
+    const startDate = startAt ? startAt.slice(0, 10) : null;
+    const endDate = endAt ? endAt.slice(0, 10) : null;
+    const contextMeta = {
+      ...nextMeta,
+      activity_type: current.activity_type,
+      title,
+      note: note ?? null,
+      start_at: startAt ?? null,
+      end_at: endAt ?? null,
+      activity_id: current.id,
+    };
+
+    await serviceRpc("cx_upsert_thread_context", {
+      p_thread_id: current.thread_id,
+      p_source_table: "activities",
+      p_source_id: current.id,
+      p_context_tag: "activity",
+      p_status_tag: "pending",
+      p_title: title,
+      p_city: null,
+      p_start_date: startDate,
+      p_end_date: endDate,
+      p_requester_id: current.requester_id,
+      p_recipient_id: current.recipient_id,
+      p_metadata: contextMeta,
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to edit activity." },
       { status: 500 }
     );
   }

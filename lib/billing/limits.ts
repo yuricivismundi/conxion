@@ -13,6 +13,8 @@ export type PlanLimits = {
   privateGroupsTotal: number | null;
   profileVideos: number | null;
   profilePhotos: number | null;
+  eventInvitesPerMonth: number | null;
+  bookingRequestsPerMonth: number | null;
 };
 
 const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
@@ -29,6 +31,8 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     privateGroupsTotal: 5,
     profileVideos: 2,
     profilePhotos: 0,
+    eventInvitesPerMonth: 10,
+    bookingRequestsPerMonth: 5,
   },
   verified: {
     activeChatThreadsPerMonth: 10,
@@ -43,6 +47,8 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     privateGroupsTotal: 5,
     profileVideos: 2,
     profilePhotos: 0,
+    eventInvitesPerMonth: 10,
+    bookingRequestsPerMonth: 5,
   },
   pro: {
     activeChatThreadsPerMonth: 30,
@@ -57,6 +63,8 @@ const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     privateGroupsTotal: 10,
     profileVideos: 2,
     profilePhotos: 3,
+    eventInvitesPerMonth: null,
+    bookingRequestsPerMonth: 10,
   },
 };
 

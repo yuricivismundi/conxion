@@ -17,6 +17,10 @@ export default function PwaInstallBanner() {
     // Don't show if already installed (standalone mode) or already dismissed
     if (window.matchMedia("(display-mode: standalone)").matches) return;
     if (localStorage.getItem(DISMISSED_KEY)) return;
+    // Desktop only — detect mobile via user agent (viewport width is unreliable)
+    const ua = navigator.userAgent;
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    if (isMobile) return;
 
     const handler = (e: Event) => {
       e.preventDefault();

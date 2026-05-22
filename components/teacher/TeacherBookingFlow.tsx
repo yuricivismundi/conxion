@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { supabase } from "@/lib/supabase/client";
 import {
   formatShortDate,
@@ -214,6 +215,9 @@ export default function TeacherBookingFlow({
     });
   }, [availableDateSet]);
 
+  const [mobileMonthIndex, setMobileMonthIndex] = useState(0);
+  const slotsRef = useRef<HTMLDivElement>(null);
+
   const submitBooking = useCallback(async () => {
     if (!selectedAvailabilityId || busy || isSelf) return;
     setBusy(true);
@@ -285,6 +289,57 @@ export default function TeacherBookingFlow({
     );
   }
 
+  function renderMonthSection(month: { label: string; cells: Array<{ key: string; date: string | null; inMonth: boolean; available: boolean }> }) {
+    return (
+      <section key={month.label} className="overflow-hidden rounded-2xl border border-white/[0.07]" style={{ background: "#181c20" }}>
+        <div className="flex items-center justify-between px-4 pb-3 pt-4">
+          <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
+          {month.cells.some((c) => c.available) ? (
+            <span className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest" style={{ background: "rgba(13,242,242,0.1)", color: "#0df2f2" }}>
+              Available
+            </span>
+          ) : (
+            <span className="text-[9px] uppercase tracking-widest text-white/40">No slots</span>
+          )}
+        </div>
+        <div className="mb-1 grid grid-cols-7 gap-0.5 px-3 text-center">
+          {["M", "T", "W", "T", "F", "S", "S"].map((label, i) => (
+            <span key={i} className="py-1 text-[9px] font-bold uppercase tracking-widest text-white/50">{label}</span>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-0.5 px-3 pb-4">
+          {month.cells.map((cell) =>
+            cell.date ? (
+              <button
+                key={cell.key}
+                type="button"
+                disabled={!cell.available}
+                onClick={() => {
+                  setSelectedDate(cell.date as string);
+                  setSelectedAvailabilityId(firstAvailabilityIdForDate(slots, cell.date as string));
+                  setTimeout(() => slotsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+                }}
+                className={[
+                  "aspect-square rounded-lg text-[12px] font-bold transition-all",
+                  selectedDate === cell.date
+                    ? "scale-110 shadow-[0_0_12px_rgba(13,242,242,0.35)] text-[#040a0f]"
+                    : cell.available
+                      ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#0df2f2]/30 hover:bg-[#0df2f2]/[0.08] hover:text-[#0df2f2]"
+                      : "text-white/40 cursor-default",
+                ].join(" ")}
+                style={selectedDate === cell.date ? { background: "linear-gradient(135deg,#0df2f2,#d93bff)" } : undefined}
+              >
+                {dayNumber(cell.date)}
+              </button>
+            ) : (
+              <div key={cell.key} className="aspect-square" />
+            )
+          )}
+        </div>
+      </section>
+    );
+  }
+
   function renderCalendarGrid() {
     if (loading) {
       return (
@@ -316,64 +371,41 @@ export default function TeacherBookingFlow({
       );
     }
     return (
-      <div className="grid gap-3 lg:grid-cols-3">
-        {calendarMonths.map((month) => (
-          <section key={month.label} className="overflow-hidden rounded-2xl border border-white/[0.07]" style={{ background: "#181c20" }}>
-            <div className="flex items-center justify-between px-4 pb-3 pt-4">
-              <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
-              {month.cells.some((c) => c.available) ? (
-                <span
-                  className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest"
-                  style={{ background: "rgba(13,242,242,0.1)", color: "#0df2f2" }}
-                >
-                  Available
-                </span>
-              ) : (
-                <span className="text-[9px] uppercase tracking-widest text-white/40">No slots</span>
-              )}
-            </div>
-            <div className="mb-1 grid grid-cols-7 gap-0.5 px-3 text-center">
-              {["M", "T", "W", "T", "F", "S", "S"].map((label, i) => (
-                <span key={i} className="py-1 text-[9px] font-bold uppercase tracking-widest text-white/50">
-                  {label}
-                </span>
-              ))}
-            </div>
-            <div className="grid grid-cols-7 gap-0.5 px-3 pb-4">
-              {month.cells.map((cell) =>
-                cell.date ? (
-                  <button
-                    key={cell.key}
-                    type="button"
-                    disabled={!cell.available}
-                    onClick={() => {
-                      setSelectedDate(cell.date as string);
-                      setSelectedAvailabilityId(firstAvailabilityIdForDate(slots, cell.date as string));
-                    }}
-                    className={[
-                      "aspect-square rounded-lg text-[12px] font-bold transition-all",
-                      selectedDate === cell.date
-                        ? "scale-110 shadow-[0_0_12px_rgba(13,242,242,0.35)] text-[#040a0f]"
-                        : cell.available
-                          ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#0df2f2]/30 hover:bg-[#0df2f2]/[0.08] hover:text-[#0df2f2]"
-                          : "text-white/40 cursor-default",
-                    ].join(" ")}
-                    style={
-                      selectedDate === cell.date
-                        ? { background: "linear-gradient(135deg,#0df2f2,#d93bff)" }
-                        : undefined
-                    }
-                  >
-                    {dayNumber(cell.date)}
-                  </button>
-                ) : (
-                  <div key={cell.key} className="aspect-square" />
-                )
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
+      <>
+        {/* Mobile: single-month carousel */}
+        <div className="lg:hidden">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setMobileMonthIndex((i) => Math.max(0, i - 1))}
+              disabled={mobileMonthIndex === 0}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 transition disabled:opacity-25 hover:text-white"
+            >
+              <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+            </button>
+            <span className="text-sm font-bold text-white">{calendarMonths[mobileMonthIndex]?.label}</span>
+            <button
+              type="button"
+              onClick={() => setMobileMonthIndex((i) => Math.min(calendarMonths.length - 1, i + 1))}
+              disabled={mobileMonthIndex === calendarMonths.length - 1}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/50 transition disabled:opacity-25 hover:text-white"
+            >
+              <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+            </button>
+          </div>
+          {calendarMonths[mobileMonthIndex] ? renderMonthSection(calendarMonths[mobileMonthIndex]) : null}
+          {/* Dot indicators */}
+          <div className="mt-3 flex justify-center gap-1.5">
+            {calendarMonths.map((_, i) => (
+              <button key={i} type="button" onClick={() => setMobileMonthIndex(i)} className={["h-1.5 rounded-full transition-all", i === mobileMonthIndex ? "w-4 bg-[#0df2f2]" : "w-1.5 bg-white/20"].join(" ")} />
+            ))}
+          </div>
+        </div>
+        {/* Desktop: 3-column grid */}
+        <div className="hidden gap-3 lg:grid lg:grid-cols-3">
+          {calendarMonths.map((month) => renderMonthSection(month))}
+        </div>
+      </>
     );
   }
 
@@ -542,7 +574,18 @@ export default function TeacherBookingFlow({
         <div className="mt-6 grid gap-8 xl:grid-cols-[minmax(0,2fr)_360px]">
           <div className="space-y-6">{renderCalendarGrid()}</div>
 
-          <aside className="rounded-2xl border border-white/[0.07] p-5" style={{ background: "#181c20" }}>
+          <aside ref={slotsRef} className="scroll-mt-6 rounded-2xl border border-white/[0.07] p-5" style={{ background: "#181c20" }}>
+            {/* Back to calendar — mobile only */}
+            {selectedDate && (
+              <button
+                type="button"
+                onClick={() => { setSelectedDate(""); setSelectedAvailabilityId(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                className="mb-4 flex items-center gap-1.5 text-[11px] font-semibold text-white/40 transition hover:text-white lg:hidden"
+              >
+                <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                Back to calendar
+              </button>
+            )}
             <div className="mb-4">
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Selected date</p>
               <h3 className="mt-2 text-2xl font-black text-white">

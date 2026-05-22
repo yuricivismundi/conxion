@@ -22,6 +22,7 @@ import { getBillingAccountState } from "@/lib/billing/account-state";
 import { getPlanLimits } from "@/lib/billing/limits";
 import { supabase } from "@/lib/supabase/client";
 import { travelIntentReasonLabel } from "@/lib/trips/join-reasons";
+import { batchFetchProfiles } from "@/lib/profiles/batch-fetch";
 import { cx } from "@/lib/cx";
 
 type ActivityTab = "events" | "trips" | "groups" | "hosting";
@@ -315,46 +316,47 @@ function ActivityPageContent() {
         <div className="flex w-full max-w-[1200px] flex-col gap-5">
           <section className="border-b border-white/[0.07] pb-0">
             <div className="flex flex-col gap-5 pb-5 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
+              <div className="flex items-center justify-between gap-3">
                 <h1 className="font-['Epilogue'] text-2xl font-extrabold tracking-tight text-white md:text-3xl">
                   My Activities
                 </h1>
+                {/* Groups limit badge — title row, right side, mobile only */}
+                {activeTab === "groups" && groupLimitInfo && (
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55 md:hidden">
+                    Groups{" "}
+                    <span className={groupLimitInfo.limit !== null && groupLimitInfo.current >= groupLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
+                      {groupLimitInfo.current}/{groupLimitInfo.limit ?? "∞"}
+                    </span>
+                  </span>
+                )}
+                {/* Trips limit badge — title row, right side, mobile only */}
+                {activeTab === "trips" && tripLimitInfo && (
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55 md:hidden">
+                    Month{" "}
+                    <span className={tripLimitInfo.limit !== null && tripLimitInfo.current >= tripLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
+                      {tripLimitInfo.current}/{tripLimitInfo.limit ?? "∞"}
+                    </span>
+                  </span>
+                )}
               </div>
 
-              {primaryAction ? <div className="flex flex-wrap items-center gap-2">
+              {primaryAction ? <div className="flex items-center gap-2">
                 {activeTab === "events" && (
-                  <label className="group relative shrink-0">
+                  <label className="group relative min-w-0 flex-1">
                     <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
                     <input
                       type="text"
                       value={eventsSearch}
                       onChange={(e) => setEventsSearch(e.target.value)}
                       placeholder="Search events…"
-                      className="h-9 w-44 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-56 transition-all"
+                      className="h-9 w-full rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 transition-all"
                     />
                   </label>
                 )}
                 {activeTab === "groups" && (
                   <>
-                    {groupLimitInfo && (
-                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
-                        Groups{" "}
-                        <span className={groupLimitInfo.limit !== null && groupLimitInfo.current >= groupLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
-                          {groupLimitInfo.current}/{groupLimitInfo.limit ?? "∞"}
-                        </span>
-                      </span>
-                    )}
-                    <label className="group relative shrink-0">
-                      <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
-                      <input
-                        type="text"
-                        value={groupQuery}
-                        onChange={(e) => setGroupQuery(e.target.value)}
-                        placeholder="Search groups…"
-                        className="h-9 w-40 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-52 transition-all"
-                      />
-                    </label>
-                    <div className="relative">
+                    {/* Type filter — leftmost */}
+                    <div className="relative shrink-0">
                       <select
                         value={groupFilter}
                         onChange={(e) => setGroupFilter((e.target.value as GroupFilter) || "all")}
@@ -366,53 +368,77 @@ function ActivityPageContent() {
                       </select>
                       <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
                     </div>
+                    {/* Search — flex-1 */}
+                    <label className="group relative min-w-0 flex-1">
+                      <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
+                      <input
+                        type="text"
+                        value={groupQuery}
+                        onChange={(e) => setGroupQuery(e.target.value)}
+                        placeholder="Search groups…"
+                        className="h-9 w-full rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 transition-all"
+                      />
+                    </label>
+                    {/* Limit badge — desktop only (mobile is in title row) */}
+                    {groupLimitInfo && (
+                      <span className="hidden rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55 md:inline">
+                        Groups{" "}
+                        <span className={groupLimitInfo.limit !== null && groupLimitInfo.current >= groupLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
+                          {groupLimitInfo.current}/{groupLimitInfo.limit ?? "∞"}
+                        </span>
+                      </span>
+                    )}
                   </>
                 )}
                 {activeTab === "trips" && (
                   <>
-                    {tripLimitInfo && (
-                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55">
-                        This month{" "}
-                        <span className={tripLimitInfo.limit !== null && tripLimitInfo.current >= tripLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
-                          {tripLimitInfo.current}/{tripLimitInfo.limit ?? "∞"}
-                        </span>
-                      </span>
-                    )}
-                    <label className="group relative shrink-0">
+                    {/* Status filter — compact, leftmost */}
+                    <div className="relative shrink-0">
+                      <select
+                        value={tripStatusFilter}
+                        onChange={(e) => setTripStatusFilter((e.target.value as "active" | "past" | "all") || "active")}
+                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-2.5 pr-6 text-[12px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                      >
+                        <option value="active">Active</option>
+                        <option value="past">Past</option>
+                        <option value="all">All</option>
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[14px] text-white/35">expand_more</span>
+                    </div>
+                    {/* Purpose filter — compact */}
+                    <div className="relative shrink-0">
+                      <select
+                        value={tripPurposeFilter}
+                        onChange={(e) => setTripPurposeFilter(e.target.value || "all")}
+                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-2.5 pr-6 text-[12px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                      >
+                        <option value="all">All</option>
+                        {tripPurposeOptions.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                      <span className="material-symbols-outlined pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[14px] text-white/35">expand_more</span>
+                    </div>
+                    {/* Search — flex-1 */}
+                    <label className="group relative min-w-0 flex-1">
                       <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">search</span>
                       <input
                         type="text"
                         value={tripQuery}
                         onChange={(e) => setTripQuery(e.target.value)}
                         placeholder="Search trips…"
-                        className="h-9 w-52 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-64 transition-all"
+                        className="h-9 w-full rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 transition-all"
                       />
                     </label>
-                    <div className="relative">
-                      <select
-                        value={tripStatusFilter}
-                        onChange={(e) => setTripStatusFilter((e.target.value as "active" | "past" | "all") || "active")}
-                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
-                      >
-                        <option value="active">Active</option>
-                        <option value="past">Past</option>
-                        <option value="all">All</option>
-                      </select>
-                      <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
-                    </div>
-                    <div className="relative">
-                      <select
-                        value={tripPurposeFilter}
-                        onChange={(e) => setTripPurposeFilter(e.target.value || "all")}
-                        className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
-                      >
-                        <option value="all">All reasons</option>
-                        {tripPurposeOptions.map((p) => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
-                      </select>
-                      <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
-                    </div>
+                    {/* Limit badge — desktop only */}
+                    {tripLimitInfo && (
+                      <span className="hidden rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white/55 md:inline">
+                        Month{" "}
+                        <span className={tripLimitInfo.limit !== null && tripLimitInfo.current >= tripLimitInfo.limit ? "text-amber-300" : "text-cyan-300"}>
+                          {tripLimitInfo.current}/{tripLimitInfo.limit ?? "∞"}
+                        </span>
+                      </span>
+                    )}
                   </>
                 )}
                 {isLocked ? (
@@ -439,29 +465,31 @@ function ActivityPageContent() {
                 )}
               </div> : null}
               {activeTab === "hosting" && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="group relative shrink-0">
+                <div className="flex items-center gap-2">
+                  {/* Status filter — compact, leftmost */}
+                  <div className="relative shrink-0">
+                    <select
+                      value={hostingStatusFilter}
+                      onChange={(e) => setHostingStatusFilter((e.target.value as "current" | "past" | "all") || "current")}
+                      className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-2.5 pr-6 text-[12px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
+                    >
+                      <option value="current">Current</option>
+                      <option value="past">Past</option>
+                      <option value="all">All</option>
+                    </select>
+                    <span className="material-symbols-outlined pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[14px] text-white/35">expand_more</span>
+                  </div>
+                  {/* City search — flex-1 */}
+                  <label className="group relative min-w-0 flex-1">
                     <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-white/35 transition-colors group-focus-within:text-cyan-300">location_on</span>
                     <input
                       type="text"
                       value={hostingCityQuery}
                       onChange={(e) => setHostingCityQuery(e.target.value)}
                       placeholder="City or country…"
-                      className="h-9 w-48 rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 focus:w-60 transition-all"
+                      className="h-9 w-full rounded-full border border-white/10 bg-white/[0.05] pl-8 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/30 focus:border-[#00F5FF]/50 transition-all"
                     />
                   </label>
-                  <div className="relative">
-                    <select
-                      value={hostingStatusFilter}
-                      onChange={(e) => setHostingStatusFilter((e.target.value as "current" | "past" | "all") || "current")}
-                      className="h-9 appearance-none rounded-full border border-white/10 bg-white/[0.05] pl-3 pr-7 text-[13px] font-semibold text-white/90 outline-none focus:border-[#00F5FF]/50"
-                    >
-                      <option value="current">Current</option>
-                      <option value="past">Past</option>
-                      <option value="all">All</option>
-                    </select>
-                    <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[16px] text-white/35">expand_more</span>
-                  </div>
                 </div>
               )}
             </div>
@@ -816,25 +844,18 @@ function HostingPanel({ externalCityQuery = "", externalStatusFilter = "current"
     const tripIds = Array.from(new Set(mapped.map((request) => request.tripId).filter((value): value is string => Boolean(value))));
 
     if (profileIds.length > 0) {
-      const profilesRes = await supabase
-        .from("profiles")
-        .select("user_id,display_name,city,country,avatar_url")
-        .in("user_id", profileIds.slice(0, 400));
-      if (!profilesRes.error) {
-        const nextProfiles: Record<string, LiteProfile> = {};
-        ((profilesRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
-          const userIdValue = typeof row.user_id === "string" ? row.user_id : "";
-          if (!userIdValue) return;
-          nextProfiles[userIdValue] = {
-            userId: userIdValue,
-            displayName: typeof row.display_name === "string" && row.display_name.trim() ? row.display_name : "Member",
-            city: typeof row.city === "string" ? row.city : "",
-            country: typeof row.country === "string" ? row.country : "",
-            avatarUrl: typeof row.avatar_url === "string" && row.avatar_url.trim() ? row.avatar_url : null,
-          };
-        });
-        setProfilesById(nextProfiles);
-      }
+      const profileMap = await batchFetchProfiles(supabase, profileIds);
+      const nextProfiles: Record<string, LiteProfile> = {};
+      profileMap.forEach((profile) => {
+        nextProfiles[profile.userId] = {
+          userId: profile.userId,
+          displayName: profile.displayName || "Member",
+          city: profile.city || "",
+          country: profile.country || "",
+          avatarUrl: profile.avatarUrl,
+        };
+      });
+      setProfilesById(nextProfiles);
     } else {
       setProfilesById({});
     }

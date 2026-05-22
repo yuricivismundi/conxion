@@ -3,6 +3,7 @@ import { normalizeEventAccessType, normalizeEventChatMode } from "@/lib/events/a
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { buildRateLimitKey, consumeRateLimit } from "@/lib/security/rate-limit";
 import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
+import { encodeCursor, decodeCursor, validatePaginationLimit, PaginationResponse } from "@/lib/pagination/cursor";
 
 type EventLinkInput = {
   label?: unknown;
@@ -127,6 +128,76 @@ function formatCreateErrorMessage(message: string) {
     return "Cover image could not be used. Upload a JPG, PNG, or WEBP and we will crop it into a wide event banner.";
   }
   return message;
+}
+
+export async function GET(req: Request) {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "Missing auth token." }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+    const limit = validatePaginationLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor");
+    const filter = url.searchParams.get("filter") || "upcoming"; // upcoming, past, my_events, saved
+
+    const userClient = getSupabaseUserClient(token);
+    const { data: authData, error: authErr } = await userClient.auth.getUser(token);
+    if (authErr || !authData.user) {
+      return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    const decodedCursor = cursor ? decodeCursor(cursor) : null;
+    const pageSize = limit + 1; // fetch one extra to determine hasMore
+
+    let query = userClient.from("events").select(
+      "id,title,starts_at,ends_at,city,country,description,cover_url,host_user_id,status,visibility,access_type,created_at,event_type"
+    );
+
+    // Apply status filter
+    if (filter === "my_events") {
+      query = query.eq("host_user_id", authData.user.id);
+    } else if (filter === "upcoming") {
+      query = query.gte("starts_at", new Date().toISOString());
+    } else if (filter === "past") {
+      query = query.lt("starts_at", new Date().toISOString());
+    }
+    // saved filter would require a separate saved_events table
+
+    query = query.eq("status", "published").eq("visibility", "public");
+
+    // Cursor-based pagination
+    if (decodedCursor?.id) {
+      query = query.lt("starts_at", decodedCursor.sortValue as string).lt("id", decodedCursor.id);
+    }
+
+    query = query.order("starts_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
+
+    const { data, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    const items = (data ?? []).slice(0, limit);
+    const hasMore = (data ?? []).length > limit;
+    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.starts_at ?? "") : null;
+
+    const response: PaginationResponse<typeof items> & { ok: boolean } = {
+      ok: true,
+      items,
+      cursor: nextCursor,
+      hasMore,
+    };
+
+    return NextResponse.json(response);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load events." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {

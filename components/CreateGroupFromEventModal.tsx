@@ -171,9 +171,9 @@ export default function CreateGroupFromEventModal({
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
-      <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0a0c13] shadow-2xl">
+      <div className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0a0c13] shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/[0.07] px-5 py-4">
           <div>
             <h2 className="text-[17px] font-bold text-white">Create Group</h2>
             {monthlyLimit != null && (
@@ -192,7 +192,8 @@ export default function CreateGroupFromEventModal({
           </button>
         </div>
 
-        <div className="flex flex-col gap-5 overflow-y-auto px-5 py-5" style={{ maxHeight: "70vh" }}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="flex flex-col gap-5">
           {atLimit ? (
             <div className="flex flex-col items-center gap-4 py-4 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-fuchsia-500/15">
@@ -317,6 +318,7 @@ export default function CreateGroupFromEventModal({
             <p className="rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-[12px] text-red-300">{error}</p>
           )}
           </>)}
+          </div>
         </div>
 
         {/* Footer */}

@@ -12,6 +12,8 @@ import PaginationControls from "@/components/PaginationControls";
 import EventHeroImage from "@/components/events/EventHeroImage";
 import EventsExploreSkeleton, { EventsCardsSkeleton } from "@/components/events/EventsExploreSkeleton";
 import CreateEventModal from "@/components/events/CreateEventModal";
+import MapboxLocationSearch from "@/components/maps/MapboxLocationSearch";
+import type { MapboxPlaceResult } from "@/lib/maps/mapbox";
 import { supabase } from "@/lib/supabase/client";
 import {
   type EventMemberRecord,
@@ -388,9 +390,6 @@ function EventsExplorePageContent() {
   const [allEventCities, setAllEventCities] = useState<Array<{ country: string; city: string }>>([]);
   const [cityFilter, setCityFilter] = useState("all");
   const [locationQuery, setLocationQuery] = useState("");
-  const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
-  const [locationResults, setLocationResults] = useState<Array<{ type: "country" | "city"; country: string; city?: string; display: string }>>([]);
-  const [locationSearching, setLocationSearching] = useState(false);
 
   const [datePreset, setDatePreset] = useState<DatePreset>("any");
   const [customDateFrom, setCustomDateFrom] = useState("");
@@ -414,43 +413,6 @@ function EventsExplorePageContent() {
   const effectiveCustomDateFrom = !isAuthenticated && datePreset === "custom" ? "" : customDateFrom;
   const effectiveCustomDateTo = !isAuthenticated && datePreset === "custom" ? "" : customDateTo;
 
-  useEffect(() => {
-    const q = locationQuery.trim();
-    if (q.length < 2) { setLocationResults([]); return; }
-    setLocationSearching(true);
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      try {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=8&addressdetails=1&accept-language=en`;
-        const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "ConXion/1.0" } });
-        const data = (await res.json()) as Array<Record<string, unknown>>;
-        const seen = new Set<string>();
-        const results: Array<{ type: "country" | "city"; country: string; city?: string; display: string }> = [];
-        for (const item of data) {
-          const addr = (item.address ?? {}) as Record<string, string>;
-          const country = (addr.country ?? "").trim();
-          const city = (addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? addr.county ?? "").trim();
-          const type = (item.type as string) ?? "";
-          const cls = (item.class as string) ?? "";
-          if (!country) continue;
-          if ((cls === "boundary" || type === "administrative" || type === "country") && !city) {
-            const key = `country:${country}`;
-            if (!seen.has(key)) { seen.add(key); results.push({ type: "country", country, display: country }); }
-          } else if (city) {
-            const key = `city:${city}:${country}`;
-            if (!seen.has(key)) { seen.add(key); results.push({ type: "city", country, city, display: `${city}, ${country}` }); }
-          }
-          if (results.length >= 8) break;
-        }
-        setLocationResults(results);
-      } catch {
-        // aborted or network error — ignore
-      } finally {
-        setLocationSearching(false);
-      }
-    }, 350);
-    return () => { window.clearTimeout(timer); controller.abort(); setLocationSearching(false); };
-  }, [locationQuery]);
 
   const closeMenus = useCallback(() => {
     setFiltersOpen(false);
@@ -1372,23 +1334,46 @@ function EventsExplorePageContent() {
           </section>
         ) : null}
 
-        <header className="mb-4 flex items-center justify-between gap-2">
-          {/* Left: Create Event */}
+        {/* Mobile header row: auto text + two equal buttons */}
+        <div className="mb-4 flex items-center gap-2 sm:hidden">
+          <p className="whitespace-nowrap text-[12px] text-white/40">
+            Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span>{" "}
+            {effectivePastOnly ? "past events" : "events"}
+          </p>
           {isAuthenticated ? (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); setCreateModalOpen(true); }}
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-bold text-[#071116] transition hover:opacity-90 sm:px-5 sm:text-[13px]" style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
+              className="flex h-10 flex-1 items-center justify-center gap-1 rounded-full text-xs font-bold text-[#071116] transition hover:opacity-90" style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
             >
               <span className="material-symbols-outlined text-[16px]">add</span>
-              <span className="hidden sm:inline">Create Event</span>
-              <span className="sm:hidden">Create</span>
+              Create
             </button>
-          ) : (
-            <div />
-          )}
+          ) : null}
+          <div className="relative flex-1">
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); setFiltersOpen((value) => !value); }}
+              aria-label="Open event filters"
+              className={cx(
+                "flex h-10 w-full items-center justify-center gap-1.5 rounded-full border text-xs font-semibold transition",
+                activeFiltersCount
+                  ? "border-white/20 bg-white/[0.07] text-white"
+                  : "border-white/15 bg-white/[0.04] text-white/60 hover:text-white"
+              )}
+            >
+              <span className="material-symbols-outlined text-[16px]">tune</span>
+              Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+            </button>
+            {activeFiltersCount ? (
+              <span className="pointer-events-none absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[9px] font-bold text-black">{activeFiltersCount}</span>
+            ) : null}
+          </div>
+        </div>
 
-          {/* Right: My location + search + showing + filters */}
+        {/* Desktop header row */}
+        <header className="mb-4 hidden items-center justify-between gap-2 sm:flex">
+          <div />
           <div className="flex min-w-0 items-center gap-2">
             {isAuthenticated && (myCity || myCountry) ? (
               <button
@@ -1405,7 +1390,7 @@ function EventsExplorePageContent() {
                 My location
               </button>
             ) : null}
-            <label className="group relative hidden sm:block">
+            <label className="group relative">
               <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
                 search
               </span>
@@ -1417,14 +1402,21 @@ function EventsExplorePageContent() {
                 className="h-10 w-[260px] rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
               />
             </label>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setCreateModalOpen(true); }}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-5 text-[13px] font-bold text-[#071116] transition hover:opacity-90" style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                Create Event
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setFiltersOpen((value) => !value);
-              }}
+              onClick={(event) => { event.stopPropagation(); setFiltersOpen((value) => !value); }}
               aria-label="Open event filters"
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#00F5FF] px-3 text-xs font-bold text-[#0A0A0A] transition hover:opacity-90 sm:px-4 sm:text-sm"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#00F5FF] px-4 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
             >
               <span className="material-symbols-outlined text-[16px]">tune</span>
               Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
@@ -1432,7 +1424,7 @@ function EventsExplorePageContent() {
           </div>
         </header>
 
-        <p className="mt-3 mb-2 text-right text-[12px] text-white/40">
+        <p className="mt-3 mb-2 hidden text-right text-[12px] text-white/40 sm:block">
           Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span> {effectivePastOnly ? "past events" : "events"}
         </p>
 
@@ -1562,55 +1554,19 @@ function EventsExplorePageContent() {
                     </div>
                   ) : null}
 
-                  {/* Location search */}
-                  <div className="relative">
-                    <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35">search</span>
-                    <input
-                      type="text"
-                      value={locationQuery}
-                      onChange={(e) => { setLocationQuery(e.target.value); setLocationDropdownOpen(true); }}
-                      onFocus={() => setLocationDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setLocationDropdownOpen(false), 150)}
-                      placeholder="Search by city or country..."
-                      className="w-full rounded-xl border border-white/10 bg-[#1B1B1B] py-3 pl-10 pr-4 text-sm text-white/90 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                    />
-                    {locationDropdownOpen && locationQuery.trim().length >= 2 ? (
-                      <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-10 overflow-hidden rounded-xl border border-white/10 bg-[#1B1B1B] shadow-2xl">
-                        {locationSearching ? (
-                          <div className="px-4 py-3 text-sm text-white/40">Searching…</div>
-                        ) : locationResults.length === 0 ? (
-                          <div className="px-4 py-3 text-sm text-white/40">No locations found.</div>
-                        ) : (
-                          locationResults.map((r, i) => (
-                            <button
-                              key={`loc-${i}`}
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => {
-                                if (r.type === "country") {
-                                  setCountryFilter(r.country); setCityFilter("all");
-                                } else {
-                                  setCountryFilter(r.country); setCityFilter(r.city!);
-                                }
-                                setLocationQuery(""); setLocationDropdownOpen(false);
-                              }}
-                              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/6"
-                            >
-                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/8">
-                                <span className="material-symbols-outlined text-[18px] text-white/50">
-                                  {r.type === "country" ? "public" : "location_on"}
-                                </span>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-white">{r.display}</p>
-                                <p className="text-[11px] text-white/40">{r.type === "country" ? "Country" : "City"}</p>
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
+                  {/* Location search — uses Mapbox (same as event creation) for consistent city/country strings */}
+                  <MapboxLocationSearch
+                    value={locationQuery}
+                    onChange={setLocationQuery}
+                    onSelect={(result: MapboxPlaceResult) => {
+                      setCountryFilter(result.country);
+                      setCityFilter(result.city || "all");
+                      setLocationQuery(result.city ? `${result.city}, ${result.country}` : result.country);
+                    }}
+                    onClear={() => { setCountryFilter("all"); setCityFilter("all"); setLocationQuery(""); }}
+                    placeholder="Search by city or country..."
+                    inputClassName="bg-[#1B1B1B] border-white/10 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
+                  />
                 </section>
 
                 <section className="space-y-3">

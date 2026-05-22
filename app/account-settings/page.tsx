@@ -396,7 +396,9 @@ export default function AccountSettingsPage() {
       const deactivatedAt = new Date().toISOString();
       const updateRes = await supabase.auth.updateUser({ data: buildAccountDeactivatedMetadata(deactivatedAt) });
       if (updateRes.error) throw updateRes.error;
-      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+      await supabase.auth.signOut({ scope: "local" }).catch((err) => {
+        console.warn('[deactivate-account] SignOut failed:', err instanceof Error ? err.message : err);
+      });
       router.replace("/auth?deactivated=1");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not deactivate your account.");
@@ -407,7 +409,9 @@ export default function AccountSettingsPage() {
   const handleLogOut = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
-    try { await supabase.auth.signOut(); } catch {}
+    try { await supabase.auth.signOut(); } catch (err) {
+      console.warn('[logout] SignOut failed:', err instanceof Error ? err.message : err);
+    }
     window.location.assign("/auth");
   };
 

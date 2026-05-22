@@ -61,16 +61,26 @@ export default function EventsExploreSkeleton({ showNav = true }: { showNav?: bo
       {showNav ? <Nav /> : null}
       <main className="mx-auto w-full max-w-[1320px] px-4 pb-12 pt-7 sm:px-6 lg:px-8">
         <div className="animate-pulse space-y-5">
-          <header className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 sm:flex sm:items-center sm:justify-between sm:gap-3">
-            <div className="contents sm:flex sm:items-center sm:gap-3">
-              <div className="h-10 w-24 rounded-full bg-[#00F5FF]/70 sm:w-28" />
-              <div className="hidden h-10 w-[300px] rounded-full border border-white/10 bg-white/[0.05] sm:block" />
-              <div className="hidden h-4 w-28 rounded bg-white/8 sm:block" />
-            </div>
-            <div className="contents sm:flex sm:items-center sm:gap-2">
-              <div className="h-10 min-w-0 rounded-full border border-cyan-300/35 bg-cyan-300/20 sm:w-32" />
+          {/* Header */}
+          <header className="flex items-center justify-between gap-2">
+            {/* Left: "Showing N events" on mobile, spacer on desktop */}
+            <div className="h-3 w-28 rounded bg-white/8 sm:hidden" />
+            <div className="hidden sm:block" />
+            <div className="flex items-center gap-2">
+              {/* Desktop: search bar */}
+              <div className="hidden h-10 w-[260px] rounded-full border border-white/10 bg-white/[0.05] sm:block" />
+              {/* Desktop: Create Event */}
+              <div className="hidden h-10 w-32 rounded-full bg-[#00F5FF]/60 sm:block" />
+              {/* Desktop: Filters */}
+              <div className="hidden h-10 w-24 rounded-full bg-[#00F5FF]/80 sm:block" />
+              {/* Mobile: Create */}
+              <div className="h-10 w-24 rounded-full bg-[#00F5FF]/60 sm:hidden" />
+              {/* Mobile: filter icon */}
+              <div className="h-10 w-10 rounded-full border border-white/15 bg-white/[0.04] sm:hidden" />
             </div>
           </header>
+          {/* Desktop: Showing N events line */}
+          <div className="hidden h-3 w-28 rounded bg-white/8 sm:block" />
           <EventsCardsSkeleton />
         </div>
       </main>

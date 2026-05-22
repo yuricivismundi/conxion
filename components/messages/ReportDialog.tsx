@@ -28,10 +28,11 @@ export default function ReportDialog({
   onSubmit,
 }: ReportDialogProps) {
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg overflow-hidden rounded-[28px] border border-white/10 bg-[#0c0e10] shadow-[0_0_0_1px_rgba(242,13,177,0.12),0_32px_80px_rgba(0,0,0,0.7),0_0_60px_rgba(242,13,177,0.06)]">
-        <div className="h-px w-full bg-gradient-to-r from-[#f20db1]/80 via-[#0df2f2]/30 to-[#f20db1]/50" />
-        <div className="p-6 space-y-4">
+    <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/80 px-4 py-3 backdrop-blur-sm sm:items-center">
+      <div className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0c0e10] shadow-[0_0_0_1px_rgba(242,13,177,0.12),0_32px_80px_rgba(0,0,0,0.7),0_0_60px_rgba(242,13,177,0.06)]">
+        <div className="h-px w-full shrink-0 bg-gradient-to-r from-[#f20db1]/80 via-[#0df2f2]/30 to-[#f20db1]/50" />
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="space-y-4">
           <div className="flex items-start justify-between gap-3">
             <h3 className="text-xl font-bold text-white">{reportFromMessageId ? "Report Message" : "Report Conversation"}</h3>
             <button
@@ -104,7 +105,9 @@ export default function ReportDialog({
             />
           </label>
 
-          <div className="flex items-center justify-end gap-3">
+        </div>
+        </div>
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/[0.07] px-6 py-4">
             <button
               type="button"
               disabled={reportBusy}
@@ -122,7 +125,6 @@ export default function ReportDialog({
               {reportBusy ? "Sending…" : "Submit Report"}
             </button>
           </div>
-        </div>
       </div>
     </div>
   );

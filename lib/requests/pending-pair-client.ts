@@ -9,6 +9,7 @@ type PendingPairConflictResponse = {
     kind?: string | null;
     message?: string | null;
     requestId?: string | null;
+    threadToken?: string | null;
   } | null;
 };
 
@@ -16,6 +17,7 @@ export type PendingPairConflictDetails = {
   kind: string | null;
   message: string | null;
   requestId: string | null;
+  threadToken: string | null;
 };
 
 export async function fetchPendingPairConflictDetails(
@@ -47,6 +49,7 @@ export async function fetchPendingPairConflictDetails(
     kind: result.conflict.kind?.trim() || null,
     message: result.conflict.message?.trim() || null,
     requestId: result.conflict.requestId?.trim() || null,
+    threadToken: result.conflict.threadToken?.trim() || null,
   };
 }
 

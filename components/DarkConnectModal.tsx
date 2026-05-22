@@ -225,7 +225,7 @@ export default function DarkConnectModal({
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
       <div
-        className="relative w-full max-w-[520px] overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
+        className="relative flex max-h-[90dvh] w-full max-w-[520px] flex-col overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
         style={{
           background:
             "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14",
@@ -269,7 +269,7 @@ export default function DarkConnectModal({
           </div>
         </div>
 
-        <div className="px-5 pt-5 pb-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-4 space-y-4">
           {/* Self warning */}
           {isSelf && (
             <div className="flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3">

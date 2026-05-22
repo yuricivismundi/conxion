@@ -74,6 +74,7 @@ import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-usernam
 import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
 import DarkConnectModal from "@/components/DarkConnectModal";
 import BlockDialog from "@/components/messages/BlockDialog";
+import ActivityComposerModal from "@/components/activity/ActivityComposerModal";
 import { cx } from "@/lib/cx";
 import { getPlanIdFromMeta, getPlanLimits } from "@/lib/billing/limits";
 
@@ -940,6 +941,9 @@ function MemberProfilePage() {
   const [teacherPageAvailable, setTeacherPageAvailable] = useState(false);
   const [teacherBookingAvailable, setTeacherBookingAvailable] = useState(false);
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [removeConnectionConfirmOpen, setRemoveConnectionConfirmOpen] = useState(false);
+
   const panelSwitchTimerRef = useRef<number | null>(null);
   const toastCounterRef = useRef(0);
   const profileLoadRequestIdRef = useRef(0);
@@ -1989,7 +1993,9 @@ function MemberProfilePage() {
               .then((payload) => {
                 if (canCommit()) setOwnerPhotoLimit(payload.profilePhotos ?? 0);
               })
-              .catch(() => {});
+              .catch((err) => {
+                console.warn('[profile-photo-limit] Failed to fetch limit:', err instanceof Error ? err.message : err);
+              });
           }
         }
 
@@ -2761,92 +2767,104 @@ function MemberProfilePage() {
 
               {!isSelf ? (
                 <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                  {canBookSession ? (
-                    <button
-                      type="button"
-                      onClick={() => setBookingOpen(true)}
-                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-5 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/16"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">event_available</span>
-                      Book session
-                    </button>
-                  ) : null}
-                  {state.status === "none" ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setConnectModalOpen(true)}
-                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">person_add</span>
-                        Add Conexion
-                      </button>
-                    </>
-                  ) : null}
 
-                  {state.status === "pending" && state.role === "requester" ? (
-                    <button
-                      type="button"
-                      onClick={() => void cancelRequest()}
-                      disabled={busy}
-                      className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/20 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/[0.08] disabled:opacity-60"
-                    >
-                      {busy ? "Cancelling..." : "Cancel request"}
-                    </button>
-                  ) : null}
-
+                  {/* ── Pending connection request: accept/decline inline ── */}
                   {state.status === "pending" && state.role === "target" ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void declineRequest()}
-                        disabled={busy}
-                        className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/20 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/[0.08] disabled:opacity-60"
-                      >
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => void declineRequest()} disabled={busy}
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/20 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white/90 hover:bg-white/[0.08] disabled:opacity-60">
                         Decline
                       </button>
+                      <button type="button" onClick={() => void acceptRequest()} disabled={busy}
+                        className="inline-flex min-h-10 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:opacity-60">
+                        Accept connection
+                      </button>
+                      <button type="button" onClick={(e) => openActionMenu(e, "desktop", "below")}
+                        aria-haspopup="menu" aria-expanded={actionMenu?.source === "desktop"}
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white/60 hover:text-white">
+                        <span className="material-symbols-outlined text-[20px]">more_horiz</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      {/* ── Invite — gradient pill ── */}
                       <button
                         type="button"
-                        onClick={() => void acceptRequest()}
-                        disabled={busy}
-                        className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110 disabled:opacity-60"
+                        onClick={() => setInviteModalOpen(true)}
+                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-500 px-5 text-[13px] font-bold text-[#06121a] hover:brightness-110"
                       >
-                        Accept
+                        <span className="material-symbols-outlined text-[15px]">bolt</span>
+                        Invite
                       </button>
-                    </>
-                  ) : null}
 
-                  {state.status === "accepted" ? (
-                    <>
-                      {!isTeacherProfile ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100">
-                          <span className="material-symbols-outlined text-[16px]">person_check</span>
-                          Connected
-                        </span>
-                      ) : null}
-                      {state.id !== "self" ? (
-                        <Link
-                          href={`/messages?thread=${encodeURIComponent(`conn:${state.id}`)}`}
-                          className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-[#06121a] hover:brightness-110"
+                      {/* Connect / Pending / Connected */}
+                      {state.status === "none" ? (
+                        <button type="button" onClick={() => setConnectModalOpen(true)}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-white/18 bg-white/[0.05] px-4 text-[13px] font-semibold text-white/85 hover:bg-white/[0.09] hover:text-white">
+                          <span className="material-symbols-outlined text-[14px]">person_add</span>
+                          Connect
+                        </button>
+                      ) : state.status === "pending" && state.role === "requester" ? (
+                        <button type="button" onClick={() => void cancelRequest()} disabled={busy}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/[0.06] px-4 text-[13px] font-semibold text-amber-200/75 hover:bg-amber-300/10 disabled:opacity-60">
+                          <span className="material-symbols-outlined text-[14px]">schedule</span>
+                          Pending
+                        </button>
+                      ) : state.status === "accepted" ? (
+                        <button
+                          type="button"
+                          onClick={() => setRemoveConnectionConfirmOpen(true)}
+                          className="group inline-flex h-9 items-center gap-1.5 rounded-full px-5 text-[13px] font-bold text-white transition-all hover:brightness-110"
+                          style={{ background: "linear-gradient(to right, rgba(34,211,238,0.25), rgba(167,139,250,0.25), rgba(232,121,249,0.25))", border: "1px solid rgba(167,139,250,0.45)" }}
+                          title="Remove connection"
                         >
-                          <span className="material-symbols-outlined text-[16px]">chat_bubble</span>
-                          Message
+                          <span className="group-hover:hidden">Connected</span>
+                          <span className="hidden group-hover:inline text-rose-400 text-[13px] font-semibold">Remove</span>
+                        </button>
+                      ) : null}
+
+                      {/* Message — no container, icon only */}
+                      {profileUserId ? (
+                        <Link
+                          href={
+                            state.status === "accepted" && state.id !== "self"
+                              ? `/messages?thread=${encodeURIComponent(`conn:${state.id}`)}`
+                              : `/messages?to=${encodeURIComponent(profileUserId)}`
+                          }
+                          aria-label="Message"
+                          className="flex h-9 w-9 items-center justify-center text-white/40 hover:text-white/80 transition"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">chat_bubble</span>
                         </Link>
                       ) : null}
-                    </>
-                  ) : null}
 
-                  <button
-                    type="button"
-                    onClick={(event) => openActionMenu(event, "desktop", "below")}
-                    aria-haspopup="menu"
-                    aria-expanded={actionMenu?.source === "desktop"}
-                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
-                  >
-                      <span className="material-symbols-outlined text-[20px]">more_horiz</span>
-                  </button>
-                  </div>
+                      {/* Follow / Unfollow — no container, filled heart when following */}
+                      <button
+                        type="button"
+                        onClick={() => void toggleFollowingMember()}
+                        disabled={followingBusy}
+                        aria-label={contactFollowing ? "Unfollow" : "Follow"}
+                        className={cx(
+                          "flex h-9 w-9 items-center justify-center transition disabled:opacity-50",
+                          contactFollowing ? "text-fuchsia-400 hover:text-rose-400" : "text-white/40 hover:text-white/80"
+                        )}
+                      >
+                        <span
+                          className="material-symbols-outlined text-[20px]"
+                          style={{ fontVariationSettings: contactFollowing ? "'FILL' 1" : "'FILL' 0" }}
+                        >
+                          favorite
+                        </span>
+                      </button>
+
+                      {/* ··· no container */}
+                      <button type="button" onClick={(e) => openActionMenu(e, "desktop", "below")}
+                        aria-haspopup="menu" aria-expanded={actionMenu?.source === "desktop"}
+                        className="flex h-9 w-9 items-center justify-center text-white/40 hover:text-white/80 transition">
+                        <span className="material-symbols-outlined text-[21px]">more_horiz</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="hidden items-center gap-3 sm:flex">
@@ -2935,7 +2953,8 @@ function MemberProfilePage() {
                     <h2 className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-100">Profile overview</h2>
                   </div>
 
-                  <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-5">
+                  {/* Mobile: compact rows with inline chips. Desktop: original multi-column grid */}
+                  <div className="hidden md:grid gap-8 md:grid-cols-2 xl:grid-cols-5">
                     <div>
                       <div className="mb-4 flex items-center gap-2">
                         <span className="material-symbols-outlined text-[18px] text-cyan-300">person_pin</span>
@@ -2944,19 +2963,13 @@ function MemberProfilePage() {
                       {profile.roles.length ? (
                         <div className="flex flex-col gap-2.5">
                           {profile.roles.map((role) => (
-                            <span
-                              key={role}
-                              className="text-sm font-semibold text-slate-200"
-                            >
-                              {role}
-                            </span>
+                            <span key={role} className="text-sm font-semibold text-slate-200">{role}</span>
                           ))}
                         </div>
                       ) : (
                         <p className="text-sm text-slate-500">No roles listed.</p>
                       )}
                     </div>
-
                     <div>
                       <div className="mb-4 flex items-center gap-2">
                         <span className="material-symbols-outlined text-[18px] text-cyan-300">language</span>
@@ -2965,38 +2978,26 @@ function MemberProfilePage() {
                       {overviewLanguageCodes.length ? (
                         <div className="flex flex-col gap-2.5">
                           {overviewLanguageCodes.map((item) => (
-                            <span key={item.label} className="text-sm font-semibold text-slate-200">
-                              {item.label}
-                            </span>
+                            <span key={item.label} className="text-sm font-semibold text-slate-200">{item.label}</span>
                           ))}
                         </div>
                       ) : (
                         <p className="text-sm text-slate-500">No languages listed.</p>
                       )}
                     </div>
-
                     <div>
                       <div className="mb-4 flex items-center gap-2">
                         <span className="material-symbols-outlined text-[18px] text-fuchsia-300">music_note</span>
                         <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Dance styles</h3>
                       </div>
                       <div className="flex flex-col gap-2.5">
-                      {skillList.length ? (
-                        skillList.map((item) => (
-                          <span
-                            key={item.style}
-                            className="text-sm font-semibold text-slate-200"
-                          >
-                            {titleCase(item.style)}
-                            {item.level ? <span className="text-slate-300">({formatDanceLevelLabel(item.level)})</span> : null}
+                        {skillList.length ? skillList.map((item) => (
+                          <span key={item.style} className="text-sm font-semibold text-slate-200">
+                            {titleCase(item.style)}{item.level ? <span className="text-slate-300"> ({formatDanceLevelLabel(item.level)})</span> : null}
                           </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-slate-500">No dance styles listed.</span>
-                      )}
+                        )) : <span className="text-sm text-slate-500">No dance styles listed.</span>}
                       </div>
                     </div>
-
                     <div>
                       <div className="mb-4 flex items-center gap-2">
                         <span className="material-symbols-outlined text-[18px] text-cyan-300">favorite</span>
@@ -3004,7 +3005,6 @@ function MemberProfilePage() {
                       </div>
                       <p className="text-sm font-semibold leading-6 text-slate-200">{primaryInterest ?? "Not shared"}</p>
                     </div>
-
                     <div>
                       <div className="mb-4 flex items-center gap-2">
                         <span className="material-symbols-outlined text-[18px] text-cyan-300">schedule</span>
@@ -3013,16 +3013,55 @@ function MemberProfilePage() {
                       {profile.availability.length ? (
                         <div className="flex flex-col gap-2.5">
                           {profile.availability.map((slot) => (
-                            <span key={slot} className="text-sm font-semibold text-slate-200">
-                              {slot}
-                            </span>
+                            <span key={slot} className="text-sm font-semibold text-slate-200">{slot}</span>
                           ))}
                         </div>
                       ) : (
                         <p className="text-sm text-slate-500">Not shared</p>
                       )}
                     </div>
+                  </div>
 
+                  {/* Mobile compact layout — flat sections, no card containers */}
+                  <div className="md:hidden">
+                    {[
+                      {
+                        icon: "person_pin", iconColor: "text-cyan-300", label: "Roles",
+                        chips: profile.roles.length ? profile.roles.map((r) => ({ key: r, text: r, accent: false })) : null,
+                      },
+                      {
+                        icon: "language", iconColor: "text-cyan-300", label: "Languages",
+                        chips: overviewLanguageCodes.length ? overviewLanguageCodes.map((l) => ({ key: l.label, text: l.label, accent: false })) : null,
+                      },
+                      {
+                        icon: "music_note", iconColor: "text-fuchsia-300", label: "Dance styles",
+                        chips: skillList.length ? skillList.map((s) => ({ key: s.style, text: titleCase(s.style) + (s.level ? ` · ${formatDanceLevelLabel(s.level)}` : ""), accent: true })) : null,
+                      },
+                      {
+                        icon: "favorite", iconColor: "text-cyan-300", label: "Interest",
+                        chips: primaryInterest ? [{ key: primaryInterest, text: primaryInterest, accent: false }] : null,
+                      },
+                      {
+                        icon: "schedule", iconColor: "text-cyan-300", label: "Availability",
+                        chips: profile.availability.length ? profile.availability.map((a) => ({ key: a, text: a, accent: false })) : null,
+                      },
+                    ].map(({ icon, iconColor, label, chips }) => (
+                      <div key={label} className="flex items-start gap-3 py-3.5">
+                        <span className={`material-symbols-outlined text-[16px] mt-0.5 shrink-0 ${iconColor}`}>{icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="mb-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">{label}</p>
+                          {chips ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {chips.map((c) => (
+                                <span key={c.key} className={`rounded-full px-2.5 py-1 text-xs font-semibold text-slate-200 ${c.accent ? "bg-fuchsia-300/[0.08] border border-fuchsia-300/20" : "bg-white/[0.06]"}`}>{c.text}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-500">—</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   <div className="mt-8 h-px bg-white/[0.06]" />
@@ -3032,7 +3071,8 @@ function MemberProfilePage() {
                       <span className="material-symbols-outlined text-[18px] text-cyan-300">verified_user</span>
                       <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Verification</h3>
                     </div>
-                    <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+                    {/* Desktop */}
+                    <div className="hidden sm:grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
                       <div className="space-y-1">
                         <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Status</p>
                         {profile.verified ? (
@@ -3055,6 +3095,31 @@ function MemberProfilePage() {
                       <div className="space-y-1">
                         <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Member since</p>
                         <p className="text-sm font-bold text-white">{formatMonthYear(profile.createdAt)}</p>
+                      </div>
+                    </div>
+                    {/* Mobile — flat 2-col grid, no boxes */}
+                    <div className="grid grid-cols-2 gap-y-4 sm:hidden">
+                      <div>
+                        <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Status</p>
+                        {profile.verified ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-200">
+                            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300" />Verified
+                          </span>
+                        ) : (
+                          <span className="text-xs font-semibold text-slate-400">Not verified</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Last active</p>
+                        <p className="text-xs font-semibold text-slate-200">{profile.lastSeenAt ? formatRelativeTime(profile.lastSeenAt) : "—"}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Response rate</p>
+                        <p className="text-xs font-semibold text-slate-200">{responseRate}%</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Member since</p>
+                        <p className="text-xs font-semibold text-slate-200">{formatMonthYear(profile.createdAt)}</p>
                       </div>
                     </div>
                     {isSelf && !profile.verified ? (
@@ -3417,64 +3482,60 @@ function MemberProfilePage() {
                   <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-cyan-100">Hosting details</h3>
                 </div>
 
-                <div className="rounded-[26px] bg-white/[0.05] p-5">
-                  <div className="space-y-4 text-xs">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-white/45">Status</span>
-                      <span className="text-right font-black text-white">
-                        {hostingAvailable ? "Accepting guests" : "Not accepting guests"}
-                      </span>
-                    </div>
-
-                    {hostingAvailable ? (
-                      <>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-white/45">Max guests</span>
-                          <span className="text-right font-black text-white">{profile.maxGuests ?? "Not set"}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-white/45">Last-minute requests</span>
-                          <span className="text-right font-black text-white">{profile.hostingLastMinuteOk ? "Yes" : "No"}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-white/45">Smoking allowed</span>
-                          <span className="text-right font-black text-white">{profile.hostingSmokingAllowed ? "Yes" : "No"}</span>
-                        </div>
-                        {profile.hostingPreferredGuestGender ? (
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-white/45">Preferred guest</span>
-                            <span className="text-right font-black text-white">{formatGuestGenderPreference(profile.hostingPreferredGuestGender)}</span>
-                          </div>
-                        ) : null}
-                        {profile.hostingSleepingArrangement ? (
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-white/45">Space type</span>
-                            <span className="text-right font-black text-white">{formatSleepingArrangement(profile.hostingSleepingArrangement)}</span>
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-white/45">Status</span>
+                    <span className="text-right font-black text-white">
+                      {hostingAvailable ? "Accepting guests" : "Not accepting guests"}
+                    </span>
                   </div>
 
-                  {(profile.hostingGuestShare || profile.hostingTransitAccess) ? (
-                    <div className="mt-5 space-y-4 border-t border-white/[0.06] pt-5">
-                      {profile.hostingGuestShare ? (
-                        <div>
-                          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">About my place</p>
-                          <p className="rounded-2xl bg-white/[0.04] px-4 py-3 text-sm italic leading-6 text-slate-200">
-                            &ldquo;{profile.hostingGuestShare}&rdquo;
-                          </p>
+                  {hostingAvailable ? (
+                    <>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-white/45">Max guests</span>
+                        <span className="text-right font-black text-white">{profile.maxGuests ?? "Not set"}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-white/45">Last-minute requests</span>
+                        <span className="text-right font-black text-white">{profile.hostingLastMinuteOk ? "Yes" : "No"}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-white/45">Smoking allowed</span>
+                        <span className="text-right font-black text-white">{profile.hostingSmokingAllowed ? "Yes" : "No"}</span>
+                      </div>
+                      {profile.hostingPreferredGuestGender ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-white/45">Preferred guest</span>
+                          <span className="text-right font-black text-white">{formatGuestGenderPreference(profile.hostingPreferredGuestGender)}</span>
                         </div>
                       ) : null}
-                      {profile.hostingTransitAccess ? (
-                        <div>
-                          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">Transit access</p>
-                          <p className="text-sm leading-6 text-slate-300">{profile.hostingTransitAccess}</p>
+                      {profile.hostingSleepingArrangement ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-white/45">Space type</span>
+                          <span className="text-right font-black text-white">{formatSleepingArrangement(profile.hostingSleepingArrangement)}</span>
                         </div>
                       ) : null}
-                    </div>
+                    </>
                   ) : null}
                 </div>
+
+                {(profile.hostingGuestShare || profile.hostingTransitAccess) ? (
+                  <div className="mt-5 space-y-4 border-t border-white/[0.06] pt-5">
+                    {profile.hostingGuestShare ? (
+                      <div>
+                        <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">About my place</p>
+                        <p className="text-sm italic leading-6 text-slate-300">&ldquo;{profile.hostingGuestShare}&rdquo;</p>
+                      </div>
+                    ) : null}
+                    {profile.hostingTransitAccess ? (
+                      <div>
+                        <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">Transit access</p>
+                        <p className="text-sm leading-6 text-slate-300">{profile.hostingTransitAccess}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </article>
             ) : null}
 
@@ -3991,6 +4052,64 @@ function MemberProfilePage() {
           }}
         />
       ) : null}
+
+      {/* Activity composer modal */}
+      {profile && profileUserId ? (
+        <ActivityComposerModal
+          open={inviteModalOpen}
+          recipientUserId={profileUserId}
+          recipientName={profile.displayName}
+          recipientAvatarUrl={profile.avatarUrl}
+          connectionId={state.status === "accepted" && state.id !== "self" ? state.id : null}
+          onClose={() => setInviteModalOpen(false)}
+          onSent={(threadId) => {
+            setInviteModalOpen(false);
+            router.push(`/messages?thread=${encodeURIComponent(threadId)}`);
+          }}
+        />
+      ) : null}
+
+      {/* Remove connection confirmation */}
+      {removeConnectionConfirmOpen && state.status === "accepted" && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+              onClick={() => setRemoveConnectionConfirmOpen(false)}
+            >
+              <div
+                className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#0c1219] p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-base font-bold text-white">Remove connection?</p>
+                <p className="mt-1.5 text-sm text-white/50">
+                  You and <span className="text-white/80">{profile?.displayName}</span> will no longer be connected. This cannot be undone.
+                </p>
+                <div className="mt-5 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setRemoveConnectionConfirmOpen(false)}
+                    className="flex-1 rounded-full border border-white/15 py-2.5 text-sm font-semibold text-white/60 hover:text-white transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setRemoveConnectionConfirmOpen(false);
+                      await cancelRequest();
+                    }}
+                    className="flex-1 rounded-full bg-rose-500/20 border border-rose-500/30 py-2.5 text-sm font-semibold text-rose-300 hover:bg-rose-500/30 transition disabled:opacity-60"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
     </div>
   );
 }

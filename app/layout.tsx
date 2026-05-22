@@ -24,8 +24,8 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL(appUrl),
-  title: "ConXion",
-  description: "Conecta, practica, viaja, mejora.",
+  title: "ConXion — Dance Networking",
+  description: "Discover dancers, teachers, and events. Connect, practise, travel, and grow with the global dance community.",
   icons: {
     icon: "/branding/CONXION-2-favicon.png?v=17",
     shortcut: "/branding/CONXION-2-favicon.png?v=17",
@@ -34,18 +34,23 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   openGraph: {
     siteName: "ConXion",
+    title: "ConXion — Dance Networking",
+    description: "Discover dancers, teachers, and events. Connect, practise, travel, and grow with the global dance community.",
+    // Replace with a proper 1200×630 social share image when available
     images: [
       {
-        url: "/branding/CONXION-2-favicon.png?v=17",
+        url: "/branding/CONXION-2.png",
         width: 1200,
-        height: 600,
-        alt: "ConXion logo",
+        height: 630,
+        alt: "ConXion — Dance Networking",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    images: ["/branding/CONXION-2-favicon.png?v=17"],
+    title: "ConXion — Dance Networking",
+    description: "Discover dancers, teachers, and events. Connect, practise, travel, and grow with the global dance community.",
+    images: ["/branding/CONXION-2.png"],
   },
 };
 

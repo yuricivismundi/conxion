@@ -1,5 +1,11 @@
+import type { Metadata } from "next";
 import InfoPageShell from "@/components/InfoPageShell";
 import { LEGAL_PROFILE, formatPublishedPostalAddress, hasPublishedPostalAddress } from "@/lib/legal-profile";
+
+export const metadata: Metadata = {
+  title: "Terms of Service — ConXion",
+  description: "Read the ConXion Terms of Service covering your rights, responsibilities, and the rules that apply when using the platform.",
+};
 
 type TermsSection = {
   title: string;

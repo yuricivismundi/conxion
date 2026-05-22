@@ -651,6 +651,8 @@ function ConnectionsPageContent() {
   const [memberSearch, setMemberSearch] = useState("");
   const [cityQuery, setCityQuery] = useState("");
   const [languageQuery, setLanguageQuery] = useState("");
+  const [countryQuery, setCountryQuery] = useState("");
+  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
 
   const [uiError, setUiError] = useState<string | null>(null);
   const [uiInfo, setUiInfo] = useState<string | null>(null);
@@ -1936,6 +1938,11 @@ function ConnectionsPageContent() {
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const countryNames = useMemo(() => countriesAll.map((c) => c.name), [countriesAll]);
   const countryIso = useMemo(() => countriesAll.find((c) => c.name === filters.country)?.isoCode ?? "", [countriesAll, filters.country]);
+  const filteredCountryNames = useMemo(() => {
+    const q = countryQuery.trim().toLowerCase();
+    if (!q) return countryNames.slice(0, 80);
+    return countryNames.filter((c) => c.toLowerCase().includes(q)).slice(0, 80);
+  }, [countryNames, countryQuery]);
   const citySuggestions = useMemo(() => {
     const q = cityQuery.trim().toLowerCase();
     return availableCities
@@ -2408,11 +2415,6 @@ function ConnectionsPageContent() {
       return;
     }
 
-    if (!tripJoinModal.reason) {
-      setTripJoinError("Choose why you want to join this trip.");
-      return;
-    }
-
     if (tripRequestMessageValidation) {
       setTripJoinError(tripRequestMessageValidation);
       return;
@@ -2435,7 +2437,7 @@ function ConnectionsPageContent() {
         },
         body: JSON.stringify({
           tripId: tripJoinModal.tripId,
-          reason: tripJoinModal.reason,
+          reason: tripJoinModal.reason ?? "travelling",
           note: note || null,
           linkedMemberUserId: tripJoinModal.linkedMemberUserId || null,
         }),
@@ -2789,88 +2791,134 @@ function ConnectionsPageContent() {
           </div>
         </section>
 
-        <div className="mt-6 flex flex-col gap-4 md:mt-8 md:flex-row md:items-center md:justify-between">
-          <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center md:gap-6">
-            <p className="text-white/50 text-sm">
-              {t("discover.showing")} <span className="text-white font-semibold">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
-              {tab === "members" ? (discoverMode === "hosts" ? "hosts" : "dancers") : "travelers"}
-            </p>
-
-            <div className="hidden md:flex md:flex-row md:items-center md:gap-3 md:border-l md:border-white/10 md:pl-6">
-              <div className="relative">
-                <select
-                  value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value as SortMode)}
-                  className="appearance-none bg-transparent pr-5 text-sm text-white/85 outline-none cursor-pointer"
-                >
-                  <option value="recommended">Recommended</option>
-                  <option value="newest">Newest</option>
-                  <option value="name_az">Name A-Z</option>
-                  <option value="city_az">City A-Z</option>
-                  {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
-                  {tab === "members" ? <option value="references_desc">Most references</option> : null}
-                </select>
-                <MSIcon name="expand_more" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[16px] text-white/45" />
+        {/* Mobile: single row — label + search + filter icon. Desktop: two-column layout */}
+        <div className="mt-6 md:mt-8">
+          {/* Desktop layout */}
+          <div className="hidden md:flex md:flex-row md:items-center md:justify-between md:gap-4">
+            <div className="flex flex-row items-center gap-6">
+              <p className="text-white/50 text-sm">
+                {t("discover.showing")} <span className="text-white font-semibold">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
+                {tab === "members" ? (discoverMode === "hosts" ? "hosts" : "dancers") : "travelers"}
+              </p>
+              <div className="flex flex-row items-center gap-3 border-l border-white/10 pl-6">
+                <div className="relative">
+                  <select
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value as SortMode)}
+                    className="appearance-none bg-transparent pr-5 text-sm text-white/85 outline-none cursor-pointer"
+                  >
+                    <option value="recommended">Recommended</option>
+                    <option value="newest">Newest</option>
+                    <option value="name_az">Name A-Z</option>
+                    <option value="city_az">City A-Z</option>
+                    {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
+                    {tab === "members" ? <option value="references_desc">Most references</option> : null}
+                  </select>
+                  <MSIcon name="expand_more" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[16px] text-white/45" />
+                </div>
+                {tab === "members" || tab === "travellers" ? (
+                  <button
+                    type="button"
+                    onClick={() => { if (!myCity) return; setMyCityOnly((value) => !value); }}
+                    disabled={!myCity}
+                    title={myCity ? `Only show ${myCity}` : "Set your city in profile first"}
+                    className={["inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition", myCityOnly ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300" : myCity ? "border-white/10 text-white/40 hover:text-white/70" : "cursor-not-allowed border-white/10 text-white/20"].join(" ")}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">my_location</span>
+                    My location
+                  </button>
+                ) : null}
               </div>
-
-              {tab === "members" || tab === "travellers" ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!myCity) return;
-                    setMyCityOnly((value) => !value);
-                  }}
-                  disabled={!myCity}
-                  title={myCity ? `Only show ${myCity}` : "Set your city in profile first"}
-                  className={[
-                    "inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
-                    myCityOnly
-                      ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
-                      : myCity
-                        ? "border-white/10 text-white/40 hover:text-white/70"
-                        : "cursor-not-allowed border-white/10 text-white/20",
-                  ].join(" ")}
-                >
-                  <span className="material-symbols-outlined text-[13px]">my_location</span>
-                  My location
-                </button>
-              ) : null}
             </div>
-          </div>
-
-          <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center md:w-auto md:justify-end">
-            {tab === "members" ? (
-              <label className="relative w-full sm:flex-1 md:w-[240px] md:flex-none">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
-                  <MSIcon name="search" className="text-[18px]" />
-                </span>
-                <input
-                  type="search"
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder={discoverMode === "hosts" ? "Search hosts by name" : "Search dancers by name"}
-                  className="h-11 w-full rounded-full border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/35 hover:border-white/20 focus:border-[#00F5FF]/45"
-                />
-              </label>
-            ) : null}
-            {tab === "travellers" ? (
-              <div className="hidden md:block">
+            <div className="flex flex-row flex-wrap items-center justify-end gap-3">
+              {tab === "members" ? (
+                <label className="relative w-[240px]">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
+                    <MSIcon name="search" className="text-[18px]" />
+                  </span>
+                  <input
+                    type="search"
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder={discoverMode === "hosts" ? "Search hosts by name" : "Search dancers by name"}
+                    className="h-11 w-full rounded-full border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/35 hover:border-white/20 focus:border-[#00F5FF]/45"
+                  />
+                </label>
+              ) : null}
+              {tab === "travellers" ? (
                 <RangeDatePicker
                   start={filters.tripDateFrom}
                   end={filters.tripDateTo}
                   onChangeStart={(v) => setFilters((p) => ({ ...p, tripDateFrom: v }))}
                   onChangeEnd={(v) => setFilters((p) => ({ ...p, tripDateTo: v }))}
                 />
-              </div>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setFiltersOpen(true)}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90 sm:w-auto"
-            >
-              <span className="material-symbols-outlined text-[18px]">tune</span>
-              {t("discover.filters")}{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
-            </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-[#00F5FF] px-6 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
+              >
+                <span className="material-symbols-outlined text-[18px]">tune</span>
+                {t("discover.filters")}{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile: one row — sort | count + search + location text + filter icon */}
+          <div className="flex items-center gap-2 md:hidden">
+            {/* Sort — leftmost, icon-only dropdown */}
+            <div className="relative shrink-0">
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                className="h-10 w-10 cursor-pointer appearance-none rounded-full border border-white/15 bg-white/[0.05] text-transparent outline-none"
+                aria-label="Sort by"
+              >
+                <option value="recommended">Recommended</option>
+                <option value="newest">Newest</option>
+                <option value="name_az">Name A-Z</option>
+                <option value="city_az">City A-Z</option>
+                {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
+                {tab === "members" ? <option value="references_desc">Most references</option> : null}
+              </select>
+              <span className={["material-symbols-outlined pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[20px]", sortMode !== "recommended" ? "text-[#00F5FF]" : "text-white/70"].join(" ")}>
+                sort
+              </span>
+            </div>
+            <p className="shrink-0 text-xs text-white/50">
+              <span className="font-semibold text-white">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
+              {tab === "members" ? (discoverMode === "hosts" ? "hosts" : "dancers") : "travelers"}
+            </p>
+            {tab === "members" ? (
+              <label className="relative min-w-0 flex-1">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
+                  <MSIcon name="search" className="text-[16px]" />
+                </span>
+                <input
+                  type="search"
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  placeholder={discoverMode === "hosts" ? "Search hosts…" : "Search dancers…"}
+                  className="h-10 w-full rounded-full border border-white/10 bg-white/5 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#00F5FF]/45"
+                />
+              </label>
+            ) : (
+              <div className="flex-1" />
+            )}
+            {/* Filters */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className={["inline-flex h-10 w-10 items-center justify-center rounded-full transition", activeFiltersCount ? "bg-[#00F5FF] text-[#0A0A0A]" : "border border-white/15 bg-white/[0.05] text-white/70 hover:text-white"].join(" ")}
+                aria-label="Filters"
+              >
+                <span className="material-symbols-outlined text-[18px]">tune</span>
+              </button>
+              {activeFiltersCount ? (
+                <span className="pointer-events-none absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#00F5FF] text-[9px] font-bold text-[#0A0A0A]">{activeFiltersCount}</span>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -2881,37 +2929,52 @@ function ConnectionsPageContent() {
                 Array.from({ length: 8 }).map((_, i) => (
                   <div
                     key={`sk-${i}`}
-                    className="connections-card flex min-h-[196px] flex-col overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] animate-pulse md:h-64 md:min-h-0 md:flex-row"
+                    className="connections-card animate-pulse overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212]"
                   >
-                    <div className="w-full md:w-1/2 h-44 md:h-full bg-white/5" />
-                    <div className="w-full md:w-1/2 p-4 flex flex-col h-full justify-between">
-                      <div className="min-h-0">
-                        <div className="h-5 w-40 rounded bg-white/10" />
-                        <div className="mt-3 h-4 w-44 rounded bg-white/10" />
-                        <div className="mt-4 h-3 w-52 rounded bg-white/10" />
-
-                        <div className="mt-4 flex items-center gap-2">
-                          <div className="h-3 w-8 rounded bg-white/10" />
-                          <div className="h-3 w-14 rounded bg-white/10" />
-                          <div className="h-3 w-10 rounded bg-white/10" />
+                    {/* Mobile skeleton — matches the actual md:hidden flex-row layout */}
+                    <div className="flex min-h-[210px] md:hidden">
+                      <div className="w-[42%] shrink-0 bg-white/5 border-r border-white/10" />
+                      <div className="flex flex-1 flex-col justify-between p-3">
+                        <div className="space-y-2.5">
+                          <div className="h-5 w-32 rounded bg-white/10" />
+                          <div className="h-3.5 w-24 rounded bg-white/10" />
+                          <div className="h-3 w-28 rounded bg-white/10" />
+                          <div className="h-3 w-20 rounded bg-white/10" />
+                          <div className="flex gap-1.5">
+                            <div className="h-5 w-8 rounded-full bg-white/10" />
+                            <div className="h-5 w-8 rounded-full bg-white/10" />
+                            <div className="h-5 w-8 rounded-full bg-white/10" />
+                          </div>
                         </div>
-
-                        <div className="mt-4 flex items-center gap-2">
-                          <div className="h-5 w-10 rounded bg-white/10" />
-                          <div className="h-5 w-16 rounded bg-white/10" />
-                          <div className="h-5 w-14 rounded bg-white/10" />
-                        </div>
-
-                        <div className="mt-3 flex items-center gap-2">
-                          <div className="h-5 w-14 rounded bg-white/10" />
-                          <div className="h-5 w-12 rounded bg-white/10" />
+                        <div className="flex gap-2 pt-2">
+                          <div className="h-9 flex-1 rounded-full bg-white/10" />
+                          <div className="h-9 flex-[1.5] rounded-full bg-white/10" />
                         </div>
                       </div>
+                    </div>
 
-                      <div className="pt-3 flex flex-col gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1 h-9 rounded-full bg-white/10" />
-                          <div className="flex-[1.5] h-9 rounded-full bg-white/10" />
+                    {/* Desktop skeleton — horizontal card */}
+                    <div className="hidden md:flex md:h-64">
+                      <div className="w-1/2 bg-white/5" />
+                      <div className="flex w-1/2 flex-col justify-between p-4">
+                        <div className="min-h-0 space-y-3">
+                          <div className="h-5 w-40 rounded bg-white/10" />
+                          <div className="h-4 w-44 rounded bg-white/10" />
+                          <div className="h-3 w-52 rounded bg-white/10" />
+                          <div className="flex gap-2">
+                            <div className="h-5 w-10 rounded bg-white/10" />
+                            <div className="h-5 w-16 rounded bg-white/10" />
+                            <div className="h-5 w-14 rounded bg-white/10" />
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="h-5 w-8 rounded-full bg-white/10" />
+                            <div className="h-5 w-8 rounded-full bg-white/10" />
+                            <div className="h-5 w-8 rounded-full bg-white/10" />
+                          </div>
+                        </div>
+                        <div className="flex gap-3 pt-3">
+                          <div className="h-9 flex-1 rounded-full bg-white/10" />
+                          <div className="h-9 flex-[1.5] rounded-full bg-white/10" />
                         </div>
                       </div>
                     </div>
@@ -3482,12 +3545,16 @@ function ConnectionsPageContent() {
       </main>
 
       {filtersOpen ? (
-        <div className="fixed inset-0 z-[60]">
-          <button aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} type="button" />
+        <div className="fixed inset-0 z-[60] flex items-end sm:justify-end">
+          <button aria-label="Close filters" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setFiltersOpen(false)} type="button" />
 
-          <aside className="absolute right-0 top-0 h-full w-full max-w-md border-l border-white/10 bg-[#0A0A0A] shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
-              <h2 className="text-2xl font-bold tracking-tight text-white">
+          <aside className="relative w-full max-h-[92dvh] rounded-t-3xl sm:rounded-none sm:rounded-l-3xl sm:h-full sm:max-h-full sm:max-w-md border-t sm:border-t-0 sm:border-l border-white/10 bg-[#0A0A0A] shadow-2xl flex flex-col">
+            {/* Drag handle mobile */}
+            <div className="flex justify-center pt-3 pb-1 sm:hidden">
+              <div className="h-1 w-10 rounded-full bg-white/20" />
+            </div>
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <h2 className="text-lg font-bold tracking-tight text-white">
                 {filtersTitle}
               </h2>
               <button
@@ -3500,51 +3567,41 @@ function ConnectionsPageContent() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-6 pb-36 space-y-7">
+            <div className="flex-1 overflow-y-auto px-5 py-5 pb-36 space-y-7">
               <section className="space-y-4 md:hidden">
                 <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">View</h3>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="text-sm font-semibold text-white/90">Sort by</label>
-                    <div className="relative mt-2">
-                      <select
-                        value={sortMode}
-                        onChange={(e) => setSortMode(e.target.value as SortMode)}
-                        className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                      >
-                        <option value="recommended">Recommended</option>
-                        <option value="newest">Newest</option>
-                        <option value="name_az">Name A-Z</option>
-                        <option value="city_az">City A-Z</option>
-                        {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
-                        {tab === "members" ? <option value="references_desc">Most references</option> : null}
-                      </select>
-                      <MSIcon name="expand_more" className="pointer-events-none absolute right-3 top-3 text-[20px] text-white/40" />
-                    </div>
-                  </div>
+                <div className="grid grid-cols-2 gap-2">
                   {tab === "members" || tab === "travellers" ? (
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!myCity) return;
-                          setMyCityOnly((value) => !value);
-                        }}
-                        disabled={!myCity}
-                        className={[
-                          "inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
-                          myCityOnly
-                            ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
-                            : myCity
-                              ? "border-white/10 text-white/55 hover:text-white/80"
-                              : "cursor-not-allowed border-white/10 text-white/25",
-                        ].join(" ")}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">my_location</span>
-                        My location
-                      </button>
-                    </div>
-                  ) : null}
+                    <button
+                      type="button"
+                      onClick={() => { if (!myCity) return; setMyCityOnly((value) => !value); }}
+                      disabled={!myCity}
+                      className={[
+                        "inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border px-3 text-sm font-semibold transition",
+                        myCityOnly
+                          ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
+                          : myCity
+                            ? "border-white/10 bg-white/[0.03] text-white/55 hover:text-white/80"
+                            : "cursor-not-allowed border-white/10 text-white/25",
+                      ].join(" ")}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">my_location</span>
+                      My location
+                    </button>
+                  ) : <div />}
+                  <button
+                    type="button"
+                    onClick={() => setFilters((p) => ({ ...p, verifiedOnly: !p.verifiedOnly }))}
+                    className={[
+                      "inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border px-3 text-sm font-semibold transition",
+                      filters.verifiedOnly
+                        ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
+                        : "border-white/10 bg-white/[0.03] text-white/55 hover:text-white/80",
+                    ].join(" ")}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">verified</span>
+                    Verified only
+                  </button>
                 </div>
                 {tab === "travellers" ? (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -3576,25 +3633,36 @@ function ConnectionsPageContent() {
                 <div>
                   <label className="text-sm font-semibold text-white/90">Country</label>
                   <div className="relative mt-2">
-                    <select
-                      value={filters.country ?? ""}
-                      onChange={(e) =>
-                        setFilters((p) => ({
-                          ...p,
-                          country: e.target.value ? e.target.value : undefined,
-                          cities: [],
-                        }))
-                      }
-                      className="w-full appearance-none rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30"
-                    >
-                      <option value="">Any country</option>
-                      {countryNames.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <MSIcon name="expand_more" className="pointer-events-none absolute right-3 top-3 text-[20px] text-white/40" />
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/30 pointer-events-none">search</span>
+                    <input
+                      type="text"
+                      value={countryQuery || filters.country || ""}
+                      placeholder="Search country…"
+                      autoComplete="off"
+                      onChange={(e) => { setCountryQuery(e.target.value); setCountryDropdownOpen(true); }}
+                      onFocus={() => setCountryDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setCountryDropdownOpen(false), 150)}
+                      className="w-full min-h-[48px] rounded-xl border border-white/10 bg-[#1B1B1B] pl-9 pr-9 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 placeholder:text-white/30"
+                    />
+                    {(filters.country || countryQuery) && (
+                      <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70"
+                        onClick={() => { setCountryQuery(""); setCountryDropdownOpen(false); setFilters((p) => ({ ...p, country: undefined, cities: [] })); }}>
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
+                    )}
+                    {countryDropdownOpen && filteredCountryNames.length > 0 && (
+                      <ul className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-white/10 bg-[#141414] shadow-xl">
+                        {filteredCountryNames.map((c) => (
+                          <li key={c}>
+                            <button type="button" className="w-full px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06] hover:text-white"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => { setFilters((p) => ({ ...p, country: c, cities: [] })); setCountryQuery(""); setCountryDropdownOpen(false); setCityQuery(""); }}>
+                              {c}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </div>
 
@@ -3656,9 +3724,9 @@ function ConnectionsPageContent() {
                 </div>
               </section>
 
-              <section className="space-y-4">
+              <section className="space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Role Preference</h3>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {ROLE_OPTIONS.map((role) => {
                     const selected = filters.roles.includes(role);
                     return (
@@ -3671,12 +3739,9 @@ function ConnectionsPageContent() {
                             roles: selected ? p.roles.filter((r) => r !== role) : [...p.roles, role],
                           }))
                         }
-                        className="inline-flex items-center gap-1.5 transition"
+                        className={["py-3 px-3 rounded-2xl border text-sm font-medium transition text-left", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
                       >
-                        <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
-                          {selected ? <MSIcon name="check" className="text-[11px]" /> : null}
-                        </span>
-                        <span className={`text-sm font-semibold ${selected ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{role}</span>
+                        {role}
                       </button>
                     );
                   })}
@@ -3684,27 +3749,19 @@ function ConnectionsPageContent() {
               </section>
 
               {tab === "travellers" ? (
-                <section className="space-y-4">
+                <section className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Trip Reason</h3>
-                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {TRIP_PURPOSES.map((purpose) => {
                       const selected = filters.tripPurpose === purpose;
                       return (
                         <button
                           key={purpose}
                           type="button"
-                          onClick={() =>
-                            setFilters((p) => ({
-                              ...p,
-                              tripPurpose: p.tripPurpose === purpose ? undefined : purpose,
-                            }))
-                          }
-                          className="inline-flex items-center gap-1.5 transition"
+                          onClick={() => setFilters((p) => ({ ...p, tripPurpose: p.tripPurpose === purpose ? undefined : purpose }))}
+                          className={["py-3 px-3 rounded-2xl border text-sm font-medium transition text-left", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
                         >
-                          <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
-                            {selected ? <MSIcon name="check" className="text-[11px]" /> : null}
-                          </span>
-                          <span className={`text-sm font-semibold ${selected ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{purpose}</span>
+                          {purpose}
                         </button>
                       );
                     })}
@@ -3712,33 +3769,22 @@ function ConnectionsPageContent() {
                 </section>
               ) : null}
 
-              <section className="space-y-4">
+              <section className="space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">References</h3>
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { key: "has", label: "Has references" },
                     { key: "none", label: "No references" },
                   ].map((option) => {
-                    const selected =
-                      option.key === "all"
-                        ? !filters.references
-                        : filters.references === option.key;
+                    const selected = filters.references === option.key;
                     return (
                       <button
                         key={option.key}
                         type="button"
-                        onClick={() =>
-                          setFilters((p) => ({
-                            ...p,
-                            references: option.key === "all" ? undefined : (option.key as "has" | "none"),
-                          }))
-                        }
-                        className="inline-flex items-center gap-1.5 transition"
+                        onClick={() => setFilters((p) => ({ ...p, references: p.references === option.key ? undefined : (option.key as "has" | "none") }))}
+                        className={["py-3 px-3 rounded-2xl border text-sm font-medium transition text-left", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
                       >
-                        <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
-                          {selected ? <MSIcon name="check" className="text-[11px]" /> : null}
-                        </span>
-                        <span className={`text-sm font-semibold ${selected ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{option.label}</span>
+                        {option.label}
                       </button>
                     );
                   })}
@@ -3746,16 +3792,14 @@ function ConnectionsPageContent() {
               </section>
 
               {tab === "members" ? (
-                <section className="space-y-4">
+                <section className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Dance Styles &amp; Level</h3>
-
-                  <div className="flex flex-wrap gap-x-4 gap-y-3">
+                  <div className="space-y-2">
                     {STYLE_OPTIONS.map((style) => {
                       const levelsForStyle = filters.styleLevels[style] ?? [];
                       const enabled = Object.prototype.hasOwnProperty.call(filters.styleLevels, style);
-                      const selectedLevel = levelsForStyle[0] ?? null;
                       return (
-                        <div key={style} className="flex flex-col gap-2">
+                        <div key={style} className={["rounded-2xl border overflow-hidden transition", enabled ? "border-white/15 bg-white/[0.03]" : "border-white/10"].join(" ")}>
                           <button
                             type="button"
                             onClick={() =>
@@ -3766,36 +3810,35 @@ function ConnectionsPageContent() {
                                 return { ...p, styleLevels: next };
                               })
                             }
-                            className="inline-flex items-center gap-1.5 transition text-left"
+                            className="w-full flex items-center justify-between px-4 py-3.5"
                           >
-                            <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${enabled ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]" : "border-white/25"}`}>
-                              {enabled ? <MSIcon name="check" className="text-[11px]" /> : null}
+                            <span className={`text-sm font-semibold ${enabled ? "text-[#00F5FF]" : "text-white/80"}`}>{style}</span>
+                            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-lg border text-[13px] font-bold ${enabled ? "border-[#00F5FF] bg-[#00F5FF]/15 text-[#00F5FF]" : "border-white/20 text-white/20"}`}>
+                              {enabled ? "✓" : ""}
                             </span>
-                            <span className={`text-sm font-semibold ${enabled ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>{style}</span>
                           </button>
                           {enabled ? (
-                            <div className="flex gap-1">
-                              {LEVELS.map((level) => (
-                                <button
-                                  key={`${style}-${level}`}
-                                  type="button"
-                                  onClick={() =>
-                                    setFilters((p) => {
-                                      const next = { ...p.styleLevels };
-                                      const current = next[style] ?? [];
-                                      next[style] = current[0] === level ? [] : [level];
-                                      return { ...p, styleLevels: next };
-                                    })
-                                  }
-                                  className={`rounded border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition ${
-                                    selectedLevel === level
-                                      ? "border-[#00F5FF] bg-[#00F5FF] text-[#0A0A0A]"
-                                      : "border-white/15 text-white/45 hover:border-white/30"
-                                  }`}
-                                >
-                                  {LEVEL_SHORT_LABEL[level]}
-                                </button>
-                              ))}
+                            <div className="px-4 pb-4 flex flex-wrap gap-2">
+                              {LEVELS.map((level) => {
+                                const selected = levelsForStyle[0] === level;
+                                return (
+                                  <button
+                                    key={`${style}-${level}`}
+                                    type="button"
+                                    onClick={() =>
+                                      setFilters((p) => {
+                                        const next = { ...p.styleLevels };
+                                        const current = next[style] ?? [];
+                                        next[style] = current[0] === level ? [] : [level];
+                                        return { ...p, styleLevels: next };
+                                      })
+                                    }
+                                    className={`px-3 py-2 rounded-full border text-xs font-semibold transition ${selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 text-white/55 hover:border-white/20"}`}
+                                  >
+                                    {LEVEL_SHORT_LABEL[level]}
+                                  </button>
+                                );
+                              })}
                             </div>
                           ) : null}
                         </div>
@@ -3854,17 +3897,6 @@ function ConnectionsPageContent() {
                     </div>
                   ) : null}
 
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={filters.verifiedOnly}
-                      onChange={(e) => setFilters((p) => ({ ...p, verifiedOnly: e.target.checked }))}
-                      className="h-4 w-4 rounded border-white/20 bg-transparent accent-[#00F5FF]"
-                    />
-                    <span className={`text-sm font-semibold transition ${filters.verifiedOnly ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>
-                      Verified only
-                    </span>
-                  </label>
                 </section>
               ) : null}
 
@@ -3917,17 +3949,6 @@ function ConnectionsPageContent() {
                     </div>
                   ) : null}
 
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={filters.verifiedOnly}
-                      onChange={(e) => setFilters((p) => ({ ...p, verifiedOnly: e.target.checked }))}
-                      className="h-4 w-4 rounded border-white/20 bg-transparent accent-[#00F5FF]"
-                    />
-                    <span className={`text-sm font-semibold transition ${filters.verifiedOnly ? "text-[#00F5FF]" : "text-white/50 hover:text-white"}`}>
-                      Verified only
-                    </span>
-                  </label>
                 </section>
               ) : null}
             </div>
@@ -4047,46 +4068,6 @@ function ConnectionsPageContent() {
                 </div>
               )}
 
-              {/* Reason grid — uses shared ActivityType values for cross-feature consistency */}
-              <div className="flex flex-wrap justify-center gap-2.5">
-                {TRIP_JOIN_REASON_OPTIONS.map((type) => {
-                  const sel = tripJoinModal.reason === type.key;
-                  return (
-                    <button
-                      key={type.key}
-                      type="button"
-                      onClick={() => setTripJoinModal((prev) => ({ ...prev, reason: sel ? null : type.key }))}
-                      className={`group relative flex w-[calc(33.333%-7px)] flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition-all duration-150 ${
-                        sel
-                          ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
-                          : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
-                      }`}
-                    >
-                      {sel && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />}
-                      <span
-                        className={`material-symbols-outlined text-[22px] transition-colors ${sel ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"}`}
-                        style={{ fontVariationSettings: sel ? "'FILL' 1" : "'FILL' 0" }}
-                      >{type.icon}</span>
-                      <span className={`text-[11px] font-semibold leading-tight transition-colors ${sel ? "text-white" : "text-white/55 group-hover:text-white/80"}`}>
-                        {type.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Selected intent preview */}
-              {tripJoinModal.reason && (
-                <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2.5">
-                  <span className="material-symbols-outlined text-[14px] text-[#0df2f2] shrink-0">bolt</span>
-                  <p className="text-xs text-white/60">
-                    You want to join for{" "}
-                    <span className="font-semibold text-white/90">
-                      {tripJoinReasonLabel(tripJoinModal.reason)}
-                    </span>
-                  </p>
-                </div>
-              )}
 
               {/* Optional note */}
               <div className="space-y-2">
@@ -4221,7 +4202,7 @@ function ConnectionsPageContent() {
             <div className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-4">
               <button
                 type="button"
-                disabled={!tripJoinModal.reason || tripRequestSending || Boolean(tripRequestMessageValidation) || Boolean(tripJoinWarning)}
+                disabled={tripRequestSending || Boolean(tripRequestMessageValidation) || Boolean(tripJoinWarning)}
                 onClick={sendTripJoinRequest}
                 className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] disabled:opacity-40 transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99]"
                 style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}

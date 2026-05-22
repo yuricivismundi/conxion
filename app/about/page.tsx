@@ -1,4 +1,10 @@
+import type { Metadata } from "next";
 import InfoPageShell from "@/components/InfoPageShell";
+
+export const metadata: Metadata = {
+  title: "About ConXion",
+  description: "ConXion is a trust-first dance networking platform built to help members discover people, trips, events, and sync opportunities with stronger reputation and safety controls.",
+};
 
 export default function AboutPage() {
   return (

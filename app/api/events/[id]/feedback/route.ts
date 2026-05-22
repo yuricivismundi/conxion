@@ -77,10 +77,11 @@ export async function POST(
     }
 
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-    const happenedAsDescribed = body?.happenedAsDescribed === true;
+    const happenedAsDescribed = body?.happenedAsDescribed !== false;
     const quality = typeof body?.quality === "number" ? body.quality : Number(body?.quality ?? 0);
-    const note = typeof body?.note === "string" ? body.note : null;
-    const visibility = typeof body?.visibility === "string" ? body.visibility : "private";
+    const reviewText = typeof body?.reviewText === "string" ? body.reviewText.trim() : typeof body?.note === "string" ? body.note.trim() : null;
+    const note = reviewText || null;
+    const visibility = typeof body?.visibility === "string" ? body.visibility : "public";
 
     const token = getBearerToken(req);
     if (!token) {

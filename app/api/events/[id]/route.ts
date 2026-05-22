@@ -157,6 +157,27 @@ export async function PATCH(
 
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
 
+    // Fast-path: status-only update (e.g. cancel)
+    if (body && Object.keys(body).length === 1 && typeof body.status === "string") {
+      const newStatus = body.status;
+      if (!["draft", "published", "cancelled"].includes(newStatus)) {
+        return NextResponse.json({ ok: false, error: "invalid_status" }, { status: 400 });
+      }
+      const token = getBearerToken(req);
+      if (!token) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+      const userClient = getSupabaseUserClient(token);
+      const { data: authData, error: authErr } = await userClient.auth.getUser(token);
+      if (authErr || !authData.user) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const service = getSupabaseServiceClient() as any;
+      const { data: ev, error: fetchErr } = await service.from("events").select("host_user_id").eq("id", eventId).maybeSingle();
+      if (fetchErr || !ev) return NextResponse.json({ ok: false, error: "Event not found." }, { status: 404 });
+      if ((ev as { host_user_id: string }).host_user_id !== authData.user.id) return NextResponse.json({ ok: false, error: "Not authorized." }, { status: 403 });
+      const { error: updateErr } = await service.from("events").update({ status: newStatus }).eq("id", eventId);
+      if (updateErr) return NextResponse.json({ ok: false, error: (updateErr as { message?: string }).message ?? "Update failed." }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     const description = typeof body?.description === "string" ? body.description : null;
     const eventType = typeof body?.eventType === "string" ? body.eventType : null;

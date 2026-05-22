@@ -226,7 +226,8 @@ export default function Nav({ title }: NavProps) {
   const isPublicContext = authResolved ? !isAuthenticated : false;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-[#2A2A2A] bg-[#0A0A0A]/95 backdrop-blur-md">
+    <>
+    <header className="sticky top-0 z-50 hidden border-b border-[#2A2A2A] bg-[#0A0A0A]/95 backdrop-blur-md md:block">
       <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center justify-between px-4">
         <div className="flex items-center gap-4 lg:gap-7">
           <Link href={isPublicContext ? "/" : "/connections"} className="flex items-center">
@@ -399,39 +400,38 @@ export default function Nav({ title }: NavProps) {
         )}
       </div>
       {title ? <div className="mx-auto w-full max-w-[1440px] px-4 pb-3 text-sm text-white/55 sm:px-6">{title}</div> : null}
-      {!isPublicContext ? (
-        <div className="md:hidden">
-          <nav className="fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0A0A0A]/96 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-2 backdrop-blur-md">
-            <div className="mx-auto grid max-w-[520px] grid-cols-6 gap-1">
-              {[...tabs, { href: accountHref, activeKey: "/account", label: t("nav.mySpace"), icon: "person" }].map((tab) => {
-                const active = activeTab === ("activeKey" in tab ? tab.activeKey : tab.href);
-                const showMessagesLoading = tab.href === "/messages" && unreadMessagesLoading;
-                const showMessagesBadge = tab.href === "/messages" && !unreadMessagesLoading && unreadMessageThreads > 0;
-                return (
-                  <Link
-                    key={`mobile-${tab.href}`}
-                    href={tab.href}
-                    className={cx(
-                      "relative flex min-h-[60px] flex-col items-center justify-center gap-[3px] rounded-2xl px-1 py-2 transition-colors active:scale-95",
-                      active ? "bg-cyan-300/12 text-white" : "text-gray-400 hover:text-white"
-                    )}
-                  >
-                    <span className={cx("material-symbols-outlined text-[22px]", active ? "text-[#22d3ee]" : "")}>{tab.icon}</span>
-                    <span className={cx("max-w-full truncate text-[11px] leading-none font-medium", active ? "text-white" : "text-gray-400")}>{tab.label}</span>
-                    {showMessagesBadge ? (
-                      <span className="absolute right-1.5 top-1.5 rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-1.5 py-[1px] text-[9px] font-black text-black">
-                        {unreadMessageThreads > 99 ? "99+" : unreadMessageThreads}
-                      </span>
-                    ) : null}
-                    {showMessagesLoading ? <span className="absolute right-1.5 top-1.5 h-4 w-6 animate-pulse rounded-full bg-white/[0.08]" /> : null}
-                    {active ? <span className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-[#22d3ee]" /> : null}
-                  </Link>
-                );
-              })}
-            </div>
-          </nav>
-        </div>
-      ) : null}
     </header>
+    {!isPublicContext ? (
+      <nav className="fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0A0A0A]/96 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-2 backdrop-blur-md md:hidden">
+        <div className="mx-auto grid max-w-[520px] grid-cols-6 gap-1">
+          {[...tabs, { href: accountHref, activeKey: "/account", label: t("nav.mySpace"), icon: "person" }].map((tab) => {
+            const active = activeTab === ("activeKey" in tab ? tab.activeKey : tab.href);
+            const showMessagesLoading = tab.href === "/messages" && unreadMessagesLoading;
+            const showMessagesBadge = tab.href === "/messages" && !unreadMessagesLoading && unreadMessageThreads > 0;
+            return (
+              <Link
+                key={`mobile-${tab.href}`}
+                href={tab.href}
+                className={cx(
+                  "relative flex min-h-[60px] flex-col items-center justify-center gap-[3px] rounded-2xl px-1 py-2 transition-colors active:scale-95",
+                  active ? "bg-cyan-300/12 text-white" : "text-gray-400 hover:text-white"
+                )}
+              >
+                <span className={cx("material-symbols-outlined text-[22px]", active ? "text-[#22d3ee]" : "")}>{tab.icon}</span>
+                <span className={cx("max-w-full truncate text-[11px] leading-none font-medium", active ? "text-white" : "text-gray-400")}>{tab.label}</span>
+                {showMessagesBadge ? (
+                  <span className="absolute right-1.5 top-1.5 rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-1.5 py-[1px] text-[9px] font-black text-black">
+                    {unreadMessageThreads > 99 ? "99+" : unreadMessageThreads}
+                  </span>
+                ) : null}
+                {showMessagesLoading ? <span className="absolute right-1.5 top-1.5 h-4 w-6 animate-pulse rounded-full bg-white/[0.08]" /> : null}
+                {active ? <span className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-[#22d3ee]" /> : null}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
+    ) : null}
+    </>
   );
 }

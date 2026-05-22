@@ -409,7 +409,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
           if (tp.base_country) {
             const iso = countriesData.find((c) => c.name === tp.base_country)?.isoCode ?? tp.base_country;
-            getCitiesOfCountry(iso).then((cities) => { if (!cancelled) setBaseCountryCities(cities); }).catch(() => {});
+            getCitiesOfCountry(iso).then((cities) => { if (!cancelled) setBaseCountryCities(cities); }).catch((err) => { console.warn("[get-cities] Failed:", err instanceof Error ? err.message : err); });
           }
         }
 
@@ -659,7 +659,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     });
     if (ev.country) {
       const iso = countriesAll.find((c) => c.name === ev.country)?.isoCode ?? ev.country;
-      void getCitiesOfCountry(iso).then(setEventCities).catch(() => {});
+      void getCitiesOfCountry(iso).then(setEventCities).catch((err) => { console.warn("[get-cities] Failed:", err instanceof Error ? err.message : err); });
     } else {
       setEventCities([]);
     }
@@ -1014,7 +1014,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                       setBaseCity("");
                       setBaseCountryCities([]);
                       const iso = countriesAll.find((country) => country.name === nextCountry)?.isoCode ?? nextCountry;
-                      void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
+                      void getCitiesOfCountry(iso).then(setBaseCountryCities).catch((err) => { console.warn("[get-cities] Failed:", err instanceof Error ? err.message : err); });
                     }}
                     buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
                   />
@@ -1027,7 +1027,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                     setBaseCountryCities([]);
                     if (e.target.value) {
                       const iso = countriesAll.find((c) => c.name === e.target.value)?.isoCode ?? e.target.value;
-                      void getCitiesOfCountry(iso).then(setBaseCountryCities).catch(() => {});
+                      void getCitiesOfCountry(iso).then(setBaseCountryCities).catch((err) => { console.warn("[get-cities] Failed:", err instanceof Error ? err.message : err); });
                     }
                   }}
                   className="mt-1.5 hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none sm:block"
@@ -1558,7 +1558,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                           setEventDraft((d) => ({ ...d, country, city: "" }));
                           setEventCities([]);
                           const iso = countriesAll.find((c) => c.name === country)?.isoCode ?? country;
-                          void getCitiesOfCountry(iso).then(setEventCities).catch(() => {});
+                          void getCitiesOfCountry(iso).then(setEventCities).catch((err) => { console.warn("[get-cities] Failed:", err instanceof Error ? err.message : err); });
                         }}
                         buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
                       />
@@ -1571,7 +1571,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                         setEventCities([]);
                         if (country) {
                           const iso = countriesAll.find((c) => c.name === country)?.isoCode ?? country;
-                          void getCitiesOfCountry(iso).then(setEventCities).catch(() => {});
+                          void getCitiesOfCountry(iso).then(setEventCities).catch((err) => { console.warn("[get-cities] Failed:", err instanceof Error ? err.message : err); });
                         }
                       }}
                       className="hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 sm:block"

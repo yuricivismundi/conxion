@@ -29,7 +29,9 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         items: [
           "Discover social dancers, teachers, organizers, DJs, and artists",
           "10 connection requests per month",
-          "Up to 10 active chat threads",
+          "10 chat activations per month (resets on the 1st of each month)",
+          "Each activated chat stays open for 30 days from activation",
+          "Activity, trip & hosting chats are free — don't use activations",
         ],
       },
       {
@@ -48,6 +50,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
           "Create up to 2 events per month",
           "Up to 5 private groups total",
           "5 activity requests per month",
+          "10 event invites per month",
+          "5 teacher booking requests per month",
         ],
       },
       {
@@ -103,7 +107,9 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
         title: "Discovery",
         items: [
           "60 connection requests per month",
-          "Up to 30 active chat threads",
+          "30 chat activations per month (resets on your renewal date)",
+          "Each activated chat stays open for 30 days from activation",
+          "Activity, trip & hosting chats are free — don't use activations",
           "Appear before free users in Discover",
         ],
       },
@@ -124,6 +130,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
           "Create up to 5 events per month",
           "Up to 10 private groups total",
           "15 activity requests per month",
+          "Unlimited event invites",
+          "10 teacher booking requests per month",
           "Your events appear before free users (Ideal for Organisers)",
         ],
       },

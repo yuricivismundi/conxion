@@ -68,6 +68,31 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (coverUrl) updates.cover_status = "pending";
     }
 
+    // Transfer ownership: update host, remove current user from members, keep them as regular member
+    if (typeof body?.transferTo === "string") {
+      const newHostId = body.transferTo.trim();
+      if (!newHostId) return NextResponse.json({ ok: false, error: "Invalid transferTo user." }, { status: 400 });
+      // Verify new host is a member
+      const { data: memberCheck } = await service.from("group_members").select("user_id").eq("group_id", groupId).eq("user_id", newHostId).maybeSingle();
+      if (!memberCheck) return NextResponse.json({ ok: false, error: "That person is not a member of the group." }, { status: 400 });
+      // Transfer host
+      const { error: transferErr } = await service.from("groups").update({ host_user_id: newHostId }).eq("id", groupId);
+      if (transferErr) return NextResponse.json({ ok: false, error: (transferErr as { message?: string }).message ?? "Transfer failed." }, { status: 500 });
+      // Update old host's member role to member (if they stay) or remove them
+      if (body?.leaveAfterTransfer === true) {
+        await service.from("group_members").delete().eq("group_id", groupId).eq("user_id", userId);
+        // Archive their thread participation
+        const threadRes = await service.from("threads").select("id").eq("group_id", groupId).eq("thread_type", "group").maybeSingle();
+        const threadId = (threadRes.data as { id?: string } | null)?.id ?? null;
+        if (threadId) {
+          await service.from("thread_participants").update({ archived_at: new Date().toISOString() }).eq("thread_id", threadId).eq("user_id", userId);
+        }
+      } else {
+        await service.from("group_members").update({ role: "member" }).eq("group_id", groupId).eq("user_id", userId);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     if (Object.keys(updates).length > 0) {
       const { error: updateErr } = await service.from("groups").update(updates).eq("id", groupId);
       if (updateErr) {

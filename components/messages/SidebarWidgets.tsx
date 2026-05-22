@@ -134,21 +134,23 @@ export function SidebarActionRow({
   title,
   subtitle,
   onClick,
+  danger,
 }: {
   icon: string;
   title: string;
   subtitle?: string;
   onClick?: () => void;
+  danger?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-start gap-3 rounded-xl px-0.5 py-1.5 text-left transition hover:text-cyan-100"
+      className={`flex w-full items-start gap-3 rounded-xl px-0.5 py-1.5 text-left transition ${danger ? "hover:text-red-300" : "hover:text-cyan-100"}`}
     >
-      <span className="material-symbols-outlined mt-0.5 text-[18px] text-white/70">{icon}</span>
+      <span className={`material-symbols-outlined mt-0.5 text-[18px] ${danger ? "text-red-400/70" : "text-white/70"}`}>{icon}</span>
       <span className="min-w-0">
-        <span className="block text-[13px] font-medium text-white">{title}</span>
+        <span className={`block text-[13px] font-medium ${danger ? "text-red-300/90" : "text-white"}`}>{title}</span>
         {subtitle ? <span className="block text-[11px] leading-relaxed text-white/45">{subtitle}</span> : null}
       </span>
     </button>

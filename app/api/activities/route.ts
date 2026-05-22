@@ -3,6 +3,8 @@ import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import { encodeCursor, decodeCursor, validatePaginationLimit, PaginationResponse } from "@/lib/pagination/cursor";
+import { checkDirectInviteRateLimit } from "@/lib/activities/direct-invite-limits";
 import {
   ACTIVITY_TYPES,
   LINKED_MEMBER_ACTIVITY_TYPES,
@@ -26,6 +28,8 @@ type CreateActivityPayload = {
   startAt?: string | null;
   endAt?: string | null;
   linkedMemberUserId?: string | null;
+  /** When true, skips the accepted-base-context requirement (profile direct invite flow) */
+  directInvite?: boolean;
 };
 
 const LINKED_MEMBER_ELIGIBLE_ACTIVITY_TYPES = new Set(LINKED_MEMBER_ACTIVITY_TYPES);
@@ -271,6 +275,206 @@ async function resolveConnectionThreadId(params: {
   return threadId;
 }
 
+async function resolveDirectThreadId(params: {
+  service: ReturnType<typeof getSupabaseServiceClient>;
+  actorId: string;
+  recipientId: string;
+}): Promise<{ dbId: string; token: string } | null> {
+  const svc = params.service;
+  const { actorId, recipientId } = params;
+
+  // 1. Prefer an existing accepted connection thread — activity contexts belong there.
+  const connRes = await svc
+    .from("connections")
+    .select("id")
+    .eq("status", "accepted")
+    .or(
+      `and(requester_id.eq.${actorId},target_id.eq.${recipientId}),and(requester_id.eq.${recipientId},target_id.eq.${actorId})`
+    )
+    .limit(1)
+    .maybeSingle();
+  if (!connRes.error && (connRes.data as { id?: string } | null)?.id) {
+    const connectionId = (connRes.data as unknown as { id: string }).id;
+    const connThread = await svc
+      .from("threads")
+      .select("id")
+      .eq("thread_type", "connection")
+      .eq("connection_id", connectionId)
+      .limit(1)
+      .maybeSingle();
+    if (!connThread.error && (connThread.data as { id?: string } | null)?.id) {
+      return { dbId: (connThread.data as unknown as { id: string }).id, token: `conn:${connectionId}` };
+    }
+  }
+
+  // 2. Find an existing direct thread via thread_participants
+  const actorThreads = await svc
+    .from("thread_participants")
+    .select("thread_id")
+    .eq("user_id", actorId);
+
+  if (!actorThreads.error && actorThreads.data?.length) {
+    const actorIds = (actorThreads.data as Array<{ thread_id?: string }>)
+      .map((r) => r.thread_id)
+      .filter((id): id is string => Boolean(id));
+
+    if (actorIds.length > 0) {
+      const recipThreads = await svc
+        .from("thread_participants")
+        .select("thread_id")
+        .eq("user_id", recipientId)
+        .in("thread_id", actorIds.slice(0, 100));
+
+      if (!recipThreads.error && recipThreads.data?.length) {
+        const sharedIds = (recipThreads.data as Array<{ thread_id?: string }>)
+          .map((r) => r.thread_id)
+          .filter((id): id is string => Boolean(id));
+
+        if (sharedIds.length > 0) {
+          const directThread = await svc
+            .from("threads")
+            .select("id")
+            .eq("thread_type", "direct")
+            .in("id", sharedIds.slice(0, 100))
+            .limit(1)
+            .maybeSingle();
+
+          if (!directThread.error && (directThread.data as { id?: string } | null)?.id) {
+            const id = (directThread.data as unknown as { id: string }).id;
+            return { dbId: id, token: `direct:${id}` };
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Find via direct_user_low/high (canonical direct thread columns)
+  const [userLow, userHigh] = [actorId, recipientId].sort();
+  const byCanonical = await svc
+    .from("threads")
+    .select("id")
+    .eq("thread_type", "direct")
+    .eq("direct_user_low", userLow)
+    .eq("direct_user_high", userHigh)
+    .limit(1)
+    .maybeSingle();
+  if (!byCanonical.error && (byCanonical.data as { id?: string } | null)?.id) {
+    const id = (byCanonical.data as unknown as { id: string }).id;
+    return { dbId: id, token: `direct:${id}` };
+  }
+
+  // 4. Create new direct thread
+  const created = await svc
+    .from("threads")
+    .insert({
+      thread_type: "direct",
+      created_by: actorId,
+      direct_user_low: userLow,
+      direct_user_high: userHigh,
+      last_message_at: new Date().toISOString(),
+    } as never)
+    .select("id")
+    .maybeSingle();
+
+  if (!created.error && (created.data as { id?: string } | null)?.id) {
+    const newThreadId = (created.data as unknown as { id: string }).id;
+    await svc.from("thread_participants").insert([
+      { thread_id: newThreadId, user_id: actorId },
+      { thread_id: newThreadId, user_id: recipientId },
+    ] as never).then(() => null, () => null);
+    return { dbId: newThreadId, token: `direct:${newThreadId}` };
+  }
+
+  // 5. Race condition retry via canonical columns
+  if (isDuplicateError(created.error ?? {})) {
+    const retry = await svc
+      .from("threads")
+      .select("id")
+      .eq("thread_type", "direct")
+      .eq("direct_user_low", userLow)
+      .eq("direct_user_high", userHigh)
+      .limit(1)
+      .maybeSingle();
+    if (!retry.error && (retry.data as { id?: string } | null)?.id) {
+      const id = (retry.data as unknown as { id: string }).id;
+      return { dbId: id, token: `direct:${id}` };
+    }
+  }
+
+  return null;
+}
+
+export async function GET(req: Request) {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "Missing auth token." }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+    const limit = validatePaginationLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor");
+    const filter = url.searchParams.get("filter") || "pending"; // pending, accepted, declined, all
+
+    const userClient = getSupabaseUserClient(token);
+    const { data: authData, error: authErr } = await userClient.auth.getUser(token);
+    if (authErr || !authData.user) {
+      return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    const decodedCursor = cursor ? decodeCursor(cursor) : null;
+    const pageSize = limit + 1;
+
+    let query = userClient.from("activities").select(
+      "id,thread_id,requester_id,recipient_id,activity_type,status,title,note,start_at,end_at,metadata,created_at,updated_at"
+    );
+
+    // Filter by user involvement
+    query = query.or(`requester_id.eq.${authData.user.id},recipient_id.eq.${authData.user.id}`);
+
+    // Apply status filter
+    if (filter === "pending") {
+      query = query.eq("status", "pending");
+    } else if (filter === "accepted") {
+      query = query.eq("status", "accepted");
+    } else if (filter === "declined") {
+      query = query.in("status", ["declined", "cancelled"]);
+    }
+    // filter === "all" has no additional status filter
+
+    // Cursor-based pagination
+    if (decodedCursor?.id) {
+      query = query.lt("created_at", decodedCursor.sortValue as string).lt("id", decodedCursor.id);
+    }
+
+    query = query.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
+
+    const { data, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    const items = (data ?? []).slice(0, limit);
+    const hasMore = (data ?? []).length > limit;
+    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.created_at ?? "") : null;
+
+    const response: PaginationResponse<typeof items> & { ok: boolean } = {
+      ok: true,
+      items,
+      cursor: nextCursor,
+      hasMore,
+    };
+
+    return NextResponse.json(response);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load activities." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: Request) {
   if (!validateCsrfOrigin(req)) return csrfError();
   try {
@@ -287,10 +491,35 @@ export async function POST(req: Request) {
     const rawActivityType = typeof body?.activityType === "string" ? body.activityType.trim() : "";
     const activityType = parseActivityType(rawActivityType);
     const linkedMemberUserId = typeof body?.linkedMemberUserId === "string" ? body.linkedMemberUserId.trim() : "";
+    const directInvite = Boolean(body?.directInvite);
 
-    if ((!requestedThreadId && !connectionId) || !recipientUserId || !rawActivityType) {
+    // Check directInvite rate limit before authentication
+    if (directInvite && req.headers.get("authorization")) {
+      const token = getBearerToken(req);
+      if (token) {
+        const tempUserClient = getSupabaseUserClient(token);
+        const { data: tempAuthData } = await tempUserClient.auth.getUser(token);
+        if (tempAuthData?.user) {
+          const rateLimit = checkDirectInviteRateLimit(tempAuthData.user.id);
+          if (!rateLimit.allowed) {
+            return NextResponse.json(
+              { ok: false, error: `Too many direct invites. Try again in ${Math.ceil((rateLimit.resetAt!.getTime() - Date.now()) / 1000 / 60)} minutes.` },
+              { status: 429 }
+            );
+          }
+        }
+      }
+    }
+
+    if (!recipientUserId || !rawActivityType) {
       return NextResponse.json(
-        { ok: false, error: "threadId or connectionId, recipientUserId, and activityType are required." },
+        { ok: false, error: "recipientUserId and activityType are required." },
+        { status: 400 }
+      );
+    }
+    if (!directInvite && !requestedThreadId && !connectionId) {
+      return NextResponse.json(
+        { ok: false, error: "threadId or connectionId is required (or use directInvite: true)." },
         { status: 400 }
       );
     }
@@ -335,6 +564,8 @@ export async function POST(req: Request) {
     }
 
     let threadId = requestedThreadId;
+    let threadToken: string | null = null;
+
     if (!threadId && connectionId) {
       threadId = (await resolveConnectionThreadId({
         service,
@@ -344,88 +575,99 @@ export async function POST(req: Request) {
       if (!threadId) {
         return NextResponse.json({ ok: false, error: "Failed to prepare activity thread." }, { status: 503 });
       }
+      threadToken = `conn:${connectionId}`;
+      await ensureThreadParticipantCompat({ service, threadId, userId: authData.user.id, includeLastReadAt: true });
+      await ensureThreadParticipantCompat({ service, threadId, userId: recipientUserId, includeLastReadAt: false });
+    }
 
-      await ensureThreadParticipantCompat({
+    if (!threadId && directInvite) {
+      const resolved = await resolveDirectThreadId({
         service,
-        threadId,
-        userId: authData.user.id,
-        includeLastReadAt: true,
+        actorId: authData.user.id,
+        recipientId: recipientUserId,
       });
-      await ensureThreadParticipantCompat({
-        service,
-        threadId,
-        userId: recipientUserId,
-        includeLastReadAt: false,
-      });
-    }
-
-    const participantsRes = await service
-      .from("thread_participants")
-      .select("user_id")
-      .eq("thread_id", threadId)
-      .in("user_id", [authData.user.id, recipientUserId]);
-
-    if (participantsRes.error) {
-      const message = participantsRes.error.message ?? "Failed to validate thread participants.";
-      const status = isMissingSchemaError(message) ? 503 : 500;
-      return NextResponse.json({ ok: false, error: message }, { status });
-    }
-
-    const participantIds = new Set(
-      ((participantsRes.data ?? []) as Array<{ user_id?: string | null }>)
-        .map((row) => (typeof row.user_id === "string" ? row.user_id : ""))
-        .filter(Boolean)
-    );
-    if (!participantIds.has(authData.user.id) || !participantIds.has(recipientUserId)) {
-      return NextResponse.json({ ok: false, error: "Both users must belong to the thread." }, { status: 403 });
-    }
-
-    let hasAcceptedBaseContext = false;
-
-    const threadContextsRes = await service
-      .from("thread_contexts")
-      .select("context_tag,status_tag")
-      .eq("thread_id", threadId);
-
-    if (threadContextsRes.error) {
-      const message = threadContextsRes.error.message ?? "Failed to validate thread state.";
-      const status = isMissingSchemaError(message) ? 503 : 500;
-      return NextResponse.json({ ok: false, error: message }, { status });
-    }
-
-    hasAcceptedBaseContext = ((threadContextsRes.data ?? []) as Array<{ context_tag?: string | null; status_tag?: string | null }>).some(
-      (row) => {
-        const tag = typeof row.context_tag === "string" ? row.context_tag : "";
-        return tag !== "activity" && isAcceptedStatus(row.status_tag);
+      if (!resolved) {
+        return NextResponse.json({ ok: false, error: "Failed to prepare activity thread." }, { status: 503 });
       }
-    );
+      threadId = resolved.dbId;
+      threadToken = resolved.token;
+      await ensureThreadParticipantCompat({ service, threadId, userId: authData.user.id, includeLastReadAt: true });
+      await ensureThreadParticipantCompat({ service, threadId, userId: recipientUserId, includeLastReadAt: false });
+    }
 
-    if (!hasAcceptedBaseContext && connectionId) {
-      const connectionRes = await service
-        .from("connections")
-        .select("status,blocked_by")
-        .eq("id", connectionId)
-        .maybeSingle();
+    // Validate that both participants belong to the thread (skip for directInvite — we just created/ensured it)
+    if (!directInvite) {
+      const participantsRes = await service
+        .from("thread_participants")
+        .select("user_id")
+        .eq("thread_id", threadId)
+        .in("user_id", [authData.user.id, recipientUserId]);
 
-      if (connectionRes.error) {
-        const message = connectionRes.error.message ?? "Failed to validate connection state.";
+      if (participantsRes.error) {
+        const message = participantsRes.error.message ?? "Failed to validate thread participants.";
         const status = isMissingSchemaError(message) ? 503 : 500;
         return NextResponse.json({ ok: false, error: message }, { status });
       }
 
-      const connectionRow = connectionRes.data as { status?: string | null; blocked_by?: string | null } | null;
-      hasAcceptedBaseContext = Boolean(
-        connectionRow &&
-          isAcceptedStatus(connectionRow.status) &&
-          !connectionRow.blocked_by
+      const participantIds = new Set(
+        ((participantsRes.data ?? []) as Array<{ user_id?: string | null }>)
+          .map((row) => (typeof row.user_id === "string" ? row.user_id : ""))
+          .filter(Boolean)
       );
+      if (!participantIds.has(authData.user.id) || !participantIds.has(recipientUserId)) {
+        return NextResponse.json({ ok: false, error: "Both users must belong to the thread." }, { status: 403 });
+      }
     }
 
-    if (!hasAcceptedBaseContext) {
-      return NextResponse.json(
-        { ok: false, error: "Activities require an accepted connection, trip, hosting, or event context first." },
-        { status: 409 }
+    // Check for accepted base context (skip for direct invites — the activity IS the first context)
+    if (!directInvite) {
+      let hasAcceptedBaseContext = false;
+
+      const threadContextsRes = await service
+        .from("thread_contexts")
+        .select("context_tag,status_tag")
+        .eq("thread_id", threadId);
+
+      if (threadContextsRes.error) {
+        const message = threadContextsRes.error.message ?? "Failed to validate thread state.";
+        const status = isMissingSchemaError(message) ? 503 : 500;
+        return NextResponse.json({ ok: false, error: message }, { status });
+      }
+
+      hasAcceptedBaseContext = ((threadContextsRes.data ?? []) as Array<{ context_tag?: string | null; status_tag?: string | null }>).some(
+        (row) => {
+          const tag = typeof row.context_tag === "string" ? row.context_tag : "";
+          return tag !== "activity" && isAcceptedStatus(row.status_tag);
+        }
       );
+
+      if (!hasAcceptedBaseContext && connectionId) {
+        const connectionRes = await service
+          .from("connections")
+          .select("status,blocked_by")
+          .eq("id", connectionId)
+          .maybeSingle();
+
+        if (connectionRes.error) {
+          const message = connectionRes.error.message ?? "Failed to validate connection state.";
+          const status = isMissingSchemaError(message) ? 503 : 500;
+          return NextResponse.json({ ok: false, error: message }, { status });
+        }
+
+        const connectionRow = connectionRes.data as { status?: string | null; blocked_by?: string | null } | null;
+        hasAcceptedBaseContext = Boolean(
+          connectionRow &&
+            isAcceptedStatus(connectionRow.status) &&
+            !connectionRow.blocked_by
+        );
+      }
+
+      if (!hasAcceptedBaseContext) {
+        return NextResponse.json(
+          { ok: false, error: "Activities require an accepted connection, trip, hosting, or event context first." },
+          { status: 409 }
+        );
+      }
     }
 
     const pairLimitCheck = await validatePairActivityMonthlyLimit({
@@ -537,7 +779,7 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ ok: true, id: activityId, threadId });
+    return NextResponse.json({ ok: true, id: activityId, threadId: threadToken ?? threadId });
   } catch (error: unknown) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Failed to create activity." },

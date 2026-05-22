@@ -1,26 +1,58 @@
 {
   "name": "ConXion",
   "short_name": "ConXion",
-  "description": "Connect, practice, travel, improve.",
-  "start_url": "/connections",
+  "description": "Connect, practice, travel, and grow with the dance community.",
+  "start_url": "/discover",
   "display": "standalone",
   "background_color": "#0A0A0A",
   "theme_color": "#0A0A0A",
   "orientation": "portrait-primary",
+  "lang": "en",
+  "categories": ["social", "sports", "lifestyle"],
   "icons": [
     {
       "src": "/branding/conxion_app_favicon_icon_clean.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/branding/conxion_app_favicon_icon_clean.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/branding/CONXION-2-favicon.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/branding/CONXION-2-favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
-  "categories": ["social", "sports", "lifestyle"],
-  "lang": "en"
+  "shortcuts": [
+    {
+      "name": "Messages",
+      "short_name": "Messages",
+      "url": "/messages",
+      "icons": [{ "src": "/branding/conxion_app_favicon_icon_clean.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Discover",
+      "short_name": "Discover",
+      "url": "/discover",
+      "icons": [{ "src": "/branding/conxion_app_favicon_icon_clean.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Events",
+      "short_name": "Events",
+      "url": "/events",
+      "icons": [{ "src": "/branding/conxion_app_favicon_icon_clean.png", "sizes": "96x96" }]
+    }
+  ]
 }

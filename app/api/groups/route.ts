@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { buildRateLimitKey, consumeRateLimit } from "@/lib/security/rate-limit";
 import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
+import { encodeCursor, decodeCursor, validatePaginationLimit, PaginationResponse } from "@/lib/pagination/cursor";
 
 function getBearerToken(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
@@ -21,6 +22,83 @@ function getUserClient(token: string) {
 function normalizeChatMode(value: unknown): "discussion" | "broadcast" {
   if (value === "broadcast") return "broadcast";
   return "discussion";
+}
+
+export async function GET(req: Request) {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "Missing auth token." }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+    const limit = validatePaginationLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor");
+    const filter = url.searchParams.get("filter") || "member"; // member, admin, all
+
+    const userClient = getUserClient(token);
+    const { data: authData, error: authErr } = await userClient.auth.getUser(token);
+    if (authErr || !authData.user) {
+      return NextResponse.json({ ok: false, error: "Invalid auth token." }, { status: 401 });
+    }
+
+    const decodedCursor = cursor ? decodeCursor(cursor) : null;
+    const pageSize = limit + 1;
+
+    let memberQuery = userClient.from("group_members").select("group_id");
+    if (filter === "admin") {
+      memberQuery = memberQuery.eq("role", "host");
+    } else if (filter === "member") {
+      memberQuery = memberQuery.eq("role", "member");
+    }
+    // filter === "all" has no role restriction
+    memberQuery = memberQuery.eq("user_id", authData.user.id);
+
+    const { data: memberData, error: memberErr } = await memberQuery;
+    if (memberErr) {
+      return NextResponse.json({ ok: false, error: memberErr.message }, { status: 400 });
+    }
+
+    const groupIds = (memberData ?? []).map((m: Record<string, unknown>) => m.group_id as string).filter(Boolean);
+    if (groupIds.length === 0) {
+      return NextResponse.json({ ok: true, items: [], cursor: null, hasMore: false });
+    }
+
+    let query = userClient.from("groups").select("id,title,description,chat_mode,city,country,cover_url,host_user_id,status,created_at,updated_at").in("id", groupIds);
+
+    query = query.eq("status", "active");
+
+    // Cursor-based pagination
+    if (decodedCursor?.id) {
+      query = query.lt("created_at", decodedCursor.sortValue as string).lt("id", decodedCursor.id);
+    }
+
+    query = query.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
+
+    const { data, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    const items = (data ?? []).slice(0, limit);
+    const hasMore = (data ?? []).length > limit;
+    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.created_at ?? "") : null;
+
+    const response: PaginationResponse<typeof items> & { ok: boolean } = {
+      ok: true,
+      items,
+      cursor: nextCursor,
+      hasMore,
+    };
+
+    return NextResponse.json(response);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load groups." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {

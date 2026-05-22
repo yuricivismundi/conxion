@@ -65,71 +65,86 @@ export async function POST(req: Request) {
       return jsonError("Bookings are limited to the next 3 months.", 400);
     }
 
-    const acceptedRes = await auth.serviceClient
-      .from("teacher_session_bookings")
+    // Mark availability as unavailable (atomically prevents race condition on concurrent bookings)
+    const updateAvailRes = await auth.serviceClient
+      .from("teacher_session_availability")
+      .update({ is_available: false })
+      .eq("id", availability.id)
+      .eq("is_available", true)
       .select("id")
-      .eq("availability_id", availability.id)
-      .eq("status", "accepted")
       .maybeSingle();
-    if (acceptedRes.error) throw acceptedRes.error;
-    if (acceptedRes.data) return jsonError("This slot has already been booked.", 409);
+    if (updateAvailRes.error) throw updateAvailRes.error;
+    if (!updateAvailRes.data) return jsonError("This slot is no longer available.", 409);
 
-    const insertRes = await auth.serviceClient
-      .from("teacher_session_bookings")
-      .insert({
-        teacher_id: teacherId,
-        student_id: auth.userId,
-        availability_id: availability.id,
-        service_type: serviceType,
-        session_date: availability.availability_date,
-        session_time: availability.start_time,
-        duration_min: durationMinutesFromTimeRange(availability.start_time, availability.end_time),
-        note,
-        status: "pending",
-      } as never)
-      .select("id,teacher_id,student_id,availability_id,service_type,session_date,session_time,duration_min,note,status,created_at,accepted_at,declined_at")
-      .single();
-    if (insertRes.error) throw insertRes.error;
-
-    const booking = insertRes.data as {
-      id: string; teacher_id: string; student_id: string; service_type: string;
-      session_date: string; session_time: string; duration_min: number | null; note: string | null;
-    };
-
-    // Best-effort: create/reuse DM thread and emit booking card event
     try {
-      const threadId = await ensureTeacherBookingThread({
-        serviceClient: auth.serviceClient,
-        teacherId: booking.teacher_id,
-        studentId: booking.student_id,
-        actorUserId: auth.userId,
-      });
-      await upsertTeacherBookingContext({
-        serviceClient: auth.serviceClient,
-        threadId,
-        meta: {
-          bookingId: booking.id,
+      const insertRes = await auth.serviceClient
+        .from("teacher_session_bookings")
+        .insert({
+          teacher_id: teacherId,
+          student_id: auth.userId,
+          availability_id: availability.id,
+          service_type: serviceType,
+          session_date: availability.availability_date,
+          session_time: availability.start_time,
+          duration_min: durationMinutesFromTimeRange(availability.start_time, availability.end_time),
+          note,
+          status: "pending",
+        } as never)
+        .select("id,teacher_id,student_id,availability_id,service_type,session_date,session_time,duration_min,note,status,created_at,accepted_at,declined_at")
+        .single();
+      if (insertRes.error) throw insertRes.error;
+
+      const booking = insertRes.data as {
+        id: string; teacher_id: string; student_id: string; service_type: string;
+        session_date: string; session_time: string; duration_min: number | null; note: string | null;
+      };
+
+      // Best-effort: create/reuse DM thread and emit booking card event
+      try {
+        const threadId = await ensureTeacherBookingThread({
+          serviceClient: auth.serviceClient,
           teacherId: booking.teacher_id,
           studentId: booking.student_id,
-          serviceType: booking.service_type,
-          sessionDate: booking.session_date,
-          sessionTime: booking.session_time,
-          durationMin: booking.duration_min,
-          note: booking.note,
-        },
-        statusTag: "pending",
-      });
-      await emitTeacherBookingEvent({
-        serviceClient: auth.serviceClient,
-        threadId,
-        senderId: auth.userId,
-        body: `Booking request for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}`,
-        statusTag: "pending",
-        metadata: { booking_id: booking.id },
-      });
-    } catch { /* non-fatal */ }
+          actorUserId: auth.userId,
+        });
+        await upsertTeacherBookingContext({
+          serviceClient: auth.serviceClient,
+          threadId,
+          meta: {
+            bookingId: booking.id,
+            teacherId: booking.teacher_id,
+            studentId: booking.student_id,
+            serviceType: booking.service_type,
+            sessionDate: booking.session_date,
+            sessionTime: booking.session_time,
+            durationMin: booking.duration_min,
+            note: booking.note,
+          },
+          statusTag: "pending",
+        });
+        await emitTeacherBookingEvent({
+          serviceClient: auth.serviceClient,
+          threadId,
+          senderId: auth.userId,
+          body: `Booking request for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}`,
+          statusTag: "pending",
+          metadata: { booking_id: booking.id },
+        });
+      } catch { /* non-fatal */ }
 
-    return NextResponse.json({ ok: true, booking: insertRes.data });
+      return NextResponse.json({ ok: true, booking: insertRes.data });
+    } catch (insertErr) {
+      // Restore availability if booking insertion failed
+      await auth.serviceClient
+        .from("teacher_session_availability")
+        .update({ is_available: true })
+        .eq("id", availability.id)
+        .catch(() => {
+          // If restore also fails, log and continue (slot will be stuck unavailable, but this is rare)
+          console.error("[teacher-bookings] Failed to restore availability after booking insert failure");
+        });
+      throw insertErr;
+    }
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Could not create the booking request." },

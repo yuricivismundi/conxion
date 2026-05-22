@@ -1,5 +1,11 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import InfoPageShell from "@/components/InfoPageShell";
+
+export const metadata: Metadata = {
+  title: "Trust & Safety — ConXion",
+  description: "ConXion's Trust & Safety guidelines for hosting, travelling, references, and community conduct. Know your rights and responsibilities on the platform.",
+};
 
 type Section = {
   id: string;

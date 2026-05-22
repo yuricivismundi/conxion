@@ -13,6 +13,7 @@ export type PendingPairRequestConflict = {
   label: string;
   message: string;
   requestId: string | null;
+  threadToken: string | null;
 };
 
 const PENDING_REQUEST_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -25,26 +26,27 @@ function pairOrClause(leftField: string, rightField: string, leftUserId: string,
   return `and(${leftField}.eq.${leftUserId},${rightField}.eq.${rightUserId}),and(${leftField}.eq.${rightUserId},${rightField}.eq.${leftUserId})`;
 }
 
-function createConflict(kind: PendingPairRequestKind, label: string, requestId?: string | null): PendingPairRequestConflict {
+function createConflict(kind: PendingPairRequestKind, label: string, requestId?: string | null, threadToken?: string | null): PendingPairRequestConflict {
   return {
     kind,
     label,
     requestId: requestId ?? null,
+    threadToken: threadToken ?? null,
     message: `There is already a pending ${label} with this member.`,
   };
 }
 
-async function hasLivePendingThreadContext(
+async function getLivePendingThreadContext(
   serviceClient: SupabaseServiceClient,
   sourceTable: string,
   sourceId: string | null | undefined
-) {
+): Promise<{ threadId: string; threadToken: string } | null> {
   const resolvedSourceId = sourceId?.trim();
-  if (!resolvedSourceId) return false;
+  if (!resolvedSourceId) return null;
 
   const contextRes = await serviceClient
     .from("thread_contexts")
-    .select("status_tag,created_at")
+    .select("thread_id,status_tag,created_at")
     .eq("source_table", sourceTable)
     .eq("source_id", resolvedSourceId)
     .order("updated_at", { ascending: false })
@@ -52,15 +54,40 @@ async function hasLivePendingThreadContext(
     .maybeSingle();
 
   if (contextRes.error) throw contextRes.error;
-  const row = (contextRes.data ?? null) as { status_tag?: string | null; created_at?: string | null } | null;
-  if (!row) return true;
+  const row = (contextRes.data ?? null) as { thread_id?: string | null; status_tag?: string | null; created_at?: string | null } | null;
+  if (!row?.thread_id) return null;
 
   const statusTag = (row.status_tag ?? "").trim().toLowerCase();
-  if (statusTag !== "pending" && statusTag !== "inquiry_followup_pending") return false;
+  if (statusTag !== "pending" && statusTag !== "inquiry_followup_pending") return null;
 
   const createdAt = row.created_at ? Date.parse(row.created_at) : NaN;
-  if (!Number.isFinite(createdAt)) return true;
-  return createdAt >= Date.now() - PENDING_REQUEST_WINDOW_MS;
+  if (Number.isFinite(createdAt) && createdAt < Date.now() - PENDING_REQUEST_WINDOW_MS) return null;
+
+  const threadId = row.thread_id.trim();
+
+  // Resolve thread type to build the correct navigation token
+  const threadRes = await serviceClient
+    .from("threads")
+    .select("thread_type,connection_id")
+    .eq("id", threadId)
+    .maybeSingle();
+
+  if (threadRes.error || !threadRes.data) return { threadId, threadToken: `direct:${threadId}` };
+  const t = threadRes.data as { thread_type?: string | null; connection_id?: string | null };
+  const token =
+    t.thread_type === "connection" && t.connection_id
+      ? `conn:${t.connection_id}`
+      : `direct:${threadId}`;
+
+  return { threadId, threadToken: token };
+}
+
+async function hasLivePendingThreadContext(
+  serviceClient: SupabaseServiceClient,
+  sourceTable: string,
+  sourceId: string | null | undefined
+) {
+  return (await getLivePendingThreadContext(serviceClient, sourceTable, sourceId)) !== null;
 }
 
 async function findPendingConnectionConflict(
@@ -80,8 +107,9 @@ async function findPendingConnectionConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null } | null;
   if (!row?.id) return null;
-  if (!(await hasLivePendingThreadContext(serviceClient, "connections", row.id))) return null;
-  return createConflict("connection", "connection request", row.id);
+  const threadCtx = await getLivePendingThreadContext(serviceClient, "connections", row.id);
+  if (!threadCtx) return null;
+  return createConflict("connection", "connection request", row.id, threadCtx.threadToken);
 }
 
 async function findPendingHostingConflict(
@@ -102,9 +130,10 @@ async function findPendingHostingConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null; request_type?: string | null } | null;
   if (!row?.id) return null;
-  if (!(await hasLivePendingThreadContext(serviceClient, "hosting_requests", row.id))) return null;
+  const threadCtx = await getLivePendingThreadContext(serviceClient, "hosting_requests", row.id);
+  if (!threadCtx) return null;
   const label = row.request_type === "offer_to_host" ? "host offer" : "hosting request";
-  return createConflict("hosting_request", label, row.id);
+  return createConflict("hosting_request", label, row.id, threadCtx.threadToken);
 }
 
 async function findPendingServiceInquiryConflict(
@@ -125,8 +154,9 @@ async function findPendingServiceInquiryConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null } | null;
   if (!row?.id) return null;
-  if (!(await hasLivePendingThreadContext(serviceClient, "service_inquiries", row.id))) return null;
-  return createConflict("service_inquiry", "teaching inquiry", row.id);
+  const threadCtx = await getLivePendingThreadContext(serviceClient, "service_inquiries", row.id);
+  if (!threadCtx) return null;
+  return createConflict("service_inquiry", "teaching inquiry", row.id, threadCtx.threadToken);
 }
 
 async function findPendingActivityConflict(
@@ -147,9 +177,26 @@ async function findPendingActivityConflict(
   if (pendingRes.error) throw pendingRes.error;
   const row = (pendingRes.data ?? null) as { id?: string | null; activity_type?: string | null } | null;
   if (!row?.id) return null;
-  if (!(await hasLivePendingThreadContext(serviceClient, "activities", row.id))) return null;
+  const threadCtx = await getLivePendingThreadContext(serviceClient, "activities", row.id);
+  if (!threadCtx) return null;
+
+  // Always prefer the most recent accepted connection thread so the user lands
+  // on the canonical thread (not a stale direct or older connection thread).
+  let resolvedToken = threadCtx.threadToken;
+  const connRes = await serviceClient
+    .from("connections")
+    .select("id")
+    .eq("status", "accepted")
+    .or(pairOrClause("requester_id", "target_id", actorUserId, otherUserId))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!connRes.error && connRes.data) {
+    resolvedToken = `conn:${(connRes.data as { id: string }).id}`;
+  }
+
   const activityLabel = row.activity_type ? `${activityTypeLabel(row.activity_type)} activity request` : "activity request";
-  return createConflict("activity", activityLabel.toLowerCase(), row.id);
+  return createConflict("activity", activityLabel.toLowerCase(), row.id, resolvedToken);
 }
 
 async function findPendingTripRequestConflictForDirection(
@@ -191,8 +238,9 @@ async function findPendingTripRequestConflictForDirection(
 
   const match = pendingRows.find((row) => typeof row.trip_id === "string" && ownedTripIds.has(row.trip_id));
   if (!match?.id) return null;
-  if (!(await hasLivePendingThreadContext(serviceClient, "trip_requests", match.id))) return null;
-  return createConflict("trip_request", "trip request", match.id);
+  const threadCtx = await getLivePendingThreadContext(serviceClient, "trip_requests", match.id);
+  if (!threadCtx) return null;
+  return createConflict("trip_request", "trip request", match.id, threadCtx.threadToken);
 }
 
 export async function findPendingPairRequestConflict(
