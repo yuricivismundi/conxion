@@ -7,8 +7,9 @@ import { isPaymentVerified } from "@/lib/verification";
 // Allowed origins by environment
 const ALLOWED_ORIGINS = {
   production: [
-    'https://conxion.app',
-    'https://www.conxion.app',
+    'https://conxion.social',
+    'https://www.conxion.social',
+    'https://conxion.vercel.app',
   ],
   staging: [
     'https://staging.conxion.social',
