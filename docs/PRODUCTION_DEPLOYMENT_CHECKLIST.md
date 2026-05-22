@@ -25,12 +25,13 @@
 #### CORS Origin Validation
 - **Test:** Send POST request from disallowed origin
 - **Expected:** 403 CORS policy violation error
+- **Staging Origins Only:** `https://staging.conxion.social`, `http://localhost:3000`
 - **Production Origins Only:** `https://conxion.app`, `https://www.conxion.app`
 - **Status:** ✅ Implemented in proxy.ts
 
 ```bash
 # Test disallowed origin rejection
-curl -X POST https://conxion.app/api/syncs/action \
+curl -X POST https://staging.conxion.social/api/syncs/action \
   -H "Origin: https://evil.com" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer {token}"

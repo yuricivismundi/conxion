@@ -11,7 +11,7 @@ const ALLOWED_ORIGINS = {
     'https://www.conxion.app',
   ],
   staging: [
-    'https://staging.conxion.app',
+    'https://staging.conxion.social',
     'http://localhost:3000',
   ],
   development: [
