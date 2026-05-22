@@ -135,14 +135,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, booking: insertRes.data });
     } catch (insertErr) {
       // Restore availability if booking insertion failed
-      await auth.serviceClient
-        .from("teacher_session_availability")
-        .update({ is_available: true } as never)
-        .eq("id", availability.id)
-        .catch(() => {
-          // If restore also fails, log and continue (slot will be stuck unavailable, but this is rare)
-          console.error("[teacher-bookings] Failed to restore availability after booking insert failure");
-        });
+      try {
+        await auth.serviceClient
+          .from("teacher_session_availability")
+          .update({ is_available: true } as never)
+          .eq("id", availability.id);
+      } catch {
+        // If restore also fails, log and continue (slot will be stuck unavailable, but this is rare)
+        console.error("[teacher-bookings] Failed to restore availability after booking insert failure");
+      }
       throw insertErr;
     }
   } catch (error) {
