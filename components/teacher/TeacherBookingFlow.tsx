@@ -274,7 +274,7 @@ export default function TeacherBookingFlow({
           </div>
         ) : null}
         {info ? (
-          <div className="flex items-start gap-3 rounded-2xl border border-[#5DD8D8]/30 bg-[#5DD8D8]/[0.07] px-4 py-3 text-sm text-[#5DD8D8]">
+          <div className="flex items-start gap-3 rounded-2xl border border-[#0df2f2]/30 bg-[#0df2f2]/[0.07] px-4 py-3 text-sm text-[#0df2f2]">
             <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px]">check_circle</span>
             {info}
           </div>
@@ -295,7 +295,7 @@ export default function TeacherBookingFlow({
         <div className="flex items-center justify-between px-4 pb-3 pt-4">
           <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
           {month.cells.some((c) => c.available) ? (
-            <span className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest" style={{ background: "rgba(93,216,216,0.1)", color: "#5DD8D8" }}>
+            <span className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest" style={{ background: "rgba(13,242,242,0.1)", color: "#0df2f2" }}>
               Available
             </span>
           ) : (
@@ -322,12 +322,12 @@ export default function TeacherBookingFlow({
                 className={[
                   "aspect-square rounded-lg text-[12px] font-bold transition-all",
                   selectedDate === cell.date
-                    ? "scale-110 shadow-[0_0_12px_rgba(93,216,216,0.35)] text-[#0a0e12]"
+                    ? "scale-110 shadow-[0_0_12px_rgba(13,242,242,0.35)] text-[#040a0f]"
                     : cell.available
-                      ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#5DD8D8]/30 hover:bg-[#5DD8D8]/[0.08] hover:text-[#5DD8D8]"
+                      ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#0df2f2]/30 hover:bg-[#0df2f2]/[0.08] hover:text-[#0df2f2]"
                       : "text-white/40 cursor-default",
                 ].join(" ")}
-                style={selectedDate === cell.date ? { background: "linear-gradient(135deg,#5DD8D8,#B670CC)" } : undefined}
+                style={selectedDate === cell.date ? { background: "linear-gradient(135deg,#0df2f2,#d93bff)" } : undefined}
               >
                 {dayNumber(cell.date)}
               </button>
@@ -397,7 +397,7 @@ export default function TeacherBookingFlow({
           {/* Dot indicators */}
           <div className="mt-3 flex justify-center gap-1.5">
             {calendarMonths.map((_, i) => (
-              <button key={i} type="button" onClick={() => setMobileMonthIndex(i)} className={["h-1.5 rounded-full transition-all", i === mobileMonthIndex ? "w-4 bg-[#5DD8D8]" : "w-1.5 bg-white/20"].join(" ")} />
+              <button key={i} type="button" onClick={() => setMobileMonthIndex(i)} className={["h-1.5 rounded-full transition-all", i === mobileMonthIndex ? "w-4 bg-[#0df2f2]" : "w-1.5 bg-white/20"].join(" ")} />
             ))}
           </div>
         </div>
@@ -475,17 +475,17 @@ export default function TeacherBookingFlow({
             className={[
               "group relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all",
               selectedAvailabilityId === slot.availabilityId
-                ? "border-[#B670CC]/40 text-white shadow-[0_0_20px_rgba(182,112,204,0.15)]"
+                ? "border-[#d93bff]/40 text-white shadow-[0_0_20px_rgba(217,59,255,0.15)]"
                 : "border-white/[0.07] bg-white/[0.03] text-white/70 hover:border-white/[0.12] hover:bg-white/[0.05] hover:text-white",
             ].join(" ")}
             style={
               selectedAvailabilityId === slot.availabilityId
-                ? { background: "linear-gradient(135deg,rgba(93,216,216,0.1),rgba(182,112,204,0.12))" }
+                ? { background: "linear-gradient(135deg,rgba(13,242,242,0.1),rgba(217,59,255,0.12))" }
                 : undefined
             }
           >
             {selectedAvailabilityId === slot.availabilityId && (
-              <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#5DD8D8,#B670CC)" }} />
+              <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#0df2f2,#d93bff)" }} />
             )}
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -503,8 +503,8 @@ export default function TeacherBookingFlow({
                   </span>
                 ) : null}
                 {selectedAvailabilityId === slot.availabilityId ? (
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#5DD8D8,#B670CC)" }}>
-                    <span className="material-symbols-outlined text-[12px] text-[#0a0e12]">check</span>
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#0df2f2,#d93bff)" }}>
+                    <span className="material-symbols-outlined text-[12px] text-[#040a0f]">check</span>
                   </span>
                 ) : (
                   <span className="flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] text-white/25 transition group-hover:border-white/25 group-hover:text-white/50">
@@ -535,7 +535,7 @@ export default function TeacherBookingFlow({
               ? `Add a quick note for ${teacherName}.`
               : `Share your level, goals, or anything ${teacherName} should know.`
           }
-          className="w-full resize-none rounded-2xl border border-white/[0.07] bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition focus:border-[#5DD8D8]/25 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(93,216,216,0.06)]"
+          className="w-full resize-none rounded-2xl border border-white/[0.07] bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition focus:border-[#0df2f2]/25 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(13,242,242,0.06)]"
         />
         {selectedSlot ? (
           <p className="flex items-center gap-1.5 text-[11px] text-white/35">
@@ -554,7 +554,7 @@ export default function TeacherBookingFlow({
         onClick={() => void submitBooking()}
         disabled={!selectedAvailabilityId || busy || loading || isSelf}
         className={[
-          "w-full rounded-2xl bg-gradient-to-r from-[#5DD8D8] via-[#7c3aff] to-[#ff00ff] px-5 py-3 text-sm font-black text-[#0a0e12] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40",
+          "w-full rounded-2xl bg-gradient-to-r from-[#0df2f2] via-[#7c3aff] to-[#ff00ff] px-5 py-3 text-sm font-black text-[#040a0f] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40",
           extraClassName,
         ].join(" ")}
       >
@@ -647,18 +647,18 @@ export default function TeacherBookingFlow({
         {SERVICE_OPTIONS.map((option) => (
           <div
             key={option.id}
-            className="relative overflow-hidden rounded-2xl border border-[#5DD8D8]/25 px-5 py-4"
-            style={{ background: "linear-gradient(135deg,rgba(93,216,216,0.07) 0%,rgba(182,112,204,0.07) 100%)" }}
+            className="relative overflow-hidden rounded-2xl border border-[#0df2f2]/25 px-5 py-4"
+            style={{ background: "linear-gradient(135deg,rgba(13,242,242,0.07) 0%,rgba(217,59,255,0.07) 100%)" }}
           >
-            <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#5DD8D8,#B670CC)" }} />
+            <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#0df2f2,#d93bff)" }} />
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-black text-white">{option.label}</p>
                 <p className="mt-1 text-xs leading-5 text-white/50">{option.description}</p>
               </div>
               <span
-                className="mt-0.5 shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-[#5DD8D8]"
-                style={{ background: "rgba(93,216,216,0.1)" }}
+                className="mt-0.5 shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-[#0df2f2]"
+                style={{ background: "rgba(13,242,242,0.1)" }}
               >
                 Selected
               </span>
@@ -675,7 +675,7 @@ export default function TeacherBookingFlow({
 
         <aside
           className="space-y-4 rounded-2xl border border-white/[0.07] p-4"
-          style={{ background: "radial-gradient(circle at 50% 0%,rgba(93,216,216,0.04),transparent 60%),rgba(255,255,255,0.015)" }}
+          style={{ background: "radial-gradient(circle at 50% 0%,rgba(13,242,242,0.04),transparent 60%),rgba(255,255,255,0.015)" }}
         >
           <div>
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-white/30">3. Slot</p>

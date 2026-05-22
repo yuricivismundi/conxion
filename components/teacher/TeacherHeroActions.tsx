@@ -24,7 +24,7 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
           <button
             type="button"
             onClick={() => setBookingOpen(true)}
-            className="inline-block rounded-full bg-gradient-to-r from-[#E8C875] to-[#D4AF37] px-12 py-5 text-base font-black uppercase tracking-widest text-zinc-900 shadow-[0_0_50px_rgba(255,81,250,0.3)] transition-transform hover:scale-105"
+            className="inline-block rounded-full bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] px-12 py-5 text-base font-black uppercase tracking-widest text-zinc-900 shadow-[0_0_50px_rgba(255,81,250,0.3)] transition-transform hover:scale-105"
           >
             {bookingSuccessMsg ?? "Book Session"}
           </button>
@@ -69,7 +69,7 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
         <button
           type="button"
           onClick={() => setBookingOpen(true)}
-          className="bg-gradient-to-r from-[#E8C875] to-[#D4AF37] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
+          className="bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
         >
           {bookingSuccessMsg ?? "Book Session"}
           <span className="material-symbols-outlined text-[18px]">event_available</span>
