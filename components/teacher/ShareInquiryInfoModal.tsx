@@ -54,7 +54,7 @@ export default function ShareInquiryInfoModal({
         className="relative w-full max-w-2xl overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
         style={{
           background:
-            "radial-gradient(circle at 15% 0%, rgba(93,216,216,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(182,112,204,0.08), transparent 45%), #0F1418",
+            "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14",
         }}
       >
         <button
@@ -68,8 +68,8 @@ export default function ShareInquiryInfoModal({
 
         <div className="border-b border-white/[0.07] px-6 pb-5 pt-6">
           <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-[#5DD8D8]/20 via-[#11212f] to-[#B670CC]/18">
-              <span className="material-symbols-outlined text-[26px] text-[#5DD8D8]">share</span>
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-[#0df2f2]/20 via-[#11212f] to-[#d93bff]/18">
+              <span className="material-symbols-outlined text-[26px] text-[#0df2f2]">share</span>
             </div>
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Inquiry response</p>
@@ -99,7 +99,7 @@ export default function ShareInquiryInfoModal({
                     className={[
                       "flex items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-all duration-150",
                       selected
-                        ? "border-[#5DD8D8]/40 bg-gradient-to-br from-[#5DD8D8]/10 to-[#B670CC]/10 shadow-[0_0_16px_rgba(93,216,216,0.12)]"
+                        ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
                         : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]",
                     ].join(" ")}
                   >
@@ -107,7 +107,7 @@ export default function ShareInquiryInfoModal({
                       className={[
                         "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px]",
                         selected
-                          ? "border-[#5DD8D8]/40 bg-[#5DD8D8]/20 text-cyan-50"
+                          ? "border-[#0df2f2]/40 bg-[#0df2f2]/20 text-cyan-50"
                           : "border-white/15 bg-white/[0.04] text-transparent",
                       ].join(" ")}
                     >
@@ -135,7 +135,7 @@ export default function ShareInquiryInfoModal({
               maxLength={INTRO_LIMIT}
               rows={3}
               placeholder="Happy to share the options that fit your request."
-              className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm leading-6 text-white placeholder:text-white/25 outline-none transition focus:border-[#5DD8D8]/30 focus:bg-white/[0.06]"
+              className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm leading-6 text-white placeholder:text-white/25 outline-none transition focus:border-[#0df2f2]/30 focus:bg-white/[0.06]"
             />
           </label>
 
@@ -147,8 +147,8 @@ export default function ShareInquiryInfoModal({
             type="button"
             onClick={() => onConfirm({ selectedBlockIds, introNote: introNote.trim() || null })}
             disabled={busy || selectedBlockIds.length < 1 || blocks.length === 0}
-            className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#0a0e12] transition-all hover:scale-[1.01] hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ backgroundImage: "linear-gradient(90deg, #5DD8D8 0%, #7c3aff 50%, #ff00ff 100%)" }}
+            className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] transition-all hover:scale-[1.01] hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
           >
             {busy ? "Sharing..." : "Share information"}
           </button>

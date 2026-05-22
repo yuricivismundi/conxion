@@ -44,13 +44,13 @@ function KindCard({
       onClick={onClick}
       className={`group relative flex w-full flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition-all duration-150 ${
         selected
-          ? "border-[#5DD8D8]/40 bg-gradient-to-br from-[#5DD8D8]/10 to-[#B670CC]/10 shadow-[0_0_16px_rgba(93,216,216,0.12)]"
+          ? "border-[#0df2f2]/40 bg-gradient-to-br from-[#0df2f2]/10 to-[#d93bff]/10 shadow-[0_0_16px_rgba(13,204,242,0.12)]"
           : "border-white/[0.07] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]"
       }`}
     >
-      {selected && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#5DD8D8]/30" />}
+      {selected && <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-[#0df2f2]/30" />}
       <span
-        className={`material-symbols-outlined text-[22px] transition-colors ${selected ? "text-[#5DD8D8]" : "text-white/40 group-hover:text-white/60"}`}
+        className={`material-symbols-outlined text-[22px] transition-colors ${selected ? "text-[#0df2f2]" : "text-white/40 group-hover:text-white/60"}`}
         style={{ fontVariationSettings: selected ? "'FILL' 1" : "'FILL' 0" }}
       >
         {icon}
@@ -187,7 +187,7 @@ export default function RequestInfoModal({
         className="relative flex max-h-[min(92svh,740px)] w-full max-w-[520px] flex-col overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]"
         style={{
           background:
-            "radial-gradient(circle at 15% 0%, rgba(93,216,216,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(182,112,204,0.08), transparent 45%), #080e14",
+            "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14",
         }}
       >
         {/* Close */}
@@ -207,7 +207,7 @@ export default function RequestInfoModal({
             style={{
               backgroundImage: recipientPhotoUrl
                 ? `url(${recipientPhotoUrl})`
-                : "linear-gradient(135deg, rgba(93,216,216,0.25), rgba(182,112,204,0.25))",
+                : "linear-gradient(135deg, rgba(13,204,242,0.25), rgba(217,59,255,0.25))",
             }}
           />
           <div className="min-w-0">
@@ -224,7 +224,7 @@ export default function RequestInfoModal({
           {usage ? (
             <div className="flex items-center justify-between rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-2 text-xs">
               <span className="text-white/35">Info requests left this month</span>
-              <span className={usage.remaining <= 0 ? "font-bold text-rose-400" : usage.remaining === 1 ? "font-bold text-amber-400" : "font-semibold text-[#5DD8D8]"}>
+              <span className={usage.remaining <= 0 ? "font-bold text-rose-400" : usage.remaining === 1 ? "font-bold text-amber-400" : "font-semibold text-[#0df2f2]"}>
                 {usage.remaining} / {usage.limit}
               </span>
             </div>
@@ -260,13 +260,13 @@ export default function RequestInfoModal({
               value={city}
               onChange={(e) => setCity(e.target.value)}
               placeholder="City"
-              className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#5DD8D8]/30 focus:bg-white/[0.06]"
+              className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#0df2f2]/30 focus:bg-white/[0.06]"
             />
             <input
               value={country}
               onChange={(e) => setCountry(e.target.value)}
               placeholder="Country"
-              className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#5DD8D8]/30 focus:bg-white/[0.06]"
+              className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#0df2f2]/30 focus:bg-white/[0.06]"
             />
           </div>
 
@@ -275,14 +275,14 @@ export default function RequestInfoModal({
             value={requestedDatesText}
             onChange={(e) => setRequestedDatesText(e.target.value)}
             placeholder="Dates (e.g. next month, 12–14 April)"
-            className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#5DD8D8]/30 focus:bg-white/[0.06]"
+            className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#0df2f2]/30 focus:bg-white/[0.06]"
           />
 
           {/* Note — mandatory */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
-                Your note <span className="text-[#5DD8D8]/60">*</span>
+                Your note <span className="text-[#0df2f2]/60">*</span>
               </label>
               <span className="text-[10px] text-white/25">{Math.max(0, remaining)}/{NOTE_LIMIT}</span>
             </div>
@@ -291,7 +291,7 @@ export default function RequestInfoModal({
               onChange={(e) => setShortNote(e.target.value.slice(0, NOTE_LIMIT))}
               placeholder="Give the teacher context — what you're looking for, your level, availability…"
               rows={3}
-              className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#5DD8D8]/30 focus:bg-white/[0.06]"
+              className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-[#0df2f2]/30 focus:bg-white/[0.06]"
             />
           </div>
 
@@ -307,7 +307,7 @@ export default function RequestInfoModal({
             onClick={() => void submitInquiry()}
             disabled={busy || Boolean(pendingWarning) || atLimit || isSelf}
             className="h-12 w-full rounded-2xl text-sm font-bold tracking-wide text-[#040a0f] transition-all hover:brightness-110 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ backgroundImage: "linear-gradient(90deg, #5DD8D8 0%, #7c3aff 50%, #ff00ff 100%)" }}
+            style={{ backgroundImage: "linear-gradient(90deg, #0df2f2 0%, #7c3aff 50%, #ff00ff 100%)" }}
           >
             {busy ? "Sending…" : "Request info"}
           </button>

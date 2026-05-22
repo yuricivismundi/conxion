@@ -43,7 +43,7 @@ function ServiceCard({ block }: { block: TeacherInfoBlock }) {
   const isPromo = !!original;
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-zinc-900/40 p-6 flex flex-col w-[280px] shrink-0 select-none">
-      <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#9333ea,#D4AF37)" }} />
+      <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#9333ea,#ff51fa)" }} />
       <h3 className="font-black text-lg mb-2 text-white leading-snug">{block.title}</h3>
       {block.shortSummary && (
         <p className="text-zinc-400 text-sm leading-relaxed flex-1 mb-5">{block.shortSummary}</p>
@@ -51,18 +51,18 @@ function ServiceCard({ block }: { block: TeacherInfoBlock }) {
       {rawPrice ? (
         <div className="mt-auto pt-4 border-t border-white/[0.06] space-y-1.5">
           {saving && (
-            <div className="inline-flex items-center gap-1.5 bg-[#D4AF37]/10 border border-[#D4AF37]/20 rounded-full px-2.5 py-0.5">
-              <span className="material-symbols-outlined text-[#D4AF37] text-[11px]">sell</span>
-              <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-wide">Save {saving}</span>
+            <div className="inline-flex items-center gap-1.5 bg-[#ff51fa]/10 border border-[#ff51fa]/20 rounded-full px-2.5 py-0.5">
+              <span className="material-symbols-outlined text-[#ff51fa] text-[11px]">sell</span>
+              <span className="text-[#ff51fa] text-[10px] font-bold uppercase tracking-wide">Save {saving}</span>
             </div>
           )}
           <div className="flex items-baseline gap-2">
-            <p className="text-[#D4AF37] font-black text-2xl tracking-tighter leading-none">{finalPrice}</p>
+            <p className="text-[#ff51fa] font-black text-2xl tracking-tighter leading-none">{finalPrice}</p>
             {isPromo && original && <p className="text-zinc-600 text-sm line-through">{original}</p>}
           </div>
         </div>
       ) : ctaText ? (
-        <p className="mt-auto pt-4 border-t border-white/[0.06] text-[#D4AF37] font-black text-lg tracking-tighter">{ctaText}</p>
+        <p className="mt-auto pt-4 border-t border-white/[0.06] text-[#ff51fa] font-black text-lg tracking-tighter">{ctaText}</p>
       ) : null}
     </div>
   );
@@ -178,7 +178,7 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
               )}
               {languages && languages.length > 0 && tab === "about" && (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="material-symbols-outlined text-[#D4AF37] text-base">translate</span>
+                  <span className="material-symbols-outlined text-[#ff51fa] text-base">translate</span>
                   {languages.map((l) => (
                     <span key={l} className="px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-xs font-semibold">
                       {l}
@@ -210,7 +210,7 @@ export default function TeacherExperiencesSection({ infoBlocks, videos, bio, lan
             <div
               className="absolute top-0 h-px w-24 transition-all duration-300"
               style={{
-                background: "linear-gradient(90deg,#5DD8D8,#B670CC)",
+                background: "linear-gradient(90deg,#0df2f2,#d93bff)",
                 left: tab === "about" ? 0 : "auto",
                 right: tab === "videos" ? 0 : "auto",
               }}
