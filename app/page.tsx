@@ -51,6 +51,7 @@ const landingRedirectScript = `
 
   try {
     if (hasSession(window.localStorage) || hasSession(window.sessionStorage)) {
+      document.documentElement.dataset.cxLandingRedirecting = "1";
       window.location.replace("/connections");
       return;
     }
@@ -58,6 +59,13 @@ const landingRedirectScript = `
 
   document.documentElement.dataset.cxLandingReady = "1";
 })();
+
+// Failsafe: ensure landing page is visible after 500ms even if the script above fails
+setTimeout(() => {
+  if (!document.documentElement.dataset.cxLandingReady && !document.documentElement.dataset.cxLandingRedirecting) {
+    document.documentElement.dataset.cxLandingReady = "1";
+  }
+}, 500);
 `;
 
 export const metadata: Metadata = {
@@ -192,6 +200,11 @@ export default async function LandingPage() {
       </noscript>
       <style>{`
         .landing-root {
+          opacity: 1;
+          transition: opacity 120ms ease-out;
+        }
+
+        html[data-cx-landing-redirecting="1"] .landing-root {
           opacity: 0;
         }
 
