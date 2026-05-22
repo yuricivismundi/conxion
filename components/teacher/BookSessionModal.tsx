@@ -52,7 +52,7 @@ export default function BookSessionModal({
         ].join(" ")}
         style={{
           background:
-            "radial-gradient(circle at 15% 0%, rgba(13,204,242,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(217,59,255,0.08), transparent 45%), #080e14",
+            "radial-gradient(circle at 15% 0%, rgba(93,216,216,0.08), transparent 45%), radial-gradient(circle at 85% 100%, rgba(182,112,204,0.08), transparent 45%), #0F1418",
         }}
       >
         <button
@@ -65,14 +65,14 @@ export default function BookSessionModal({
         </button>
 
         <div className="relative overflow-hidden border-b border-white/[0.06] px-6 pb-5 pt-6">
-          <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#0df2f2,#d93bff)" }} />
+          <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#5DD8D8,#B670CC)" }} />
           <div className="flex items-center gap-4">
             <div
               className="h-[60px] w-[60px] shrink-0 rounded-2xl border border-white/[0.12] bg-cover bg-center shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
               style={{
                 backgroundImage: teacherPhotoUrl
                   ? `url(${teacherPhotoUrl})`
-                  : "linear-gradient(135deg, rgba(13,204,242,0.3), rgba(217,59,255,0.3))",
+                  : "linear-gradient(135deg, rgba(93,216,216,0.3), rgba(182,112,204,0.3))",
               }}
             />
             <div className="min-w-0">

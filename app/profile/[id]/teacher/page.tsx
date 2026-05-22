@@ -267,10 +267,10 @@ export default async function TeacherProfilePage({
 
             <div className="relative">
               {/* Outer neon glow blur */}
-              <div className="absolute inset-0 rounded-[22px] bg-gradient-to-br from-[#9333ea]/30 to-[#ff51fa]/40 blur-2xl -z-10 scale-110" />
+              <div className="absolute inset-0 rounded-[22px] bg-gradient-to-br from-[#9333ea]/30 to-[#D4AF37]/40 blur-2xl -z-10 scale-110" />
 
               {/* Gradient border wrapper */}
-              <div className="relative rounded-[20px] p-[2px] bg-gradient-to-br from-zinc-800/20 via-[#9333ea]/60 to-[#ff51fa]/80">
+              <div className="relative rounded-[20px] p-[2px] bg-gradient-to-br from-zinc-800/20 via-[#9333ea]/60 to-[#D4AF37]/80">
                 <div className="rounded-[18px] overflow-hidden">
                   {avatarUrl ? (
                     <Image
@@ -327,7 +327,7 @@ export default async function TeacherProfilePage({
             {(profileRow.city || profileRow.country) && (
               <div className="flex flex-wrap gap-8 mt-6 text-zinc-300 text-sm">
                 <span className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[#c1fffe] text-lg">location_on</span>
+                  <span className="material-symbols-outlined text-[#E8C875] text-lg">location_on</span>
                   {[profileRow.city, profileRow.country].filter(Boolean).join(", ")}
                 </span>
               </div>
@@ -381,7 +381,7 @@ export default async function TeacherProfilePage({
                 >
                   <div className="flex items-center gap-5 sm:gap-10">
                     <div className="text-center min-w-[64px]">
-                      <p className="font-black text-2xl text-[#c1fffe]">
+                      <p className="font-black text-2xl text-[#E8C875]">
                         {cls.weekday != null ? WEEKDAY_SHORT[cls.weekday] : "–"}
                       </p>
                       <p className="text-xs text-zinc-500 font-bold uppercase">
@@ -438,19 +438,19 @@ export default async function TeacherProfilePage({
               ) : (
                 <>
                   {/* Vertical gradient line */}
-                  <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-[#c1fffe]/50 to-transparent" />
+                  <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-[#E8C875]/50 to-transparent" />
                   {eventTeaching.map((event, i) => (
                     <div key={event.id} className="pl-10 relative">
                       <div
                         className={`absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full ${
                           i === 0
-                            ? "bg-[#c1fffe] shadow-[0_0_10px_#c1fffe]"
+                            ? "bg-[#E8C875] shadow-[0_0_10px_#E8C875]"
                             : "bg-zinc-800"
                         }`}
                       />
                       <p
                         className={`font-black text-xs tracking-[0.2em] uppercase mb-2 ${
-                          i === 0 ? "text-[#ff51fa]" : "text-zinc-600"
+                          i === 0 ? "text-[#D4AF37]" : "text-zinc-600"
                         }`}
                       >
                         {formatEventDate(event.start_date)}
