@@ -30,7 +30,7 @@ export async function batchFetchProfiles(
     const { data, error } = await client.from("profiles").select(columns).in("user_id", batch);
 
     if (!error && Array.isArray(data)) {
-      data.forEach((row: Record<string, unknown>) => {
+      (data as unknown as Array<Record<string, unknown>>).forEach((row) => {
         const userId = typeof row.user_id === "string" ? row.user_id : null;
         if (userId) {
           profileMap.set(userId, {

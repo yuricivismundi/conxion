@@ -22,11 +22,11 @@ const ALLOWED_ORIGINS = {
 };
 
 function getAllowedOrigins(): string[] {
-  const env = process.env.NODE_ENV;
+  const env = process.env.VERCEL_ENV ?? process.env.NODE_ENV;
   if (env === 'production') {
     return ALLOWED_ORIGINS.production;
   }
-  if (env === 'staging') {
+  if (env === 'preview' || env === 'staging') {
     return ALLOWED_ORIGINS.staging;
   }
   return ALLOWED_ORIGINS.development;

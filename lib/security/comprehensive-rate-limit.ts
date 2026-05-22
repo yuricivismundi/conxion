@@ -75,8 +75,8 @@ export function checkRateLimit(
 
   return {
     allowed: result.ok,
-    remaining: Math.max(0, result.remainingRequests),
-    resetAt: new Date(Date.now() + result.windowMs),
+    remaining: Math.max(0, result.remaining),
+    resetAt: new Date(result.resetAt),
     retryAfterSeconds: result.ok ? undefined : result.retryAfterSec,
   };
 }

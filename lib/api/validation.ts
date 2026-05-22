@@ -49,7 +49,7 @@ export function isValidUrl(url: string): boolean {
 
 export function isValidIsoDate(dateStr: string): boolean {
   const date = new Date(dateStr);
-  return !Number.isNaN(date.getTime()) && dateStr.match(/^\d{4}-\d{2}-\d{2}/);
+  return !Number.isNaN(date.getTime()) && /^\d{4}-\d{2}-\d{2}/.test(dateStr);
 }
 
 export function parseIsoDateOrNull(value: unknown): string | null {
