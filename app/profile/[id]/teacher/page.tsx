@@ -252,12 +252,12 @@ export default async function TeacherProfilePage({
         <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
           {/* Left: photo */}
           <div className="lg:col-span-5">
-            <div className="relative">
-              {/* Profile Switcher - Right side (Mobile only) */}
-              <div className="absolute -right-4 sm:-right-6 top-4 z-30 lg:hidden">
-                <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} />
-              </div>
+            {/* Profile Switcher - Above photo on mobile, compact & discrete */}
+            <div className="flex justify-end mb-2 lg:hidden">
+              <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
+            </div>
 
+            <div className="relative">
               {/* Outer neon glow blur */}
               <div className="absolute inset-0 rounded-[22px] bg-gradient-to-br from-[#9333ea]/30 to-[#ff51fa]/40 blur-2xl -z-10 scale-110" />
 
