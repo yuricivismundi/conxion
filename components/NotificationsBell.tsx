@@ -16,6 +16,20 @@ import {
 } from "@/lib/notifications/client";
 import { cx } from "@/lib/cx";
 
+type TimeGroup = "new" | "earlier";
+
+function bucketForItem(item: NotificationRow): TimeGroup {
+  if (!item.is_read) return "new";
+  const created = new Date(item.created_at).getTime();
+  const now = Date.now();
+  const diffH = (now - created) / 3_600_000;
+  return diffH < 24 ? "new" : "earlier";
+}
+
+const GROUP_LABELS: Record<TimeGroup, string> = {
+  new: "New",
+  earlier: "Earlier",
+};
 
 export default function NotificationsBell() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -142,6 +156,14 @@ export default function NotificationsBell() {
 
   const visibleItems = useMemo(() => items.slice(0, 8), [items]);
 
+  const groupedItems = useMemo(() => {
+    const groups: Record<TimeGroup, NotificationRow[]> = { new: [], earlier: [] };
+    visibleItems.forEach((item) => {
+      groups[bucketForItem(item)].push(item);
+    });
+    return groups;
+  }, [visibleItems]);
+
   if (!ready) {
     return (
       <div className="relative">
@@ -186,6 +208,8 @@ export default function NotificationsBell() {
     window.location.assign("/notifications");
   }
 
+  const orderedGroups: TimeGroup[] = ["new", "earlier"];
+
   return (
     <div className="relative" ref={panelRef}>
       <button
@@ -198,85 +222,157 @@ export default function NotificationsBell() {
       >
         <span className="material-symbols-outlined text-[22px] group-hover:text-[#22d3ee]">notifications</span>
         {unreadCount > 0 ? (
-          <span className="absolute right-0.5 top-0.5 text-[11px] font-black text-[#0df2f2] [text-shadow:0_0_8px_rgba(13,242,242,0.7)]">
+          <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-cyan-400 px-1 text-[10px] font-black text-slate-900 shadow-[0_0_10px_rgba(34,211,238,0.4)]">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         ) : null}
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[52px] z-[70] w-[360px] max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-white/10 bg-[#101216] shadow-[0_24px_50px_rgba(0,0,0,0.45)]">
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <h3 className="text-sm font-bold text-white">Notifications</h3>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleMarkAllRead}
-                disabled={unreadCount === 0}
-                className={cx(
-                  "rounded-lg px-2 py-1 text-xs font-semibold",
-                  unreadCount === 0
-                    ? "cursor-not-allowed text-slate-600"
-                    : "text-cyan-200 hover:bg-cyan-300/10 hover:text-cyan-100"
-                )}
+        <div className="absolute right-0 top-[52px] z-[70] w-[400px] max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-white/10 bg-[#101216] shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 pb-2 pt-4">
+            <div>
+              <h3 className="text-[18px] font-black tracking-tight text-white">Notifications</h3>
+              {unreadCount > 0 ? (
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  <span className="font-semibold text-cyan-300">{unreadCount} unread</span>
+                </p>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-1">
+              {unreadCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={handleMarkAllRead}
+                  title="Mark all as read"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+                >
+                  <span className="material-symbols-outlined text-[18px]">done_all</span>
+                </button>
+              ) : null}
+              <Link
+                href="/notifications"
+                onClick={() => setOpen(false)}
+                title="View all"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
               >
-                Mark all read
-              </button>
-              <Link href="/notifications" className="rounded-lg px-2 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-300/10">
-                View all
+                <span className="material-symbols-outlined text-[18px]">open_in_full</span>
               </Link>
             </div>
           </div>
 
-          <div className="max-h-[420px] overflow-y-auto scrollbar-subtle">
+          {/* Scroll content */}
+          <div className="max-h-[460px] overflow-y-auto scrollbar-subtle pb-1">
             {error ? <p className="px-4 py-3 text-xs text-rose-300">{error}</p> : null}
 
-            {loading ? <p className="px-4 py-8 text-sm text-slate-400">Loading notifications…</p> : null}
+            {loading ? (
+              <ul className="space-y-1 px-2 py-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <li key={index} className="flex items-start gap-3 rounded-xl px-2 py-2.5">
+                    <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-white/[0.06]" />
+                    <div className="flex-1 space-y-1.5 py-1">
+                      <div className="h-3 w-2/3 animate-pulse rounded bg-white/[0.06]" />
+                      <div className="h-2.5 w-1/2 animate-pulse rounded bg-white/[0.04]" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
 
             {!loading && visibleItems.length === 0 ? (
               <div className="px-4 py-10 text-center">
-                <p className="text-sm text-slate-300">No notifications yet.</p>
-                <p className="mt-1 text-xs text-slate-500">New requests and updates will appear here.</p>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/[0.04]">
+                  <span className="material-symbols-outlined text-[22px] text-slate-500">notifications_none</span>
+                </div>
+                <p className="text-[13px] font-semibold text-white">You're all caught up</p>
+                <p className="mt-1 text-[11px] text-slate-500">New activity will appear here.</p>
               </div>
             ) : null}
 
-            {!loading
-              ? visibleItems.map((item) => {
-                  const category = notificationCategory(item.kind);
-                  const { icon, colorClass, bgClass } = notificationIcon(item.kind);
+            {!loading && visibleItems.length > 0 ? (
+              <div className="space-y-2 pt-1">
+                {orderedGroups.map((group) => {
+                  const groupItems = groupedItems[group];
+                  if (groupItems.length === 0) return null;
                   return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => void openNotification(item)}
-                      className={cx(
-                        "w-full border-b border-white/5 px-4 py-3 text-left transition",
-                        item.is_read ? "bg-transparent hover:bg-white/[0.03]" : "bg-cyan-400/[0.06] hover:bg-cyan-400/[0.10]"
-                      )}
-                    >
-                      <div className="flex gap-3">
-                        <div className={cx("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", bgClass)}>
-                          <span className={cx("material-symbols-outlined text-[16px]", colorClass)}>{icon}</span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="mb-1 flex items-start justify-between gap-2">
-                            <p className={cx("text-sm font-semibold leading-snug", item.is_read ? "text-slate-200" : "text-white")}>{item.title}</p>
-                            <span className="shrink-0 text-[11px] text-slate-500">{formatNotificationRelativeTime(item.created_at)}</span>
-                          </div>
-                          {item.body ? <p className="line-clamp-2 text-xs text-slate-400">{item.body}</p> : null}
-                          <div className="mt-1.5 flex items-center justify-between">
-                            <span className="rounded-full border border-white/12 bg-white/[0.02] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                              {notificationCategoryLabel(category)}
-                            </span>
-                            {!item.is_read ? <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.85)]" /> : null}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
+                    <section key={group}>
+                      <h4 className="px-4 pb-1 pt-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                        {GROUP_LABELS[group]}
+                      </h4>
+                      <ul>
+                        {groupItems.map((item) => {
+                          const category = notificationCategory(item.kind);
+                          const { icon, colorClass, bgClass } = notificationIcon(item.kind);
+                          return (
+                            <li key={item.id}>
+                              <button
+                                type="button"
+                                onClick={() => void openNotification(item)}
+                                className={cx(
+                                  "group/item w-full px-3 py-2.5 text-left transition",
+                                  item.is_read
+                                    ? "hover:bg-white/[0.04]"
+                                    : "bg-cyan-400/[0.05] hover:bg-cyan-400/[0.08]"
+                                )}
+                              >
+                                <div className="flex gap-3">
+                                  <div className={cx(
+                                    "relative mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition group-hover/item:scale-[1.03]",
+                                    bgClass,
+                                  )}>
+                                    <span className={cx("material-symbols-outlined text-[19px]", colorClass)}>{icon}</span>
+                                    {!item.is_read ? (
+                                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#101216] bg-cyan-400" />
+                                    ) : null}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className={cx(
+                                      "text-[13px] leading-snug",
+                                      item.is_read ? "font-medium text-slate-300" : "font-bold text-white"
+                                    )}>
+                                      {item.title}
+                                    </p>
+                                    {item.body ? (
+                                      <p className={cx(
+                                        "mt-0.5 line-clamp-2 text-[12px] leading-snug",
+                                        item.is_read ? "text-slate-500" : "text-slate-300"
+                                      )}>
+                                        {item.body}
+                                      </p>
+                                    ) : null}
+                                    <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+                                      <span className={cx("font-semibold", item.is_read ? "text-slate-600" : "text-cyan-300")}>
+                                        {formatNotificationRelativeTime(item.created_at)}
+                                      </span>
+                                      <span className="text-slate-700">·</span>
+                                      <span className="text-slate-500">{notificationCategoryLabel(category)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
                   );
-                })
-              : null}
+                })}
+              </div>
+            ) : null}
           </div>
+
+          {/* Footer - See all */}
+          {!loading && visibleItems.length > 0 ? (
+            <Link
+              href="/notifications"
+              onClick={() => setOpen(false)}
+              className="flex items-center justify-center gap-1.5 border-t border-white/8 bg-white/[0.02] px-4 py-2.5 text-[12px] font-semibold text-cyan-300 transition hover:bg-cyan-400/[0.05]"
+            >
+              See all notifications
+              <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+            </Link>
+          ) : null}
         </div>
       ) : null}
     </div>
