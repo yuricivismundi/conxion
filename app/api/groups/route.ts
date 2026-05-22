@@ -81,9 +81,9 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
     }
 
-    const items = (data ?? []).slice(0, limit);
+    const items = ((data ?? []) as Array<Record<string, unknown>>).slice(0, limit);
     const hasMore = (data ?? []).length > limit;
-    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id ?? "", items[items.length - 1]?.created_at ?? "") : null;
+    const nextCursor = hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]?.id as string ?? "", items[items.length - 1]?.created_at as string ?? "") : null;
 
     return NextResponse.json({
       ok: true,
