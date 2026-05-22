@@ -52,6 +52,7 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
           open={bookingOpen}
           teacherUserId={userId}
           teacherName={displayName}
+          teacherPhotoUrl={avatarUrl}
           onClose={() => setBookingOpen(false)}
           onSubmitted={(msg) => {
             setBookingSuccessMsg(msg);
@@ -100,6 +101,7 @@ export default function TeacherHeroActions({ userId, displayName, avatarUrl, var
         open={bookingOpen}
         teacherUserId={userId}
         teacherName={displayName}
+        teacherPhotoUrl={avatarUrl}
         onClose={() => setBookingOpen(false)}
         onSubmitted={(msg) => {
           setBookingSuccessMsg(msg);
