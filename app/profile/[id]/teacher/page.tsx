@@ -252,8 +252,8 @@ export default async function TeacherProfilePage({
         <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
           {/* Left: photo */}
           <div className="lg:col-span-5">
-            {/* Profile Switcher - Above photo on mobile, compact & discrete */}
-            <div className="flex justify-end mb-2 lg:hidden">
+            {/* Profile Switcher - Above photo (compact & discrete on all sizes) */}
+            <div className="flex justify-end mb-2">
               <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
             </div>
 
@@ -331,11 +331,6 @@ export default async function TeacherProfilePage({
               displayName={displayName}
               avatarUrl={avatarUrl}
             />
-
-            {/* Switch to Social Profile (Desktop) */}
-            <div className="hidden lg:flex flex-wrap items-center gap-3 mt-6">
-              <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} />
-            </div>
           </div>
         </section>
 
