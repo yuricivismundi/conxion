@@ -17,6 +17,7 @@ import { normalizeProfileMediaRow, sortProfileMedia } from "@/lib/profile-media/
 import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import TeacherExperiencesSection from "@/components/teacher/TeacherExperiencesSection";
 import TeacherOwnerActions from "@/components/teacher/TeacherOwnerActions";
+import ProfileSettingsMenu from "@/components/teacher/ProfileSettingsMenu";
 
 // ---------------------------------------------------------------------------
 // Supabase helper (public anon client — reads public data only)
@@ -248,17 +249,23 @@ export default async function TeacherProfilePage({
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 pb-32 md:pb-24">
 
-        {/* Profile Switcher - Top right of screen (desktop) */}
-        <div className="hidden lg:flex justify-end mb-3">
-          <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
-        </div>
-
         {/* ── Hero ────────────────────────────────────────────────────────── */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
+        <section className="relative grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
+          {/* Settings menu - Top left of hero section (desktop, aligned with photo top) */}
+          <div className="hidden lg:block absolute top-0 left-0 z-30">
+            <ProfileSettingsMenu profileUserId={id} teacherProfileEnabled />
+          </div>
+
+          {/* Profile Switcher - Top right of hero section (desktop, aligned with photo top) */}
+          <div className="hidden lg:block absolute top-0 right-0 z-30">
+            <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
+          </div>
+
           {/* Left: photo */}
           <div className="lg:col-span-5">
-            {/* Profile Switcher - Above photo on mobile only */}
-            <div className="flex justify-end mb-2 lg:hidden">
+            {/* Settings + Switcher row (mobile only) */}
+            <div className="flex items-center justify-between mb-2 lg:hidden">
+              <ProfileSettingsMenu profileUserId={id} teacherProfileEnabled />
               <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
             </div>
 
