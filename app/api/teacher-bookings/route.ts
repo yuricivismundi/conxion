@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     // Mark availability as unavailable (atomically prevents race condition on concurrent bookings)
     const updateAvailRes = await auth.serviceClient
       .from("teacher_session_availability")
-      .update({ is_available: false })
+      .update({ is_available: false } as never)
       .eq("id", availability.id)
       .eq("is_available", true)
       .select("id")
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
       // Restore availability if booking insertion failed
       await auth.serviceClient
         .from("teacher_session_availability")
-        .update({ is_available: true })
+        .update({ is_available: true } as never)
         .eq("id", availability.id)
         .catch(() => {
           // If restore also fails, log and continue (slot will be stuck unavailable, but this is rare)
