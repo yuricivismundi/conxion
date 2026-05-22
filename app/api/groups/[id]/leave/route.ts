@@ -41,7 +41,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (threadId) {
       await service
         .from("thread_participants")
-        .update({ archived_at: new Date().toISOString() })
+        .update({ archived_at: new Date().toISOString() } as never)
         .eq("thread_id", threadId)
         .eq("user_id", userId);
     }
