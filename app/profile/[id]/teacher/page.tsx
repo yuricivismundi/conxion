@@ -377,14 +377,15 @@ export default async function TeacherProfilePage({
               {regularClasses.map((cls) => (
                 <div
                   key={cls.id}
-                  className="bg-zinc-900/40 backdrop-blur-xl flex flex-col md:flex-row items-start md:items-center justify-between p-6 rounded-2xl group hover:bg-zinc-900/60 transition-colors border border-white/5"
+                  className="bg-zinc-900/40 backdrop-blur-xl flex flex-col md:flex-row items-start md:items-center justify-between p-6 rounded-2xl group hover:bg-zinc-900/60 hover:border-[#D4AF37]/20 transition-all border border-white/5"
                 >
                   <div className="flex items-center gap-5 sm:gap-10">
-                    <div className="text-center min-w-[64px]">
-                      <p className="font-black text-2xl text-[#c1fffe]">
+                    <div className="text-center min-w-[64px] relative">
+                      <div className="absolute inset-0 -m-1 rounded-xl bg-gradient-to-br from-[#D4AF37]/10 to-[#B670CC]/5 blur-sm" />
+                      <p className="relative font-black text-2xl bg-gradient-to-br from-[#E8C875] to-[#D4AF37] bg-clip-text text-transparent">
                         {cls.weekday != null ? WEEKDAY_SHORT[cls.weekday] : "–"}
                       </p>
-                      <p className="text-xs text-zinc-500 font-bold uppercase">
+                      <p className="relative text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
                         {formatTime(cls.start_time)}
                       </p>
                     </div>
@@ -400,14 +401,14 @@ export default async function TeacherProfilePage({
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-4 md:mt-0">
+                  <div className="flex items-center gap-2 mt-4 md:mt-0">
                     {cls.style && (
-                      <span className="px-3 py-1 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                      <span className="px-3 py-1 rounded-full border border-[#D4AF37]/20 bg-[#D4AF37]/[0.04] text-[#D4AF37]/80 text-[10px] font-semibold uppercase tracking-widest">
                         {cls.style}
                       </span>
                     )}
                     {cls.level && (
-                      <span className="px-3 py-1 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                      <span className="px-3 py-1 rounded-full border border-white/10 bg-white/[0.03] text-zinc-400 text-[10px] font-semibold uppercase tracking-widest">
                         {cls.level}
                       </span>
                     )}
