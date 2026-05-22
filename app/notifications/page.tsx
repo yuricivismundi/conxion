@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Nav from "@/components/Nav";
 import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
@@ -21,7 +21,6 @@ import { cx } from "@/lib/cx";
 
 type FilterKey = "all" | "unread" | "requests" | "trips" | "hosting" | "references" | "events" | "general";
 
-
 const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "all", label: "All" },
   { key: "unread", label: "Unread" },
@@ -33,6 +32,27 @@ const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "general", label: "General" },
 ];
 
+type TimeGroup = "new" | "today" | "yesterday" | "thisWeek" | "earlier";
+
+function bucketForDate(iso: string): TimeGroup {
+  const created = new Date(iso).getTime();
+  const now = Date.now();
+  const diffH = (now - created) / 3_600_000;
+  if (diffH < 4) return "new";
+  if (diffH < 24) return "today";
+  if (diffH < 48) return "yesterday";
+  if (diffH < 24 * 7) return "thisWeek";
+  return "earlier";
+}
+
+const GROUP_LABELS: Record<TimeGroup, string> = {
+  new: "New",
+  today: "Earlier today",
+  yesterday: "Yesterday",
+  thisWeek: "This week",
+  earlier: "Earlier",
+};
+
 export default function NotificationsPage() {
   const router = useRouter();
   const [meId, setMeId] = useState<string | null>(null);
@@ -42,6 +62,8 @@ export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -115,6 +137,18 @@ export default function NotificationsPage() {
     };
   }, [meId, refresh]);
 
+  // Close 3-dot menu when clicking outside
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handler = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openMenuId]);
+
   const unreadCount = useMemo(() => notifications.filter((item) => !item.is_read).length, [notifications]);
 
   const visibleItems = useMemo(() => {
@@ -131,6 +165,22 @@ export default function NotificationsPage() {
       return haystack.includes(needle);
     });
   }, [filter, notifications, query]);
+
+  const groupedItems = useMemo(() => {
+    const groups: Record<TimeGroup, NotificationRow[]> = {
+      new: [],
+      today: [],
+      yesterday: [],
+      thisWeek: [],
+      earlier: [],
+    };
+    visibleItems.forEach((item) => {
+      // Unread items always go to "new" group for emphasis
+      const bucket = !item.is_read ? "new" : bucketForDate(item.created_at);
+      groups[bucket].push(item);
+    });
+    return groups;
+  }, [visibleItems]);
 
   async function handleMarkAllRead() {
     setBusy(true);
@@ -157,152 +207,234 @@ export default function NotificationsPage() {
     }
   }
 
+  const orderedGroups: TimeGroup[] = ["new", "today", "yesterday", "thisWeek", "earlier"];
+
   return (
     <div className="min-h-screen bg-[#06070b] text-slate-100">
       <PullToRefreshIndicator pullY={pullY} refreshing={ptr} />
       <Nav />
-      <main className="mx-auto w-full max-w-[1280px] px-4 pb-28 pt-7 sm:pb-16 sm:px-6 lg:px-8">
-        <header className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <main className="mx-auto w-full max-w-[820px] px-4 pb-28 pt-7 sm:pb-16 sm:px-6 lg:px-8">
+        <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-black text-white">Notifications</h1>
-            <p className="mt-1 text-sm text-slate-400">Requests, travel updates, references, and account activity in one feed.</p>
+            <h1 className="text-[28px] font-black tracking-tight text-white">Notifications</h1>
+            <p className="mt-0.5 text-[13px] text-slate-500">
+              {unreadCount > 0 ? (
+                <>
+                  <span className="font-semibold text-cyan-300">{unreadCount} unread</span>
+                  <span className="text-slate-600"> · </span>
+                  <span>{notifications.length} total</span>
+                </>
+              ) : (
+                <span>{notifications.length} notifications</span>
+              )}
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">
-              Unread: {unreadCount}
-            </span>
+          {unreadCount > 0 ? (
             <button
               type="button"
               onClick={() => void handleMarkAllRead()}
-              disabled={busy || unreadCount === 0}
+              disabled={busy}
               className={cx(
-                "rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
-                busy || unreadCount === 0
-                  ? "cursor-not-allowed border-white/10 bg-white/5 text-slate-600"
-                  : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100 hover:bg-cyan-300/20"
+                "inline-flex items-center gap-1.5 self-start rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition sm:self-auto",
+                busy
+                  ? "cursor-not-allowed bg-white/5 text-slate-600"
+                  : "bg-white/[0.06] text-slate-200 hover:bg-white/10 hover:text-white"
               )}
             >
-              Mark all read
+              <span className="material-symbols-outlined text-[15px]">done_all</span>
+              Mark all as read
             </button>
-          </div>
+          ) : null}
         </header>
 
-        <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-          <div className="mb-3 flex flex-wrap gap-2">
-            {FILTERS.map((chip) => {
-              const active = filter === chip.key;
-              return (
-                <button
-                  key={chip.key}
-                  type="button"
-                  onClick={() => setFilter(chip.key)}
-                  className={cx(
-                    "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                    active
-                      ? "border-cyan-300/45 bg-cyan-300/14 text-cyan-100 shadow-[0_0_14px_rgba(34,211,238,0.2)]"
-                      : "border-white/12 bg-black/20 text-slate-300 hover:border-white/30 hover:text-white"
-                  )}
-                >
-                  {chip.label}
-                </button>
-              );
-            })}
-          </div>
+        <div className="mb-5 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-hide">
+          {FILTERS.map((chip) => {
+            const active = filter === chip.key;
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setFilter(chip.key)}
+                className={cx(
+                  "shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition",
+                  active
+                    ? "bg-white text-slate-900 shadow-[0_4px_12px_rgba(255,255,255,0.1)]"
+                    : "bg-white/[0.04] text-slate-400 hover:bg-white/[0.08] hover:text-slate-200"
+                )}
+              >
+                {chip.label}
+                {chip.key === "unread" && unreadCount > 0 ? (
+                  <span className={cx("ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold", active ? "bg-slate-900 text-white" : "bg-cyan-400/90 text-slate-900")}>
+                    {unreadCount}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="relative mb-6">
+          <span className="material-symbols-outlined pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search notifications..."
-            className="w-full rounded-xl border border-white/12 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/40 focus:outline-none"
+            placeholder="Search notifications"
+            className="w-full rounded-full border border-white/8 bg-white/[0.03] py-2.5 pl-10 pr-4 text-[13px] text-white placeholder:text-slate-500 transition focus:border-white/20 focus:bg-white/[0.06] focus:outline-none"
           />
-        </section>
+        </div>
 
         {error ? (
           <div className="mb-4 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
         ) : null}
 
-        <section className="rounded-2xl border border-white/10 bg-white/[0.03]">
-          {loading ? (
-            <div className="space-y-3 px-4 py-4">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-2 flex items-center gap-2">
-                        <div className="h-5 w-20 animate-pulse rounded-full bg-white/10" />
-                        <div className="h-3 w-12 animate-pulse rounded bg-white/10" />
-                      </div>
-                      <div className="h-4 w-40 animate-pulse rounded bg-white/10" />
-                      <div className="mt-2 h-4 w-64 animate-pulse rounded bg-white/10" />
-                    </div>
-                    <div className="h-8 w-24 animate-pulse rounded-lg bg-white/10" />
-                  </div>
+        {loading ? (
+          <ul className="space-y-2">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <li key={index} className="flex items-start gap-3 rounded-2xl bg-white/[0.02] p-3.5">
+                <div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-white/[0.06]" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 w-2/3 animate-pulse rounded bg-white/[0.06]" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-white/[0.04]" />
                 </div>
-              ))}
+              </li>
+            ))}
+          </ul>
+        ) : visibleItems.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-white/8 px-6 py-16 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.04]">
+              <span className="material-symbols-outlined text-[26px] text-slate-500">notifications_none</span>
             </div>
-          ) : visibleItems.length === 0 ? (
-            <div className="px-4 py-12 text-center">
-              <p className="text-base font-semibold text-slate-200">No notifications for this filter.</p>
-              <p className="mt-1 text-sm text-slate-500">New activity will appear here.</p>
-              <Link
-                href="/discover"
-                className="mt-4 inline-flex rounded-full border border-white/15 bg-black/25 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-300/35 hover:text-cyan-100"
-              >
-                Explore
-              </Link>
-            </div>
-          ) : (
-            <ul className="divide-y divide-white/8">
-              {visibleItems.map((item) => {
-                const category = notificationCategory(item.kind);
-                const { icon, colorClass, bgClass } = notificationIcon(item.kind);
-                return (
-                  <li key={item.id} className={cx("px-4 py-4", item.is_read ? "bg-transparent" : "bg-cyan-400/[0.04]")}>
-                    <div className="flex gap-3">
-                      <div className={cx("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", bgClass)}>
-                        <span className={cx("material-symbols-outlined text-[18px]", colorClass)}>{icon}</span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <div className="mb-1 flex items-center gap-2">
-                              <span className="rounded-full border border-white/12 bg-black/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                {notificationCategoryLabel(category)}
-                              </span>
-                              <span className="text-[11px] text-slate-500">{formatNotificationRelativeTime(item.created_at)}</span>
-                              {!item.is_read ? <span className="h-2 w-2 rounded-full bg-cyan-300" /> : null}
+            <p className="text-[15px] font-semibold text-white">You're all caught up</p>
+            <p className="mt-1 text-[13px] text-slate-500">
+              {filter === "unread" ? "No unread notifications." : "New activity will appear here."}
+            </p>
+            <Link
+              href="/discover"
+              className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] px-4 py-2 text-[12px] font-semibold text-slate-200 transition hover:bg-white/[0.1] hover:text-white"
+            >
+              Explore
+              <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {orderedGroups.map((group) => {
+              const items = groupedItems[group];
+              if (items.length === 0) return null;
+              return (
+                <section key={group}>
+                  <h2 className="mb-2 px-2 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
+                    {GROUP_LABELS[group]}
+                  </h2>
+                  <ul className="space-y-1">
+                    {items.map((item) => {
+                      const category = notificationCategory(item.kind);
+                      const { icon, colorClass, bgClass } = notificationIcon(item.kind);
+                      const isMenuOpen = openMenuId === item.id;
+                      return (
+                        <li key={item.id} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => void handleOpen(item)}
+                            className={cx(
+                              "group flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition-all",
+                              item.is_read
+                                ? "hover:bg-white/[0.04]"
+                                : "bg-cyan-400/[0.05] hover:bg-cyan-400/[0.08]"
+                            )}
+                          >
+                            <div className={cx(
+                              "relative mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition group-hover:scale-[1.03]",
+                              bgClass,
+                            )}>
+                              <span className={cx("material-symbols-outlined text-[22px]", colorClass)}>{icon}</span>
+                              {!item.is_read ? (
+                                <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#06070b] bg-cyan-400" />
+                              ) : null}
                             </div>
-                            <p className="text-sm font-semibold text-white">{item.title}</p>
-                            {item.body ? <p className="mt-1 text-sm text-slate-400">{item.body}</p> : null}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                            {item.link_url ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleOpen(item)}
-                                className="rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/20"
+                            <div className="min-w-0 flex-1 pr-8">
+                              <p className={cx(
+                                "text-[14px] leading-snug",
+                                item.is_read ? "font-medium text-slate-300" : "font-bold text-white"
+                              )}>
+                                {item.title}
+                              </p>
+                              {item.body ? (
+                                <p className={cx(
+                                  "mt-0.5 line-clamp-2 text-[13px] leading-snug",
+                                  item.is_read ? "text-slate-500" : "text-slate-300"
+                                )}>
+                                  {item.body}
+                                </p>
+                              ) : null}
+                              <div className="mt-1 flex items-center gap-2 text-[11px]">
+                                <span className={cx("font-semibold", item.is_read ? "text-slate-600" : "text-cyan-300")}>
+                                  {formatNotificationRelativeTime(item.created_at)}
+                                </span>
+                                <span className="text-slate-700">·</span>
+                                <span className="text-slate-500">{notificationCategoryLabel(category)}</span>
+                              </div>
+                            </div>
+                          </button>
+                          {/* 3-dot menu (top-right of card) */}
+                          <div className="absolute right-2 top-3">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuId(isMenuOpen ? null : item.id);
+                              }}
+                              aria-label="More options"
+                              className="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-white/[0.08] hover:text-white"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">more_horiz</span>
+                            </button>
+                            {isMenuOpen ? (
+                              <div
+                                ref={menuRef}
+                                role="menu"
+                                className="absolute right-0 top-9 z-20 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#15171c] py-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
                               >
-                                Open
-                              </button>
-                            ) : null}
-                            {!item.is_read ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleMarkRead(item.id)}
-                                className="rounded-lg border border-white/15 bg-black/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-white/30"
-                              >
-                                Mark read
-                              </button>
+                                {!item.is_read ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenMenuId(null);
+                                      void handleMarkRead(item.id);
+                                    }}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-slate-200 hover:bg-white/5"
+                                  >
+                                    <span className="material-symbols-outlined text-[16px] text-slate-400">check_circle</span>
+                                    Mark as read
+                                  </button>
+                                ) : null}
+                                {item.link_url ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenMenuId(null);
+                                      void handleOpen(item);
+                                    }}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-slate-200 hover:bg-white/5"
+                                  >
+                                    <span className="material-symbols-outlined text-[16px] text-slate-400">open_in_new</span>
+                                    Open
+                                  </button>
+                                ) : null}
+                              </div>
                             ) : null}
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </main>
     </div>
   );
