@@ -16,6 +16,7 @@ import { requestUsernameCheck } from "@/lib/username/client";
 import { buildUsernameSuggestionBase, normalizeUsername, USERNAME_MAX_LENGTH } from "@/lib/username/normalize";
 import { validateUsernameFormat } from "@/lib/username/validate";
 import { readOnboardingDraft, writeOnboardingDraft } from "@/lib/onboardingDraft";
+import { GENDER_OPTIONS, normalizeGender, type Gender } from "@/lib/profile/gender";
 import { supabase } from "@/lib/supabase/client";
 
 const ROLES = [
@@ -62,6 +63,7 @@ export default function OnboardingProfilePage() {
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
   const [roles, setRoles] = useState<Role[]>([]);
+  const [gender, setGender] = useState<Gender>("prefer_not_to_say");
   const [usernameDirty, setUsernameDirty] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<{
     checking: boolean;
@@ -137,6 +139,7 @@ export default function OnboardingProfilePage() {
       if (typeof d.country === "string") setCountry(d.country);
       if (typeof d.city === "string") setCity(d.city);
       if (Array.isArray(d.roles)) setRoles(normalizeLegacyRoles(d.roles.filter(Boolean)));
+      if (typeof d.gender === "string") setGender(normalizeGender(d.gender));
       const draftAvatarPath = typeof d.avatarPath === "string" && d.avatarPath.trim() ? d.avatarPath.trim() : undefined;
       const draftAvatarUrl =
         typeof d.avatarDataUrl === "string" && d.avatarDataUrl
@@ -186,11 +189,12 @@ export default function OnboardingProfilePage() {
       country,
       city,
       roles,
+      gender,
       avatarDataUrl: avatarPreviewUrl,
       avatarPath,
       avatarStatus,
     });
-  }, [hydrated, displayName, username, country, city, roles, avatarPreviewUrl, avatarPath, avatarStatus]);
+  }, [hydrated, displayName, username, country, city, roles, gender, avatarPreviewUrl, avatarPath, avatarStatus]);
 
   const suggestedUsernameBase = useMemo(() => buildUsernameSuggestionBase(displayName), [displayName]);
   const normalizedUsername = useMemo(() => normalizeUsername(username).slice(0, USERNAME_MAX_LENGTH), [username]);
@@ -581,6 +585,35 @@ export default function OnboardingProfilePage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Gender (optional, friendly) */}
+        <div className="pt-2">
+          <div className="flex items-end justify-between">
+            <label className="ml-1 text-xs font-semibold uppercase tracking-wider text-white/70">Gender</label>
+            <span className="text-[10px] text-white/40">Optional · used for hosting matches</span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {GENDER_OPTIONS.map((option) => {
+              const active = gender === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setGender(option.value)}
+                  className={[
+                    "rounded-2xl border px-3 py-3 text-center text-[13px] font-semibold transition",
+                    active
+                      ? "border-[#00F5FF] bg-black/30 text-white shadow-[0_0_14px_rgba(0,245,255,0.18)]"
+                      : "border-white/10 bg-black/20 text-white/70 hover:border-white/25 hover:text-white",
+                  ].join(" ")}
+                  aria-pressed={active}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
