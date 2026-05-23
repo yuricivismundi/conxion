@@ -288,27 +288,40 @@ export default function OnboardingFinalizePage() {
           : "pending";
       const avatarUrl = getAvatarStorageUrl(avatarPath);
 
-      const upsertRes = await supabase.from("profiles").upsert(
-        {
-          user_id: user.id,
-          auth_user_id: user.id,
-          display_name: displayName,
-          username: usernameValidation.normalizedUsername,
-          city,
-          country,
-          roles,
-          languages,
-          interests,
-          availability,
-          dance_styles: danceStyles,
-          dance_skills: danceSkills,
-          has_other_style: hasOtherStyle,
-          avatar_path: avatarPath,
-          avatar_status: avatarStatus,
-          ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
-        },
+      const draftGender =
+        draft.gender === "woman" || draft.gender === "man" || draft.gender === "nonbinary"
+          ? draft.gender
+          : "prefer_not_to_say";
+
+      // Build payload; include gender if the column exists, but fall back gracefully if migration hasn't run
+      const basePayload = {
+        user_id: user.id,
+        auth_user_id: user.id,
+        display_name: displayName,
+        username: usernameValidation.normalizedUsername,
+        city,
+        country,
+        roles,
+        languages,
+        interests,
+        availability,
+        dance_styles: danceStyles,
+        dance_skills: danceSkills,
+        has_other_style: hasOtherStyle,
+        avatar_path: avatarPath,
+        avatar_status: avatarStatus,
+        ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+      };
+
+      let upsertRes = await supabase.from("profiles").upsert(
+        { ...basePayload, gender: draftGender },
         { onConflict: "user_id" }
       );
+
+      // If `gender` column doesn't exist yet (pre-migration), retry without it
+      if (upsertRes.error && /gender/i.test(upsertRes.error.message)) {
+        upsertRes = await supabase.from("profiles").upsert(basePayload, { onConflict: "user_id" });
+      }
 
       if (upsertRes.error) {
         throw new Error(mapUsernameServerError(upsertRes.error.message));
@@ -326,7 +339,7 @@ export default function OnboardingFinalizePage() {
       }
 
       clearOnboardingDraft();
-      router.replace("/auth/success?next=%2Fconnections&context=onboarding");
+      router.replace("/onboarding/welcome");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Could not complete onboarding.";
       setSaveError(message);

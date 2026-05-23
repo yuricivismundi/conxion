@@ -9,6 +9,7 @@ export type OnboardingDraft = {
   country?: string;
   city?: string;
   roles?: string[];
+  gender?: "woman" | "man" | "nonbinary" | "prefer_not_to_say";
 
   interests?: string[];
   styles?: string[];
