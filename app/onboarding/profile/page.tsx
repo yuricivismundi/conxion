@@ -301,12 +301,9 @@ export default function OnboardingProfilePage() {
       const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
       if (upErr) throw upErr;
 
-      const publicUrl = getAvatarStorageUrl(path);
-      if (!publicUrl) throw new Error("Could not generate preview URL.");
-
       setAvatarPath(path);
       setAvatarStatus("pending");
-      setAvatarPreviewUrl(publicUrl);
+      setAvatarPreviewUrl(URL.createObjectURL(file));
 
       writeOnboardingDraft({
         avatarPath: path,
