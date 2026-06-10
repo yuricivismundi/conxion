@@ -356,7 +356,7 @@ export default async function TeacherProfilePage({
             <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
           </div>
-          <div className="rounded-[28px] overflow-hidden" style={{ background: "#242428" }}>
+          <div className="sm:rounded-[28px] sm:overflow-hidden sm:bg-[#242428]">
             <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
           </div>
         </section>
@@ -387,6 +387,11 @@ export default async function TeacherProfilePage({
                       <p className="text-xs text-zinc-500 font-bold uppercase">
                         {formatTime(cls.start_time)}
                       </p>
+                      {cls.duration_min ? (
+                        <p className="mt-0.5 text-[10px] text-zinc-600 font-semibold uppercase">
+                          {cls.duration_min} min
+                        </p>
+                      ) : null}
                     </div>
                     <div>
                       <h4 className="font-bold text-xl mb-1 text-white">{cls.title}</h4>
@@ -422,8 +427,9 @@ export default async function TeacherProfilePage({
         <section className="mb-12 sm:mb-24">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16">
             <div className="lg:col-span-4">
-              <h2 className="font-black text-4xl sm:text-5xl tracking-tighter leading-none mb-4 sm:mb-6 text-white">
-                Global<br />Stage<br />Presence
+              <h2 className="font-black text-3xl sm:text-5xl tracking-tighter leading-none mb-4 sm:mb-6 text-white">
+                <span className="lg:hidden">Global Stage Presence</span>
+                <span className="hidden lg:inline">Global<br />Stage<br />Presence</span>
               </h2>
               <p className="text-zinc-500 leading-relaxed">
                 Representing the pinnacle of dance at the world&apos;s most prestigious festivals and congresses.

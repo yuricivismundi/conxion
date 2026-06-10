@@ -45,7 +45,7 @@ function defaultProfileConfig(userId: string): TeacherInfoProfileConfig {
     userId,
     headline: "",
     introText: "",
-    isEnabled: true,
+    isEnabled: false,
     createdAt: nowIso,
     updatedAt: nowIso,
   };

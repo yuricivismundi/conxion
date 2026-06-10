@@ -299,7 +299,7 @@ export default function ConnectionsFiltersDrawer({
   const availableCities = cityNames.filter((c) => !local.cities.includes(c));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:justify-end">
+    <div className="fixed inset-0 z-[80] flex items-end sm:justify-end">
       <button
         aria-label="Close filters"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"

@@ -104,6 +104,24 @@ const PRICING_FAQ_ITEMS: PricingFaqItem[] = [
     answer:
       "On the Starter plan you can send up to 10 event invites per month. Plus members get unlimited event invites. You can only invite accepted connections, so the limit is there to keep invites meaningful rather than spammy. The counter resets at the start of each calendar month.",
   },
+  {
+    id: "teacher-bookings-limit",
+    question: "How many teacher booking requests can I send per month?",
+    answer:
+      "Starter and Verified members can send 5 teacher booking requests per month. Plus members get 15 per month. A booking request reserves a specific time slot with a teacher and stays in the teacher's calendar until they accept or decline. Counts reset on the 1st of each calendar month.",
+  },
+  {
+    id: "service-inquiries-limit",
+    question: "How many teacher service inquiries can I send per month?",
+    answer:
+      "Service inquiries are the 'Request info' messages you send to a teacher to ask about their classes, workshops, or collaborations — they don't lock the teacher's calendar. Starter and Verified members can send 5 per month, Plus members 15. You can have one pending inquiry per teacher at a time; cancel or wait for a reply before sending another. Counts reset on the 1st of each calendar month.",
+  },
+  {
+    id: "booking-vs-inquiry",
+    question: "What is the difference between a booking request and a service inquiry?",
+    answer:
+      "A booking request reserves a specific time slot in a teacher's calendar and waits for them to accept or decline — once accepted, the slot is taken. A service inquiry is a way to ask the teacher questions (about a private class, group class, workshop, collaboration, or other) without committing to a time. They are independent: you can have both pending at the same time with the same teacher.",
+  },
 ];
 
 export function getPricingFaqItems() {

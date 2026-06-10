@@ -68,6 +68,13 @@ export default function EventInboxPage() {
 
     const userId = authData.user.id;
 
+    // Verify profile exists — stale session without a profile row redirects to onboarding
+    const profileCheck = await supabase.from("profiles").select("user_id").eq("user_id", userId).maybeSingle();
+    if (!profileCheck.error && !profileCheck.data) {
+      router.replace("/onboarding/profile");
+      return;
+    }
+
     const { data: sessionData } = await supabase.auth.getSession();
     setAccessToken(sessionData.session?.access_token ?? null);
 

@@ -7,6 +7,8 @@ import { ensureServiceInquiryThread, upsertServiceInquiryContext, emitServiceInq
 import { isServiceInquiryKind, isServiceInquiryRequesterType, normalizeServiceInquiryRow } from "@/lib/service-inquiries/types";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { encodeCursor, decodeCursor, validatePaginationLimit, PaginationResponse } from "@/lib/pagination/cursor";
+import { getBillingAccountStateForUserId } from "@/lib/billing/account-state";
+import { getPlanLimits } from "@/lib/billing/limits";
 
 export const runtime = "nodejs";
 
@@ -98,9 +100,12 @@ export async function POST(req: Request) {
       return jsonError("You cannot send a professional inquiry to yourself.", 400);
     }
 
+    const accountState = await getBillingAccountStateForUserId(auth.serviceClient, auth.userId);
+    const planLimits = getPlanLimits(accountState.currentPlanId);
+    const monthlyLimit = planLimits.serviceInquiriesPerMonth ?? SERVICE_INQUIRY_MONTHLY_LIMIT;
     const monthlyCount = await countServiceInquiriesThisMonth(auth.serviceClient, auth.userId);
-    if (monthlyCount >= SERVICE_INQUIRY_MONTHLY_LIMIT) {
-      return jsonError(`You already used all ${SERVICE_INQUIRY_MONTHLY_LIMIT} info requests this month.`, 400);
+    if (monthlyCount >= monthlyLimit) {
+      return jsonError(`You already used all ${monthlyLimit} info requests this month.`, 400);
     }
 
     const recipientProfileRes = await auth.serviceClient

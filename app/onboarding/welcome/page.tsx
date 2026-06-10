@@ -15,7 +15,6 @@ type ProfileRow = {
   dance_skills: Record<string, { level?: string }> | null;
   dance_styles: string[] | null;
   avatar_path: string | null;
-  bio: string | null;
 };
 
 type Suggestion = {
@@ -75,7 +74,7 @@ function buildSuggestions(profile: ProfileRow | null): Suggestion[] {
   const isOrganizer = isOrganizerLike(profile.roles);
   const isBeginner = isBeginnerLevel(level);
   const hasAvatar = Boolean(profile.avatar_path);
-  const hasBio = Boolean(profile.bio && profile.bio.trim());
+
 
   // 1. Find dancers nearby with matching style (always relevant for any role)
   if (primaryStyle) {
@@ -174,23 +173,20 @@ function buildSuggestions(profile: ProfileRow | null): Suggestion[] {
     priority: 6,
   });
 
-  // 5. Complete profile — only if something's missing
-  if (!hasAvatar || !hasBio) {
-    const missing: string[] = [];
-    if (!hasAvatar) missing.push("photo");
-    if (!hasBio) missing.push("short bio");
-    suggestions.push({
-      id: "complete-profile",
-      icon: "person_edit",
-      iconBg: "border-rose-300/35 bg-rose-400/10",
-      iconColor: "text-rose-300",
-      title: "Complete your profile",
-      body: `Add a ${missing.join(" and ")} — it boosts connection match rate by 3x.`,
-      cta: "Edit profile",
-      href: "/me/edit",
-      priority: 8,
-    });
-  }
+  // 5. Complete profile — always shown, copy adapts to what's missing
+  suggestions.push({
+    id: "complete-profile",
+    icon: "manage_accounts",
+    iconBg: "border-rose-300/35 bg-rose-400/10",
+    iconColor: "text-rose-300",
+    title: "Complete your profile",
+    body: !hasAvatar
+      ? "Add a profile photo — it boosts connection match rate by 3x."
+      : "Add your dance styles, levels, and socials to stand out.",
+    cta: "Edit profile",
+    href: "/me/edit",
+    priority: 8,
+  });
 
   return suggestions.sort((a, b) => b.priority - a.priority);
 }
@@ -202,7 +198,9 @@ function buildGreeting(profile: ProfileRow | null): { title: string; subtitle: s
   const isTeacher = isTeacherLike(profile?.roles ?? null);
   const isBeginner = isBeginnerLevel(getLevel(profile, primaryStyle));
 
-  if (isTeacher) {
+  const roles = profile?.roles ?? [];
+  const isTeacherOnly = isTeacher && roles.every((r) => isTeacherLike([r]));
+  if (isTeacherOnly) {
     return {
       title: `Welcome, ${firstName} ✨`,
       subtitle: city
@@ -250,7 +248,7 @@ export default function OnboardingWelcomePage() {
       }
       const res = await supabase
         .from("profiles")
-        .select("user_id,display_name,city,country,roles,dance_skills,dance_styles,avatar_path,bio")
+        .select("user_id,display_name,city,country,roles,dance_skills,dance_styles,avatar_path")
         .eq("user_id", userId)
         .maybeSingle();
       if (cancelled) return;

@@ -703,7 +703,7 @@ function GroupDetail() {
       {/* Message action sheet */}
       {msgActionTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 backdrop-blur-sm"
           onClick={() => setMsgActionTarget(null)}
         >
           <div className="sheet-up w-full max-w-sm overflow-hidden rounded-t-[28px] border border-white/10 bg-[#0f1116] pb-safe" onClick={(e) => e.stopPropagation()}>
@@ -754,7 +754,7 @@ function GroupDetail() {
       {/* All members modal — bottom sheet on mobile, centered on sm+ */}
       {allMembersOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
           onClick={() => setAllMembersOpen(false)}
         >
           <div

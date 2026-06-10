@@ -168,10 +168,10 @@ export default function CreateGroupFromEventModal({
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 pb-[max(1rem,env(safe-area-inset-bottom))] px-4 pt-4 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
-      <div className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0a0c13] shadow-2xl">
+      <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0a0c13] shadow-2xl" style={{ maxHeight: "min(90dvh, calc(100dvh - 2rem - env(safe-area-inset-bottom)))" }}>
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-white/[0.07] px-5 py-4">
           <div>

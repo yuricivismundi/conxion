@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { countServiceInquiriesThisMonth, SERVICE_INQUIRY_MONTHLY_LIMIT } from "@/lib/service-inquiries/read-model";
 import { requireServiceInquiryAuth } from "@/lib/service-inquiries/server";
 import { getBillingAccountStateForUserId } from "@/lib/billing/account-state";
 import { getPlanLimits } from "@/lib/billing/limits";
@@ -13,18 +12,28 @@ export async function GET(req: Request) {
 
     const accountState = await getBillingAccountStateForUserId(auth.serviceClient, auth.userId);
     const planLimits = getPlanLimits(accountState.currentPlanId);
-    const limit = planLimits.serviceInquiriesPerMonth ?? SERVICE_INQUIRY_MONTHLY_LIMIT;
-    const used = await countServiceInquiriesThisMonth(auth.serviceClient, auth.userId);
+    const limit = planLimits.bookingRequestsPerMonth;
+
+    const cycleStart = new Date();
+    cycleStart.setUTCDate(1);
+    cycleStart.setUTCHours(0, 0, 0, 0);
+    const countRes = await auth.serviceClient
+      .from("teacher_session_bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("student_id", auth.userId)
+      .gte("created_at", cycleStart.toISOString());
+    if (countRes.error) throw countRes.error;
+    const used = countRes.count ?? 0;
 
     return NextResponse.json({
       ok: true,
       used,
       limit,
-      remaining: Math.max(0, limit - used),
+      remaining: limit === null ? null : Math.max(0, limit - used),
     });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Could not load inquiry usage." },
+      { ok: false, error: error instanceof Error ? error.message : "Could not load booking usage." },
       { status: 500 }
     );
   }

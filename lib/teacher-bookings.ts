@@ -60,12 +60,18 @@ export function isoDateWeekday(value: string) {
 }
 
 export function generateWeeklyDatesWithinNextThreeMonths(anchorDate: string, now = new Date()) {
+  return generateWeeklyDates(anchorDate, 3, now);
+}
+
+export function generateWeeklyDates(anchorDate: string, months: number, now = new Date()) {
   if (!isDateWithinNextThreeMonths(anchorDate, now)) return [] as string[];
   const parsed = parseIsoDate(anchorDate);
   if (!parsed) return [] as string[];
 
   const min = startOfLocalDay(now);
-  const max = addMonthsClamped(min, 3);
+  const anchorMax = addMonthsClamped(new Date(parsed.year, parsed.month - 1, parsed.day), months);
+  const policyMax = addMonthsClamped(min, 3);
+  const max = anchorMax < policyMax ? anchorMax : policyMax;
   const results: string[] = [];
   let cursor = new Date(parsed.year, parsed.month - 1, parsed.day);
 

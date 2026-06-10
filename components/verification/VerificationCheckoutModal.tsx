@@ -5,6 +5,7 @@ import {
   createVerificationCheckoutSession,
   type VerificationResumePayload,
 } from "@/lib/verification-client";
+import { VERIFICATION_PRICE_LABEL } from "@/lib/verification";
 
 type Props = {
   open: boolean;
@@ -28,6 +29,7 @@ export default function VerificationCheckoutModal({
       open={open}
       title="Get Verified"
       badgeLabel="One-time trust upgrade"
+      subtitle={VERIFICATION_PRICE_LABEL}
       submitLabel="Confirm verification"
       loadingLabel="Preparing verification checkout…"
       onClose={onClose}

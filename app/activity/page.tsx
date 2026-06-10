@@ -1373,7 +1373,7 @@ function HostingRequestList({
 
       {/* Cancel modal */}
       {cancelTarget ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-white/12 bg-[#0f1419] p-5 shadow-2xl">
             <h3 className="text-base font-bold text-white">Cancel hosting request</h3>
             <p className="mt-1 text-sm text-white/55">

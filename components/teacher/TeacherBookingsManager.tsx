@@ -6,12 +6,19 @@ import {
   buildTeacherBookingCalendarUrl,
   formatShortDate,
   formatShortTime,
-  generateWeeklyDatesWithinNextThreeMonths,
+  generateWeeklyDates,
   isDateWithinNextThreeMonths,
   isTeacherBookingStatus,
   isTimeRangeValid,
   type TeacherBookingStatus,
 } from "@/lib/teacher-bookings";
+
+const REPEAT_OPTIONS = [
+  { label: "No repeat — one slot only", value: 0 },
+  { label: "Every week for 1 month", value: 1 },
+  { label: "Every week for 2 months", value: 2 },
+  { label: "Every week for 3 months", value: 3 },
+] as const;
 
 type AvailabilityRow = {
   id: string;
@@ -47,6 +54,73 @@ function statusClasses(status: TeacherBookingStatus) {
   if (status === "accepted") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
   if (status === "declined") return "border-rose-300/30 bg-rose-400/10 text-rose-100";
   return "border-amber-300/30 bg-amber-400/10 text-amber-100";
+}
+
+function AvailabilityByMonth({
+  slots,
+  saving,
+  onRemove,
+}: {
+  slots: AvailabilityRow[];
+  saving: boolean;
+  onRemove: (id: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const groups = slots.reduce<{ key: string; label: string; slots: AvailabilityRow[] }[]>((acc, slot) => {
+    const d = new Date(slot.availability_date + "T00:00:00");
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    const existing = acc.find((g) => g.key === key);
+    if (existing) { existing.slots.push(slot); } else { acc.push({ key, label, slots: [slot] }); }
+    return acc;
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      {groups.map((group) => {
+        const isOpen = !collapsed[group.key];
+        return (
+          <div key={group.key} className="rounded-xl border border-white/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setCollapsed((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-white/[0.03]"
+            >
+              <span className="text-sm font-semibold text-slate-200">{group.label}</span>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-400">{group.slots.length} slot{group.slots.length !== 1 ? "s" : ""}</span>
+                <span className="material-symbols-outlined text-[16px] text-slate-500 transition-transform" style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}>expand_more</span>
+              </div>
+            </button>
+            {isOpen && (
+              <div className="divide-y divide-white/[0.06] border-t border-white/[0.06]">
+                {group.slots.map((slot) => (
+                  <div key={slot.id} className="px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm text-slate-200">{new Date(slot.availability_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</p>
+                        <p className="text-xs text-slate-400">{formatShortTime(slot.start_time)} – {formatShortTime(slot.end_time)}</p>
+                        {slot.note ? <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{slot.note}</p> : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onRemove(slot.id)}
+                        disabled={saving}
+                        className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-white/10 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function Toggle({
@@ -90,7 +164,7 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
   const [draftStartTime, setDraftStartTime] = useState("");
   const [draftEndTime, setDraftEndTime] = useState("");
   const [draftNote, setDraftNote] = useState("");
-  const [draftRepeatWeekly, setDraftRepeatWeekly] = useState(true);
+  const [draftRepeatMonths, setDraftRepeatMonths] = useState<number>(3);
   const [calendarLinks, setCalendarLinks] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -184,8 +258,8 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
 
     setSaving(true);
     try {
-      const dates = draftRepeatWeekly
-        ? generateWeeklyDatesWithinNextThreeMonths(draftDate)
+      const dates = draftRepeatMonths > 0
+        ? generateWeeklyDates(draftDate, draftRepeatMonths)
         : [draftDate];
       const rows = dates.map((date) => ({
         teacher_id: teacherUserId,
@@ -205,8 +279,7 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
       setDraftStartTime("");
       setDraftEndTime("");
       setDraftNote("");
-      setDraftRepeatWeekly(true);
-      setInfo(draftRepeatWeekly ? "Weekly private class slots added." : "Private class slot added.");
+      setInfo(draftRepeatMonths > 0 ? "Weekly private class slots added." : "Private class slot added.");
       await loadData();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not add availability.");
@@ -332,13 +405,7 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
   }
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="mb-5 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Private class availability</p>
-          <p className="mt-1 text-sm text-slate-400">Add private-class slots and manage incoming requests.</p>
-        </div>
-      </div>
+    <section className="w-full min-w-0 max-w-full overflow-hidden border-0 p-0">
 
       {error ? (
         <div className="mb-4 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -351,47 +418,50 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="grid w-full min-w-0 gap-6 lg:gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 border-0 p-0 lg:rounded-2xl lg:border lg:border-white/10 lg:bg-black/20 lg:p-4">
           <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Add private class slot</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+            <label className="block min-w-0 col-span-2 sm:col-span-1">
               <span className="text-xs text-slate-400">Date</span>
               <input
                 type="date"
                 value={draftDate}
                 onChange={(event) => setDraftDate(event.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+                className="mt-1.5 w-full min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
               />
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="text-xs text-slate-400">Start</span>
-                <input
-                  type="time"
-                  value={draftStartTime}
-                  onChange={(event) => setDraftStartTime(event.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-slate-400">End</span>
-                <input
-                  type="time"
-                  value={draftEndTime}
-                  onChange={(event) => setDraftEndTime(event.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
-                />
-              </label>
-            </div>
+            <label className="block min-w-0">
+              <span className="text-xs text-slate-400">Start</span>
+              <input
+                type="time"
+                value={draftStartTime}
+                onChange={(event) => setDraftStartTime(event.target.value)}
+                className="mt-1.5 w-full min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+              />
+            </label>
+            <label className="block min-w-0">
+              <span className="text-xs text-slate-400">End</span>
+              <input
+                type="time"
+                value={draftEndTime}
+                onChange={(event) => setDraftEndTime(event.target.value)}
+                className="mt-1.5 w-full min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+              />
+            </label>
           </div>
-          <label className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-            <div>
-              <p className="text-sm font-medium text-slate-200">Repeat weekly</p>
-              <p className="mt-0.5 text-xs text-slate-500">Generate bookable slots weekly for the next 3 months.</p>
-            </div>
-            <Toggle checked={draftRepeatWeekly} onChange={setDraftRepeatWeekly} />
-          </label>
+          <div className="mt-3">
+            <span className="text-xs text-slate-400">Repeat weekly</span>
+            <select
+              value={draftRepeatMonths}
+              onChange={(e) => setDraftRepeatMonths(Number(e.target.value))}
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+            >
+              {REPEAT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
           <label className="mt-3 block">
             <span className="text-xs text-slate-400">Note</span>
             <textarea
@@ -412,109 +482,18 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
           </button>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-          <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Available slots</p>
+        <div className="min-w-0 border-0 p-0 lg:rounded-2xl lg:border lg:border-white/10 lg:bg-black/20 lg:p-4">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Available slots{availability.length > 0 ? <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">{availability.length}</span> : null}
+          </p>
           {loading ? <p className="text-sm text-slate-500">Loading...</p> : null}
           {!loading && availability.length === 0 ? (
             <p className="text-sm text-slate-500">No availability added yet.</p>
           ) : null}
-          <div className="space-y-3">
-            {availability.map((slot) => (
-              <div key={slot.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-100">{formatShortDate(slot.availability_date)}</p>
-                    <p className="mt-1 text-sm text-slate-300">
-                      {formatShortTime(slot.start_time)} - {formatShortTime(slot.end_time)}
-                    </p>
-                    {slot.note ? <p className="mt-2 text-xs text-slate-400">{slot.note}</p> : null}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDisableAvailability(slot.id)}
-                    disabled={saving}
-                    className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <AvailabilityByMonth slots={availability} saving={saving} onRemove={(id) => void handleDisableAvailability(id)} />
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Booking requests</p>
-        {loading ? <p className="text-sm text-slate-500">Loading...</p> : null}
-        {!loading && bookings.length === 0 ? (
-          <p className="text-sm text-slate-500">No booking requests yet.</p>
-        ) : null}
-        <div className="space-y-3">
-          {bookings.map((booking) => (
-            <div key={booking.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-slate-100">
-                      {studentNames[booking.student_id] ?? "Member"}
-                    </p>
-                    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusClasses(booking.status)}`}>
-                      {booking.status}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-300">
-                    {formatShortDate(booking.session_date)} at {formatShortTime(booking.session_time)}
-                  </p>
-                  {booking.duration_min ? <p className="mt-1 text-xs text-slate-500">{booking.duration_min} min session</p> : null}
-                  {booking.note ? <p className="mt-2 text-sm text-slate-400">{booking.note}</p> : null}
-                  {calendarLinks[booking.id] ? (
-                    <a
-                      href={calendarLinks[booking.id]}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-cyan-200"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">event</span>
-                      Add to Google Calendar
-                    </a>
-                  ) : null}
-                </div>
-                {booking.status === "pending" && (
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void handleRespond(booking.id, "decline")}
-                      disabled={respondingId === booking.id}
-                      className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60"
-                    >
-                      Decline
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleRespond(booking.id, "accept")}
-                      disabled={respondingId === booking.id}
-                      className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-2 text-xs font-semibold text-[#06121a] disabled:opacity-60"
-                    >
-                      {respondingId === booking.id ? "Saving..." : "Accept"}
-                    </button>
-                  </div>
-                )}
-                {booking.status === "accepted" && (
-                  <button
-                    type="button"
-                    onClick={() => void handleCancel(booking.id)}
-                    disabled={respondingId === booking.id}
-                    className="rounded-xl border border-rose-400/30 bg-rose-400/[0.07] px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/15 disabled:opacity-60"
-                  >
-                    {respondingId === booking.id ? "Cancelling..." : "Cancel booking"}
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </section>
   );
 }

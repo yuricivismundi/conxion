@@ -44,11 +44,11 @@ export default function BookSessionModal({
       : "Select a service, bookable date, and slot.";
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-md sm:items-center">
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 backdrop-blur-md sm:items-center sm:px-3 sm:py-3">
       <div
         className={[
-          "relative flex max-h-[min(92svh,760px)] w-full flex-col overflow-hidden rounded-[28px] border border-white/[0.08] shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:rounded-[32px]",
-          mode === "chat" ? "max-w-[460px]" : "max-w-[980px]",
+          "relative flex max-h-[100svh] w-full flex-col overflow-hidden border-0 sm:max-h-[min(92svh,760px)] sm:rounded-[32px] sm:border sm:border-white/[0.08] sm:shadow-[0_32px_80px_rgba(0,0,0,0.6)]",
+          mode === "chat" ? "sm:max-w-[460px]" : "sm:max-w-[980px]",
         ].join(" ")}
         style={{
           background:

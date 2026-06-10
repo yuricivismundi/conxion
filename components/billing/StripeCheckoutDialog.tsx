@@ -275,8 +275,9 @@ export default function StripeCheckoutDialog({
 
         <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-6 touch-pan-y [scrollbar-gutter:stable] sm:px-6 sm:pb-6 sm:pt-7 [-webkit-overflow-scrolling:touch]">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-100/75">{badgeLabel}</p>
-          <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">{title}</h2>
-          {subtitle ? <p className="mt-3 max-w-[44ch] text-sm leading-7 text-slate-300">{subtitle}</p> : null}
+          <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
+            {title}{subtitle ? <span className="ml-3 text-base font-semibold text-cyan-300">{subtitle}</span> : null}
+          </h2>
 
           <div className="mt-6">
             {loading ? (

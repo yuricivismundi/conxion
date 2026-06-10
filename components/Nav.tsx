@@ -51,17 +51,46 @@ export default function Nav({ title }: NavProps) {
       try {
         const { data: sessionData } = await supabase.auth.getSession();
         const userId = sessionData.session?.user?.id ?? null;
-        if (!cancelled) {
-          setCurrentUserId(userId);
-          setIsAuthenticated(Boolean(userId));
-          setAuthResolved(true);
-          setUnreadMessagesLoading(Boolean(userId));
-          if (!userId) setUnreadMessageThreads(0);
-        }
 
         if (!userId) {
-          if (!cancelled) setIsAdmin(false);
+          if (!cancelled) {
+            setCurrentUserId(null);
+            setIsAuthenticated(false);
+            setIsAdmin(false);
+            setAuthResolved(true);
+            setUnreadMessageThreads(0);
+          }
           return;
+        }
+
+        // Verify the profile row exists BEFORE showing authenticated UI.
+        // This prevents a flash of the auth menu for stale/incomplete sessions.
+        const profileExistsRes = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        const profileMissing =
+          !profileExistsRes.error && !profileExistsRes.data;
+
+        if (profileMissing) {
+          await supabase.auth.signOut();
+          if (!cancelled) {
+            setIsAuthenticated(false);
+            setCurrentUserId(null);
+            setIsAdmin(false);
+            setAuthResolved(true);
+          }
+          return;
+        }
+
+        // Profile confirmed — now show authenticated UI
+        if (!cancelled) {
+          setCurrentUserId(userId);
+          setIsAuthenticated(true);
+          setAuthResolved(true);
+          setUnreadMessagesLoading(true);
         }
 
         // Stamp last_seen_at on every page load (fire-and-forget)
@@ -93,15 +122,18 @@ export default function Nav({ title }: NavProps) {
 
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
       const userId = session?.user?.id ?? null;
-      setCurrentUserId(userId);
-      setIsAuthenticated(Boolean(userId));
-      setAuthResolved(true);
-      setUnreadMessagesLoading(Boolean(userId));
+      // Don't set isAuthenticated=true here — refreshAuthState will verify the
+      // profile exists first, then set it. Only handle sign-out immediately.
       if (!userId) {
+        setCurrentUserId(null);
+        setIsAuthenticated(false);
+        setAuthResolved(true);
+        setUnreadMessagesLoading(false);
         setIsAdmin(false);
         setUnreadMessageThreads(0);
         return;
       }
+      // For sign-in events, let refreshAuthState verify the profile before showing auth UI
       void refreshAuthState();
     });
 
@@ -223,7 +255,7 @@ export default function Nav({ title }: NavProps) {
   })();
   const accountHref = currentUserId ? `/profile/${currentUserId}` : "/account-settings";
   const myProfileActive = activeTab === "/account";
-  const isPublicContext = authResolved ? !isAuthenticated : false;
+  const isPublicContext = !authResolved || !isAuthenticated;
 
   return (
     <>

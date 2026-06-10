@@ -32,7 +32,7 @@ function createConflict(kind: PendingPairRequestKind, label: string, requestId?:
     label,
     requestId: requestId ?? null,
     threadToken: threadToken ?? null,
-    message: `There is already a pending ${label} with this member.`,
+    message: `You already have a pending ${label} with this member. Wait for a response or cancel it before sending another.`,
   };
 }
 
@@ -156,7 +156,30 @@ async function findPendingServiceInquiryConflict(
   if (!row?.id) return null;
   const threadCtx = await getLivePendingThreadContext(serviceClient, "service_inquiries", row.id);
   if (!threadCtx) return null;
-  return createConflict("service_inquiry", "teaching inquiry", row.id, threadCtx.threadToken);
+  return createConflict("service_inquiry", "Request info inquiry", row.id, threadCtx.threadToken);
+}
+
+async function findPendingBookingConflict(
+  serviceClient: SupabaseServiceClient,
+  actorUserId: string,
+  otherUserId: string
+) {
+  const pendingRes = await serviceClient
+    .from("teacher_session_bookings")
+    .select("id")
+    .eq("status", "pending")
+    .gte("created_at", pendingCutoffIso())
+    .or(pairOrClause("student_id", "teacher_id", actorUserId, otherUserId))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (pendingRes.error) throw pendingRes.error;
+  const row = (pendingRes.data ?? null) as { id?: string | null } | null;
+  if (!row?.id) return null;
+  const threadCtx = await getLivePendingThreadContext(serviceClient, "teacher_session_bookings", row.id);
+  if (!threadCtx) return null;
+  return createConflict("connection", "private class booking request", row.id, threadCtx.threadToken);
 }
 
 async function findPendingActivityConflict(
@@ -253,15 +276,16 @@ export async function findPendingPairRequestConflict(
   const { actorUserId, otherUserId } = params;
   if (!actorUserId || !otherUserId || actorUserId === otherUserId) return null;
 
-  const [connectionConflict, hostingConflict, outgoingTripConflict, incomingTripConflict, serviceInquiryConflict, activityConflict] =
+  const [connectionConflict, hostingConflict, outgoingTripConflict, incomingTripConflict, serviceInquiryConflict, bookingConflict, activityConflict] =
     await Promise.all([
       findPendingConnectionConflict(serviceClient, actorUserId, otherUserId),
       findPendingHostingConflict(serviceClient, actorUserId, otherUserId),
       findPendingTripRequestConflictForDirection(serviceClient, actorUserId, otherUserId),
       findPendingTripRequestConflictForDirection(serviceClient, otherUserId, actorUserId),
       findPendingServiceInquiryConflict(serviceClient, actorUserId, otherUserId),
+      findPendingBookingConflict(serviceClient, actorUserId, otherUserId),
       findPendingActivityConflict(serviceClient, actorUserId, otherUserId),
     ]);
 
-  return connectionConflict ?? hostingConflict ?? outgoingTripConflict ?? incomingTripConflict ?? serviceInquiryConflict ?? activityConflict ?? null;
+  return connectionConflict ?? hostingConflict ?? outgoingTripConflict ?? incomingTripConflict ?? serviceInquiryConflict ?? bookingConflict ?? activityConflict ?? null;
 }

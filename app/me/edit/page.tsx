@@ -44,11 +44,50 @@ import ConfirmationDialog from "@/components/ConfirmationDialog";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
 import { cx } from "@/lib/cx";
 
-function TabPanelLoading({ label }: { label: string }) {
+function TabPanelLoading({ label: _label }: { label: string }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
-      <div className="profile-shimmer h-5 w-40 rounded-md" />
-      <p className="mt-3 text-sm text-slate-400">Loading {label.toLowerCase()}...</p>
+    <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-5 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+      <div className="animate-pulse space-y-4">
+        <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="h-7 w-12 rounded-full bg-white/[0.08]" />
+            <div className="space-y-1.5">
+              <div className="h-4 w-28 rounded bg-white/[0.10]" />
+              <div className="h-3 w-36 rounded bg-white/[0.06]" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-14 rounded-xl bg-white/[0.08]" />
+            <div className="h-8 w-14 rounded-xl bg-white/[0.06]" />
+          </div>
+        </div>
+        <div className="flex gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-9 flex-1 rounded-xl bg-white/[0.05]" />
+          ))}
+        </div>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="h-3 w-16 rounded bg-white/[0.06]" />
+            <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+          </div>
+          <div className="space-y-2">
+            <div className="h-3 w-12 rounded bg-white/[0.06]" />
+            <div className="h-24 w-full rounded-xl bg-white/[0.05]" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <div className="h-3 w-16 rounded bg-white/[0.06]" />
+              <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+            </div>
+            <div className="space-y-2">
+              <div className="h-3 w-12 rounded bg-white/[0.06]" />
+              <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+            </div>
+          </div>
+          <div className="h-10 w-32 rounded-xl bg-white/[0.08]" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -58,10 +97,6 @@ const ProfileMediaManager = dynamic(() => import("@/components/profile/ProfileMe
   loading: () => <TabPanelLoading label="media" />,
 });
 
-const TeacherInfoManager = dynamic(() => import("@/components/teacher/TeacherInfoManager"), {
-  ssr: false,
-  loading: () => <TabPanelLoading label="teacher services" />,
-});
 
 const TeacherProfilePage = dynamic(() => import("@/app/me/edit/teacher-profile/page"), {
   ssr: false,
@@ -219,7 +254,7 @@ type SnapshotValues = {
   avatarUrl: string | null;
 };
 
-type EditProfileTab = "profile" | "media" | "hosting" | "teacher_services" | "teacher_profile";
+type EditProfileTab = "profile" | "media" | "hosting" | "teacher_profile";
 
 const PROFILE_EDIT_SELECT = [
   "user_id",
@@ -424,7 +459,7 @@ async function makePreviewMatchedCroppedBlob(params: {
   if (!blob) throw new Error("Could not create cropped image.");
   return blob;
 }
-const VALID_TABS: EditProfileTab[] = ["profile", "media", "hosting", "teacher_services", "teacher_profile"];
+const VALID_TABS: EditProfileTab[] = ["profile", "media", "hosting", "teacher_profile"];
 
 function isValidTab(t: string | null): t is EditProfileTab {
   return VALID_TABS.includes(t as EditProfileTab);
@@ -455,7 +490,6 @@ function EditMePage() {
   const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null);
   const [trialExpiredBadge, setTrialExpiredBadge] = useState(false);
   const [teacherProfileOn, setTeacherProfileOn] = useState<boolean | null>(null);
-  const [inquiriesOn, setInquiriesOn] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveStage, setSaveStage] = useState<"idle" | "saving" | "redirecting">("idle");
@@ -718,7 +752,6 @@ function EditMePage() {
     { id: "profile", label: "Profile info" },
     { id: "media", label: "Media" },
     { id: "hosting", label: "Hosting" },
-    { id: "teacher_services", label: "Inquiries" },
     { id: "teacher_profile", label: "Teacher profile" },
   ];
 
@@ -1001,18 +1034,11 @@ function EditMePage() {
         // Fetch teacher profile trial status + on/off states in background.
         void (async () => {
           try {
-            const [tpRes, inqRes] = await Promise.all([
-              supabase
-                .from("teacher_profiles")
-                .select("teacher_profile_trial_ends_at, teacher_profile_trial_started_at, teacher_profile_enabled")
-                .eq("user_id", user.id)
-                .maybeSingle(),
-              supabase
-                .from("teacher_info_profile")
-                .select("is_enabled")
-                .eq("user_id", user.id)
-                .maybeSingle(),
-            ]);
+            const tpRes = await supabase
+              .from("teacher_profiles")
+              .select("teacher_profile_trial_ends_at, teacher_profile_trial_started_at, teacher_profile_enabled")
+              .eq("user_id", user.id)
+              .maybeSingle();
             if (!cancelled) {
               if (tpRes.data) {
                 const endsAt = tpRes.data.teacher_profile_trial_ends_at as string | null;
@@ -1026,9 +1052,6 @@ function EditMePage() {
                   }
                 }
                 setTeacherProfileOn(tpRes.data.teacher_profile_enabled === true);
-              }
-              if (inqRes.data) {
-                setInquiriesOn(inqRes.data.is_enabled === true);
               }
             }
           } catch { /* ignore */ }
@@ -1635,8 +1658,84 @@ function EditMePage() {
           </div>
         )}
         <form onSubmit={save} className="grid min-w-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-          <aside className="min-w-0 xl:self-start flex justify-center xl:block">
-            <div className="w-52 sm:w-64 lg:w-72 overflow-hidden rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm">
+          <aside className="min-w-0 xl:self-start">
+            {/* Mobile: photo left + info right */}
+            <div className="flex items-stretch overflow-hidden rounded-2xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm xl:hidden">
+              <div className="relative w-1/2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => { if (displayAvatarUrl) setPhotoOpen(true); }}
+                  className="block h-full w-full overflow-hidden rounded-l-2xl border-r border-white/10 bg-black/30"
+                  title={displayAvatarUrl ? "Open photo" : "Add a photo"}
+                >
+                  {displayAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={displayAvatarUrl} alt="Profile avatar" className="h-full w-full object-cover object-center" onError={clearBrokenAvatarPreview} />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-slate-500">No photo</div>
+                  )}
+                </button>
+                <label className="absolute bottom-2 right-2 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-[#1a2228]/90 shadow transition hover:bg-[#243040]/90">
+                  <input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onRawFilePicked(file); }} />
+                  {uploading
+                    ? <span className="material-symbols-outlined text-[14px] animate-spin text-white/60">progress_activity</span>
+                    : <span className="material-symbols-outlined text-[14px] text-white/80">photo_camera</span>}
+                </label>
+              </div>
+              <div className="min-w-0 flex-1 p-3">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  {meId ? (
+                    <Link href={`/profile/${meId}`} className="min-w-0 truncate text-[15px] font-semibold text-white transition hover:text-[#0df2f2]">{displayName || "Your name"}</Link>
+                  ) : (
+                    <p className="min-w-0 truncate text-[15px] font-semibold text-white">{displayName || "Your name"}</p>
+                  )}
+                  {paymentVerified ? <VerifiedBadge size={16} title={VERIFIED_VIA_PAYMENT_LABEL} /> : null}
+                </div>
+                <p className="text-[12px] text-slate-400">{[city, country].filter(Boolean).join(", ") || "City, Country"}</p>
+                {(followersCount !== null || followingCount !== null) && (
+                  <p className="mt-0.5 text-[11px] text-white/45">
+                    {followersCount !== null && <><span className="font-semibold text-white/70">{followersCount}</span> followers</>}
+                    {followersCount !== null && followingCount !== null && <span className="mx-1 text-white/20">·</span>}
+                    {followingCount !== null && <><span className="font-semibold text-white/70">{followingCount}</span> following</>}
+                  </p>
+                )}
+                <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1">
+                  <div className="space-y-1">
+                    <span className="material-symbols-outlined text-[13px] text-cyan-300/70">badge</span>
+                    {(roles.length > 0 ? roles : ["—"]).slice(0, 3).map((role) => (
+                      <p key={role} className="text-[10px] text-white/65">{role}</p>
+                    ))}
+                  </div>
+                  <div className="space-y-1">
+                    <span className="material-symbols-outlined text-[13px] text-fuchsia-300/70">music_note</span>
+                    {(selectedStyles.length > 0 ? selectedStyles : ["—"]).slice(0, 3).map((style) => (
+                      <p key={style} className="text-[10px] capitalize text-white/65">{style}</p>
+                    ))}
+                  </div>
+                  <div className="space-y-1">
+                    <span className="material-symbols-outlined text-[13px] text-cyan-300/70">translate</span>
+                    {(languages.length > 0 ? languages : ["—"]).slice(0, 3).map((lang) => (
+                      <p key={lang} className="text-[10px] text-white/65">{lang}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {!paymentVerified && (
+              <div className="mt-3 xl:hidden">
+                <GetVerifiedButton
+                  className="w-full rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-cyan-400/15 via-fuchsia-500/15 to-purple-500/15 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:brightness-110"
+                  returnTo="/me/edit"
+                  onError={(message) => setError(message)}
+                >
+                  ✦ Get verified
+                </GetVerifiedButton>
+              </div>
+            )}
+
+            {/* Desktop: vertical card */}
+            <div className="hidden w-72 overflow-hidden rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.48)] backdrop-blur-sm xl:block">
               <div className="relative mt-0 w-full">
                 <button
                   type="button"
@@ -1647,44 +1746,26 @@ function EditMePage() {
                   <div className="relative aspect-square w-full overflow-hidden rounded-3xl border border-white/10 bg-black/30">
                     {displayAvatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={displayAvatarUrl}
-                        alt="Profile avatar"
-                        className="h-full w-full object-cover object-center"
-                        onError={clearBrokenAvatarPreview}
-                      />
+                      <img src={displayAvatarUrl} alt="Profile avatar" className="h-full w-full object-cover object-center" onError={clearBrokenAvatarPreview} />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">No photo yet</div>
                     )}
                   </div>
                 </button>
-                {/* Camera button */}
                 <label className="absolute bottom-2.5 right-2.5 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-[#1a2228]/90 shadow-lg transition hover:bg-[#243040]/90">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) void onRawFilePicked(file);
-                    }}
-                  />
+                  <input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onRawFilePicked(file); }} />
                   {uploading
                     ? <span className="material-symbols-outlined text-[16px] animate-spin text-white/60">progress_activity</span>
-                    : <span className="material-symbols-outlined text-[16px] text-white/80">photo_camera</span>
-                  }
+                    : <span className="material-symbols-outlined text-[16px] text-white/80">photo_camera</span>}
                 </label>
               </div>
-
               <div className="mt-4 space-y-2.5 px-4 pb-4">
                 <div>
                   <div className="flex min-w-0 items-center gap-2">
                     {meId ? (
-                      <Link href={`/profile/${meId}`} className="min-w-0 break-words text-base font-semibold leading-tight text-white transition hover:text-[#0df2f2]">
-                        {displayName || "Your name"}
-                      </Link>
+                      <Link href={`/profile/${meId}`} className="min-w-0 break-words text-xl font-bold leading-tight text-white transition hover:text-[#0df2f2]">{displayName || "Your name"}</Link>
                     ) : (
-                      <p className="min-w-0 break-words text-base font-semibold leading-tight text-white">{displayName || "Your name"}</p>
+                      <p className="min-w-0 break-words text-xl font-bold leading-tight text-white">{displayName || "Your name"}</p>
                     )}
                     {paymentVerified ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0df2f2]/80">
@@ -1702,7 +1783,6 @@ function EditMePage() {
                     </p>
                   )}
                 </div>
-
                 <div className="grid grid-cols-3 gap-x-3 gap-y-1 pt-1">
                   <div className="space-y-1.5">
                     <span className="material-symbols-outlined text-[16px] text-cyan-300/70">badge</span>
@@ -1724,52 +1804,33 @@ function EditMePage() {
                   </div>
                 </div>
               </div>
-
-              {!paymentVerified && (
-                <div className="mx-4 mb-4 mt-4 border-t border-white/[0.07] pt-4">
-                  <GetVerifiedButton
-                    className="w-full rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-cyan-400/15 via-fuchsia-500/15 to-purple-500/15 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:brightness-110"
-                    returnTo="/me/edit"
-                    onError={(message) => setError(message)}
-                  >
-                    ✦ Get verified
-                  </GetVerifiedButton>
-                </div>
-              )}
             </div>
+
+            {!paymentVerified && (
+              <div className="mt-3 hidden w-72 xl:block">
+                <GetVerifiedButton
+                  className="w-full rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-cyan-400/15 via-fuchsia-500/15 to-purple-500/15 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:brightness-110"
+                  returnTo="/me/edit"
+                  onError={(message) => setError(message)}
+                >
+                  ✦ Get verified
+                </GetVerifiedButton>
+              </div>
+            )}
           </aside>
 
 	          <section className="min-w-0 space-y-6">
               <header className="space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex flex-wrap items-baseline gap-3">
-                    <h1 className="text-2xl font-extrabold tracking-tight text-white" data-testid="profile-edit-title">
-                      Edit your profile
-                    </h1>
+                <div className="flex flex-wrap items-baseline gap-3">
+                  <h1 className="text-2xl font-extrabold tracking-tight text-white" data-testid="profile-edit-title">
+                    Edit your profile
+                  </h1>
 
-                    {trialExpiredBadge && activeTab === "teacher_profile" && (
-                      <Link href="/me/edit?tab=teacher_profile" className="text-sm text-rose-400 hover:underline">
-                        Trial ended · Upgrade
-                      </Link>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {teacherProfileOn && (
-                      <span className="inline-flex items-center rounded-full border border-cyan-300/35 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-100">
-                        Teacher on
-                      </span>
-                    )}
-                    {inquiriesOn && (
-                      <span className="inline-flex items-center rounded-full border border-fuchsia-300/35 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-100">
-                        Inquiries on
-                      </span>
-                    )}
-                    {acceptingHosting && (
-                      <span className="inline-flex items-center rounded-full border border-emerald-300/35 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100">
-                        Hosting on
-                      </span>
-                    )}
-                  </div>
+                  {trialExpiredBadge && activeTab === "teacher_profile" && (
+                    <Link href="/me/edit?tab=teacher_profile" className="text-sm text-rose-400 hover:underline">
+                      Trial ended · Upgrade
+                    </Link>
+                  )}
                 </div>
                 <div className="relative flex max-w-full gap-1 overflow-x-auto border-b border-white/10 px-1 no-scrollbar">
                   {editTabs.map((tab) => {
@@ -2093,6 +2154,23 @@ function EditMePage() {
                         className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
                         placeholder="Meals, local recommendations, time together, workspace, laundry, or anything else guests can expect."
                       />
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="text-[11px] text-white/40">Quick fill:</span>
+                        {[
+                          { label: "Cozy basics", text: "Private room with clean sheets and towels, Wi-Fi, a quiet place to rest, and breakfast in the mornings." },
+                          { label: "Local guide", text: "Tips on the best dance venues, restaurants, and cafés nearby. Happy to share routes and recommendations." },
+                          { label: "Full host", text: "Private room, kitchen access, washer for laundry, Wi-Fi, and time together if our schedules align." },
+                        ].map((tpl) => (
+                          <button
+                            key={tpl.label}
+                            type="button"
+                            onClick={() => setHostingGuestShare(tpl.text.slice(0, 500))}
+                            className="rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70 hover:border-cyan-300/40 hover:text-cyan-100"
+                          >
+                            {tpl.label}
+                          </button>
+                        ))}
+                      </div>
                     </label>
 
                     <label className="block text-sm font-medium text-slate-300">
@@ -2104,6 +2182,23 @@ function EditMePage() {
                         className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
                         placeholder="Metro, tram, buses, distance to station, or anything guests should know."
                       />
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="text-[11px] text-white/40">Quick fill:</span>
+                        {[
+                          { label: "Metro nearby", text: "Metro station within 5 minutes walking. Direct line to the city center." },
+                          { label: "Bus + tram", text: "Bus and tram stops just outside. Easy connection to main dance venues and the city center." },
+                          { label: "Car needed", text: "Limited public transport. A car or taxi/Uber is recommended for getting around." },
+                        ].map((tpl) => (
+                          <button
+                            key={tpl.label}
+                            type="button"
+                            onClick={() => setHostingTransitAccess(tpl.text.slice(0, 300))}
+                            className="rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70 hover:border-cyan-300/40 hover:text-cyan-100"
+                          >
+                            {tpl.label}
+                          </button>
+                        ))}
+                      </div>
                     </label>
 
                     {/* Additional information collapsible */}
@@ -2157,6 +2252,23 @@ function EditMePage() {
                               className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35"
                               placeholder="Share the important rules guests should know before they request hosting."
                             />
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <span className="text-[11px] text-white/40">Quick fill:</span>
+                              {[
+                                { label: "Easygoing", text: "No smoking inside. Please keep noise down after 11pm. Treat the space and neighbors with respect." },
+                                { label: "Standard", text: "No smoking inside. Quiet hours after 10pm. No extra guests without asking first. Clean up after yourself in shared spaces." },
+                                { label: "Strict", text: "No smoking, no parties, no extra guests. Quiet hours 10pm–8am. Shoes off inside. Please respect schedules and shared areas." },
+                              ].map((tpl) => (
+                                <button
+                                  key={tpl.label}
+                                  type="button"
+                                  onClick={() => setHouseRules(tpl.text.slice(0, 500))}
+                                  className="rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70 hover:border-cyan-300/40 hover:text-cyan-100"
+                                >
+                                  {tpl.label}
+                                </button>
+                              ))}
+                            </div>
                           </label>
                         </div>
                       )}
@@ -2434,21 +2546,11 @@ function EditMePage() {
             </div>
             ) : null}
 
-            {activeTab === "teacher_services" ? <TeacherInfoManager embedded /> : null}
-
             {activeTab === "teacher_profile" ? <TeacherProfilePage embedded /> : null}
 
 
             {activeTab === "hosting" ? (
             <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={handleLeaveToAccountSettings}
-                disabled={saving || uploading}
-                className="w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 hover:bg-white/[0.08] sm:w-auto"
-              >
-                Cancel
-              </button>
               <button
                 type="submit"
                 disabled={saving || uploading || !hasUnsavedChanges}

@@ -79,6 +79,22 @@ const COMPARISON_SECTIONS: ComparisonSection[] = [
           pro: "Included",
         },
       },
+      {
+        label: "Teacher booking requests per month",
+        values: {
+          starter: String(getPlanLimits("starter").bookingRequestsPerMonth ?? "Unlimited"),
+          verified: String(getPlanLimits("verified").bookingRequestsPerMonth ?? "Unlimited"),
+          pro: String(getPlanLimits("pro").bookingRequestsPerMonth ?? "Unlimited"),
+        },
+      },
+      {
+        label: "Teacher service inquiries per month",
+        values: {
+          starter: String(getPlanLimits("starter").serviceInquiriesPerMonth ?? "Unlimited"),
+          verified: String(getPlanLimits("verified").serviceInquiriesPerMonth ?? "Unlimited"),
+          pro: String(getPlanLimits("pro").serviceInquiriesPerMonth ?? "Unlimited"),
+        },
+      },
     ],
   },
   {

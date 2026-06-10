@@ -31,8 +31,8 @@ type DanceSkillPayload = {
 };
 
 const DEFAULT_AVAIL: Record<AvailKey, boolean> = {
-  weekdays: true,
-  weekends: true,
+  weekdays: false,
+  weekends: false,
   daytime: false,
   evenings: false,
   travel: false,
@@ -98,7 +98,7 @@ type Language = (typeof LANGUAGES)[number];
 export default function OnboardingFinalizePage() {
   const router = useRouter();
 
-  const [langs, setLangs] = useState<Language[]>(["English", "Spanish"]);
+  const [langs, setLangs] = useState<Language[]>([]);
   const [langPick, setLangPick] = useState<"" | Language>("");
 
   const [avail, setAvail] = useState<Record<AvailKey, boolean>>(DEFAULT_AVAIL);

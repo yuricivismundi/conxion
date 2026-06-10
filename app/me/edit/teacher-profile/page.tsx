@@ -4,6 +4,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import SearchableMobileSelect from "@/components/SearchableMobileSelect";
 import TeacherBookingsManager from "@/components/teacher/TeacherBookingsManager";
+import TeacherInfoManager from "@/components/teacher/TeacherInfoManager";
 import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { canManageTeacherInfo } from "@/lib/teacher-info/roles";
@@ -76,7 +77,7 @@ const AVAILABILITY_OPTIONS = [
 type AvailabilityOption = (typeof AVAILABILITY_OPTIONS)[number];
 
 type ServiceType = (typeof SERVICE_TYPES)[number]["value"];
-type ActiveTab = "profile" | "classes" | "events" | "bookings";
+type ActiveTab = "profile" | "classes" | "inquiries" | "events" | "bookings";
 
 // ─── DB Row Types ─────────────────────────────────────────────────────────────
 
@@ -190,6 +191,12 @@ function formatTime(t: string | null) {
   if (!t) return "";
   // HH:MM:SS → HH:MM
   return t.slice(0, 5);
+}
+
+function formatEventDate(dateStr: string | null): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" }).toUpperCase();
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -756,8 +763,54 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     return (
       <div className={embedded ? "" : "min-h-screen bg-[#06070b] text-slate-100"}>
         {!embedded && <Nav />}
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <span className="text-sm text-slate-500">Loading…</span>
+        <div className={embedded ? "" : "mx-auto max-w-3xl px-4 py-6 sm:px-6"}>
+          <div className="animate-pulse space-y-4">
+            <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
+              <div className="flex items-center gap-4">
+                <div className="h-7 w-12 rounded-full bg-white/[0.08]" />
+                <div className="space-y-1.5">
+                  <div className="h-4 w-32 rounded bg-white/[0.10]" />
+                  <div className="h-3 w-40 rounded bg-white/[0.06]" />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-3 w-20 rounded bg-white/[0.06]" />
+                <div className="h-8 w-16 rounded-xl bg-white/[0.08]" />
+                <div className="h-8 w-16 rounded-xl bg-white/[0.06]" />
+              </div>
+            </div>
+            <div className="flex gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-9 flex-1 rounded-xl bg-white/[0.05]" />
+              ))}
+            </div>
+            <div className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+              <div className="h-3 w-24 rounded bg-white/[0.10]" />
+              <div className="space-y-2">
+                <div className="h-3 w-16 rounded bg-white/[0.06]" />
+                <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-12 rounded bg-white/[0.06]" />
+                <div className="h-24 w-full rounded-xl bg-white/[0.05]" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="h-3 w-16 rounded bg-white/[0.06]" />
+                  <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 w-12 rounded bg-white/[0.06]" />
+                  <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-20 rounded bg-white/[0.06]" />
+                <div className="h-10 w-full rounded-xl bg-white/[0.05]" />
+              </div>
+              <div className="h-10 w-32 rounded-xl bg-white/[0.08]" />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -886,61 +939,60 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
           </div>
         )}
 
-        {/* ── Enable / disable toggle ─────────────────────────────────────── */}
-        <div className="mb-2 grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="flex min-w-0 items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Teacher profile</p>
+        {/* ── Enable / disable toggle + default view ──────────────────────── */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
+          <div className="flex items-center gap-3">
+            <Toggle checked={isEnabled} onChange={handleToggleEnabled} disabled={autoSaving} />
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-white">Teacher profile</p>
               {isEnabled && userId ? (
                 <a
                   href={`/profile/${userId}/teacher`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 text-sm text-cyan-300/80 hover:text-cyan-200"
+                  className="text-cyan-300/70 hover:text-cyan-200"
+                  title="View public page"
                 >
-                  <span className="material-symbols-outlined text-[13px]">open_in_new</span>
-                  View teacher profile
+                  <span className="material-symbols-outlined text-[14px]">open_in_new</span>
                 </a>
               ) : null}
             </div>
-            <Toggle
-              checked={isEnabled}
-              onChange={handleToggleEnabled}
-              disabled={autoSaving}
-            />
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Default public view</p>
-            <div className="mt-3 flex gap-2">
-              {(["social", "teacher"] as const).map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => handleSetDefaultView(view)}
-                  disabled={autoSaving}
-                  className={[
-                    "flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors",
-                    defaultView === view
-                      ? "bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-[#06121a] font-semibold"
-                      : "border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10",
-                    autoSaving ? "cursor-not-allowed opacity-50" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                >
-                  {view === "social" ? "Social" : "Teacher"}
-                </button>
-              ))}
+
+          {isEnabled ? (
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Default profile</p>
+              <div className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] p-0.5">
+                {(["social", "teacher"] as const).map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    onClick={() => handleSetDefaultView(view)}
+                    disabled={autoSaving}
+                    className={[
+                      "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+                      defaultView === view
+                        ? "bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-[#06121a]"
+                        : "text-slate-400 hover:text-slate-200",
+                      autoSaving ? "cursor-not-allowed opacity-50" : "",
+                    ].filter(Boolean).join(" ")}
+                  >
+                    {view === "social" ? "Social" : "Teacher"}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
         {/* ── Tabs ────────────────────────────────────────────────────────── */}
-        <div className="mb-4 flex gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
+        <div className="mb-4 overflow-x-auto">
+          <div className="flex w-full gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
           {(
             [
               { key: "profile", label: "Profile info" },
               { key: "classes", label: "Weekly classes" },
+              { key: "inquiries", label: "Inquiries" },
               { key: "events", label: "Events" },
               { key: "bookings", label: "Booking" },
             ] as const
@@ -950,7 +1002,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
               type="button"
               onClick={() => setActiveTab(key)}
               className={[
-                "flex-1 rounded-xl px-2.5 py-1.5 text-sm font-medium transition-colors",
+                "flex-1 whitespace-nowrap rounded-xl px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-2 sm:text-sm",
                 activeTab === key
                   ? "bg-white/10 text-slate-100"
                   : "text-slate-500 hover:text-slate-300",
@@ -959,6 +1011,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
               {label}
             </button>
           ))}
+          </div>
         </div>
 
         {/* ── Profile info form ───────────────────────────────────────────── */}
@@ -981,6 +1034,23 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                 placeholder="e.g. Bachata & Salsa instructor based in London"
                 className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
               />
+              <div className="flex flex-wrap gap-1.5">
+                <span className="text-[11px] text-white/40">Quick fill:</span>
+                {[
+                  { label: "Instructor", text: "Bachata & Salsa instructor based in your city" },
+                  { label: "Performer", text: "Performer and teacher — workshops, shows, and private classes" },
+                  { label: "Coach", text: "Coach for couples and solo dancers — technique, musicality, expression" },
+                ].map((tpl) => (
+                  <button
+                    key={tpl.label}
+                    type="button"
+                    onClick={() => setHeadline(tpl.text.slice(0, 120))}
+                    className="rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70 hover:border-cyan-300/40 hover:text-cyan-100"
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Bio */}
@@ -996,6 +1066,23 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                 rows={5}
                 className="w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
               />
+              <div className="flex flex-wrap gap-1.5">
+                <span className="text-[11px] text-white/40">Quick fill:</span>
+                {[
+                  { label: "Beginner-friendly", text: "I love working with beginners and anyone new to dance. My classes focus on the fundamentals: posture, connection, and how to feel the music. Expect a relaxed environment where mistakes are part of learning. After years of teaching socials and workshops, my goal is to get you confident on the dance floor as quickly as possible." },
+                  { label: "Technique-focused", text: "Technique-first instructor with a background in performance and competitions. I break down movement, body mechanics, and timing in a way that's clear and repeatable. Whether you're polishing a routine or refining your social dancing, I'll help you understand the why behind every step. I teach privates, group classes, and workshops at festivals." },
+                  { label: "Couples & socials", text: "Helping couples and partners enjoy dancing together. I focus on connection, lead/follow communication, and musicality so you can dance with anyone, anywhere. I've taught at festivals across Europe and run regular weekly classes. My style is patient, technical when needed, and always rooted in the social dance experience." },
+                ].map((tpl) => (
+                  <button
+                    key={tpl.label}
+                    type="button"
+                    onClick={() => setBio(tpl.text.slice(0, 1000))}
+                    className="rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70 hover:border-cyan-300/40 hover:text-cyan-100"
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Country + City + Studio */}
@@ -1165,59 +1252,98 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         </section>
         )}
 
+        {activeTab === "inquiries" && (
+          <TeacherInfoManager embedded />
+        )}
+
         {activeTab === "bookings" && userId ? (
           <TeacherBookingsManager teacherUserId={userId} teacherName={profileDisplayName} />
         ) : null}
 
         {/* ── Tab: Classes ────────────────────────────────────────────────── */}
         {activeTab === "classes" && (
-          <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+          <section className="border-0 p-0">
             <div className="mb-4 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Weekly classes
-              </p>
-              {!showClassForm && (
-                <button
-                  type="button"
-                  onClick={openAddClass}
-                  className="rounded-xl bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 transition-colors"
-                >
-                  + Add weekly class
-                </button>
-              )}
+              {!showClassForm ? (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Weekly classes</p>
+                  <button
+                    type="button"
+                    onClick={openAddClass}
+                    className="rounded-xl bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 transition-colors"
+                  >
+                    + Add weekly class
+                  </button>
+                </>
+              ) : null}
             </div>
 
             {/* Class list */}
             {regularClasses.length === 0 && !showClassForm && (
               <p className="text-sm text-slate-500">No weekly classes added yet.</p>
             )}
-            <div className="space-y-2">
+            <div className="flex flex-col gap-4">
               {regularClasses.map((cls) => (
                 <div
                   key={cls.id}
-                  className="flex items-start justify-between gap-3 rounded-2xl border border-white/[0.07] bg-black/20 px-4 py-3"
+                  className="bg-zinc-900/40 backdrop-blur-xl flex flex-col md:flex-row items-start md:items-center justify-between p-4 sm:p-6 rounded-2xl border border-white/5"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-slate-100">{cls.title}</p>
-                    <p className="text-xs text-slate-500">
-                      {[
-                        cls.weekday != null ? WEEKDAY_NAMES[cls.weekday] : null,
-                        formatTime(cls.start_time) || null,
-                        cls.duration_min ? `${cls.duration_min} min` : null,
-                        cls.venue_name,
-                        cls.city,
-                        cls.country,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
+                  <div className="flex items-center gap-5 sm:gap-10 min-w-0 flex-1">
+                    <div className="text-center min-w-[64px]">
+                      <p className="font-black text-2xl text-[#c1fffe]">
+                        {cls.weekday != null ? (WEEKDAY_NAMES[cls.weekday]?.slice(0, 3).toUpperCase() ?? "–") : "–"}
+                      </p>
+                      <p className="text-xs text-zinc-500 font-bold uppercase">
+                        {formatTime(cls.start_time)}
+                      </p>
+                      {cls.duration_min ? (
+                        <p className="mt-0.5 text-[10px] text-zinc-600 font-semibold uppercase">
+                          {cls.duration_min} min
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-base sm:text-lg mb-1 text-white truncate">{cls.title}</h4>
+                      {(cls.venue_name || cls.city || cls.country) && (
+                        <div className="flex items-center gap-1.5 text-zinc-500">
+                          <span className="material-symbols-outlined text-sm">location_on</span>
+                          <p className="text-xs sm:text-sm truncate">
+                            {[cls.venue_name, cls.city, cls.country].filter(Boolean).join(", ")}
+                          </p>
+                        </div>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-2 md:hidden">
+                        {cls.style && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                            {cls.style}
+                          </span>
+                        )}
+                        {cls.level && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                            {cls.level}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 gap-1.5">
+                  <div className="hidden md:flex items-center gap-3">
+                    {cls.style && (
+                      <span className="px-3 py-1 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                        {cls.style}
+                      </span>
+                    )}
+                    {cls.level && (
+                      <span className="px-3 py-1 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                        {cls.level}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-1.5 mt-3 md:mt-0 md:ml-4">
                     <button
                       type="button"
                       onClick={() => openEditClass(cls)}
                       disabled={busyClassId === cls.id}
-                      className="rounded-lg bg-white/[0.06] px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10 transition-colors"
+                      className="rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/10 transition-colors"
                     >
                       Edit
                     </button>
@@ -1225,7 +1351,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                       type="button"
                       onClick={() => handleDeleteClass(cls.id)}
                       disabled={busyClassId === cls.id}
-                      className="rounded-lg bg-rose-500/10 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/20 transition-colors"
+                      className="rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition-colors"
                     >
                       {busyClassId === cls.id ? "…" : "Remove"}
                     </button>
@@ -1347,8 +1473,26 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
                 {/* Country + City */}
                 <div className="grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-xs text-slate-400">Country</span>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400">Country</label>
+                    <div className="sm:hidden">
+                      <SearchableMobileSelect
+                        label="Country"
+                        value={classDraft.country}
+                        options={countriesAll.map((country) => country.name)}
+                        placeholder="Any"
+                        searchPlaceholder="Search countries..."
+                        onSelect={(country) => {
+                          setClassDraft((d) => ({ ...d, country, city: "" }));
+                          setClassCities([]);
+                          if (country) {
+                            const iso = countriesAll.find((c) => c.name === country)?.isoCode ?? country;
+                            void getCitiesOfCountry(iso).then(setClassCities).catch(() => {});
+                          }
+                        }}
+                        buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white"
+                      />
+                    </div>
                     <select
                       value={classDraft.country}
                       onChange={(e) => {
@@ -1360,28 +1504,41 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                           setClassCities([]);
                         }
                       }}
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none"
+                      className="hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 sm:block"
                     >
                       <option value="">Any</option>
                       {countriesAll.map((c) => (
                         <option key={c.isoCode} value={c.name}>{c.name}</option>
                       ))}
                     </select>
-                  </label>
-                  <label className="block">
-                    <span className="text-xs text-slate-400">City</span>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400">City</label>
+                    <div className="sm:hidden">
+                      <SearchableMobileSelect
+                        label="City"
+                        value={classDraft.city}
+                        options={classCities}
+                        placeholder={!classDraft.country ? "Select country first" : classCities.length === 0 ? "Loading..." : "Any"}
+                        searchPlaceholder="Search cities..."
+                        disabled={!classDraft.country || classCities.length === 0}
+                        emptyMessage={!classDraft.country ? "Choose a country first." : "No cities found."}
+                        onSelect={(nextCity) => setClassDraft((d) => ({ ...d, city: nextCity }))}
+                        buttonClassName="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-white disabled:opacity-50"
+                      />
+                    </div>
                     <select
                       value={classDraft.city}
                       onChange={(e) => setClassDraft((d) => ({ ...d, city: e.target.value }))}
                       disabled={!classDraft.country}
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none disabled:opacity-50"
+                      className="hidden w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 disabled:opacity-50 sm:block"
                     >
                       <option value="">{!classDraft.country ? "Select country first" : classDraft.country && classCities.length === 0 ? "Loading…" : "Any"}</option>
                       {classCities.map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
-                  </label>
+                  </div>
                 </div>
 
                 {/* Recurrence */}
@@ -1438,70 +1595,82 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
         {/* ── Tab: Events ─────────────────────────────────────────────────── */}
         {activeTab === "events" && (
-          <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+          <section className="border-0 p-0">
             <div className="mb-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Events taught
-                </p>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  Add upcoming events where you&apos;ll be teaching — your pipeline.
-                </p>
-              </div>
-              {!showEventForm && (
-                <button
-                  type="button"
-                  onClick={openAddEvent}
-                  className="rounded-xl bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 transition-colors"
-                >
-                  + Add event
-                </button>
-              )}
+              {!showEventForm ? (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Events taught</p>
+                  <button
+                    type="button"
+                    onClick={openAddEvent}
+                    className="rounded-xl bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 transition-colors"
+                  >
+                    + Add event
+                  </button>
+                </>
+              ) : null}
             </div>
 
             {/* Event list */}
             {eventTeaching.length === 0 && !showEventForm && (
               <p className="text-sm text-slate-500">No events added yet.</p>
             )}
-            <div className="space-y-2">
-              {eventTeaching.map((ev) => (
-                <div
-                  key={ev.id}
-                  className="flex items-start justify-between gap-3 rounded-2xl border border-white/[0.07] bg-black/20 px-4 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-slate-100">{ev.event_name}</p>
-                    <p className="text-xs text-slate-500">
-                      {[
-                        ev.role,
-                        [ev.city, ev.country].filter(Boolean).join(", "),
-                        ev.start_date
+            <div className="relative space-y-8">
+              {eventTeaching.length > 0 ? (
+                <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-[#c1fffe]/50 to-transparent" />
+              ) : null}
+              {eventTeaching.map((ev, i) => (
+                <div key={ev.id} className="pl-10 relative">
+                  <div
+                    className={`absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full ${
+                      i === 0
+                        ? "bg-[#c1fffe] shadow-[0_0_10px_#c1fffe]"
+                        : "bg-zinc-800"
+                    }`}
+                  />
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={`font-black text-[11px] tracking-[0.2em] uppercase mb-2 ${
+                          i === 0 ? "text-[#ff51fa]" : "text-zinc-600"
+                        }`}
+                      >
+                        {ev.start_date
                           ? ev.end_date && ev.end_date !== ev.start_date
-                            ? `${ev.start_date} – ${ev.end_date}`
-                            : ev.start_date
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openEditEvent(ev)}
-                      disabled={busyEventId === ev.id}
-                      className="rounded-lg bg-white/[0.06] px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEvent(ev.id)}
-                      disabled={busyEventId === ev.id}
-                      className="rounded-lg bg-rose-500/10 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/20 transition-colors"
-                    >
-                      {busyEventId === ev.id ? "…" : "Remove"}
-                    </button>
+                            ? `${formatEventDate(ev.start_date)} – ${formatEventDate(ev.end_date)}`
+                            : formatEventDate(ev.start_date)
+                          : "DATE TBD"}
+                      </p>
+                      <h4 className="text-lg sm:text-xl font-bold text-white mb-1">{ev.event_name}</h4>
+                      {(ev.city || ev.country) ? (
+                        <p className="text-zinc-500 italic mb-3 text-sm">
+                          {[ev.city, ev.country].filter(Boolean).join(", ")}
+                        </p>
+                      ) : null}
+                      {ev.role ? (
+                        <span className="inline-block px-3 py-1 rounded bg-zinc-900 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                          {ev.role}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => openEditEvent(ev)}
+                        disabled={busyEventId === ev.id}
+                        className="rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/10 transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEvent(ev.id)}
+                        disabled={busyEventId === ev.id}
+                        className="rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition-colors"
+                      >
+                        {busyEventId === ev.id ? "…" : "Remove"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

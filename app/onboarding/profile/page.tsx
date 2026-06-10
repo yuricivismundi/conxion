@@ -19,6 +19,47 @@ import { readOnboardingDraft, writeOnboardingDraft } from "@/lib/onboardingDraft
 import { GENDER_OPTIONS, normalizeGender, type Gender } from "@/lib/profile/gender";
 import { supabase } from "@/lib/supabase/client";
 
+const CROP_FRAME_SIZE = 320;
+
+async function makePreviewMatchedCroppedBlob(params: {
+  src: string;
+  preview: { renderWidth: number; renderHeight: number; offsetX: number; offsetY: number };
+}) {
+  const image = new window.Image();
+  image.decoding = "async";
+  const loaded = await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Could not read image."));
+    image.src = params.src;
+  });
+  void loaded;
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) throw new Error("Invalid image dimensions.");
+  const canvas = document.createElement("canvas");
+  const outputSize = 1024;
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not initialize image cropper.");
+  const scaleOut = outputSize / CROP_FRAME_SIZE;
+  const outWidth = params.preview.renderWidth * scaleOut;
+  const outHeight = params.preview.renderHeight * scaleOut;
+  const outOffsetX = params.preview.offsetX * scaleOut;
+  const outOffsetY = params.preview.offsetY * scaleOut;
+  const left = outputSize / 2 - outWidth / 2 + outOffsetX;
+  const top = outputSize / 2 - outHeight / 2 + outOffsetY;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.clearRect(0, 0, outputSize, outputSize);
+  context.drawImage(image, left, top, outWidth, outHeight);
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92);
+  });
+  if (!blob) throw new Error("Could not create cropped image.");
+  return blob;
+}
+
 const ROLES = [
   "Social Dancer",
   "Student",
@@ -80,6 +121,13 @@ export default function OnboardingProfilePage() {
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | undefined>(undefined);
   const [avatarStatus, setAvatarStatus] = useState<"pending" | "approved" | "rejected" | undefined>(undefined);
   const [avatarPath, setAvatarPath] = useState<string | undefined>(undefined);
+  const [cropSource, setCropSource] = useState<string | null>(null);
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropPanX, setCropPanX] = useState(0);
+  const [cropPanY, setCropPanY] = useState(0);
+  const [cropNaturalSize, setCropNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [cropError, setCropError] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rolesScrollRef = useRef<HTMLDivElement | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -272,46 +320,82 @@ export default function OnboardingProfilePage() {
     setRoles((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
   }
 
+  const cropPreview = useMemo(() => {
+    if (!cropSource || !cropNaturalSize) return null;
+    const minSide = Math.min(cropNaturalSize.width, cropNaturalSize.height);
+    if (!minSide) return null;
+    const scale = (CROP_FRAME_SIZE / minSide) * Math.max(cropZoom, 1);
+    const renderWidth = cropNaturalSize.width * scale;
+    const renderHeight = cropNaturalSize.height * scale;
+    const maxOffsetX = Math.max((renderWidth - CROP_FRAME_SIZE) / 2, 0);
+    const maxOffsetY = Math.max((renderHeight - CROP_FRAME_SIZE) / 2, 0);
+    return { renderWidth, renderHeight, maxOffsetX, maxOffsetY, offsetX: cropPanX * maxOffsetX, offsetY: cropPanY * maxOffsetY };
+  }, [cropNaturalSize, cropPanX, cropPanY, cropSource, cropZoom]);
+
   function onPickPhotoClick() {
     fileInputRef.current?.click();
   }
 
-  async function onPhotoSelected(file: File | null) {
+  async function onRawFilePicked(file: File | null) {
     if (!file) return;
-
     setError(null);
-
-    if (!meId) {
-      setError("Please sign in again.");
-      router.replace("/auth");
-      return;
-    }
-
-    setUploading(true);
-
+    setCropError(null);
     try {
       if (!file.type.startsWith("image/")) throw new Error("Please upload an image.");
       if (file.size > 5 * 1024 * 1024) throw new Error("Max size is 5MB.");
-
-      const bucket = "avatars";
-
-      const ext = file.name.split(".").pop() || "jpg";
-      const path = `${meId}/${crypto.randomUUID()}.${ext}`;
-
-      const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
-      if (upErr) throw upErr;
-
-      setAvatarPath(path);
-      setAvatarStatus("pending");
-      setAvatarPreviewUrl(URL.createObjectURL(file));
-
-      writeOnboardingDraft({
-        avatarPath: path,
-        avatarStatus: "pending",
-        avatarDataUrl: publicUrl,
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => { if (typeof reader.result === "string") resolve(reader.result); else reject(new Error("Could not read image.")); };
+        reader.onerror = () => reject(new Error("Could not read image."));
+        reader.readAsDataURL(file);
       });
+      const naturalSize = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const img = new window.Image();
+        img.onload = () => { const w = img.naturalWidth || img.width; const h = img.naturalHeight || img.height; if (!w || !h) { reject(new Error("Invalid image dimensions.")); return; } resolve({ width: w, height: h }); };
+        img.onerror = () => reject(new Error("Could not read image."));
+        img.src = dataUrl;
+      });
+      setCropZoom(1);
+      setCropPanX(0);
+      setCropPanY(0);
+      setCropNaturalSize(naturalSize);
+      setCropSource(dataUrl);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      setError(e instanceof Error ? e.message : "Could not prepare image.");
+    }
+  }
+
+  async function confirmCropUpload() {
+    if (!cropSource || !meId || !cropPreview) return;
+    setUploading(true);
+    setError(null);
+    setCropError(null);
+    try {
+      const blob = await makePreviewMatchedCroppedBlob({ src: cropSource, preview: cropPreview });
+      const sessionRes = await supabase.auth.getSession();
+      const accessToken = sessionRes.data.session?.access_token?.trim() ?? "";
+      if (!accessToken) throw new Error("Please sign in again.");
+      const formData = new FormData();
+      formData.append("file", new File([blob], "avatar.jpg", { type: "image/jpeg" }));
+      const uploadResponse = await fetch("/api/profile/avatar", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const uploadPayload = (await uploadResponse.json().catch(() => null)) as { ok?: boolean; error?: string; url?: string; path?: string } | null;
+      if (!uploadResponse.ok || !uploadPayload?.ok) {
+        throw new Error(uploadPayload?.error?.trim() || "Upload failed.");
+      }
+      const previewUrl = URL.createObjectURL(blob);
+      setAvatarPreviewUrl(previewUrl);
+      setAvatarPath(uploadPayload.path ?? "");
+      setAvatarStatus("pending");
+      setCropSource(null);
+      setCropNaturalSize(null);
+      setCropError(null);
+      writeOnboardingDraft({ avatarPath: uploadPayload.path ?? "", avatarStatus: "pending", avatarDataUrl: undefined });
+    } catch (e: unknown) {
+      setCropError(e instanceof Error ? e.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
@@ -408,39 +492,37 @@ export default function OnboardingProfilePage() {
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => onPhotoSelected(e.target.files?.[0] ?? null)}
+              onChange={(e) => { void onRawFilePicked(e.target.files?.[0] ?? null); e.target.value = ""; }}
             />
 
-            <button
-              type="button"
-              onClick={onPickPhotoClick}
-              className="group mx-auto flex h-40 w-40 flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-white/15 transition hover:border-[#00F5FF]/60 sm:h-44 sm:w-44 lg:mx-0 lg:h-48 lg:w-48"
-              title="Add photo"
-            >
-              {avatarPreviewUrl ? (
-                <div className="relative h-full w-full">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
+            <div className="flex flex-col items-center lg:items-start">
+              <button
+                type="button"
+                onClick={onPickPhotoClick}
+                className="group mx-auto flex h-40 w-40 flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-white/15 transition hover:border-[#00F5FF]/60 sm:h-44 sm:w-44 lg:mx-0 lg:h-48 lg:w-48"
+                title="Add photo"
+              >
+                {avatarPreviewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={avatarPreviewUrl} alt="Selected avatar preview" className="h-full w-full object-cover" />
-                  {avatarStatus === "pending" ? (
-                    <span className="absolute bottom-2 left-2 rounded-full bg-black/60 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white/80 border border-white/10">
-                      Pending approval
+                ) : (
+                  <>
+                    <div
+                      className="text-transparent bg-clip-text"
+                      style={{ backgroundImage: "linear-gradient(90deg, #00F5FF 0%, #FF00FF 100%)" }}
+                    >
+                      <span className="text-3xl">+</span>
+                    </div>
+                    <span className="mt-1 text-[10px] font-bold text-white/60 group-hover:text-white/80">
+                      {uploading ? "Uploading…" : "Add photo"}
                     </span>
-                  ) : null}
-                </div>
-              ) : (
-                <>
-                  <div
-                    className="text-transparent bg-clip-text"
-                    style={{ backgroundImage: "linear-gradient(90deg, #00F5FF 0%, #FF00FF 100%)" }}
-                  >
-                    <span className="text-3xl">+</span>
-                  </div>
-                  <span className="mt-1 text-[10px] font-bold text-white/60 group-hover:text-white/80">
-                    {uploading ? "Uploading…" : "Add photo"}
-                  </span>
-                </>
-              )}
-            </button>
+                  </>
+                )}
+              </button>
+              {avatarStatus === "pending" ? (
+                <p className="mt-2 text-center text-[11px] text-white/45 lg:text-left">Your photo will be reviewed</p>
+              ) : null}
+            </div>
           </div>
 
           <div className="lg:col-span-8">
@@ -703,6 +785,100 @@ export default function OnboardingProfilePage() {
           Continue to step 2
         </button>
       </div>
+
+      {cropSource ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-end justify-center bg-black/88 px-4 py-4 sm:items-center"
+          onClick={() => { setCropSource(null); setCropNaturalSize(null); setCropError(null); }}
+        >
+          <div
+            className="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-white/15 bg-[#0b1418] shadow-[0_20px_50px_rgba(0,0,0,0.55)] sm:max-h-[min(92dvh,860px)] sm:rounded-3xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="min-h-0 overflow-y-auto overscroll-contain p-5">
+              <h3 className="text-lg font-bold text-white">Crop photo</h3>
+              <p className="mt-1 text-sm text-slate-300">Adjust zoom and position, then confirm your profile photo.</p>
+
+              {cropError ? (
+                <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                  {cropError}
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex justify-center">
+                <div className="relative h-[320px] w-[320px] overflow-hidden rounded-2xl border border-white/15 bg-black">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={cropSource}
+                    alt="Crop preview"
+                    className="absolute left-1/2 top-1/2 max-w-none select-none"
+                    style={{
+                      width: cropPreview ? `${cropPreview.renderWidth}px` : undefined,
+                      height: cropPreview ? `${cropPreview.renderHeight}px` : undefined,
+                      transform: `translate(calc(-50% + ${cropPreview?.offsetX ?? 0}px), calc(-50% + ${cropPreview?.offsetY ?? 0}px))`,
+                    }}
+                    draggable={false}
+                  />
+                  <div className="pointer-events-none absolute inset-0 border border-cyan-300/50" />
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm font-medium text-slate-300">Zoom</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={4}
+                  step={0.01}
+                  value={cropZoom}
+                  onChange={(e) => setCropZoom(Number(e.target.value))}
+                  className="mt-2 w-full"
+                />
+                <label className="block text-sm font-medium text-slate-300">Horizontal position</label>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={Math.round(cropPanX * 100)}
+                  onChange={(e) => setCropPanX(Number(e.target.value) / 100)}
+                  className="w-full"
+                  disabled={!cropPreview || cropPreview.maxOffsetX === 0}
+                />
+                <label className="block text-sm font-medium text-slate-300">Vertical position</label>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={Math.round(cropPanY * 100)}
+                  onChange={(e) => setCropPanY(Number(e.target.value) / 100)}
+                  className="w-full"
+                  disabled={!cropPreview || cropPreview.maxOffsetY === 0}
+                />
+              </div>
+
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setCropSource(null); setCropNaturalSize(null); setCropError(null); }}
+                  className="rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white/85 hover:bg-white/[0.08]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void confirmCropUpload(); }}
+                  disabled={uploading}
+                  className="rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-500 px-5 py-2 text-sm font-bold text-[#071018] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {uploading ? "Uploading..." : "Use this crop"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </OnboardingShell>
   );
 }
