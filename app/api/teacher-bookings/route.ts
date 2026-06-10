@@ -13,6 +13,8 @@ import {
   upsertTeacherBookingContext,
   emitTeacherBookingEvent,
 } from "@/lib/teacher-bookings/thread";
+import { getBillingAccountStateForUserId } from "@/lib/billing/account-state";
+import { getPlanLimits } from "@/lib/billing/limits";
 
 export const runtime = "nodejs";
 
@@ -21,10 +23,21 @@ type CreateBookingPayload = {
   availabilityId?: unknown;
   serviceType?: unknown;
   note?: unknown;
+  requestedStartTime?: unknown;
+  requestedEndTime?: unknown;
 };
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeTime(value: string) {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00`;
 }
 
 export async function POST(req: Request) {
@@ -38,10 +51,34 @@ export async function POST(req: Request) {
     const availabilityId = asString(body?.availabilityId);
     const serviceType = body?.serviceType;
     const note = singleLineTrimmed(body?.note, 220);
+    const requestedStartTime = normalizeTime(asString(body?.requestedStartTime));
+    const requestedEndTime = normalizeTime(asString(body?.requestedEndTime));
 
     if (!teacherId || !availabilityId) return jsonError("teacherId and availabilityId are required.", 400);
     if (!isTeacherBookingServiceType(serviceType)) return jsonError("Invalid booking service type.", 400);
     if (teacherId === auth.userId) return jsonError("You cannot book yourself.", 400);
+    if (!requestedStartTime || !requestedEndTime) return jsonError("Pick a start and end time within the available window.", 400);
+    if (requestedEndTime <= requestedStartTime) return jsonError("End time must be after start time.", 400);
+
+    // Enforce monthly booking-request limit per plan tier.
+    const accountState = await getBillingAccountStateForUserId(auth.serviceClient, auth.userId);
+    const planLimits = getPlanLimits(accountState.currentPlanId);
+    const bookingLimit = planLimits.bookingRequestsPerMonth;
+    if (bookingLimit !== null) {
+      const cycleStart = new Date();
+      cycleStart.setUTCDate(1);
+      cycleStart.setUTCHours(0, 0, 0, 0);
+      const countRes = await auth.serviceClient
+        .from("teacher_session_bookings")
+        .select("id", { count: "exact", head: true })
+        .eq("student_id", auth.userId)
+        .gte("created_at", cycleStart.toISOString());
+      if (countRes.error) throw countRes.error;
+      const used = countRes.count ?? 0;
+      if (used >= bookingLimit) {
+        return jsonError(`You already used all ${bookingLimit} booking requests this month.`, 400);
+      }
+    }
 
     const availabilityRes = await auth.serviceClient
       .from("teacher_session_availability")
@@ -65,6 +102,12 @@ export async function POST(req: Request) {
       return jsonError("Bookings are limited to the next 3 months.", 400);
     }
 
+    const windowStart = (availability.start_time || "").slice(0, 8);
+    const windowEnd = (availability.end_time || "").slice(0, 8);
+    if (requestedStartTime < windowStart || requestedEndTime > windowEnd) {
+      return jsonError("Your selected time must be within the teacher's available window.", 400);
+    }
+
     // Mark availability as unavailable (atomically prevents race condition on concurrent bookings)
     const updateAvailRes = await auth.serviceClient
       .from("teacher_session_availability")
@@ -85,8 +128,8 @@ export async function POST(req: Request) {
           availability_id: availability.id,
           service_type: serviceType,
           session_date: availability.availability_date,
-          session_time: availability.start_time,
-          duration_min: durationMinutesFromTimeRange(availability.start_time, availability.end_time),
+          session_time: requestedStartTime,
+          duration_min: durationMinutesFromTimeRange(requestedStartTime, requestedEndTime),
           note,
           status: "pending",
         } as never)
@@ -122,11 +165,18 @@ export async function POST(req: Request) {
           },
           statusTag: "pending",
         });
+        const endTime = (() => {
+          const [hh, mm] = requestedStartTime.split(":").map(Number);
+          const minutes = (booking.duration_min ?? 0) + hh * 60 + mm;
+          const eh = Math.floor((minutes / 60) % 24);
+          const em = minutes % 60;
+          return `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}:00`;
+        })();
         await emitTeacherBookingEvent({
           serviceClient: auth.serviceClient,
           threadId,
           senderId: auth.userId,
-          body: `Booking request for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}`,
+          body: `Booking request for ${formatShortDate(booking.session_date)} from ${formatShortTime(booking.session_time)} to ${formatShortTime(endTime)}`,
           statusTag: "pending",
           metadata: { booking_id: booking.id },
         });

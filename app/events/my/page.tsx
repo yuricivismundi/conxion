@@ -1172,7 +1172,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
 
       {/* Delete confirmation modal */}
       {deleteTarget ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="flex w-full max-w-sm flex-col rounded-[28px] border border-white/10 bg-[#0d1117] shadow-2xl">
             <div className="flex items-start gap-3 border-b border-white/[0.07] px-5 py-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-400/10">

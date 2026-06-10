@@ -67,7 +67,7 @@ export default function ConnectReasonModal({
   const isTrip = context === "trip";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+    <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
       {/* overlay */}
       <button
         type="button"

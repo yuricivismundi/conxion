@@ -76,10 +76,11 @@ import {
   type EventRecord,
 } from "@/lib/events/model";
 import { DismissibleBanner } from "@/components/DismissibleBanner";
+import { formatShortDate as formatBookingShortDate, formatShortTime as formatBookingShortTime } from "@/lib/teacher-bookings";
 
 type ThreadKind = "connection" | "trip" | "direct" | "event" | "group";
 type FilterTab = "all" | "active" | "pending" | "archived" | "created" | "past";
-type InboxKindFilter = "all" | "connection" | "event" | "group" | "booking";
+type InboxKindFilter = "all" | "connection" | "event" | "group" | "booking" | "service";
 type MessagingState = "inactive" | "active" | "archived";
 
 type ThreadContextTag =
@@ -146,6 +147,10 @@ type ThreadRow = {
   activationCycleStart?: string | null;
   activationCycleEnd?: string | null;
   isHost?: boolean;
+  requesterId?: string | null;
+  recipientId?: string | null;
+  hasBookingContext?: boolean;
+  hasServiceContext?: boolean;
 };
 
 type ThreadDbRow = {
@@ -1095,6 +1100,14 @@ function threadPreviewFromContext(context: ThreadContextItem) {
     }
     if (context.contextTag === "activity") return `${contextLabel} requested.`;
     if (context.contextTag === "service_inquiry") return `${contextLabel} pending.`;
+    if (context.contextTag === "teacher_booking") {
+      const sessionDate = typeof context.metadata.session_date === "string" ? context.metadata.session_date : "";
+      const sessionTime = typeof context.metadata.session_time === "string" ? context.metadata.session_time : "";
+      const dateLabel = sessionDate ? formatBookingShortDate(sessionDate) : "";
+      const timeLabel = sessionTime ? formatBookingShortTime(sessionTime) : "";
+      const meta = [dateLabel, timeLabel].filter(Boolean).join(" · ");
+      return meta ? `Private class · ${meta}` : `${contextLabel} pending.`;
+    }
     return `${contextLabel} pending.`;
   }
   if (context.statusTag === "info_shared") return "Information shared. One follow-up is available.";
@@ -1194,6 +1207,7 @@ function parseInboxKindFilter(rawKind: string | null): InboxKindFilter | null {
   if (rawKind === "event") return "event";
   if (rawKind === "group") return "group";
   if (rawKind === "booking") return "booking";
+  if (rawKind === "service") return "service";
   return null;
 }
 
@@ -1360,6 +1374,12 @@ function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[
   const statusTag = primary?.statusTag ?? thread.statusTag ?? "active";
   const metaLabel = primary ? describeContextMeta(primary) : thread.metaLabel ?? "";
 
+  // Prefer the teacher_booking context's requester/recipient when present so
+  // the inbox Sent/Received badge reflects the booking, not an older connection.
+  const bookingContext = sorted.find((context) => context.contextTag === "teacher_booking") ?? null;
+  const serviceContext = sorted.find((context) => context.contextTag === "service_inquiry") ?? null;
+  const partyContext = bookingContext ?? serviceContext ?? primary;
+
   return {
     ...thread,
     contextTag,
@@ -1369,6 +1389,10 @@ function enrichThreadWithContext(thread: ThreadRow, contexts: ThreadContextItem[
     isRelationshipPending,
     metaLabel,
     preview: primary && isLivePendingContext(primary) ? threadPreviewFromContext(primary) : thread.preview,
+    requesterId: partyContext?.requesterId ?? thread.requesterId ?? null,
+    recipientId: partyContext?.recipientId ?? thread.recipientId ?? null,
+    hasBookingContext: Boolean(bookingContext),
+    hasServiceContext: Boolean(serviceContext),
   };
 }
 
@@ -1407,6 +1431,7 @@ function inboxKindLabel(kind: InboxKindFilter) {
   if (kind === "event") return "Events";
   if (kind === "group") return "Groups";
   if (kind === "booking") return "Bookings";
+  if (kind === "service") return "Service Inquiries";
   return "All types";
 }
 
@@ -1435,6 +1460,7 @@ function threadContextPriority(context: ThreadContextItem) {
     context.statusTag === "cancelled" ? 10 :
     0;
   const tagWeight =
+    context.contextTag === "teacher_booking" ? 60 :
     context.contextTag === "connection_request" ? 50 :
     context.contextTag === "trip_join_request" ? 40 :
     context.contextTag === "hosting_request" ? 30 :
@@ -1627,6 +1653,8 @@ function MessagesPageContent() {
   const [reloadTick, setReloadTick] = useState(0);
   const { pullY, refreshing: ptrRefreshing } = usePullToRefresh(() => setReloadTick((t) => t + 1));
   const [meId, setMeId] = useState<string | null>(null);
+  const [viewerBookingEnabled, setViewerBookingEnabled] = useState<boolean | null>(null);
+  const [viewerServiceEnabled, setViewerServiceEnabled] = useState<boolean | null>(null);
   const [activeThreadToken, setActiveThreadToken] = useState<string | null>(null);
   const [activeMeta, setActiveMeta] = useState<ActiveThreadMeta | null>(null);
   const [activeThreadEntitlement, setActiveThreadEntitlement] = useState<{ effectiveStatus: string; opensAt: string; expiresAt: string } | null>(null);
@@ -1642,6 +1670,8 @@ function MessagesPageContent() {
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(null);
+  const [bookingUsage, setBookingUsage] = useState<{ used: number; limit: number | null; remaining: number | null } | null>(null);
+  const [serviceUsage, setServiceUsage] = useState<{ used: number; limit: number | null; remaining: number | null } | null>(null);
   const [threadQuotaSummary, setThreadQuotaSummary] = useState<ThreadQuotaSummary | null>(null);
   const [requestQuotaSummary, setRequestQuotaSummary] = useState<RequestQuotaSummary | null>(null);
   const [activityComposerOpen, setActivityComposerOpen] = useState(false);
@@ -2916,6 +2946,7 @@ function MessagesPageContent() {
             .eq("thread_id", threadId)
             .eq("user_id", userId)
             .then(() => null, () => null);
+          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
         }
         if (isStale()) return;
         await loadThreadReactions({
@@ -3076,6 +3107,7 @@ function MessagesPageContent() {
             .eq("thread_id", threadId)
             .eq("user_id", userId)
             .then(() => null, () => null);
+          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
           if (isStale()) return;
           await loadThreadReactions({
             kind: "trip",
@@ -3285,6 +3317,7 @@ function MessagesPageContent() {
           .eq("thread_id", thread.id)
           .eq("user_id", userId)
           .then(() => null, () => null);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
         if (isStale()) return;
         await loadThreadReactions({
           kind: "direct",
@@ -3569,8 +3602,36 @@ function MessagesPageContent() {
         router.replace("/auth");
         return;
       }
+
+      // Verify profile exists — stale session without a profile redirects to onboarding
+      const profileCheck = await supabase.from("profiles").select("user_id").eq("user_id", user.id).maybeSingle();
+      if (!profileCheck.error && !profileCheck.data) {
+        router.replace("/onboarding/profile");
+        return;
+      }
+
       if (cancelled) return;
       setMeId(user.id);
+
+      // Load viewer's own teacher/service-inquiry toggles so we can show/hide those inbox filters.
+      void (async () => {
+        const [tpRes, inqRes] = await Promise.all([
+          supabase.from("teacher_profiles").select("teacher_profile_enabled").eq("user_id", user.id).maybeSingle(),
+          supabase.from("teacher_info_profiles").select("is_enabled").eq("user_id", user.id).maybeSingle(),
+        ]);
+        if (cancelled) return;
+        const bookingOn = (tpRes.data as { teacher_profile_enabled?: boolean } | null)?.teacher_profile_enabled === true;
+        // Service Inquiries requires teacher profile to be active first
+        const serviceOn = bookingOn && (inqRes.data as { is_enabled?: boolean } | null)?.is_enabled === true;
+        setViewerBookingEnabled(bookingOn);
+        setViewerServiceEnabled(serviceOn);
+        // Auto-redirect to booking or service filter only when no explicit kind was requested
+        if (!searchParams.get("kind")) {
+          if (bookingOn) setKindFilter("booking");
+          else if (serviceOn) setKindFilter("service");
+        }
+      })();
+
       const authAvatar =
         typeof user.user_metadata?.avatar_url === "string"
           ? user.user_metadata.avatar_url
@@ -5846,10 +5907,10 @@ function MessagesPageContent() {
     return collapseDuplicateThreadContexts(contexts);
   }, [activeDbThreadId, activeFallbackContext, threadContextsByDbId]);
 
-  const activePendingContext = useMemo(
-    () => activeThreadContexts.find((context) => isLivePendingContext(context)) ?? null,
-    [activeThreadContexts]
-  );
+  const activePendingContext = useMemo(() => {
+    if (activeMeta?.kind === "event" || activeMeta?.kind === "group") return null;
+    return activeThreadContexts.find((context) => isLivePendingContext(context)) ?? null;
+  }, [activeMeta?.kind, activeThreadContexts]);
 
   // Proactive background merge: when inbox loads, find any empty direct threads that have a sibling and merge them silently.
   useEffect(() => {
@@ -5959,8 +6020,7 @@ function MessagesPageContent() {
     loading ||
     !threadsHydrated ||
     threadLoading ||
-    (Boolean(activeThreadToken) && !activeMeta) ||
-    (!activeMeta && threads.length === 0 && !error);
+    (Boolean(activeThreadToken) && !activeMeta);
   const hasSubmittedLatestCompletedActivityReference = useMemo(() => {
     if (!latestCompletedActivityReferenceTag) return false;
     return submittedReferenceState.contextTags.has(latestCompletedActivityReferenceTag);
@@ -7223,6 +7283,14 @@ function MessagesPageContent() {
         ? "Start conversation to activate chat."
         : null;
     }
+    // If the primary context on this thread is a teacher_booking, use the booking-specific
+    // placeholder regardless of any older service_inquiry state on the same thread.
+    if ((activePrimaryContext?.contextTag ?? activeMeta.contextTag) === "teacher_booking") {
+      const viewerIsRecipient = activePrimaryContext?.recipientId === meId;
+      return viewerIsRecipient
+        ? "Accept or decline the private class request below."
+        : "Waiting for the teacher to review your booking request.";
+    }
     if (serviceInquiryOwnFlowState) {
       if (serviceInquiryOwnFlowState === "followup_available") {
         return null;
@@ -7253,6 +7321,12 @@ function MessagesPageContent() {
         return viewerIsServiceInquiryRecipient
           ? "Review the inquiry and choose what information to share."
           : "Waiting for the teacher to review this professional inquiry.";
+      }
+      if (contextTag === "teacher_booking") {
+        const viewerIsRecipient = context?.recipientId === meId;
+        return viewerIsRecipient
+          ? "Accept or decline the private class request below."
+          : "Waiting for the teacher to review your booking request.";
       }
       if (contextTag === "connection_request") return "Messaging unlocks once this connection request is accepted.";
       if (contextTag === "trip_join_request") return "Messaging unlocks after the trip request is accepted.";
@@ -7429,8 +7503,8 @@ function MessagesPageContent() {
       const isActiveThread = messagingActivationLive || thread.kind === "event" || thread.kind === "group" || isAcceptedActivityThread;
       const isPast = thread.kind === "event"
         ? toTime(thread.updatedAt) < Date.now()
-        : thread.kind === "trip" && contextTag === "teacher_booking"
-          ? thread.statusTag === "completed"
+        : contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group"
+          ? thread.statusTag === "completed" || thread.statusTag === "expired"
           : false;
       // Treat declined threads as virtually archived — hidden from active inbox, visible in archived tab.
       // A new request on the same thread will set hasPendingRequest=true and naturally resurface it.
@@ -7454,7 +7528,11 @@ function MessagesPageContent() {
             ? thread.kind === "event"
           : kindFilter === "group"
             ? thread.kind === "group"
-            : thread.kind !== "event" && thread.kind !== "group";
+          : kindFilter === "booking"
+            ? thread.contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group"
+          : kindFilter === "service"
+            ? thread.contextTag === "service_inquiry"
+            : thread.kind !== "event" && thread.kind !== "group" && thread.contextTag !== "teacher_booking" && thread.contextTag !== "service_inquiry";
 
       if (activeTab === "all" && isHidden) return false;
       if (activeTab === "archived" && !isHidden) return false;
@@ -7504,8 +7582,9 @@ function MessagesPageContent() {
       if (kindFilter === "all") return true;
       if (kindFilter === "event") return thread.kind === "event";
       if (kindFilter === "group") return thread.kind === "group";
-      if (kindFilter === "booking") return thread.contextTag === "teacher_booking";
-      return thread.kind !== "event" && thread.kind !== "group";
+      if (kindFilter === "booking") return thread.contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group";
+      if (kindFilter === "service") return thread.contextTag === "service_inquiry";
+      return thread.kind !== "event" && thread.kind !== "group" && thread.contextTag !== "teacher_booking" && thread.contextTag !== "service_inquiry";
     });
   }, [kindFilter, threads]);
   const tabCounts = useMemo(() => {
@@ -7529,8 +7608,8 @@ function MessagesPageContent() {
       const isActiveThread = messagingActivationLive || thread.kind === "event" || thread.kind === "group" || isAcceptedActivityThread;
       const isPast = thread.kind === "event"
         ? toTime(thread.updatedAt) < Date.now()
-        : thread.kind === "trip" && contextTag === "teacher_booking"
-          ? thread.statusTag === "completed"
+        : contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group"
+          ? thread.statusTag === "completed" || thread.statusTag === "expired"
           : false;
       const isEffectivelyDeclined =
         thread.statusTag === "declined" &&
@@ -7569,13 +7648,92 @@ function MessagesPageContent() {
   const kindCounts = useMemo(
     () => ({
       all: threads.length,
-      connection: threads.filter((thread) => thread.kind !== "event" && thread.kind !== "group").length,
+      connection: threads.filter((thread) => thread.kind !== "event" && thread.kind !== "group" && thread.contextTag !== "teacher_booking" && thread.contextTag !== "service_inquiry").length,
       event: threads.filter((thread) => thread.kind === "event").length,
       group: threads.filter((thread) => thread.kind === "group").length,
-      booking: threads.filter((thread) => thread.contextTag === "teacher_booking").length,
+      booking: threads.filter((thread) => thread.contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group").length,
+      service: threads.filter((thread) => thread.contextTag === "service_inquiry").length,
     }),
     [threads]
   );
+  const pendingByKind = useMemo(() => {
+    const counts = { connection: 0, event: 0, group: 0, booking: 0, service: 0 };
+    for (const t of threads) {
+      const isArchived = t.messagingState === "archived" || Boolean(archivedThreads[t.threadId]);
+      if (isArchived) continue;
+      if (!t.hasPendingRequest && t.statusTag !== "pending") continue;
+      if (t.contextTag === "teacher_booking" && t.kind !== "event" && t.kind !== "group") counts.booking += 1;
+      else if (t.contextTag === "service_inquiry") counts.service += 1;
+      else if (t.kind === "event") counts.event += 1;
+      else if (t.kind === "group") counts.group += 1;
+      else counts.connection += 1;
+    }
+    return counts;
+  }, [archivedThreads, threads]);
+  const crossKindPendingHint = useMemo(() => {
+    if (activeTab === "archived") return null;
+    type OtherKind = "booking" | "service" | "connection" | "event" | "group";
+    const labels: Record<OtherKind, string> = { booking: "booking", service: "service inquiry", connection: "connection", event: "event", group: "group" };
+
+    // Find the most recently updated pending thread that's NOT in the current kindFilter.
+    // This way the pill always points at the most fresh thing the user might miss.
+    let latestKind: OtherKind | null = null;
+    let latestTime = -Infinity;
+    for (const t of threads) {
+      const isArchived = t.messagingState === "archived" || Boolean(archivedThreads[t.threadId]);
+      if (isArchived) continue;
+      if (!t.hasPendingRequest && t.statusTag !== "pending") continue;
+      const k: OtherKind =
+        t.contextTag === "teacher_booking" && t.kind !== "event" && t.kind !== "group" ? "booking"
+        : t.contextTag === "service_inquiry" ? "service"
+        : t.kind === "event" ? "event"
+        : t.kind === "group" ? "group"
+        : "connection";
+      // Don't hint towards booking/service filters if viewer has explicitly disabled them
+      if (k === "booking" && viewerBookingEnabled === false) continue;
+      if (k === "service" && viewerServiceEnabled === false) continue;
+      // Don't hint towards event/group — not needed per product decision
+      if (k === "event" || k === "group") continue;
+      if (k === kindFilter) continue;
+      const time = toTime(t.updatedAt);
+      if (time > latestTime) {
+        latestTime = time;
+        latestKind = k;
+      }
+    }
+    if (!latestKind) return null;
+
+    // Count total pending across all OTHER kinds (combined, not just the leading one) so
+    // the pill conveys the full backlog. Tap targets the most recent kind first.
+    const otherKindsTotal = (Object.keys(pendingByKind) as OtherKind[])
+      .filter((k) => k !== kindFilter)
+      .reduce((sum, k) => sum + pendingByKind[k], 0);
+    const leading = pendingByKind[latestKind];
+    const remainder = otherKindsTotal - leading;
+
+    // Don't show the hint if there are no actual pending requests in other kinds
+    if (otherKindsTotal === 0) return null;
+
+    const label = remainder > 0
+      ? `${leading === 1 ? "1 new" : `${leading} new`} ${labels[latestKind]} request${leading === 1 ? "" : "s"} · +${remainder} elsewhere`
+      : `${leading === 1 ? "1 new" : `${leading} new`} ${labels[latestKind]} request${leading === 1 ? "" : "s"}`;
+
+    return { kind: latestKind, label };
+  }, [activeTab, archivedThreads, kindFilter, pendingByKind, threads, viewerBookingEnabled, viewerServiceEnabled]);
+  const lastCrossKindTotalRef = useRef<number>(0);
+  const [crossKindPulse, setCrossKindPulse] = useState(false);
+  useEffect(() => {
+    const total = pendingByKind.connection + pendingByKind.event + pendingByKind.group + pendingByKind.booking + pendingByKind.service
+      - (kindFilter !== "all" ? (pendingByKind as Record<string, number>)[kindFilter] ?? 0 : 0);
+    const previous = lastCrossKindTotalRef.current;
+    lastCrossKindTotalRef.current = total;
+    if (total > previous && total > 0) {
+      setCrossKindPulse(true);
+      const timer = window.setTimeout(() => setCrossKindPulse(false), 3200);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [kindFilter, pendingByKind]);
   const visibleKindCounts = useMemo(
     () => ({
       all: kindCounts.connection + Math.max(kindCounts.event, threadQuotaSummary?.eventJoined ?? 0) + Math.max(kindCounts.group, threadQuotaSummary?.groupJoined ?? 0),
@@ -7583,13 +7741,14 @@ function MessagesPageContent() {
       event: Math.max(kindCounts.event, threadQuotaSummary?.eventJoined ?? 0),
       group: Math.max(kindCounts.group, threadQuotaSummary?.groupJoined ?? 0),
       booking: kindCounts.booking,
+      service: kindCounts.service,
     }),
     [kindCounts, threadQuotaSummary?.eventJoined, threadQuotaSummary?.groupJoined]
   );
   const archivedKindCounts = useMemo(
     () => ({
       all: threads.filter((thread) => thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId])).length,
-      connection: threads.filter((thread) => (thread.kind !== "event" && thread.kind !== "group") && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
+      connection: threads.filter((thread) => (thread.kind !== "event" && thread.kind !== "group" && thread.contextTag !== "teacher_booking") && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
       event: threads.filter((thread) => thread.kind === "event" && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
       group: threads.filter((thread) => thread.kind === "group" && (thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId]))).length,
     }),
@@ -7629,12 +7788,56 @@ function MessagesPageContent() {
         { key: "all", label: "All" },
       ] as const;
     }
+    if (kindFilter === "service") {
+      return [
+        { key: "active", label: "Accepted" },
+        { key: "pending", label: "Requests" },
+        { key: "past", label: "Past" },
+        { key: "all", label: "All" },
+      ] as const;
+    }
     return [
       { key: "active", label: "Active" },
       { key: "pending", label: "Requests" },
       { key: "all", label: "All" },
     ] as const;
   }, [activeTab, kindFilter]);
+  useEffect(() => {
+    if (kindFilter !== "booking" || activeTab === "archived") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sessionRes = await supabase.auth.getSession();
+        const accessToken = sessionRes.data.session?.access_token ?? "";
+        if (!accessToken) return;
+        const res = await fetch("/api/teacher-bookings/usage", { headers: { Authorization: `Bearer ${accessToken}` } });
+        const result = (await res.json().catch(() => null)) as { ok?: boolean; used?: number; limit?: number | null; remaining?: number | null } | null;
+        if (!cancelled && res.ok && result?.ok) {
+          setBookingUsage({ used: result.used ?? 0, limit: result.limit ?? null, remaining: result.remaining ?? null });
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [kindFilter, activeTab]);
+
+  useEffect(() => {
+    if (kindFilter !== "service" || activeTab === "archived") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sessionRes = await supabase.auth.getSession();
+        const accessToken = sessionRes.data.session?.access_token ?? "";
+        if (!accessToken) return;
+        const res = await fetch("/api/service-inquiries/usage", { headers: { Authorization: `Bearer ${accessToken}` } });
+        const result = (await res.json().catch(() => null)) as { ok?: boolean; used?: number; limit?: number | null; remaining?: number | null } | null;
+        if (!cancelled && res.ok && result?.ok) {
+          setServiceUsage({ used: result.used ?? 0, limit: result.limit ?? null, remaining: result.remaining ?? null });
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [kindFilter, activeTab]);
+
   const headerQuotaMeta = useMemo(() => {
     if (activeTab === "archived") return null;
     if (kindFilter === "event") {
@@ -7664,6 +7867,40 @@ function MessagesPageContent() {
         compact: true,
       };
     }
+    if (kindFilter === "booking") {
+      const used = bookingUsage?.used ?? 0;
+      const limit = bookingUsage?.limit ?? null;
+      const reached = limit !== null && used >= limit;
+      const now = new Date();
+      const firstOfNext = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      const resetLabel = `Resets ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(firstOfNext)}`;
+      return {
+        label: "SENT THIS MONTH",
+        sublabel: resetLabel,
+        current: used,
+        limit,
+        reached,
+        compact: false,
+        upgradeHint: "Upgrade to Plus to send more booking requests per month.",
+      };
+    }
+    if (kindFilter === "service") {
+      const used = serviceUsage?.used ?? 0;
+      const limit = serviceUsage?.limit ?? null;
+      const reached = limit !== null && used >= limit;
+      const now = new Date();
+      const firstOfNext = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      const resetLabel = `Resets ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(firstOfNext)}`;
+      return {
+        label: "SENT THIS MONTH",
+        sublabel: resetLabel,
+        current: used,
+        limit,
+        reached,
+        compact: false,
+        upgradeHint: "Upgrade to Plus to send more service inquiries per month.",
+      };
+    }
     const concurrentLimit = messagingSummary?.activeLimit ?? 10;
     const monthlyUsed = messagingSummary?.monthlyUsed ?? 0;
     const monthlyLimit = messagingSummary?.monthlyLimit ?? 10;
@@ -7686,7 +7923,7 @@ function MessagesPageContent() {
         ? `You have ${concurrentLimit} active conversations. Archive one to start a new one.`
         : `Upgrade to Plus to activate more conversations per month.`,
     };
-  }, [activeTab, kindCounts.group, kindFilter, messagingSummary?.activeCount, messagingSummary?.activeLimit, tabCounts, threadQuotaSummary, threads]);
+  }, [activeTab, bookingUsage, kindCounts.group, kindFilter, messagingSummary?.activeCount, messagingSummary?.activeLimit, serviceUsage, tabCounts, threadQuotaSummary, threads]);
   const inboxSectionLabel = useMemo(() => {
     if (activeTab === "archived") return "Archived";
     if (kindFilter === "all") return "";
@@ -8264,6 +8501,11 @@ function MessagesPageContent() {
 
     if (activeMeta.isRelationshipPending && activePendingContext) {
       if (activePendingContext.contextTag === "service_inquiry") {
+        return null;
+      }
+      // teacher_booking already shows "Private class booking · expires in N days" in the header.
+      // Don't repeat the same info in an inline banner.
+      if (activePendingContext.contextTag === "teacher_booking") {
         return null;
       }
       const expiresInDays = daysUntilPendingExpiry(activePendingContext);
@@ -9026,7 +9268,7 @@ function MessagesPageContent() {
       <PullToRefreshIndicator pullY={pullY} refreshing={ptrRefreshing} />
       <Nav />
 
-      <main className="flex min-h-0 flex-1 overflow-hidden overscroll-none pb-[calc(env(safe-area-inset-bottom)+56px)] md:pb-0">
+      <main className={["flex min-h-0 flex-1 overflow-hidden overscroll-none md:pb-0", mobileThreadOpen ? "pb-0" : "pb-[calc(env(safe-area-inset-bottom)+56px)]"].join(" ")}>
         <aside
           className={[
             "z-10 w-full min-h-0 flex-col overflow-hidden border-r border-white/10 bg-[linear-gradient(180deg,rgba(11,12,16,0.98),rgba(8,9,12,0.99))] md:w-[420px] lg:w-[440px] md:flex",
@@ -9148,7 +9390,7 @@ function MessagesPageContent() {
                   onClick={() => setInboxFilterMenuOpen((prev) => !prev)}
                   data-testid="thread-filter-menu-button"
                   className={[
-                    "inline-flex min-h-8 shrink-0 items-center justify-center px-1 py-1 transition-colors",
+                    "relative inline-flex min-h-8 shrink-0 items-center justify-center px-1 py-1 transition-colors",
                     inboxFilterMenuOpen || kindFilter !== "connection" || activeTab === "archived"
                       ? "text-[#f2d9ff]"
                       : "text-[#90cbcb] hover:text-white",
@@ -9156,6 +9398,9 @@ function MessagesPageContent() {
                   aria-label="Open inbox filters"
                 >
                   <span className="material-symbols-outlined text-[16px]">tune</span>
+                  {crossKindPendingHint ? (
+                    <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#d946ef] shadow-[0_0_6px_rgba(217,70,239,0.7)]" />
+                  ) : null}
                 </button>
                 {inboxFilterMenuOpen ? (
                   <div
@@ -9163,11 +9408,12 @@ function MessagesPageContent() {
                     className="absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-white/10 bg-[#11161d] p-2 shadow-2xl"
                   >
                     {([
-                      { key: "connection", label: "Connections", count: visibleKindCounts.connection },
-                      { key: "event", label: "Events", count: visibleKindCounts.event },
-                      { key: "group", label: "Groups", count: visibleKindCounts.group },
-                      { key: "booking", label: "Bookings", count: visibleKindCounts.booking },
-                    ] as const).map((option) => {
+                      { key: "connection", label: "Connections", count: visibleKindCounts.connection, pending: pendingByKind.connection, show: true },
+                      { key: "event", label: "Events", count: visibleKindCounts.event, pending: pendingByKind.event, show: true },
+                      { key: "group", label: "Groups", count: visibleKindCounts.group, pending: pendingByKind.group, show: true },
+                      { key: "booking", label: "Bookings", count: visibleKindCounts.booking, pending: pendingByKind.booking, show: viewerBookingEnabled !== false },
+                      { key: "service", label: "Service Inquiries", count: visibleKindCounts.service, pending: pendingByKind.service, show: viewerServiceEnabled !== false },
+                    ] as const).filter((o) => o.show).map((option) => {
                       const selected = kindFilter === option.key && activeTab !== "archived";
                       return (
                         <button
@@ -9179,7 +9425,12 @@ function MessagesPageContent() {
                             selected ? "bg-[#24182f] text-[#f2d9ff]" : "text-slate-200 hover:bg-white/[0.05]",
                           ].join(" ")}
                         >
-                          <span>{option.label}</span>
+                          <span className="flex items-center gap-2">
+                            {option.label}
+                            {option.pending > 0 ? (
+                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#d946ef] shadow-[0_0_6px_rgba(217,70,239,0.7)]" />
+                            ) : null}
+                          </span>
                           <span className="text-[11px] font-bold tabular-nums text-inherit/70">{option.count}</span>
                         </button>
                       );
@@ -9205,6 +9456,37 @@ function MessagesPageContent() {
           <div ref={inboxListScrollRef} className="flex-1 space-y-1.5 overflow-y-auto overscroll-y-contain p-2">
             {error ? (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>
+            ) : null}
+            {!loading && crossKindPendingHint ? (
+              <div className="relative mb-1.5">
+                {crossKindPulse ? (
+                  <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 animate-ping rounded-xl bg-[#d946ef]/25" />
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => { setCrossKindPulse(false); selectKindFilter(crossKindPendingHint.kind); }}
+                  className={[
+                    "group relative flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition",
+                    crossKindPulse
+                      ? "border-[#d946ef]/60 bg-gradient-to-r from-[#d946ef]/20 to-[#6ee7f9]/20 shadow-[0_0_18px_rgba(217,70,239,0.45)]"
+                      : "border-[#d946ef]/30 bg-gradient-to-r from-[#d946ef]/10 to-[#6ee7f9]/10 hover:from-[#d946ef]/20 hover:to-[#6ee7f9]/20",
+                  ].join(" ")}
+                >
+                  <span className="flex items-center gap-2 text-[12px] font-semibold text-white">
+                    <span className="relative inline-flex h-2 w-2">
+                      {crossKindPulse ? (
+                        <span aria-hidden className="absolute inset-0 animate-ping rounded-full bg-[#d946ef]/80" />
+                      ) : null}
+                      <span className="relative inline-block h-2 w-2 rounded-full bg-[#d946ef] shadow-[0_0_8px_rgba(217,70,239,0.8)]" />
+                    </span>
+                    {crossKindPendingHint.label}
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#f2d9ff] transition group-hover:text-white">
+                    Open
+                    <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                  </span>
+                </button>
+              </div>
             ) : null}
             {loading ? (
               <div className="divide-y divide-white/[0.04] p-2">
@@ -9329,6 +9611,7 @@ function MessagesPageContent() {
                     return copy;
                   });
                   setThreads((prev) => prev.map((row) => (row.threadId === thread.threadId ? { ...row, unreadCount: 0 } : row)));
+                  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
                   if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
                     setOpenMessageMenuId(null);
                     setMobileThreadOpen(true);
@@ -9412,6 +9695,11 @@ function MessagesPageContent() {
                               </p>
                               {thread.isHost && (thread.kind === "group" || thread.kind === "event") ? (
                                 <span className="shrink-0 text-[10px] font-medium text-[#0df2f2]/60">Organiser</span>
+                              ) : null}
+                              {thread.contextTag === "teacher_booking" && meId ? (
+                                <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${thread.requesterId === meId ? "border-cyan-300/35 bg-cyan-300/10 text-cyan-200" : "border-fuchsia-300/35 bg-fuchsia-300/10 text-fuchsia-200"}`}>
+                                  {thread.requesterId === meId ? "Sent" : "Received"}
+                                </span>
                               ) : null}
                               {(thread.messagingState === "archived" || Boolean(archivedThreads[thread.threadId])) ? (
                                 <span className="shrink-0 text-[10px] font-medium text-white/30">Archived</span>
@@ -10827,7 +11115,7 @@ function MessagesPageContent() {
               </div>
 
                 {(activeMeta?.kind !== "event" || (activeMeta?.canPostToEventThread && !showReadOnlyBroadcastFooter)) ? (
-                <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2 pb-3 sm:p-3 sm:pb-3">
+                <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 sm:pb-3 md:pb-3">
                 {replyTo ? (
                   <div className="mx-auto mb-2 max-w-4xl rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 flex items-start justify-between gap-3">
                     <div className="min-w-0">

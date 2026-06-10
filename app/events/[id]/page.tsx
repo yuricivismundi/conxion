@@ -435,7 +435,21 @@ export default function EventDetailsPage() {
       if (isStale()) return;
 
       const token = sessionData.session?.access_token ?? null;
-      const userId = authErr || !authData.user ? null : authData.user.id;
+      let userId = authErr || !authData.user ? null : authData.user.id;
+
+      // Verify the profile row exists. Stale/incomplete sessions get
+      // treated as anonymous so we don't flash authenticated-only UI.
+      if (userId) {
+        const profileCheck = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (isStale()) return;
+        if (!profileCheck.error && !profileCheck.data) {
+          userId = null;
+        }
+      }
 
       setAccessToken(token);
       setMeId(userId);
@@ -968,6 +982,11 @@ export default function EventDetailsPage() {
       return;
     }
 
+    if (hasEnded && (action === "join" || action === "interested" || action === "request_sent_to_interested")) {
+      setActionError("This event has already ended.");
+      return;
+    }
+
     haptic(10);
     setActionBusy(true);
     setActionError(null);
@@ -1381,6 +1400,14 @@ export default function EventDetailsPage() {
           <span className="material-symbols-outlined text-[20px]">arrow_back</span>
         </button>
         <span className="truncate text-sm font-semibold text-white/60">Events</span>
+        {!isHost && !isAuthenticated ? (
+          <Link
+            href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
+            className="ml-auto inline-flex items-center justify-center rounded-full bg-[#2374e1] px-4 py-1.5 text-xs font-bold text-white hover:bg-[#2d7ff0] active:scale-95 transition"
+          >
+            Sign in to Join
+          </Link>
+        ) : null}
       </div>
 
       <main id="main-content" className="pb-40 md:pb-12">
@@ -1456,9 +1483,9 @@ export default function EventDetailsPage() {
                     {(event.venueName || event.city) ? (
                       <p className="text-sm text-slate-300">{[event.venueName, event.city, event.country].filter(Boolean).join(", ")}</p>
                     ) : null}
-                    <p className="flex flex-wrap items-center gap-x-1 gap-y-0 text-sm font-semibold text-cyan-400">
+                    <p className="flex items-center gap-x-1 text-sm font-semibold text-cyan-400">
                       <span className="material-symbols-outlined text-[14px] shrink-0">calendar_month</span>
-                      <span className="break-words">{formatEventRange(event.startsAt, event.endsAt)}</span>
+                      <span className="whitespace-nowrap">{formatEventRange(event.startsAt, event.endsAt)}</span>
                     </p>
                     {(() => {
                       if (isHappeningNow) return (
@@ -1559,18 +1586,18 @@ export default function EventDetailsPage() {
                             });
                             setActionError(null);
                           }}
-                          disabled={actionBusy}
+                          disabled={actionBusy || hasEnded}
                           className={cx(
                             "inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-semibold transition",
-                            responseToneClass(currentResponseState),
+                            hasEnded ? "border-white/10 bg-white/[0.03] text-white/30 cursor-not-allowed" : responseToneClass(currentResponseState),
                             actionBusy && "cursor-not-allowed opacity-60"
                           )}
                         >
                           <span className="material-symbols-outlined text-[18px]">
-                            {responseIcon(currentResponseState)}
+                            {hasEnded ? "event_busy" : responseIcon(currentResponseState)}
                           </span>
-                          {responseLabel(currentResponseState)}
-                          {currentResponseState === "interested" || currentResponseState === "request_sent" ? (
+                          {hasEnded ? "Event ended" : responseLabel(currentResponseState)}
+                          {!hasEnded && (currentResponseState === "interested" || currentResponseState === "request_sent") ? (
                             <span className="material-symbols-outlined text-[16px]">expand_more</span>
                           ) : null}
                         </button>
@@ -1675,11 +1702,11 @@ export default function EventDetailsPage() {
                       </Link>
                     ) : null}
 
-                    {/* Sign in (unauthenticated) */}
+                    {/* Sign in (unauthenticated) — desktop only; mobile shows it in the header */}
                     {!isHost && !isAuthenticated ? (
                       <Link
                         href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-                        className="inline-flex items-center justify-center rounded-xl bg-[#2374e1] px-3 py-2 text-sm font-bold text-white hover:bg-[#2d7ff0]"
+                        className="hidden md:inline-flex items-center justify-center rounded-xl bg-[#2374e1] px-3 py-2 text-sm font-bold text-white hover:bg-[#2d7ff0]"
                       >
                         Sign in to Join
                       </Link>
@@ -1834,7 +1861,7 @@ export default function EventDetailsPage() {
           </div>
         </section>
 
-        <section className="mx-auto mt-5 grid w-full max-w-[1220px] grid-cols-1 gap-5 px-4 pb-32 sm:px-6 sm:pb-8 xl:grid-cols-[minmax(0,2fr)_360px] lg:px-8">
+        <section className="mx-auto mt-5 grid w-full max-w-[1220px] grid-cols-1 gap-5 px-4 pb-4 sm:px-6 sm:pb-8 xl:grid-cols-[minmax(0,2fr)_360px] lg:px-8">
           <div className="order-1 space-y-6 xl:order-1">
             {activeEventTab === "discussion" ? (
               <>

@@ -209,7 +209,7 @@ function EditGroupForm() {
 
       {/* Delete confirmation dialog */}
       {deleteConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-[28px] border border-white/10 bg-[#0a0c13] p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Delete group?</h3>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">

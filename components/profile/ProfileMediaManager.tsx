@@ -1433,14 +1433,16 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
         })()}
       </section>
 
-      <div className="flex">
-        <Link
-          href="/me/edit"
-          className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/85 hover:bg-white/[0.08]"
-        >
-          Back to edit profile
-        </Link>
-      </div>
+      {!embedded ? (
+        <div className="flex">
+          <Link
+            href="/me/edit"
+            className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/85 hover:bg-white/[0.08]"
+          >
+            Back to edit profile
+          </Link>
+        </div>
+      ) : null}
 
       {videoDraft ? (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/78 px-3 py-2 backdrop-blur-sm sm:items-center sm:px-6 sm:py-4">

@@ -19,14 +19,12 @@ export default function TeacherOwnerActions({ profileUserId, socialProfileHref, 
     });
   }, [profileUserId]);
 
-  if (!isSelf) return null;
-
   const isCompact = size === "compact";
 
   return (
     <Link
       href={socialProfileHref}
-      title="Switch to social profile"
+      title={isSelf ? "Switch to social profile" : "View social profile"}
       className={
         isCompact
           ? "inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full border border-[#0df2f2]/25 bg-[#0df2f2]/[0.05] text-[#0df2f2]/80 transition hover:bg-[#0df2f2]/[0.1] hover:border-[#0df2f2]/40 hover:text-[#0df2f2] text-[10px] font-medium uppercase tracking-wider"
@@ -34,7 +32,7 @@ export default function TeacherOwnerActions({ profileUserId, socialProfileHref, 
       }
     >
       <span className={isCompact ? "material-symbols-outlined text-[13px]" : "material-symbols-outlined text-[18px]"}>swap_horiz</span>
-      <span>Switch Profile</span>
+      <span>{isSelf ? "Switch Profile" : "Social Profile"}</span>
     </Link>
   );
 }

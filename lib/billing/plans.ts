@@ -52,6 +52,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
           "5 activity requests per month",
           "10 event invites per month",
           "5 teacher booking requests per month",
+          "5 teacher service inquiries per month",
         ],
       },
       {
@@ -131,7 +132,8 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
           "Up to 10 private groups total",
           "15 activity requests per month",
           "Unlimited event invites",
-          "10 teacher booking requests per month",
+          "15 teacher booking requests per month",
+          "15 teacher service inquiries per month",
           "Your events appear before free users (Ideal for Organisers)",
         ],
       },

@@ -1612,7 +1612,7 @@ function ConnectionsPageContent() {
                 "max_guests",
               ].join(",")
             )
-            .limit(200);
+            .limit(2000);
           if (meId) fallbackQueryLite = fallbackQueryLite.neq("user_id", meId);
           const { data: fallbackDataLite, error: fallbackErrorLite } = await fallbackQueryLite;
           if (!fallbackErrorLite) {
@@ -1633,7 +1633,7 @@ function ConnectionsPageContent() {
           let fallbackQueryMinimal = supabase
             .from("profiles")
             .select("user_id,username,display_name,created_at,city,country,avatar_url,verified,verified_label")
-            .limit(200);
+            .limit(2000);
           if (meId) fallbackQueryMinimal = fallbackQueryMinimal.neq("user_id", meId);
           const { data: fallbackDataMinimal, error: fallbackErrorMinimal } = await fallbackQueryMinimal;
           if (!fallbackErrorMinimal) {
@@ -1774,12 +1774,12 @@ function ConnectionsPageContent() {
         let loadedTrips = false;
         let lastTripsError: unknown = null;
 
-        let tripsQuery = supabase
+        const tripsQuery = supabase
           .from("trips")
           .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
           .eq("status", "active")
           .gte("end_date", todayIso)
-          .limit(200);
+          .limit(2000);
         const { data: tripRows, error: tripErr } = await tripsQuery;
         if (!tripErr) {
           trips = (tripRows ?? []) as TripRow[];
@@ -1789,10 +1789,10 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedTrips) {
-          let tripsQueryFallback = supabase
+          const tripsQueryFallback = supabase
             .from("trips")
             .select("id,user_id,status,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(200);
+            .limit(2000);
           const { data: fallbackRows, error: fallbackErr } = await tripsQueryFallback;
           if (!fallbackErr) {
             trips = (fallbackRows ?? []) as TripRow[];
@@ -1803,10 +1803,10 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedTrips) {
-          let tripsQueryLite = supabase
+          const tripsQueryLite = supabase
             .from("trips")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(200);
+            .limit(2000);
           const { data: fallbackRowsLite, error: fallbackErrLite } = await tripsQueryLite;
           if (!fallbackErrLite) {
             trips = (fallbackRowsLite ?? []) as TripRow[];
@@ -1817,10 +1817,10 @@ function ConnectionsPageContent() {
         }
 
         if (!loadedTrips) {
-          let travelPlansQuery = supabase
+          const travelPlansQuery = supabase
             .from("travel_plans")
             .select("id,user_id,destination_country,destination_city,start_date,end_date,purpose,created_at")
-            .limit(200);
+            .limit(2000);
           const { data: planRows, error: planErr } = await travelPlansQuery;
           if (!planErr) {
             trips = (planRows ?? []) as TripRow[];
@@ -3112,7 +3112,7 @@ function ConnectionsPageContent() {
                           </Link>
                           {discoverMode === "hosts" ? (
                             <button
-                              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-full px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#0A0A0A]"
+                              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-full px-2 py-2.5 text-[10px] font-semibold uppercase tracking-tight text-[#0A0A0A]"
                               style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
                               onClick={() => {
                                 requestHostingAccess({
@@ -3263,7 +3263,7 @@ function ConnectionsPageContent() {
                             </Link>
                             {discoverMode === "hosts" ? (
                               <button
-                                className="flex min-h-[42px] flex-1 items-center justify-center whitespace-nowrap rounded-full px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#0A0A0A]"
+                                className="flex min-h-[42px] flex-1 items-center justify-center whitespace-nowrap rounded-full px-2 py-2.5 text-[10px] font-semibold uppercase tracking-tight text-[#0A0A0A]"
                                 style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
                                 onClick={() => {
                                   requestHostingAccess({
@@ -3545,7 +3545,7 @@ function ConnectionsPageContent() {
       </main>
 
       {filtersOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-end sm:justify-end">
+        <div className="fixed inset-0 z-[80] flex items-end sm:justify-end">
           <button aria-label="Close filters" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setFiltersOpen(false)} type="button" />
 
           <aside className="relative w-full max-h-[92dvh] rounded-t-3xl sm:rounded-none sm:rounded-l-3xl sm:h-full sm:max-h-full sm:max-w-md border-t sm:border-t-0 sm:border-l border-white/10 bg-[#0A0A0A] shadow-2xl flex flex-col">

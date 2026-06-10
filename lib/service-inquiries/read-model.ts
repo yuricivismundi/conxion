@@ -46,7 +46,8 @@ export async function countServiceInquiriesThisMonth(
     .from("service_inquiries")
     .select("id", { count: "exact", head: true })
     .eq("requester_id", requesterId)
-    .gte("created_at", cycleStart);
+    .gte("created_at", cycleStart)
+    .not("status", "in", '("cancelled","declined")');
 
   if (error) throw error;
   return count ?? 0;

@@ -2516,6 +2516,17 @@ function MemberProfilePage() {
     return <ProfilePageSkeleton />;
   }
 
+  // If viewing your own profile but it doesn't exist, you have an auth user
+  // without a profile row — send to onboarding to complete setup.
+  const viewingOwnMissingProfile =
+    meId !== null && routeProfileKey === meId && !profile;
+  if (viewingOwnMissingProfile) {
+    if (typeof window !== "undefined") {
+      router.replace("/onboarding/profile");
+    }
+    return <ProfilePageSkeleton />;
+  }
+
   if (!profileUserId || !profile) {
     const isDeactivated = !error || error.toLowerCase().includes("not found") || error.toLowerCase().includes("deactivated");
     return (
@@ -3123,7 +3134,7 @@ function MemberProfilePage() {
                       </div>
                     </div>
                     {isSelf && !profile.verified ? (
-                      <div className="mt-5">
+                      <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <GetVerifiedButton
                           className="inline-flex min-h-9 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-xs font-bold text-[#06121a] hover:brightness-110"
                           returnTo={`/profile/${profile.userId}`}
@@ -3131,6 +3142,7 @@ function MemberProfilePage() {
                         >
                           Get verified
                         </GetVerifiedButton>
+                        <p className="text-[11px] text-white/50">Unlocks hosting travelers and your teacher profile.</p>
                       </div>
                     ) : null}
                   </div>

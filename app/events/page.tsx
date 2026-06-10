@@ -443,7 +443,21 @@ function EventsExplorePageContent() {
     ]);
 
     const token = sessionData.session?.access_token ?? null;
-    const userId = authErr || !authData.user ? null : authData.user.id;
+    let userId = authErr || !authData.user ? null : authData.user.id;
+
+    // Verify a profile row exists; otherwise treat as anonymous so we
+    // don't flash authenticated-only UI (Create button etc.) for users
+    // with stale/incomplete sessions.
+    if (userId) {
+      const profileCheck = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!profileCheck.error && !profileCheck.data) {
+        userId = null;
+      }
+    }
 
     setMeId(userId);
     setIsAuthenticated(Boolean(userId));
@@ -1310,32 +1324,47 @@ function EventsExplorePageContent() {
 
       <main className="mx-auto w-full max-w-[1320px] px-4 pb-28 pt-7 sm:pb-12 sm:px-6 lg:px-8" onClick={closeMenus}>
         {!isAuthenticated ? (
-          <section className="mb-5 overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,245,255,0.08),transparent_42%),linear-gradient(180deg,rgba(18,24,32,0.96),rgba(10,10,10,0.98))] p-5 sm:p-6">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="max-w-2xl">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/55">Public events</p>
-                <h1 className="mt-2 text-4xl font-black tracking-tight text-white sm:text-5xl">Events</h1>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-white/68 sm:text-base">
-                  Browse public dance events by location and date. Create an account to unlock the full event experience.
-                </p>
-              </div>
-
-              <div className="flex flex-col items-start gap-2 rounded-2xl border border-cyan-300/18 bg-cyan-300/8 px-5 py-4 text-left xl:min-w-[280px]">
-                <p className="text-sm font-semibold text-white/72">Quick filters</p>
-                <p className="text-sm leading-6 text-white/58">Use country, city, and date to narrow public events.</p>
-                <Link
-                  href="/auth?mode=signup"
-                  className="inline-flex items-center justify-center rounded-full bg-[#00F5FF] px-5 py-2.5 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
-                >
-                  Create an account
-                </Link>
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Events</h1>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-white/68">
+                Browse public dance events by location and date. Create an account to unlock the full event experience.
+              </p>
+            </div>
+            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+              <p className="whitespace-nowrap text-[12px] text-white/40">
+                Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span>{" "}
+                {effectivePastOnly ? "past events" : "events"}
+              </p>
+              <div className="flex items-center gap-2">
+              <label className="group relative">
+                <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
+                  search
+                </span>
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search events, cities, venues..."
+                  className="h-10 w-[220px] rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setFiltersOpen((v) => !v); }}
+                aria-label="Open event filters"
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#00F5FF] px-4 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"
+              >
+                <span className="material-symbols-outlined text-[16px]">tune</span>
+                Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ""}
+              </button>
               </div>
             </div>
-          </section>
+          </div>
         ) : null}
 
-        {/* Mobile header row: auto text + two equal buttons */}
-        <div className="mb-4 flex items-center gap-2 sm:hidden">
+        {/* Mobile header row: auto text + two equal buttons — authenticated only */}
+        <div className={cx("mb-4 flex items-center gap-2 sm:hidden", !isAuthenticated && "hidden")}>
           <p className="whitespace-nowrap text-[12px] text-white/40">
             Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span>{" "}
             {effectivePastOnly ? "past events" : "events"}
@@ -1371,8 +1400,8 @@ function EventsExplorePageContent() {
           </div>
         </div>
 
-        {/* Desktop header row */}
-        <header className="mb-4 hidden items-center justify-between gap-2 sm:flex">
+        {/* Desktop header row — authenticated only; anon gets search/filters in the title row above */}
+        <header className={cx("mb-4 hidden items-center justify-between gap-2 sm:flex", !isAuthenticated && "!hidden")}>
           <div />
           <div className="flex min-w-0 items-center gap-2">
             {isAuthenticated && (myCity || myCountry) ? (
@@ -1428,7 +1457,7 @@ function EventsExplorePageContent() {
           Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span> {effectivePastOnly ? "past events" : "events"}
         </p>
 
-        {!isAuthenticated ? (
+        {false ? (
           <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
               <div className="flex-1">
@@ -1517,7 +1546,7 @@ function EventsExplorePageContent() {
         ) : null}
 
         {filtersOpen ? (
-          <div className="fixed inset-0 z-[60]">
+          <div className="fixed inset-0 z-[80]">
             <button aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} type="button" />
 
             <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-[#0A0A0A] shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1669,7 +1698,7 @@ function EventsExplorePageContent() {
                   <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">References</h3>
                   <p className="text-[11px] text-white/45">Filter by whether the event organizer already has reference history.</p>
                   <div className="flex flex-wrap gap-x-5 gap-y-3">
-                    {([{ key: "has", label: "Has references" }, { key: "none", label: "No references" }] as const).map((option) => {
+                    {([{ key: "has", label: "Has references" }] as const).map((option) => {
                       const selected = referencesFilter === option.key;
                       return (
                         <button key={option.key} type="button" onClick={() => setReferencesFilter(option.key)} className="flex items-center gap-2.5 text-left">
@@ -1833,26 +1862,6 @@ function EventsExplorePageContent() {
                       >
                         Create an account
                       </Link>
-                    </div>
-                    <div className="relative mt-6 grid grid-cols-1 gap-3 opacity-35 sm:grid-cols-2 lg:grid-cols-3">
-                      {Array.from({ length: 6 }).map((_, index) => (
-                        <div
-                          key={`event-lock-preview-${index}`}
-                          className="overflow-hidden rounded-2xl border border-white/10 bg-[#121212]"
-                          aria-hidden="true"
-                        >
-                          <div className="h-44 bg-white/5" />
-                          <div className="space-y-3 p-4">
-                            <div className="h-4 w-20 rounded bg-white/10" />
-                            <div className="h-5 w-11/12 rounded bg-white/10" />
-                            <div className="h-4 w-2/3 rounded bg-white/10" />
-                            <div className="flex gap-2 pt-1">
-                              <div className="h-7 w-16 rounded-full bg-white/10" />
-                              <div className="h-7 w-20 rounded-full bg-white/10" />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 ) : null}
