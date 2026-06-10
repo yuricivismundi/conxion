@@ -7503,7 +7503,7 @@ function MessagesPageContent() {
       const isActiveThread = messagingActivationLive || thread.kind === "event" || thread.kind === "group" || isAcceptedActivityThread;
       const isPast = thread.kind === "event"
         ? toTime(thread.updatedAt) < Date.now()
-        : contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group"
+        : thread.kind !== "group" && contextTag === "teacher_booking"
           ? thread.statusTag === "completed" || thread.statusTag === "expired"
           : false;
       // Treat declined threads as virtually archived — hidden from active inbox, visible in archived tab.
@@ -7608,7 +7608,7 @@ function MessagesPageContent() {
       const isActiveThread = messagingActivationLive || thread.kind === "event" || thread.kind === "group" || isAcceptedActivityThread;
       const isPast = thread.kind === "event"
         ? toTime(thread.updatedAt) < Date.now()
-        : contextTag === "teacher_booking" && thread.kind !== "event" && thread.kind !== "group"
+        : thread.kind !== "group" && contextTag === "teacher_booking"
           ? thread.statusTag === "completed" || thread.statusTag === "expired"
           : false;
       const isEffectivelyDeclined =
