@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
@@ -7,6 +8,8 @@ import { isEventDiscoverable } from "@/lib/events/access";
 import { mapEventRows, pickEventHeroUrl, type EventRecord } from "@/lib/events/model";
 import { absolutePublicAppUrl, readPublicAppUrl } from "@/lib/public-app-url";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import { getT, isSupportedLocale, resolveLocale, type Locale } from "@/lib/i18n/landing";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 export const dynamic = "force-dynamic";
 
@@ -188,7 +191,25 @@ async function loadLandingEvents(): Promise<LandingEventCard[]> {
   }
 }
 
-export default async function LandingPage() {
+type PageProps = {
+  searchParams?: Promise<{ lang?: string | string[] }>;
+};
+
+export default async function LandingPage(props: PageProps) {
+  const sp = (await props.searchParams) ?? {};
+  const hdrs = await headers();
+  const cookieLang = (() => {
+    const cookie = hdrs.get("cookie") ?? "";
+    const match = /(?:^|;\s*)cx_lang=([^;]+)/.exec(cookie);
+    return match ? decodeURIComponent(match[1]) : null;
+  })();
+  const langParam = Array.isArray(sp.lang) ? sp.lang[0] : sp.lang;
+  const locale: Locale = isSupportedLocale(langParam)
+    ? langParam
+    : isSupportedLocale(cookieLang)
+      ? cookieLang
+      : resolveLocale(undefined, hdrs.get("accept-language"));
+  const t = getT(locale);
   const landingEvents = await loadLandingEvents();
   return (
     <div className="landing-root bg-[#0A0A0A] text-[#E0E0E0]">
@@ -310,32 +331,28 @@ export default async function LandingPage() {
           <div className="hidden items-center gap-3 md:flex">
             {BLOG_ENABLED ? (
               <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/blog">
-                Blog
+                {t.nav_blog}
               </Link>
             ) : null}
+            <LanguageSwitcher current={locale} />
             <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/auth">
-              Log in
+              {t.nav_login}
             </Link>
             <Link
               href="/auth"
               className="animate-conxion-glow rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-5 py-2.5 text-sm font-bold text-black transition hover:scale-105"
             >
-              Join ConXion
+              {t.nav_join}
             </Link>
           </div>
 
           <div className="flex items-center gap-2 md:hidden">
-            <Link
-              href="/auth"
-              className="rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-white/85 transition hover:border-white/30 hover:text-white"
-            >
-              Log in
-            </Link>
+            <LanguageSwitcher current={locale} />
             <Link
               href="/auth"
               className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-4 py-2 text-xs font-bold text-black"
             >
-              Join
+              {t.nav_join_short}
             </Link>
           </div>
         </nav>
@@ -349,12 +366,12 @@ export default async function LandingPage() {
           <div className="mx-auto grid w-full max-w-7xl items-center gap-12 lg:grid-cols-2">
             <div>
               <h1 className="text-4xl font-extrabold leading-[1.08] text-white sm:text-5xl lg:text-7xl">
-                Connect with
+                {t.hero_h1_top}
                 <br />
-                <span className="bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] bg-clip-text text-transparent">dancers worldwide</span>
+                <span className="bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] bg-clip-text text-transparent">{t.hero_h1_accent}</span>
               </h1>
               <p className="mt-6 max-w-xl text-base leading-relaxed text-white/75 sm:text-lg lg:text-xl">
-                Discover dancers, travel together, and grow your dance journey.
+                {t.hero_sub}
               </p>
 
               <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -362,13 +379,13 @@ export default async function LandingPage() {
                   href="/auth"
                   className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-9 py-4 text-center text-base font-extrabold text-black shadow-[0_0_30px_rgba(0,245,255,0.2)] transition hover:opacity-90"
                 >
-                  Join ConXion
+                  {t.hero_cta_join}
                 </Link>
                 <Link
                   href="/events"
                   className="rounded-full border border-[#00F5FF]/60 px-9 py-4 text-center text-base font-bold text-[#00F5FF] transition hover:bg-[#00F5FF]/10"
                 >
-                  Explore events
+                  {t.hero_cta_events}
                 </Link>
               </div>
             </div>
@@ -392,7 +409,7 @@ export default async function LandingPage() {
                   <p className="text-[12px] font-medium text-[#00F5FF]">Madrid, Spain</p>
                   <div className="flex flex-wrap gap-1.5">
                     <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/75">
-                      Teacher
+                      {t.card_teacher}
                     </span>
                     <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/75">
                       Salsa
@@ -406,7 +423,7 @@ export default async function LandingPage() {
                       <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">group</span> 18
                     </span>
                     <span className="inline-flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">event_available</span> 31 refs
+                      <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">event_available</span> 31 {t.card_refs}
                     </span>
                   </div>
                 </div>
@@ -421,14 +438,14 @@ export default async function LandingPage() {
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
                   <span className="absolute left-3 top-3 rounded bg-[#FF00FF]/20 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-[#FF00FF]">
-                    Traveling
+                    {t.card_traveling}
                   </span>
                 </div>
                 <div className="space-y-2.5 p-4">
                   <p className="text-base font-semibold text-white">London Bachata Tour</p>
                   <div className="text-[11px] text-white/65">Oct 12 - Oct 18 • Bachata parties + socials</div>
                   <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                    <span className="text-xs font-semibold text-white/85">15 dancers attending</span>
+                    <span className="text-xs font-semibold text-white/85">15 {t.card_attending}</span>
                     <span className="material-symbols-outlined text-[16px] text-[#00F5FF]">flight_takeoff</span>
                   </div>
                 </div>
@@ -482,9 +499,9 @@ export default async function LandingPage() {
                   <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50 group-hover:shadow-[0_0_20px_rgba(0,245,255,0.3)]">
                     <span className="material-symbols-outlined text-3xl text-[#00F5FF]">explore</span>
                   </div>
-                  <h3 className="mb-2 font-bold text-white">Discovery</h3>
+                  <h3 className="mb-2 font-bold text-white">{t.pillars_discovery_t}</h3>
                   <p className="text-center text-sm leading-relaxed text-white/50">
-                    Explore events, trips, and dancers near you.
+                    {t.pillars_discovery_d}
                   </p>
                 </div>
 
@@ -493,9 +510,9 @@ export default async function LandingPage() {
                   <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50">
                     <span className="material-symbols-outlined text-3xl text-[#00F5FF]">group</span>
                   </div>
-                  <h3 className="mb-2 font-bold text-white">Connection</h3>
+                  <h3 className="mb-2 font-bold text-white">{t.pillars_connection_t}</h3>
                   <p className="text-center text-sm leading-relaxed text-white/50">
-                    Connect by joining or requesting access.
+                    {t.pillars_connection_d}
                   </p>
                 </div>
 
@@ -504,9 +521,9 @@ export default async function LandingPage() {
                   <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50">
                     <span className="material-symbols-outlined text-3xl text-[#00F5FF]">forum</span>
                   </div>
-                  <h3 className="mb-2 font-bold text-white">Interaction</h3>
+                  <h3 className="mb-2 font-bold text-white">{t.pillars_interaction_t}</h3>
                   <p className="text-center text-sm leading-relaxed text-white/50">
-                    Start conversations and plan together.
+                    {t.pillars_interaction_d}
                   </p>
                 </div>
 
@@ -515,9 +532,9 @@ export default async function LandingPage() {
                   <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#ff51fa]/20 bg-[#1a1a1a] transition-all group-hover:border-[#ff51fa]/50">
                     <span className="material-symbols-outlined text-3xl text-[#ff51fa]">local_activity</span>
                   </div>
-                  <h3 className="mb-2 font-bold text-white">Activity</h3>
+                  <h3 className="mb-2 font-bold text-white">{t.pillars_activity_t}</h3>
                   <p className="text-center text-sm leading-relaxed text-white/50">
-                    Turn connections into real-life experiences.
+                    {t.pillars_activity_d}
                   </p>
                 </div>
 
@@ -526,9 +543,9 @@ export default async function LandingPage() {
                   <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#ff51fa]/20 bg-[#1a1a1a] transition-all group-hover:border-[#ff51fa]/50">
                     <span className="material-symbols-outlined text-3xl text-[#ff51fa]">rate_review</span>
                   </div>
-                  <h3 className="mb-2 font-bold text-white">Reference</h3>
+                  <h3 className="mb-2 font-bold text-white">{t.pillars_reference_t}</h3>
                   <p className="text-center text-sm leading-relaxed text-white/50">
-                    Share feedback after each interaction.
+                    {t.pillars_reference_d}
                   </p>
                 </div>
 
@@ -540,9 +557,9 @@ export default async function LandingPage() {
                   >
                     <span className="material-symbols-outlined text-3xl text-[#0A0A0A]">trending_up</span>
                   </div>
-                  <h3 className="mb-2 font-bold text-white">Growth</h3>
+                  <h3 className="mb-2 font-bold text-white">{t.pillars_growth_t}</h3>
                   <p className="text-center text-sm leading-relaxed text-white/50">
-                    Grow your network, unlock features, and reach more of the community.
+                    {t.pillars_growth_d}
                   </p>
                 </div>
               </div>
@@ -552,9 +569,9 @@ export default async function LandingPage() {
         <section className="border-b border-white/5 bg-[#121212] px-4 py-20 sm:px-6">
           <div className="mx-auto w-full max-w-7xl">
             <div className="text-center">
-              <h2 className="text-4xl font-extrabold text-white md:text-5xl">Built for the global dance community</h2>
+              <h2 className="text-4xl font-extrabold text-white md:text-5xl">{t.events_h2}</h2>
               <p className="mx-auto mt-4 max-w-2xl text-white/55">
-                Explore live events from top dance cities.
+                {t.events_sub}
               </p>
             </div>
 
@@ -596,11 +613,11 @@ export default async function LandingPage() {
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <span className="material-symbols-outlined text-[14px] text-cyan-300">group</span>
-                          {event.attendeeCount} attending
+                          {event.attendeeCount} {t.events_attending}
                         </span>
                       </div>
                       <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-200/90">
-                        Best of {event.city}
+                        {t.events_best_of} {event.city}
                       </div>
                     </div>
                   </Link>
@@ -608,8 +625,8 @@ export default async function LandingPage() {
               </div>
             ) : (
               <div className="mt-12 rounded-2xl border border-white/10 bg-black/25 px-6 py-10 text-center">
-                <p className="text-base font-semibold text-white">No live events to feature yet.</p>
-                <p className="mt-2 text-sm text-white/55">Explore the full events page to see what gets published next.</p>
+                <p className="text-base font-semibold text-white">{t.events_empty_title}</p>
+                <p className="mt-2 text-sm text-white/55">{t.events_empty_sub}</p>
               </div>
             )}
 
@@ -618,7 +635,7 @@ export default async function LandingPage() {
                 href="/events"
                 className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-7 py-3 text-sm font-extrabold text-black shadow-[0_0_30px_rgba(0,245,255,0.2)] transition hover:opacity-90"
               >
-                Explore all events
+                {t.events_cta}
               </Link>
             </div>
           </div>
@@ -628,17 +645,17 @@ export default async function LandingPage() {
           <div className="mx-auto w-full max-w-7xl">
             <div className="glass-card relative overflow-hidden rounded-[2rem] p-8 text-center sm:p-12">
               <div className="pointer-events-none absolute -left-20 -top-20 h-52 w-52 rounded-full bg-[#00F5FF]/10 blur-[70px]" />
-              <h2 className="text-3xl font-extrabold text-white sm:text-4xl">Confidence through community.</h2>
+              <h2 className="text-3xl font-extrabold text-white sm:text-4xl">{t.safety_h2}</h2>
               <p className="mx-auto mt-4 max-w-2xl text-white/55">
-                We&apos;ve built ConXion with safety at its core, centered on mutual respect.
+                {t.safety_sub}
               </p>
 
               <div className="mx-auto mt-10 grid max-w-4xl grid-cols-2 gap-6 lg:grid-cols-4">
                 {[
-                  ["verified_user", "Reference system"],
-                  ["badge", "Verified profiles"],
-                  ["gavel", "Safety guidelines"],
-                  ["report", "Reporting tools"],
+                  ["verified_user", t.safety_ref],
+                  ["badge", t.safety_verified],
+                  ["gavel", t.safety_guidelines],
+                  ["report", t.safety_report],
                 ].map(([icon, label]) => (
                   <div key={label} className="flex flex-col items-center gap-2">
                     <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/5 text-[#00F5FF]">
@@ -651,9 +668,9 @@ export default async function LandingPage() {
 
               <div className="mx-auto mt-10 max-w-2xl border-t border-white/10 pt-7">
                 <p className="text-lg italic text-white/75">
-                  &quot;ConXion allowed me to travel to Rome and immediately feel safe finding local socials.&quot;
+                  {t.safety_quote}
                 </p>
-                <p className="mt-2 text-sm font-bold text-[#00F5FF]">— Maria S., Bachatera</p>
+                <p className="mt-2 text-sm font-bold text-[#00F5FF]">{t.safety_quote_author}</p>
               </div>
             </div>
           </div>
@@ -662,12 +679,12 @@ export default async function LandingPage() {
         <section className="relative overflow-hidden border-t border-white/5 border-b border-white/5 px-4 py-24 text-center sm:px-6">
           <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[#00F5FF]/15 to-[#FF00FF]/15 blur-[130px]" />
           <div className="relative z-10 mx-auto w-full max-w-4xl">
-            <h2 className="text-4xl font-extrabold leading-tight text-white sm:text-6xl">Ready to build your dance network?</h2>
+            <h2 className="text-4xl font-extrabold leading-tight text-white sm:text-6xl">{t.final_h2}</h2>
             <Link
               href="/auth"
               className="mt-12 inline-flex rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-16 py-5 text-2xl font-extrabold text-black shadow-[0_0_60px_-10px_rgba(0,245,255,0.4)] transition hover:scale-105"
             >
-              Join ConXion
+              {t.final_cta}
             </Link>
           </div>
         </section>
@@ -683,12 +700,12 @@ export default async function LandingPage() {
                 </div>
               </Link>
               <p className="max-w-[220px] text-sm leading-relaxed text-white/45">
-                Connecting the world&apos;s dance community through trust and movement.
+                {t.footer_tagline}
               </p>
             </div>
 
             <div>
-              <h5 className="mb-5 font-bold text-white">Company</h5>
+              <h5 className="mb-5 font-bold text-white">{t.footer_company}</h5>
               <ul className="space-y-3 text-sm text-white/55">
                 <li>
                   <Link href="/about" className="transition hover:text-[#00F5FF]">
@@ -709,7 +726,7 @@ export default async function LandingPage() {
             </div>
 
             <div>
-              <h5 className="mb-5 font-bold text-white">Trust</h5>
+              <h5 className="mb-5 font-bold text-white">{t.footer_trust}</h5>
               <ul className="space-y-3 text-sm text-white/55">
                 <li>
                   <Link href="/safety-center" className="transition hover:text-[#00F5FF]">
@@ -730,7 +747,7 @@ export default async function LandingPage() {
             </div>
 
             <div>
-              <h5 className="mb-5 font-bold text-white">Help</h5>
+              <h5 className="mb-5 font-bold text-white">{t.footer_help}</h5>
               <ul className="space-y-3 text-sm text-white/55">
                 <li>
                   <Link href="/support" className="transition hover:text-[#00F5FF]">
@@ -763,7 +780,7 @@ export default async function LandingPage() {
             </div>
 
             <div>
-              <h5 className="mb-5 font-bold text-white">Social</h5>
+              <h5 className="mb-5 font-bold text-white">{t.footer_social}</h5>
               <span
                 className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/40"
                 aria-hidden="true"
