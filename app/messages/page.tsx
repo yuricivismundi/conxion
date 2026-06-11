@@ -5231,6 +5231,9 @@ function MessagesPageContent() {
     if (!text || !meId || !activeMeta) return;
     const currentComposerLockReason = composerLockReasonRef.current;
     if (currentComposerLockReason) {
+      // Surface the reason instead of silently dropping the send. Previously,
+      // a stale ref could block sends without any visible feedback.
+      setThreadError(currentComposerLockReason);
       return;
     }
     const currentCanSendFreeServiceInquiryFollowup = Boolean(
