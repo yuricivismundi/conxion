@@ -24,7 +24,27 @@ async function loadUserSummary(userId: string): Promise<UserSummary | null> {
     service.auth.admin.getUserById(userId),
   ]);
 
-  const email = authRes.data.user?.email?.trim() ?? null;
+  // Resilient email lookup. For Google/OAuth users, `user.email` is sometimes empty
+  // while the address lives in user_metadata.email or identities[*].identity_data.email.
+  const user = authRes.data.user as
+    | {
+        email?: string | null;
+        user_metadata?: Record<string, unknown> | null;
+        identities?: Array<{ identity_data?: Record<string, unknown> | null }> | null;
+      }
+    | null;
+  const candidateEmails: Array<string | undefined | null> = [
+    user?.email,
+    typeof user?.user_metadata?.email === "string" ? (user.user_metadata.email as string) : null,
+  ];
+  for (const identity of user?.identities ?? []) {
+    const identEmail = identity?.identity_data?.email;
+    if (typeof identEmail === "string") candidateEmails.push(identEmail);
+  }
+  const email =
+    candidateEmails
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .find((value) => value.length > 0 && /@/.test(value)) ?? null;
   const profile = (profileRes.data ?? {}) as {
     display_name?: string | null;
     city?: string | null;
