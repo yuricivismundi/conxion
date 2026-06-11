@@ -196,6 +196,8 @@ async function ensureReferenceReceivedNotification(params: {
   entityType: string;
   entityId: string;
 }) {
+  // Never notify the actor about their own action
+  if (params.actorId === params.recipientId) return;
   const admin = getSupabaseAdminClient();
   if (!admin) return;
 

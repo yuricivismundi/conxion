@@ -426,6 +426,14 @@ export async function POST(req: Request) {
     }
 
     const service = getServiceClient();
+
+    // Suppress self-notifications: a request/action started by the viewer must not
+    // generate a notification for themselves (badge, bell, email). Recipient-only.
+    // The intentional `sample` test mode is allowed below.
+    if (userId === authData.user.id && metadata.sample !== true) {
+      return NextResponse.json({ ok: true, suppressed: "self_notification" });
+    }
+
     const isAuthorized = await authorizeNotificationRequest({
       service,
       actorId: authData.user.id,

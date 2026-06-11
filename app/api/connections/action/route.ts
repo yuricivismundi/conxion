@@ -10,6 +10,8 @@ async function sendConnectionNotification(params: {
   kind: "connection_request_accepted" | "connection_request_declined";
   connectionId: string;
 }) {
+  // Never notify the actor about their own action
+  if (params.recipientId === params.actorId) return;
   const isAccepted = params.kind === "connection_request_accepted";
   const linkUrl = `/messages?thread=conn%3A${params.connectionId}`;
   const payload = {
