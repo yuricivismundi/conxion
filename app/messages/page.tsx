@@ -9270,7 +9270,7 @@ function MessagesPageContent() {
       <PullToRefreshIndicator pullY={pullY} refreshing={ptrRefreshing} />
       <Nav />
 
-      <main className={["flex min-h-0 flex-1 overflow-hidden overscroll-none md:pb-0", mobileThreadOpen ? "pb-0" : "pb-[calc(env(safe-area-inset-bottom)+56px)]"].join(" ")}>
+      <main className="flex min-h-0 flex-1 overflow-hidden overscroll-none pb-[calc(env(safe-area-inset-bottom)+56px)] md:pb-0">
         <aside
           className={[
             "z-10 w-full min-h-0 flex-col overflow-hidden border-r border-white/10 bg-[linear-gradient(180deg,rgba(11,12,16,0.98),rgba(8,9,12,0.99))] md:w-[420px] lg:w-[440px] md:flex",
