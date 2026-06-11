@@ -15,6 +15,8 @@ async function sendBookingNotificationBestEffort(params: {
   body: string;
   metadata: Record<string, unknown>;
 }) {
+  // Never notify the actor about their own action
+  if (params.recipientId === params.actorId) return;
   const candidates = [
     { user_id: params.recipientId, actor_id: params.actorId, kind: params.kind, title: params.title, body: params.body, metadata: params.metadata, is_read: false },
     { user_id: params.recipientId, actor_id: params.actorId, kind: params.kind, title: params.title, message: params.body, metadata: params.metadata, is_read: false },

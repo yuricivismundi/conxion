@@ -94,15 +94,17 @@ export async function POST(req: Request) {
 
     const connectionId = typeof data === "string" ? data : null;
 
-    await sendAppEmailBestEffort({
-      kind: "connection_request_received",
-      recipientUserId: targetId,
-      actorUserId: requesterId,
-      connectionId,
-    });
+    if (targetId !== requesterId) {
+      await sendAppEmailBestEffort({
+        kind: "connection_request_received",
+        recipientUserId: targetId,
+        actorUserId: requesterId,
+        connectionId,
+      });
+    }
 
     // In-app notification so the target can tap through to review the request
-    if (connectionId) {
+    if (connectionId && targetId !== requesterId) {
       try {
         const svc = getSupabaseServiceClient() as unknown as {
           from: (t: string) => { insert: (v: unknown) => Promise<{ error: unknown }> };

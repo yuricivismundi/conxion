@@ -158,6 +158,15 @@ export async function sendAppEmail(params: AppEmailParams) {
     return { ok: false as const, skipped: true as const, error: "Resend is not configured." };
   }
 
+  // Suppress self-notifications: never email someone for an action they performed themselves.
+  if (
+    params.actorUserId &&
+    params.actorUserId === params.recipientUserId &&
+    !params.recipientEmailOverride
+  ) {
+    return { ok: false as const, skipped: true as const, error: "Self-notification suppressed." };
+  }
+
   const [recipient, actor, trip, event, hosting, sync] = await Promise.all([
     loadUserSummary(params.recipientUserId),
     params.actorUserId ? loadUserSummary(params.actorUserId) : Promise.resolve(null),

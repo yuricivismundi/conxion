@@ -84,6 +84,8 @@ async function createActivityNotificationBestEffort(params: {
   linkUrl: string;
   metadata: Record<string, unknown>;
 }) {
+  // Never notify the actor about their own action
+  if (params.userId === params.actorId) return;
   const payloadCandidates: Array<Record<string, unknown>> = [
     {
       user_id: params.userId,
