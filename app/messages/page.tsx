@@ -3438,6 +3438,7 @@ function MessagesPageContent() {
           .eq("thread_id", thread.id)
           .eq("user_id", userId)
           .then(() => null, () => null);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
         if (isStale()) return;
         await loadThreadReactions({
           kind: "group",
@@ -3565,6 +3566,7 @@ function MessagesPageContent() {
           .eq("thread_id", thread.id)
           .eq("user_id", userId)
           .then(() => null, () => null);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
         if (isStale()) return;
         await loadThreadReactions({
           kind: "event",
@@ -9611,7 +9613,10 @@ function MessagesPageContent() {
                     return copy;
                   });
                   setThreads((prev) => prev.map((row) => (row.threadId === thread.threadId ? { ...row, unreadCount: 0 } : row)));
-                  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("cx:thread-read", { detail: { threadToken: thread.threadId } }));
+                    window.dispatchEvent(new CustomEvent("cx:manual-unread-changed"));
+                  }
                   if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
                     setOpenMessageMenuId(null);
                     setMobileThreadOpen(true);

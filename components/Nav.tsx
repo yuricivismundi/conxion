@@ -180,14 +180,21 @@ export default function Nav({ title }: NavProps) {
     const onManualUnreadChanged = () => {
       void refreshUnreadMessages();
     };
+    // Optimistic instant clear: when a thread is opened, decrement immediately
+    // without waiting for the DB round-trip or the next poll.
+    const onThreadRead = () => {
+      setUnreadMessageThreads((prev) => Math.max(0, prev - 1));
+    };
     window.addEventListener("storage", onStorage);
     window.addEventListener("cx:manual-unread-changed", onManualUnreadChanged as EventListener);
+    window.addEventListener("cx:thread-read", onThreadRead as EventListener);
 
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("cx:manual-unread-changed", onManualUnreadChanged as EventListener);
+      window.removeEventListener("cx:thread-read", onThreadRead as EventListener);
     };
   }, [currentUserId, isAuthenticated, pathname]);
 
