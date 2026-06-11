@@ -7244,6 +7244,7 @@ function MessagesPageContent() {
     if (
       (interactionStatus === "accepted" || hasOnlyConnectionAcceptance) &&
       !chatActivated &&
+      !hasHistoricalFreeText &&
       activeMeta.threadId &&
       acceptedInteractionContexts.every(
         (context) => context.contextTag !== "trip_join_request" && context.contextTag !== "hosting_request"
@@ -7255,7 +7256,7 @@ function MessagesPageContent() {
     // No accepted connection (pending request or none at all) → first message request flow
     if ((interactionStatus === "pending" || interactionStatus === "none") && activeMeta.otherUserId) return "first_message_request";
     return null;
-  }, [acceptedInteractionContexts, activeMeta, chatActivated, interactionBlocked, interactionStatus, legacyActivationExpired, serviceInquiryOwnFlowState]);
+  }, [acceptedInteractionContexts, activeMeta, chatActivated, hasHistoricalFreeText, interactionBlocked, interactionStatus, legacyActivationExpired, serviceInquiryOwnFlowState]);
   const composerLockReason = useMemo(() => {
     if (!activeMeta) return null;
     if (interactionBlocked) {
@@ -7284,7 +7285,7 @@ function MessagesPageContent() {
       ) {
         return null;
       }
-      return activeMeta.threadId && !chatActivated
+      return activeMeta.threadId && !chatActivated && !hasHistoricalFreeText
         ? "Start conversation to activate chat."
         : null;
     }
@@ -11123,7 +11124,7 @@ function MessagesPageContent() {
               </div>
 
                 {(activeMeta?.kind !== "event" || (activeMeta?.canPostToEventThread && !showReadOnlyBroadcastFooter)) ? (
-                <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 sm:pb-3 md:pb-3">
+                <footer className="shrink-0 border-t border-white/10 bg-[linear-gradient(180deg,rgba(14,15,19,0.98),rgba(10,11,14,0.98))] p-2 pb-3 sm:p-3 sm:pb-3 md:pb-3">
                 {replyTo ? (
                   <div className="mx-auto mb-2 max-w-4xl rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 flex items-start justify-between gap-3">
                     <div className="min-w-0">
