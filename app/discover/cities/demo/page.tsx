@@ -110,15 +110,9 @@ export default function CityDemoPage() {
       </div>
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
-      <div className="relative h-64 overflow-hidden md:h-80">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="https://images.unsplash.com/photo-1587789202069-44b8cf1b1998?w=1400&h=500&fit=crop"
-          alt={CITY}
-          className="h-full w-full object-cover brightness-[0.45]"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
+      <div className="relative flex flex-col items-center justify-center gap-3 py-16 text-center md:py-24">
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0A0A0A] via-[#0d1117] to-[#0A0A0A]" />
+        <div className="relative flex flex-col items-center gap-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-white/50">{COUNTRY}</p>
           <h1 className="text-[56px] font-black leading-none tracking-tight text-white md:text-[72px]">{CITY}</h1>
           <div className="flex items-center gap-6 text-[13px] text-white/50">
@@ -186,10 +180,9 @@ export default function CityDemoPage() {
                   className="group overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] transition hover:border-white/[0.14]"
                 >
                   <div className="flex h-52">
-                    {/* photo */}
-                    <div className="relative w-[45%] shrink-0 overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={m.photo} alt={m.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                    {/* photo placeholder */}
+                    <div className="relative w-[45%] shrink-0 overflow-hidden bg-gradient-to-br from-white/[0.06] to-white/[0.02] flex items-center justify-center">
+                      <span className="text-[40px] font-black text-white/10 select-none">{m.name.charAt(0)}</span>
                       {m.isHost && (
                         <span className="absolute bottom-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white/70 backdrop-blur-sm">Host</span>
                       )}
@@ -238,9 +231,8 @@ export default function CityDemoPage() {
             <p className="mb-6 text-[13px] text-white/35">{TRAVELERS.length} dancers visiting {CITY}</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {TRAVELERS.map((t) => (
-                <div key={t.id} className="group relative h-72 overflow-hidden rounded-2xl border border-white/[0.07]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={t.photo} alt={t.name} className="h-full w-full object-cover brightness-50 transition duration-700 group-hover:scale-[1.03]" />
+                <div key={t.id} className="group relative h-72 overflow-hidden rounded-2xl border border-white/[0.07] bg-gradient-to-br from-white/[0.05] to-white/[0.01] flex items-center justify-center">
+                  <span className="text-[80px] font-black text-white/[0.05] select-none">{t.name.charAt(0)}</span>
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
                   <div className="absolute inset-x-0 bottom-0 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/40">{t.from}</p>
@@ -269,9 +261,8 @@ export default function CityDemoPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {EVENTS.map((e) => (
                 <article key={e.id} className="group overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] transition hover:border-white/[0.14]">
-                  <div className="relative h-36 overflow-hidden">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={e.image} alt={e.title} className="h-full w-full object-cover brightness-75 transition duration-500 group-hover:scale-[1.03]" />
+                  <div className="relative h-36 overflow-hidden bg-gradient-to-br from-[#0d1520] to-[#111318] flex items-center justify-center">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.25em] text-white/[0.08] text-center px-4">{e.styles.join(" · ")}</span>
                     <div className="absolute inset-0 bg-gradient-to-t from-[#111318] to-transparent" />
                     <div className="absolute right-3 top-3 rounded-xl border border-white/10 bg-black/60 px-2.5 py-1.5 text-center backdrop-blur-sm">
                       <p className="text-[9px] font-bold uppercase tracking-wider text-white/50">{e.weekday} {e.month}</p>
@@ -308,9 +299,8 @@ export default function CityDemoPage() {
               {TEACHERS.map((t) => (
                 <div key={t.id} className="group overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] transition hover:border-white/[0.14]">
                   <div className="flex h-52">
-                    <div className="relative w-[40%] shrink-0 overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={t.photo} alt={t.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                    <div className="relative w-[40%] shrink-0 overflow-hidden bg-gradient-to-br from-white/[0.06] to-white/[0.02] flex items-center justify-center">
+                      <span className="text-[40px] font-black text-white/10 select-none">{t.name.charAt(0)}</span>
                     </div>
                     <div className="flex flex-1 flex-col justify-between px-4 py-4">
                       <div>
