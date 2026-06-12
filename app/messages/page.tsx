@@ -1669,11 +1669,21 @@ function MessagesPageContent() {
   const [activeMessages, setActiveMessages] = useState<MessageItem[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
-  const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(null);
+  const [messagingSummary, setMessagingSummary] = useState<MessagingSummary | null>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem("cx_messaging_summary") : null;
+      return raw ? (JSON.parse(raw) as MessagingSummary) : null;
+    } catch { return null; }
+  });
   const [bookingUsage, setBookingUsage] = useState<{ used: number; limit: number | null; remaining: number | null } | null>(null);
   const [serviceUsage, setServiceUsage] = useState<{ used: number; limit: number | null; remaining: number | null } | null>(null);
   const [threadQuotaSummary, setThreadQuotaSummary] = useState<ThreadQuotaSummary | null>(null);
-  const [requestQuotaSummary, setRequestQuotaSummary] = useState<RequestQuotaSummary | null>(null);
+  const [requestQuotaSummary, setRequestQuotaSummary] = useState<RequestQuotaSummary | null>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem("cx_request_quota_summary") : null;
+      return raw ? (JSON.parse(raw) as RequestQuotaSummary) : null;
+    } catch { return null; }
+  });
   const [activityComposerOpen, setActivityComposerOpen] = useState(false);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(DEFAULT_ACTIVITY_DRAFT);
   const [activityBusy, setActivityBusy] = useState(false);
@@ -2114,6 +2124,7 @@ function MessagesPageContent() {
         cycleEnd: asString(data.cycleEnd) || null,
       };
       setMessagingSummary(summary);
+      try { localStorage.setItem("cx_messaging_summary", JSON.stringify(summary)); } catch {}
       setThreadQuotaSummary((prev) => ({
         eventCreated,
         eventLimit: planLimits.eventsPerMonth ?? null,
@@ -2122,11 +2133,13 @@ function MessagesPageContent() {
         eventJoined: prev?.eventJoined ?? 0,
         groupJoined: prev?.groupJoined ?? 0,
       }));
-      setRequestQuotaSummary({
+      const requestQuota = {
         used: requestsUsed,
         limit: requestLimit,
         remaining: requestLimit === null ? null : Math.max(0, requestLimit - requestsUsed),
-      });
+      };
+      setRequestQuotaSummary(requestQuota);
+      try { localStorage.setItem("cx_request_quota_summary", JSON.stringify(requestQuota)); } catch {};
       return summary;
     } catch {
       setMessagingSummary((prev) => prev);
