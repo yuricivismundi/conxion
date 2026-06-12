@@ -53,8 +53,20 @@ function MSIcon({ name, className }: { name: string; className?: string }) {
 }
 
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
+const POPULAR_CITIES = [
+  { name: "Tallinn", country: "Estonia", members: 24 },
+  { name: "Barcelona", country: "Spain", members: 187 },
+  { name: "Berlin", country: "Germany", members: 143 },
+  { name: "Paris", country: "France", members: 210 },
+  { name: "Medellín", country: "Colombia", members: 98 },
+  { name: "Lisbon", country: "Portugal", members: 76 },
+  { name: "Amsterdam", country: "Netherlands", members: 64 },
+  { name: "Buenos Aires", country: "Argentina", members: 112 },
+];
+
 export default function CityDemoPage() {
   const [tab, setTab] = useState<Tab>("members");
+  const [citySearch, setCitySearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [hostsOnly, setHostsOnly] = useState(false);
   const [eventSearch, setEventSearch] = useState("");
@@ -92,6 +104,40 @@ export default function CityDemoPage() {
         <Link href="/discover" className="text-[11px] text-amber-300 underline underline-offset-2">← Exit preview</Link>
       </div>
 
+      {/* ── CITY SEARCH ── */}
+      <div className="border-b border-white/[0.06] bg-[#0A0A0A] px-4 py-5">
+        <div className="mx-auto max-w-xl">
+          <p className="mb-3 text-center text-[13px] font-semibold text-white/50">Find dancers, travelers, events & teachers by city</p>
+          <label className="relative block">
+            <MSIcon name="search" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[20px] text-white/35" />
+            <input
+              type="search"
+              value={citySearch}
+              onChange={(e) => setCitySearch(e.target.value)}
+              placeholder="Search a city… e.g. Barcelona, Berlin, Medellín"
+              className="h-12 w-full rounded-full border border-white/10 bg-white/[0.05] pl-11 pr-4 text-[14px] text-white/90 outline-none placeholder:text-white/30 transition focus:border-[#00F5FF]/50 focus:ring-2 focus:ring-[#00F5FF]/20"
+            />
+          </label>
+          {/* popular cities */}
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            {POPULAR_CITIES.filter((c) => !citySearch || c.name.toLowerCase().includes(citySearch.toLowerCase())).map((c) => (
+              <button
+                key={c.name}
+                onClick={() => setCitySearch(c.name)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                  citySearch === c.name
+                    ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300"
+                    : "border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
+                }`}
+              >
+                {c.name}
+                <span className="text-white/30">{c.members}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* ── CITY HERO STRIP ── */}
       <div className="relative h-48 overflow-hidden md:h-56">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -101,10 +147,11 @@ export default function CityDemoPage() {
           className="h-full w-full object-cover brightness-60"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A]/20 to-transparent" />
-        <div className="absolute bottom-0 left-0 px-6 pb-5">
+        {/* centered content */}
+        <div className="absolute inset-0 flex flex-col items-center justify-end pb-5 text-center">
           <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#c1fffe]">🇪🇪 {COUNTRY}</p>
-          <h1 className="mt-0.5 text-[40px] font-black leading-none tracking-tight text-white drop-shadow-2xl">{CITY}</h1>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <h1 className="mt-0.5 text-[44px] font-black leading-none tracking-tight text-white drop-shadow-2xl">{CITY}</h1>
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
             {[
               { icon: "group", label: `${MEMBERS.length} members` },
               { icon: "flight", label: `${TRAVELERS.length} travelers` },
