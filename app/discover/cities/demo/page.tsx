@@ -81,26 +81,29 @@ export default function CityDemoPage() {
       </div>
 
       {/* ── CITY SEARCH ─────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-2xl px-6 pt-10 pb-6">
-        <p className="mb-6 text-center text-[28px] font-bold tracking-tight text-white">Discover your next city</p>
-        <div className="flex items-center gap-6">
-          <div className="relative flex-1">
-            <span className="material-symbols-outlined pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[20px] text-white/25">search</span>
-            <input
-              type="search"
-              value={citySearch}
-              onChange={(e) => setCitySearch(e.target.value)}
-              placeholder="Search a city…"
-              className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-5 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
-            />
+      <div className="mx-auto max-w-4xl px-6 pt-10 pb-6">
+        <div className="flex items-center gap-10">
+          {/* left: heading + search */}
+          <div className="flex-1">
+            <p className="mb-4 text-[28px] font-bold tracking-tight text-white">Discover your next city</p>
+            <div className="relative">
+              <span className="material-symbols-outlined pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[20px] text-white/25">search</span>
+              <input
+                type="search"
+                value={citySearch}
+                onChange={(e) => setCitySearch(e.target.value)}
+                placeholder="Search a city…"
+                className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-5 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
+              />
+            </div>
           </div>
-          {/* city hero inline to the right */}
-          <div className="shrink-0 flex flex-col items-start leading-none">
+          {/* right: city title — equal width */}
+          <div className="flex-1 flex flex-col justify-center">
             <div className="flex items-center gap-2 mb-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-white/40">{COUNTRY}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-white/40">{COUNTRY}</p>
               <span className="rounded-full bg-[#00F5FF]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#00F5FF]/80">Your city</span>
             </div>
-            <h1 className="text-[40px] font-black leading-none tracking-tight text-white">{CITY}</h1>
+            <h1 className="text-[56px] font-black leading-none tracking-tight text-white md:text-[64px]">{CITY}</h1>
           </div>
         </div>
       </div>
