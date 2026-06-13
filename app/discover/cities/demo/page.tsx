@@ -63,11 +63,11 @@ export default function CityDemoPage() {
     return true;
   });
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "members", label: "Members" },
-    { id: "travelers", label: "Travelers" },
-    { id: "events", label: "Events" },
-    { id: "teachers", label: "Teachers" },
+  const tabs: { id: Tab; label: string; icon: string }[] = [
+    { id: "members", label: "Members", icon: "person" },
+    { id: "travelers", label: "Travelers", icon: "flight" },
+    { id: "events", label: "Events", icon: "celebration" },
+    { id: "teachers", label: "Teachers", icon: "school" },
   ];
 
   return (
@@ -109,20 +109,24 @@ export default function CityDemoPage() {
 
       {/* ── TABS ────────────────────────────────────────────────────────── */}
       <div className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0A0A0A]/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center justify-center gap-1 px-4 py-2">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`rounded-full px-5 py-2.5 text-[13px] font-semibold tracking-wide transition ${
-                tab === t.id
-                  ? "bg-white/[0.08] text-white"
-                  : "text-white/40 hover:text-white/70"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="mx-auto flex max-w-3xl items-center justify-center gap-3 px-6 py-4">
+          {tabs.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-[13px] font-semibold tracking-wide transition-all duration-200 ${
+                  active
+                    ? "border border-[#00F5FF]/40 bg-[#00F5FF]/[0.07] text-[#00F5FF] shadow-[0_0_16px_0_rgba(0,245,255,0.15)]"
+                    : "text-white/35 hover:text-white/60"
+                }`}
+              >
+                <span className={`material-symbols-outlined text-[17px] ${active ? "text-[#00F5FF]" : "text-white/30"}`}>{t.icon}</span>
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
