@@ -93,38 +93,21 @@ export default function CityDemoPage() {
             className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-5 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
           />
         </label>
-        {/* quick-action pills */}
+        {/* quick-action pills — no icons */}
         <div className="mt-4 flex flex-wrap gap-2 justify-center">
           {[
-            { label: "Your city", icon: "home_pin", action: () => setCitySearch(CITY) },
-            { label: "Nearby hosts", icon: "hotel", action: () => {} },
-            { label: "Travelers nearby", icon: "hiking", action: () => {} },
-            { label: "Weekend events", icon: "event", action: () => {} },
+            { label: "Your city", action: () => setCitySearch(CITY) },
+            { label: "Find hosts", action: () => {} },
+            { label: "Dancers nearby", action: () => {} },
+            { label: "Upcoming events", action: () => {} },
+            { label: "Teachers", action: () => {} },
           ].map((pill) => (
             <button
               key={pill.label}
               onClick={pill.action}
-              className="flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-medium text-white/50 transition hover:border-white/15 hover:text-white/80"
+              className="rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-medium text-white/50 transition hover:border-white/15 hover:text-white/80"
             >
-              <span className="material-symbols-outlined text-[14px]">{pill.icon}</span>
               {pill.label}
-            </button>
-          ))}
-        </div>
-        {/* popular cities */}
-        <div className="mt-5 flex flex-wrap gap-2">
-          {POPULAR_CITIES.map((c) => (
-            <button
-              key={c.name}
-              onClick={() => setCitySearch(c.name)}
-              className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] transition ${
-                citySearch === c.name
-                  ? "border-white/20 bg-white/[0.07] text-white"
-                  : "border-white/[0.06] text-white/35 hover:text-white/60"
-              }`}
-            >
-              {c.name === CITY && <span className="h-1.5 w-1.5 rounded-full bg-[#00F5FF]" />}
-              {c.name} <span className="opacity-40">{c.members}</span>
             </button>
           ))}
         </div>
@@ -139,24 +122,6 @@ export default function CityDemoPage() {
             <span className="rounded-full bg-[#00F5FF]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#00F5FF]/80">Your city</span>
           </div>
           <h1 className="text-[56px] font-black leading-none tracking-tight text-white md:text-[72px]">{CITY}</h1>
-          <div className="flex items-center gap-1 text-[13px]">
-            {([
-              { id: "members" as Tab, count: MEMBERS.length, label: "members" },
-              { id: "travelers" as Tab, count: TRAVELERS.length, label: "travelers" },
-              { id: "events" as Tab, count: EVENTS.length, label: "events" },
-              { id: "teachers" as Tab, count: TEACHERS.length, label: "teachers" },
-            ] as { id: Tab; count: number; label: string }[]).map((s, i, arr) => (
-              <span key={s.id} className="flex items-center gap-1">
-                <button
-                  onClick={() => setTab(s.id)}
-                  className={`rounded-md px-2 py-0.5 transition ${tab === s.id ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"}`}
-                >
-                  <span className="font-bold text-white">{s.count}</span> {s.label}
-                </button>
-                {i < arr.length - 1 && <span className="text-white/15">·</span>}
-              </span>
-            ))}
-          </div>
         </div>
       </div>
 
