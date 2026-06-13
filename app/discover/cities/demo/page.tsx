@@ -205,23 +205,72 @@ export default function CityDemoPage() {
         {/* ══ TRAVELERS ══ */}
         {tab === "travelers" && (
           <div>
-            <p className="mb-6 text-[13px] text-white/35">{TRAVELERS.length} dancers visiting {CITY}</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* filter bar */}
+            <div className="mb-6 flex flex-wrap items-center gap-3">
+              <span className="text-[13px] text-white/40">Showing <span className="font-semibold text-white">{TRAVELERS.length}</span> travelers</span>
+              <div className="h-4 w-px bg-white/10" />
+              <button className="flex items-center gap-1 text-[13px] text-white/50 hover:text-white/80 transition">
+                Recommended <span className="material-symbols-outlined text-[14px]">expand_more</span>
+              </button>
+              <button className="flex items-center gap-1.5 rounded-full border border-white/[0.08] px-3 py-1.5 text-[12px] text-white/40 hover:text-white/70 transition">
+                <span className="material-symbols-outlined text-[14px]">my_location</span> My location
+              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <div className="flex items-center gap-px rounded-2xl border border-white/[0.08] bg-white/[0.03] overflow-hidden text-[11px]">
+                  <div className="px-3 py-2 border-r border-white/[0.06]">
+                    <p className="font-bold uppercase tracking-wider text-white/30 text-[9px]">Arrive</p>
+                    <p className="font-semibold text-white/60">Select</p>
+                  </div>
+                  <div className="px-3 py-2">
+                    <p className="font-bold uppercase tracking-wider text-white/30 text-[9px]">Depart</p>
+                    <p className="font-semibold text-white/60">Select</p>
+                  </div>
+                  <button className="px-3 self-stretch border-l border-white/[0.06] text-white/40 hover:text-white/70 transition">
+                    <span className="material-symbols-outlined text-[18px]">calendar_month</span>
+                  </button>
+                </div>
+                <button className="flex items-center gap-1.5 rounded-full px-4 py-2.5 text-[12px] font-bold text-[#0A0A0A]" style={{ backgroundImage: "linear-gradient(90deg,#0df2f2,#8b5cf6)" }}>
+                  <span className="material-symbols-outlined text-[15px]">tune</span> Filters
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {TRAVELERS.map((t) => (
-                <div key={t.id} className="group relative h-72 overflow-hidden rounded-2xl border border-white/[0.07] bg-gradient-to-br from-white/[0.05] to-white/[0.01] flex items-center justify-center">
-                  <span className="text-[80px] font-black text-white/[0.05] select-none">{t.name.charAt(0)}</span>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
-                  <div className="absolute inset-x-0 bottom-0 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/40">{t.from}</p>
-                    <h3 className="mt-0.5 text-[22px] font-bold text-white">{t.name}</h3>
-                    <p className="mt-0.5 text-[12px] text-[#00F5FF]/80">{t.arrival} → {t.departure}</p>
-                    <p className="mt-0.5 text-[12px] text-white/40">{t.styles.join(" · ")}</p>
-                    <div className="mt-3 flex gap-2">
-                      <button className="flex h-9 flex-1 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[11px] font-semibold text-white/70 backdrop-blur-sm transition hover:bg-white/10">
-                        Offer Hosting
+                <div key={t.id} className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0f1014]">
+                  {/* city image area — gradient placeholder */}
+                  <div className="relative h-44 bg-gradient-to-br from-[#1a1625] via-[#111520] to-[#0d1015] flex flex-col justify-end p-4">
+                    <span className="absolute inset-0 flex items-center justify-center text-[90px] font-black text-white/[0.03] select-none">{t.from.split(" · ")[0].charAt(0)}</span>
+                    <h3 className="relative text-[28px] font-black leading-none text-white">{t.from.split(" · ")[0]}</h3>
+                    <p className="relative text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mt-1">{t.from.split(" · ")[1]}</p>
+                    <div className="relative mt-3 flex items-center gap-1.5 self-start rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-sm border border-white/[0.06]">
+                      <span className="material-symbols-outlined text-[13px] text-[#00F5FF]/70">calendar_month</span>
+                      <span className="text-[11px] font-semibold text-white/80">{t.arrival} – {t.departure}</span>
+                    </div>
+                  </div>
+                  {/* info area */}
+                  <div className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-11 w-11 shrink-0 rounded-full bg-gradient-to-br from-white/10 to-white/[0.03] flex items-center justify-center border border-white/[0.08]">
+                        <span className="text-[16px] font-bold text-white/30">{t.name.charAt(0)}</span>
+                      </div>
+                      <div>
+                        <p className="text-[15px] font-bold text-white">{t.name}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">{t.styles[0] === "Tango" ? "Teacher" : "Social Dancer"}</span>
+                          {t.styles.slice(0, 2).map((l) => (
+                            <span key={l} className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-bold text-white/40">{l.slice(0, 2).toUpperCase()}</span>
+                          ))}
+                        </div>
+                        <p className="mt-0.5 text-[11px] font-bold uppercase tracking-wider text-[#00F5FF]/70">{t.purpose} / Event</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full bg-white/[0.05] border border-white/[0.08] text-[11px] font-bold uppercase tracking-wide text-white/60 transition hover:bg-white/[0.08]">
+                        <span className="material-symbols-outlined text-[14px]">home</span> Offer Hosting
                       </button>
-                      <button className="flex h-9 flex-1 items-center justify-center rounded-full text-[11px] font-bold text-[#040a0f]" style={{ backgroundImage: "linear-gradient(90deg,#0df2f2,#ff00ff)" }}>
-                        Join Trip
+                      <button className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full text-[11px] font-bold uppercase tracking-wide text-black" style={{ backgroundImage: "linear-gradient(90deg,#0df2f2,#c026d3)" }}>
+                        <span className="material-symbols-outlined text-[14px]">bolt</span> Join Trip
                       </button>
                     </div>
                   </div>
