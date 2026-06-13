@@ -82,7 +82,7 @@ export default function CityDemoPage() {
 
       {/* ── CITY SEARCH ─────────────────────────────────────────────────── */}
       <div className="mx-auto max-w-2xl px-6 pt-10 pb-2">
-        <p className="mb-6 text-center text-[28px] font-bold tracking-tight text-white">Where are you going?</p>
+        <p className="mb-6 text-center text-[28px] font-bold tracking-tight text-white">Discover your next city</p>
         <label className="relative block">
           <span className="material-symbols-outlined pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[20px] text-white/25">search</span>
           <input
@@ -96,7 +96,7 @@ export default function CityDemoPage() {
       </div>
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
-      <div className="relative flex flex-col items-center justify-center gap-3 py-16 text-center md:py-24">
+      <div className="relative flex flex-col items-center justify-center gap-3 py-8 text-center md:py-10">
         <div className="absolute inset-0 bg-gradient-to-b from-[#0A0A0A] via-[#0d1117] to-[#0A0A0A]" />
         <div className="relative flex flex-col items-center gap-3">
           <div className="flex items-center gap-2">
