@@ -81,29 +81,37 @@ export default function CityDemoPage() {
       </div>
 
       {/* ── CITY SEARCH ─────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-4xl px-6 pt-10 pb-6">
-        <div className="flex items-center gap-10">
+      <div className="relative mx-auto max-w-4xl px-8 pt-12 pb-8">
+        <div className="flex items-stretch gap-0">
           {/* left: heading + search */}
-          <div className="flex-1">
-            <p className="mb-4 text-[28px] font-bold tracking-tight text-white">Discover your next city</p>
+          <div className="flex-1 flex flex-col justify-center pr-10">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/25">Explore</p>
+            <p className="mb-5 text-[32px] font-black tracking-tight text-white leading-tight">Discover your<br/>next city</p>
             <div className="relative">
-              <span className="material-symbols-outlined pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[20px] text-white/25">search</span>
+              <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/20">search</span>
               <input
                 type="search"
                 value={citySearch}
                 onChange={(e) => setCitySearch(e.target.value)}
                 placeholder="Search a city…"
-                className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-5 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
+                className="h-12 w-full rounded-xl border border-white/[0.07] bg-white/[0.03] pl-11 pr-4 text-[14px] text-white outline-none placeholder:text-white/20 transition focus:border-[#00F5FF]/20 focus:bg-white/[0.05] focus:shadow-[0_0_0_1px_rgba(0,245,255,0.08)]"
               />
             </div>
           </div>
-          {/* right: city title — equal width */}
-          <div className="flex-1 flex flex-col justify-center">
-            <div className="flex items-center gap-2 mb-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-white/40">{COUNTRY}</p>
-              <span className="rounded-full bg-[#00F5FF]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#00F5FF]/80">Your city</span>
+
+          {/* divider */}
+          <div className="w-px bg-gradient-to-b from-transparent via-white/[0.08] to-transparent" />
+
+          {/* right: city display */}
+          <div className="flex-1 flex flex-col justify-center pl-10 relative overflow-hidden">
+            {/* subtle cyan glow behind */}
+            <div className="pointer-events-none absolute -right-10 top-1/2 -translate-y-1/2 h-40 w-40 rounded-full bg-[#00F5FF]/[0.04] blur-3xl" />
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/30">{COUNTRY}</p>
+              <span className="rounded-full border border-[#00F5FF]/20 bg-[#00F5FF]/[0.06] px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-[#00F5FF]/70">Your city</span>
             </div>
-            <h1 className="text-[56px] font-black leading-none tracking-tight text-white md:text-[64px]">{CITY}</h1>
+            <h1 className="text-[64px] font-black leading-none tracking-[-0.02em] text-white md:text-[72px]">{CITY}</h1>
+            <p className="mt-2 text-[12px] text-white/20">{MEMBERS.length} members · {TRAVELERS.length} travelers · {EVENTS.length} events</p>
           </div>
         </div>
       </div>
