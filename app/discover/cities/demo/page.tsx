@@ -93,24 +93,6 @@ export default function CityDemoPage() {
             className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-5 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
           />
         </label>
-        {/* quick-action pills — no icons */}
-        <div className="mt-4 flex flex-wrap gap-2 justify-center">
-          {[
-            { label: "Your city", action: () => setCitySearch(CITY) },
-            { label: "Find hosts", action: () => {} },
-            { label: "Dancers nearby", action: () => {} },
-            { label: "Upcoming events", action: () => {} },
-            { label: "Teachers", action: () => {} },
-          ].map((pill) => (
-            <button
-              key={pill.label}
-              onClick={pill.action}
-              className="rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-medium text-white/50 transition hover:border-white/15 hover:text-white/80"
-            >
-              {pill.label}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
