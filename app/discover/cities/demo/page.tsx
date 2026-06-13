@@ -81,29 +81,22 @@ export default function CityDemoPage() {
       </div>
 
       {/* ── CITY SEARCH ─────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-2xl px-6 pt-10 pb-2">
+      <div className="mx-auto max-w-2xl px-6 pt-10 pb-6">
         <p className="mb-6 text-center text-[28px] font-bold tracking-tight text-white">Discover your next city</p>
-        <label className="relative block">
+        <div className="relative">
           <span className="material-symbols-outlined pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[20px] text-white/25">search</span>
           <input
             type="search"
             value={citySearch}
             onChange={(e) => setCitySearch(e.target.value)}
             placeholder="Search a city…"
-            className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-5 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
+            className="h-14 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-12 pr-36 text-[15px] text-white outline-none placeholder:text-white/25 transition focus:border-white/20 focus:bg-white/[0.06]"
           />
-        </label>
-      </div>
-
-      {/* ── HERO ────────────────────────────────────────────────────────── */}
-      <div className="relative flex flex-col items-center justify-center gap-3 py-8 text-center md:py-10">
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0A0A0A] via-[#0d1117] to-[#0A0A0A]" />
-        <div className="relative flex flex-col items-center gap-3">
-          <div className="flex items-center gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-white/50">{COUNTRY}</p>
-            <span className="rounded-full bg-[#00F5FF]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#00F5FF]/80">Your city</span>
+          {/* city badge on right side of bar */}
+          <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            <span className="text-[13px] font-bold text-white">{CITY}</span>
+            <span className="rounded-full bg-[#00F5FF]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#00F5FF]/80">Your city</span>
           </div>
-          <h1 className="text-[56px] font-black leading-none tracking-tight text-white md:text-[72px]">{CITY}</h1>
         </div>
       </div>
 
