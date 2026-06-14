@@ -103,14 +103,11 @@ export default function CityDemoPage() {
 
           {/* right: city display */}
           <div className="flex-1 flex flex-col justify-center pl-10 relative overflow-hidden">
-            {/* subtle cyan glow behind */}
-            <div className="pointer-events-none absolute -right-10 top-1/2 -translate-y-1/2 h-40 w-40 rounded-full bg-[#00F5FF]/[0.04] blur-3xl" />
             <div className="flex items-center gap-2 mb-2">
               <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/30">{COUNTRY}</p>
               <span className="rounded-full border border-[#00F5FF]/20 bg-[#00F5FF]/[0.06] px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-[#00F5FF]/70">Your city</span>
             </div>
             <h1 className="text-[64px] font-black leading-none tracking-[-0.02em] text-white md:text-[72px]">{CITY}</h1>
-            <p className="mt-2 text-[12px] text-white/20">{MEMBERS.length} members · {TRAVELERS.length} travelers · {EVENTS.length} events</p>
           </div>
         </div>
       </div>
