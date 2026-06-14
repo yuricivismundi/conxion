@@ -81,12 +81,11 @@ export default function CityDemoPage() {
       </div>
 
       {/* ── CITY SEARCH ─────────────────────────────────────────────────── */}
-      <div className="relative mx-auto max-w-4xl px-8 pt-12 pb-8">
+      <div className="relative mx-auto max-w-4xl px-8 pt-8 pb-6">
         <div className="flex items-stretch gap-0">
           {/* left: heading + search */}
           <div className="flex-1 flex flex-col justify-center pr-10">
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/25">Explore</p>
-            <p className="mb-5 text-[32px] font-black tracking-tight text-white leading-tight">Discover your<br/>next city</p>
+            <p className="mb-4 text-[26px] font-black tracking-tight text-white leading-tight">Discover your next city</p>
             <div className="relative">
               <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/20">search</span>
               <input
