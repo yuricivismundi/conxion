@@ -9320,14 +9320,14 @@ function MessagesPageContent() {
           <div className="flex flex-col gap-4 px-3 pt-4 pb-2 sm:px-4 sm:pt-5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
-                  <h1 className="text-2xl font-bold leading-tight">Inbox</h1>
+                  <h1 className="shrink-0 text-2xl font-bold leading-tight">Inbox</h1>
                   {inboxSectionLabel ? (
-                    <span className="truncate bg-gradient-to-r from-[#6ee7f9] to-[#d946ef] bg-clip-text text-[11px] font-black uppercase tracking-[0.18em] text-transparent">
+                    <span className="bg-gradient-to-r from-[#6ee7f9] to-[#d946ef] bg-clip-text text-[11px] font-black uppercase tracking-[0.18em] text-transparent">
                       {inboxSectionLabel}
                     </span>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   {headerQuotaMeta ? (
                     <div className="flex flex-col items-end gap-0.5 text-right">
                       {headerQuotaMeta.reached ? (
@@ -9339,14 +9339,14 @@ function MessagesPageContent() {
                           Upgrade to Plus
                         </Link>
                       ) : null}
-                      <div className="flex items-baseline gap-1.5">
+                      <div className="flex items-center gap-1.5">
                         <span className={headerQuotaMeta.compact ? "text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-500" : "text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400"}>{headerQuotaMeta.label}</span>
-                        <span className={headerQuotaMeta.reached ? "text-[11px] font-bold tabular-nums text-[#FFC6FA]" : "text-[11px] font-bold tabular-nums text-white"}>
+                        <span className={headerQuotaMeta.reached ? "text-[13px] font-bold tabular-nums text-[#FFC6FA]" : "text-[13px] font-bold tabular-nums text-white"}>
                           {headerQuotaMeta.current} / {headerQuotaMeta.limit ?? "∞"}
                         </span>
                       </div>
                       {"sublabel" in headerQuotaMeta && headerQuotaMeta.sublabel ? (
-                        <span className="text-[8px] font-medium uppercase tracking-[0.08em] text-slate-600">{headerQuotaMeta.sublabel}</span>
+                        <span className="text-[9px] font-medium uppercase tracking-[0.08em] text-slate-500">{headerQuotaMeta.sublabel}</span>
                       ) : null}
                     </div>
                   ) : null}

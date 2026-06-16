@@ -3896,9 +3896,9 @@ function ConnectionsPageContent() {
         {tab === "events" ? (
           <div className="relative mt-8">
             {loadingCityEvents ? (
-              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={`esk-${i}`} className="animate-pulse overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] h-48" />
+                  <div key={`esk-${i}`} className="animate-pulse overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] h-[336px]" />
                 ))}
               </div>
             ) : filteredCityEvents.length === 0 ? (
@@ -3910,70 +3910,113 @@ function ConnectionsPageContent() {
               </div>
             ) : (
               <>
-                <div className={`grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2`}>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
                   {filteredCityEvents.slice(0, DISCOVER_PAGE_SIZE).map((e) => {
-                    const date = e.starts_at ? (() => {
+                    const styles = Array.isArray(e.styles) ? e.styles as string[] : [];
+                    const dateBadge = e.starts_at ? (() => {
                       const d = new Date(e.starts_at!);
                       return {
                         weekday: d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
                         month: d.toLocaleDateString("en-US", { month: "short" }).toUpperCase(),
                         day: String(d.getDate()),
-                        time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
                       };
                     })() : null;
-                    const styles = Array.isArray(e.styles) ? e.styles as string[] : [];
+                    const startTime = e.starts_at
+                      ? new Date(e.starts_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+                      : null;
+                    const rangeLabel = e.starts_at && e.ends_at
+                      ? (() => {
+                          const s = new Date(e.starts_at!);
+                          const en = new Date(e.ends_at!);
+                          const fmt = (d: Date) => d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                          return `${fmt(s)} - ${fmt(en)}`;
+                        })()
+                      : e.starts_at
+                        ? new Date(e.starts_at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+                        : null;
                     return (
                       <article
                         key={e.id}
-                        className="connections-card relative overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
+                        className="relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
+                        style={{ height: "336px" }}
+                        onClick={() => router.push(`/events/${e.id}`)}
                       >
-                        <div className="flex min-h-[160px] md:h-52 md:flex-row">
-                          {/* date block */}
-                          <div className="relative w-[42%] shrink-0 border-r border-white/10 bg-gradient-to-br from-[#0d1520] to-[#111318] flex flex-col items-center justify-center gap-1 md:w-1/2">
-                            {date ? (
-                              <>
-                                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">{date.weekday} · {date.month}</p>
-                                <p className="text-[52px] font-black leading-none text-white">{date.day}</p>
-                                <p className="text-[11px] text-white/40">{date.time}</p>
-                              </>
-                            ) : (
-                              <span className="text-white/10 text-[11px] uppercase tracking-widest">TBD</span>
-                            )}
-                            {styles.length > 0 && (
-                              <div className="absolute bottom-3 left-0 right-0 flex flex-wrap justify-center gap-1 px-2">
-                                {styles.slice(0, 2).map((s) => (
-                                  <span key={s} className="rounded-full border border-[#00F5FF]/20 px-2 py-0.5 text-[9px] font-semibold text-[#00F5FF]/60">{s}</span>
-                                ))}
+                        {/* hero */}
+                        <Link href={`/events/${e.id}`} className="block" onClick={(ev) => ev.stopPropagation()}>
+                          <div className="relative h-[120px] bg-gradient-to-br from-[#0d1520] to-[#111318]">
+                            <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
+                          </div>
+                        </Link>
+
+                        <div className="relative flex flex-1 flex-col p-2">
+                          {/* date badge */}
+                          {dateBadge && (
+                            <div className="pointer-events-none absolute right-2 top-1 z-10">
+                              <div className="rounded-xl border border-cyan-300/30 bg-cyan-300/14 px-2 py-1 text-center shadow-[0_8px_20px_rgba(34,211,238,0.12)]">
+                                <p className="text-[10px] font-semibold tracking-wide text-cyan-100">{dateBadge.weekday}</p>
+                                <p className="text-[10px] font-semibold tracking-wide text-cyan-100">{dateBadge.month}</p>
+                                <p className="text-[22px] font-extrabold leading-none text-white">{dateBadge.day}</p>
                               </div>
+                            </div>
+                          )}
+
+                          <div className="mb-0.5">
+                            <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-400">
+                              Upcoming
+                              {e.event_type && <><span className="ml-1.5 text-white/30">·</span><span className="ml-1.5 text-white/45">{e.event_type}</span></>}
+                            </p>
+                            <Link href={`/events/${e.id}`} className="block min-w-0 pr-[98px]" onClick={(ev) => ev.stopPropagation()}>
+                              <h3 className="line-clamp-2 min-h-[34px] text-[15px] font-bold leading-tight text-white">{e.title}</h3>
+                            </Link>
+                            {rangeLabel && (
+                              <p className="mt-0.5 truncate text-[11px] font-semibold text-cyan-200/90">
+                                {rangeLabel}{startTime ? ` • ${startTime}` : ""}
+                              </p>
                             )}
                           </div>
-                          {/* info */}
-                          <div className="flex flex-1 flex-col justify-between p-4">
-                            <div>
-                              <h3 className="text-[17px] font-semibold leading-snug text-white">{e.title}</h3>
-                              {(e.city || e.country) && (
-                                <p className="mt-1 text-[13px] font-medium">
-                                  <span className="text-[#00F5FF]">{e.city}</span>
-                                  {e.country ? <span className="text-white/50">, {e.country}</span> : null}
-                                </p>
+
+                          <div>
+                            <p className="mt-0.5 flex items-center gap-1 text-[13px] text-slate-300">
+                              <span className="material-symbols-outlined text-[16px] text-cyan-200">location_on</span>
+                              <span className="truncate">
+                                {e.city && <span className="text-cyan-200/90">{e.city}</span>}
+                                {e.country && <span className="text-white/50">, {e.country}</span>}
+                              </span>
+                              {styles.length > 0 && (
+                                <>
+                                  <span className="text-white/40">,</span>
+                                  <span className="truncate text-cyan-100/85">{styles.slice(0, 2).join(", ")}</span>
+                                </>
                               )}
-                              {e.venue_name && (
-                                <p className="mt-1 text-[12px] text-white/40">{e.venue_name}</p>
-                              )}
+                            </p>
+                            <div className="mt-1 min-h-[20px]">
+                              {e.venue_name
+                                ? <p className="truncate text-[11px] text-slate-500">{e.venue_name}</p>
+                                : <p className="text-[11px] text-slate-500">No direct connections attending yet</p>
+                              }
                             </div>
-                            <div className="mt-3 flex gap-2">
+                          </div>
+
+                          <div
+                            className="mt-auto flex items-center gap-1.5 border-t border-white/10 pt-1"
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            <div className="flex-1">
                               <Link
                                 href={`/events/${e.id}`}
-                                className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full border border-white/10 px-4 text-[11px] font-semibold uppercase tracking-widest transition hover:bg-white/5"
+                                className="flex h-[42px] w-full items-center justify-center gap-1 rounded-xl border border-white/15 bg-white/6 text-[12px] font-semibold text-white transition hover:bg-white/10"
                               >
-                                View
+                                <span className="material-symbols-outlined text-[18px]">star</span>
+                                Interested
                               </Link>
+                            </div>
+                            <div>
                               <Link
                                 href={`/events/${e.id}`}
-                                className="inline-flex min-h-[40px] flex-[1.4] items-center justify-center rounded-full text-[11px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
-                                style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/8 text-white/85 transition hover:bg-white/12"
+                                aria-label="View event"
                               >
-                                Join event
+                                <span className="material-symbols-outlined text-[20px]">share</span>
                               </Link>
                             </div>
                           </div>

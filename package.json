@@ -25,7 +25,9 @@
     "e2e:trips:reset": "node scripts/e2e-trips-seed-reset.mjs",
     "e2e:syncs:reset": "node scripts/e2e-syncs-seed-reset.mjs",
     "db:run-sql": "bash scripts/sql/run-remote-sql.sh",
-    "db:references:cycle": "bash scripts/sql/run-references-cycle.sh"
+    "db:references:cycle": "bash scripts/sql/run-references-cycle.sh",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^6.0.0",
@@ -48,6 +50,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }
