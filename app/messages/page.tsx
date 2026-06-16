@@ -7689,15 +7689,38 @@ function MessagesPageContent() {
     }
     return counts;
   }, [archivedThreads, threads]);
+  // Once the user clicks OPEN on the cross-kind hint, we snapshot a "dismissed-at"
+  // timestamp. The hint only reappears later if a pending request UPDATED at a time
+  // newer than the snapshot exists — meaning something genuinely new arrived after
+  // the user acknowledged the previous batch.
+  const [crossKindDismissedAt, setCrossKindDismissedAt] = useState<number>(() => {
+    if (typeof window === "undefined") return 0;
+    try {
+      const raw = window.localStorage.getItem("cx_messages_cross_kind_dismissed_at_v1");
+      const n = raw ? Number(raw) : 0;
+      return Number.isFinite(n) ? n : 0;
+    } catch { return 0; }
+  });
+  const dismissCrossKindHint = useCallback(() => {
+    const now = Date.now();
+    setCrossKindDismissedAt(now);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("cx_messages_cross_kind_dismissed_at_v1", String(now));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   const crossKindPendingHint = useMemo(() => {
     if (activeTab === "archived") return null;
     type OtherKind = "booking" | "service" | "connection" | "event" | "group";
     const labels: Record<OtherKind, string> = { booking: "booking", service: "service inquiry", connection: "connection", event: "event", group: "group" };
 
-    // Find the most recently updated pending thread that's NOT in the current kindFilter.
-    // This way the pill always points at the most fresh thing the user might miss.
+    // Find the most recently updated pending thread that's NOT in the current kindFilter
+    // AND was updated AFTER the user's last dismissal.
     let latestKind: OtherKind | null = null;
     let latestTime = -Infinity;
+    const freshByKind: Record<OtherKind, number> = { booking: 0, service: 0, connection: 0, event: 0, group: 0 };
     for (const t of threads) {
       const isArchived = t.messagingState === "archived" || Boolean(archivedThreads[t.threadId]);
       if (isArchived) continue;
@@ -7715,6 +7738,9 @@ function MessagesPageContent() {
       if (k === "event" || k === "group") continue;
       if (k === kindFilter) continue;
       const time = toTime(t.updatedAt);
+      // Skip pending requests the user has already acknowledged in a prior session.
+      if (crossKindDismissedAt && time <= crossKindDismissedAt) continue;
+      freshByKind[k] += 1;
       if (time > latestTime) {
         latestTime = time;
         latestKind = k;
@@ -7722,15 +7748,12 @@ function MessagesPageContent() {
     }
     if (!latestKind) return null;
 
-    // Count total pending across all OTHER kinds (combined, not just the leading one) so
-    // the pill conveys the full backlog. Tap targets the most recent kind first.
-    const otherKindsTotal = (Object.keys(pendingByKind) as OtherKind[])
+    const otherKindsTotal = (Object.keys(freshByKind) as OtherKind[])
       .filter((k) => k !== kindFilter)
-      .reduce((sum, k) => sum + pendingByKind[k], 0);
-    const leading = pendingByKind[latestKind];
+      .reduce((sum, k) => sum + freshByKind[k], 0);
+    const leading = freshByKind[latestKind];
     const remainder = otherKindsTotal - leading;
 
-    // Don't show the hint if there are no actual pending requests in other kinds
     if (otherKindsTotal === 0) return null;
 
     const label = remainder > 0
@@ -7738,7 +7761,7 @@ function MessagesPageContent() {
       : `${leading === 1 ? "1 new" : `${leading} new`} ${labels[latestKind]} request${leading === 1 ? "" : "s"}`;
 
     return { kind: latestKind, label };
-  }, [activeTab, archivedThreads, kindFilter, pendingByKind, threads, viewerBookingEnabled, viewerServiceEnabled]);
+  }, [activeTab, archivedThreads, kindFilter, threads, viewerBookingEnabled, viewerServiceEnabled, crossKindDismissedAt]);
   const lastCrossKindTotalRef = useRef<number>(0);
   const [crossKindPulse, setCrossKindPulse] = useState(false);
   useEffect(() => {
@@ -7784,11 +7807,11 @@ function MessagesPageContent() {
     }
     if (kindFilter === "event") {
       return [
+        { key: "all", label: "All" },
         { key: "active", label: "Upcoming" },
         { key: "pending", label: "Requests" },
         { key: "created", label: "Created" },
         { key: "past", label: "Past" },
-        { key: "all", label: "All" },
       ] as const;
     }
     if (kindFilter === "group") {
@@ -9350,7 +9373,14 @@ function MessagesPageContent() {
               <input
                 ref={searchInputRef}
                 className="block h-full w-full rounded-full border-none bg-black/30 py-2 pl-10 pr-3 text-sm text-white placeholder-[#90cbcb] transition-shadow focus:outline-none focus:ring-2 focus:ring-[#0df2f2]/50"
-                placeholder="Search messages..."
+                placeholder={
+                  kindFilter === "event" ? "Search events…"
+                  : kindFilter === "group" ? "Search groups…"
+                  : kindFilter === "booking" ? "Search bookings…"
+                  : kindFilter === "service" ? "Search service inquiries…"
+                  : kindFilter === "connection" ? "Search connections…"
+                  : "Search messages…"
+                }
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -9369,7 +9399,8 @@ function MessagesPageContent() {
               ) : null}
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {inboxViewTabs.map((tab) => {
                 const archiveMode = activeTab === "archived";
                 const selected = archiveMode ? kindFilter === tab.key : activeTab === tab.key;
@@ -9403,22 +9434,23 @@ function MessagesPageContent() {
                   </button>
                 );
               })}
-              <div className="relative ml-auto" ref={inboxFilterMenuRef}>
+              </div>
+              <div className="relative shrink-0 pl-1.5" ref={inboxFilterMenuRef}>
                 <button
                   type="button"
                   onClick={() => setInboxFilterMenuOpen((prev) => !prev)}
                   data-testid="thread-filter-menu-button"
                   className={[
-                    "relative inline-flex min-h-8 shrink-0 items-center justify-center px-1 py-1 transition-colors",
+                    "relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors",
                     inboxFilterMenuOpen || kindFilter !== "connection" || activeTab === "archived"
-                      ? "text-[#f2d9ff]"
-                      : "text-[#90cbcb] hover:text-white",
+                      ? "border-[#f2d9ff]/40 bg-[#f2d9ff]/10 text-[#f2d9ff]"
+                      : "border-white/10 bg-white/[0.03] text-[#90cbcb] hover:border-white/20 hover:text-white",
                   ].join(" ")}
                   aria-label="Open inbox filters"
                 >
-                  <span className="material-symbols-outlined text-[16px]">tune</span>
+                  <span className="material-symbols-outlined text-[18px]">tune</span>
                   {crossKindPendingHint ? (
-                    <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#d946ef] shadow-[0_0_6px_rgba(217,70,239,0.7)]" />
+                    <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[#d946ef] shadow-[0_0_8px_rgba(217,70,239,0.8)]" />
                   ) : null}
                 </button>
                 {inboxFilterMenuOpen ? (
@@ -9483,7 +9515,7 @@ function MessagesPageContent() {
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => { setCrossKindPulse(false); selectKindFilter(crossKindPendingHint.kind); }}
+                  onClick={() => { setCrossKindPulse(false); dismissCrossKindHint(); selectKindFilter(crossKindPendingHint.kind); }}
                   className={[
                     "group relative flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition",
                     crossKindPulse

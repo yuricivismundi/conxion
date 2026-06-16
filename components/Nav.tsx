@@ -33,6 +33,21 @@ function readManualUnreadThreadTokensFromStorage(): Set<string> {
   }
 }
 
+function writeManualUnreadThreadTokensToStorage(tokens: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (tokens.size === 0) {
+      window.localStorage.removeItem(LOCAL_MANUAL_UNREAD_STORAGE_KEY);
+      return;
+    }
+    const obj: Record<string, true> = {};
+    tokens.forEach((token) => { obj[token] = true; });
+    window.localStorage.setItem(LOCAL_MANUAL_UNREAD_STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    // ignore quota / serialization errors
+  }
+}
+
 export default function Nav({ title }: NavProps) {
   const pathname = usePathname();
   const { t } = useAppLanguage();
@@ -159,9 +174,19 @@ export default function Nav({ title }: NavProps) {
       const unreadRes = await fetchUnreadThreadTokens(currentUserId);
       if (cancelled) return;
       if (!unreadRes.error) {
+        // Prune the localStorage manual-unread set against the live DB unread set,
+        // so stale tokens for archived/closed threads can't keep inflating the badge.
+        // Only manual-unread tokens that ALSO appear as DB-unread are kept — those
+        // are still legitimately unread on the server side.
         const manualTokens = readManualUnreadThreadTokensFromStorage();
-        const merged = new Set<string>([...unreadRes.tokens, ...manualTokens]);
-        setUnreadMessageThreads(merged.size);
+        const pruned = new Set<string>();
+        for (const token of manualTokens) {
+          if (unreadRes.tokens.has(token)) pruned.add(token);
+        }
+        writeManualUnreadThreadTokensToStorage(pruned);
+        // The badge count == DB-tracked unread incoming threads. Manual flags do
+        // not add to it (they're a per-thread UX flag only).
+        setUnreadMessageThreads(unreadRes.tokens.size);
       }
       setUnreadMessagesLoading(false);
     };

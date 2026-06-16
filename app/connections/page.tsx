@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 import PendingRequestBanner from "@/components/requests/PendingRequestBanner";
 import DarkConnectModal from "@/components/DarkConnectModal";
+import BookSessionModal from "@/components/teacher/BookSessionModal";
 import PaginationControls from "@/components/PaginationControls";
 import { useAppLanguage } from "@/components/AppLanguageProvider";
 import {
@@ -51,7 +52,7 @@ import {
   type HostingSleepingArrangement,
 } from "@/lib/hosting/preferences";
 
-type Tab = "members" | "travellers";
+type Tab = "members" | "travellers" | "events" | "teachers";
 type DiscoverMode = "dancers" | "travelers" | "hosts";
 
 type Level = "Beginner" | "Improver" | "Intermediate" | "Advanced" | "Teacher/Competitor";
@@ -592,6 +593,11 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
+type EventDatePreset = "any" | "today" | "tomorrow" | "this_weekend" | "this_week" | "next_week" | "this_month" | "custom";
+type EventTypeKey = "Social" | "Workshop" | "Festival" | "Masterclass" | "Competition";
+const EVENT_TYPE_OPTIONS: EventTypeKey[] = ["Social", "Workshop", "Festival", "Masterclass", "Competition"];
+const EVENT_STYLE_OPTIONS = ["Bachata", "Salsa", "Kizomba", "Tango", "Zouk", "Semba", "Urbankiz", "Sensual", "Cuban", "LA", "Brazilian zouk", "Son", "Mambo", "Other"] as const;
+
 type FiltersState = {
   country?: string;
   cities: string[]; // max 3
@@ -606,6 +612,14 @@ type FiltersState = {
   tripPurpose?: (typeof TRIP_PURPOSES)[number];
   tripDateFrom?: string;
   tripDateTo?: string;
+  // Event filters
+  eventDatePreset?: EventDatePreset;
+  eventDateFrom?: string;
+  eventDateTo?: string;
+  eventVisibility?: "public" | "private";
+  eventTypes: EventTypeKey[];
+  eventStyles: string[];
+  eventHasReferences: boolean;
 };
 
 const EMPTY_FILTERS: FiltersState = {
@@ -622,7 +636,37 @@ const EMPTY_FILTERS: FiltersState = {
   tripPurpose: undefined,
   tripDateFrom: undefined,
   tripDateTo: undefined,
+  eventDatePreset: "any",
+  eventDateFrom: undefined,
+  eventDateTo: undefined,
+  eventVisibility: undefined,
+  eventTypes: [],
+  eventStyles: [],
+  eventHasReferences: false,
 };
+
+function resolveEventDateRange(preset: EventDatePreset, customFrom: string | undefined, customTo: string | undefined): { start: string; end: string } {
+  const atStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const localIso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  };
+  const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const today = atStart(new Date());
+  const dow = today.getDay();
+  if (preset === "any") return { start: "", end: "" };
+  if (preset === "custom") return { start: customFrom ?? "", end: customTo ?? "" };
+  if (preset === "today") { const iso = localIso(today); return { start: iso, end: iso }; }
+  if (preset === "tomorrow") { const iso = localIso(addDays(today, 1)); return { start: iso, end: iso }; }
+  if (preset === "this_weekend") { const sat = addDays(today, (6 - dow + 7) % 7); return { start: localIso(sat), end: localIso(addDays(sat, 1)) }; }
+  if (preset === "this_week") { const mon = addDays(today, dow === 0 ? -6 : 1 - dow); return { start: localIso(mon), end: localIso(addDays(mon, 6)) }; }
+  if (preset === "next_week") { const mon = addDays(today, dow === 0 ? 1 : 8 - dow); return { start: localIso(mon), end: localIso(addDays(mon, 6)) }; }
+  const first = new Date(today.getFullYear(), today.getMonth(), 1);
+  const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  return { start: localIso(first), end: localIso(last) };
+}
 
 function ConnectionsPageContent() {
   const { t } = useAppLanguage();
@@ -653,6 +697,17 @@ function ConnectionsPageContent() {
   const [languageQuery, setLanguageQuery] = useState("");
   const [countryQuery, setCountryQuery] = useState("");
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+  const [headerCitySearch, setHeaderCitySearch] = useState("");
+  const [showHeaderCitySuggestions, setShowHeaderCitySuggestions] = useState(false);
+  const [headerSelectedCountry, setHeaderSelectedCountry] = useState<string>("");
+  const [mapboxSuggestions, setMapboxSuggestions] = useState<Array<{ mapboxId: string; name: string; placeFormatted: string; featureType: string }>>([]);
+  const [mapboxLoading, setMapboxLoading] = useState(false);
+  const mapboxSessionRef = useRef<string>("");
+  const [hostsOnlyQuick, setHostsOnlyQuick] = useState(false);
+  const [bookSessionTeacher, setBookSessionTeacher] = useState<{ id: string; name: string; photoUrl: string | null } | null>(null);
+  const [cityEvents, setCityEvents] = useState<Array<{ id: string; title: string; city: string | null; country: string | null; starts_at: string | null; ends_at: string | null; venue_name: string | null; styles: string[] | null; event_type: string | null; visibility: string | null }>>([]);
+  const [loadingCityEvents, setLoadingCityEvents] = useState(false);
+  const [activeTeacherIds, setActiveTeacherIds] = useState<Set<string>>(new Set());
 
   const [uiError, setUiError] = useState<string | null>(null);
   const [uiInfo, setUiInfo] = useState<string | null>(null);
@@ -872,9 +927,9 @@ function ConnectionsPageContent() {
   const tripJoinModalLoadRequestIdRef = useRef(0);
 
   const filtersTitle =
-    tab === "travellers" ? "Filter travellers" : discoverMode === "hosts" ? "Filter hosts" : "Filter dancers";
+    tab === "events" ? "Filter Events" : tab === "teachers" ? "Filter teachers" : tab === "travellers" ? "Filter travellers" : discoverMode === "hosts" ? "Filter hosts" : "Filter dancers";
   const filtersApplyLabel =
-    tab === "travellers" ? "Show travellers" : discoverMode === "hosts" ? "Show hosts" : "Show dancers";
+    tab === "events" ? "Show Events" : tab === "teachers" ? "Show teachers" : tab === "travellers" ? "Show travellers" : discoverMode === "hosts" ? "Show hosts" : "Show dancers";
 
   useEffect(() => {
     let cancelled = false;
@@ -925,6 +980,15 @@ function ConnectionsPageContent() {
     if (modeParam === "dancers") {
       setDiscoverMode("dancers");
       setTab("members");
+      return;
+    }
+    if (modeParam === "events") {
+      setTab("events");
+      return;
+    }
+    if (modeParam === "teachers") {
+      setDiscoverMode("dancers");
+      setTab("teachers");
       return;
     }
   }, [searchParams]);
@@ -2284,12 +2348,18 @@ function ConnectionsPageContent() {
     return list;
   }, [filters, tripCards, sortMode, getTripRecommendationMeta, myCityOnly, myCity, myCountry]);
 
-  const totalMembersPages = Math.max(1, Math.ceil(members.length / DISCOVER_PAGE_SIZE));
   const totalTravellersPages = Math.max(1, Math.ceil(filteredTrips.length / DISCOVER_PAGE_SIZE));
 
+  const displayedMembers = useMemo(
+    () => hostsOnlyQuick ? members.filter((m) => isHostingListingOpen(m.canHost === true, m.hostingStatus)) : members,
+    [members, hostsOnlyQuick]
+  );
+
+  const totalMembersPages = Math.max(1, Math.ceil(displayedMembers.length / DISCOVER_PAGE_SIZE));
+
   const paginatedMembers = useMemo(
-    () => members.slice((membersPage - 1) * DISCOVER_PAGE_SIZE, membersPage * DISCOVER_PAGE_SIZE),
-    [members, membersPage]
+    () => displayedMembers.slice((membersPage - 1) * DISCOVER_PAGE_SIZE, membersPage * DISCOVER_PAGE_SIZE),
+    [displayedMembers, membersPage]
   );
 
   const paginatedTrips = useMemo(
@@ -2299,18 +2369,25 @@ function ConnectionsPageContent() {
 
   const activeFiltersCount = useMemo(() => {
     let n = 0;
-    if (filters.country) n += 1;
     if (filters.cities.length) n += 1;
-    if (filters.roles.length) n += 1;
-    if (filters.references) n += 1;
-    if (tab === "members") {
+    if (tab === "members" || tab === "teachers") {
+      if (filters.roles.length) n += 1;
+      if (filters.references) n += 1;
       if (Object.keys(filters.styleLevels).length) n += 1;
       if (filters.otherStyle) n += 1;
       if (filters.langs.length) n += 1;
       if (filters.interest) n += 1;
       if (filters.availability) n += 1;
       if (filters.verifiedOnly) n += 1;
+    } else if (tab === "events") {
+      if (filters.eventDatePreset && filters.eventDatePreset !== "any") n += 1;
+      if (filters.eventVisibility) n += 1;
+      if (filters.eventTypes.length) n += 1;
+      if (filters.eventStyles.length) n += 1;
+      if (filters.eventHasReferences) n += 1;
     } else {
+      if (filters.roles.length) n += 1;
+      if (filters.references) n += 1;
       if (filters.tripPurpose) n += 1;
       if ((filters.tripDateFrom ?? "").trim() || (filters.tripDateTo ?? "").trim()) n += 1;
       if (filters.verifiedOnly) n += 1;
@@ -2684,11 +2761,249 @@ function ConnectionsPageContent() {
     }
   }
 
+  // ── Events for selected city ──────────────────────────────────────────────
+  const effectiveCityFilter = filters.cities[0] ?? myCity ?? "";
+  useEffect(() => {
+    if (!effectiveCityFilter) { setCityEvents([]); return; }
+    let cancelled = false;
+    setLoadingCityEvents(true);
+    supabase
+      .from("events")
+      .select("id,title,city,country,starts_at,ends_at,venue_name,styles,event_type,visibility")
+      .eq("status", "published")
+      .gte("ends_at", new Date().toISOString())
+      .order("starts_at", { ascending: true })
+      .limit(300)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const q = effectiveCityFilter.trim().toLowerCase();
+        const filtered = ((data ?? []) as Array<{ id: string; title: string; city: string | null; country: string | null; starts_at: string | null; ends_at: string | null; venue_name: string | null; styles: string[] | null; event_type: string | null; visibility: string | null }>)
+          .filter((e) => {
+            const c = (e.city ?? "").trim().toLowerCase();
+            return c.includes(q) || q.includes(c);
+          });
+        setCityEvents(filtered);
+        setLoadingCityEvents(false);
+      });
+    return () => { cancelled = true; };
+  }, [effectiveCityFilter]);
+
+  // ── Apply event filters to cityEvents ────────────────────────────────────
+  const filteredCityEvents = useMemo(() => {
+    let list = cityEvents.slice();
+
+    // Date filter
+    const datePreset = filters.eventDatePreset ?? "any";
+    if (datePreset !== "any") {
+      const { start, end } = resolveEventDateRange(datePreset, filters.eventDateFrom, filters.eventDateTo);
+      if (start || end) {
+        const startMs = start ? new Date(`${start}T00:00:00`).getTime() : -Infinity;
+        const endMs = end ? new Date(`${end}T23:59:59`).getTime() : Infinity;
+        list = list.filter((e) => {
+          if (!e.starts_at) return false;
+          const t = new Date(e.starts_at).getTime();
+          return t >= startMs && t <= endMs;
+        });
+      }
+    }
+
+    // Visibility
+    if (filters.eventVisibility) {
+      list = list.filter((e) => (e.visibility ?? "public").toLowerCase() === filters.eventVisibility);
+    }
+
+    // Event types
+    if (filters.eventTypes.length) {
+      const set = new Set(filters.eventTypes.map((t) => t.toLowerCase()));
+      list = list.filter((e) => set.has((e.event_type ?? "social").toLowerCase()));
+    }
+
+    // Dance styles
+    if (filters.eventStyles.length) {
+      const set = new Set(filters.eventStyles.map((s) => s.toLowerCase()));
+      list = list.filter((e) => Array.isArray(e.styles) && e.styles.some((s) => set.has(s.toLowerCase())));
+    }
+
+    return list;
+  }, [cityEvents, filters.eventDatePreset, filters.eventDateFrom, filters.eventDateTo, filters.eventVisibility, filters.eventTypes, filters.eventStyles]);
+
+  // ── Load list of teachers with activated public teacher profiles ─────────
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("teacher_profiles")
+      .select("user_id,is_public,teacher_profile_enabled")
+      .eq("is_public", true)
+      .eq("teacher_profile_enabled", true)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        const ids = new Set((data as Array<{ user_id: string }>).map((r) => r.user_id).filter(Boolean));
+        setActiveTeacherIds(ids);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Teachers from members (only those with activated teacher profiles) ──
+  const teachers = useMemo(() => {
+    return members.filter((m) =>
+      m.roles.some((r) => r.toLowerCase() === "teacher") && activeTeacherIds.has(m.id)
+    );
+  }, [members, activeTeacherIds]);
+
+  const paginatedTeachers = useMemo(
+    () => teachers.slice((membersPage - 1) * DISCOVER_PAGE_SIZE, membersPage * DISCOVER_PAGE_SIZE),
+    [teachers, membersPage]
+  );
+
+  // Mapbox-powered city suggestions (debounced)
+  useEffect(() => {
+    const q = headerCitySearch.trim();
+    if (q.length < 2) { setMapboxSuggestions([]); return; }
+    if (!mapboxSessionRef.current) {
+      mapboxSessionRef.current = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2);
+    }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      setMapboxLoading(true);
+      try {
+        const params = new URLSearchParams({ q, session_token: mapboxSessionRef.current });
+        const res = await fetch(`/api/geocode/mapbox?${params.toString()}`);
+        const data = (await res.json().catch(() => null)) as { ok?: boolean; suggestions?: Array<{ mapboxId: string; name: string; placeFormatted: string; featureType: string }> } | null;
+        if (cancelled) return;
+        if (data?.ok && Array.isArray(data.suggestions)) {
+          // Prefer city-level results
+          const filtered = data.suggestions.filter((s) => ["place", "locality", "district", "region"].includes(s.featureType));
+          setMapboxSuggestions(filtered.length > 0 ? filtered : data.suggestions);
+        } else {
+          setMapboxSuggestions([]);
+        }
+      } catch {
+        if (!cancelled) setMapboxSuggestions([]);
+      } finally {
+        if (!cancelled) setMapboxLoading(false);
+      }
+    }, 220);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [headerCitySearch]);
+
+  const headerSelectedCity = filters.cities[0] ?? "";
+  const headerDisplayCity = headerSelectedCity || myCity || "";
+  const headerDisplayCountry = headerSelectedCity
+    ? (headerSelectedCountry || dbMembers.find((m) => m.city === headerSelectedCity)?.country || "")
+    : (myCountry ?? "");
+
+  function parseCountryFromMapbox(s: { name: string; placeFormatted: string }): string {
+    // placeFormatted ≈ "Tallinn, Estonia" or "Barcelona, Catalonia, Spain"
+    if (!s.placeFormatted) return "";
+    const parts = s.placeFormatted.split(",").map((p) => p.trim()).filter(Boolean);
+    return parts[parts.length - 1] ?? "";
+  }
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white">
       <Nav />
 
-      <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8">
+      {/* ── DISCOVER HEADER ────────────────────────────────────────────────── */}
+      <div className="relative mx-auto w-full max-w-[1200px] px-4 pt-6 pb-2 sm:px-6">
+        <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+          {/* country + Your city */}
+          {headerDisplayCountry && (
+            <div className="flex items-center gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-[0.32em] text-[#00F5FF]">{headerDisplayCountry}</p>
+              {!headerCitySearch && myCity && (
+                <span className="rounded-full border border-[#00F5FF]/20 bg-[#00F5FF]/[0.06] px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-[#00F5FF]/70">
+                  Your city
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* City title */}
+          <h1
+            className="mt-1 break-words font-black leading-[0.95] tracking-[-0.02em] text-white"
+            style={{
+              fontSize: (() => {
+                const len = (headerDisplayCity || "—").length;
+                if (len <= 8) return "clamp(36px, 4.5vw, 56px)";
+                if (len <= 12) return "clamp(32px, 4vw, 48px)";
+                if (len <= 18) return "clamp(28px, 3.2vw, 40px)";
+                if (len <= 26) return "clamp(24px, 2.6vw, 32px)";
+                return "clamp(20px, 2.2vw, 26px)";
+              })(),
+            }}
+          >
+            {headerDisplayCity || "—"}
+          </h1>
+
+          {/* Search bar */}
+          <div className="relative mt-5 w-full max-w-md">
+            <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-white/25">
+              search
+            </span>
+            <input
+              type="search"
+              value={headerCitySearch}
+              onChange={(e) => {
+                setHeaderCitySearch(e.target.value);
+                setShowHeaderCitySuggestions(true);
+                if (!e.target.value.trim()) {
+                  setFilters((f) => ({ ...f, cities: [] }));
+                  setHeaderSelectedCountry("");
+                }
+              }}
+              onFocus={() => setShowHeaderCitySuggestions(true)}
+              onBlur={() => setTimeout(() => setShowHeaderCitySuggestions(false), 150)}
+              placeholder={myCity ? `Search a city… (${myCity})` : "Search a city…"}
+              className="h-12 w-full rounded-full border border-white/[0.07] bg-white/[0.03] pl-11 pr-10 text-center text-[14px] text-white outline-none placeholder:text-white/25 transition focus:border-[#00F5FF]/25 focus:bg-white/[0.05] focus:shadow-[0_0_0_1px_rgba(0,245,255,0.1)]"
+            />
+            {mapboxLoading && (
+              <span className="material-symbols-outlined absolute right-10 top-1/2 -translate-y-1/2 animate-spin text-[16px] text-white/30">progress_activity</span>
+            )}
+            {headerCitySearch && (
+              <button
+                onClick={() => {
+                  setHeaderCitySearch("");
+                  setFilters((f) => ({ ...f, cities: [] }));
+                  setHeaderSelectedCountry("");
+                  setMapboxSuggestions([]);
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            )}
+            {showHeaderCitySuggestions && mapboxSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#111318] text-left shadow-2xl">
+                {mapboxSuggestions.slice(0, 7).map((s) => {
+                  const country = parseCountryFromMapbox(s);
+                  return (
+                    <button
+                      key={s.mapboxId}
+                      onMouseDown={() => {
+                        setHeaderCitySearch(s.name);
+                        setHeaderSelectedCountry(country);
+                        setFilters((f) => ({ ...f, cities: [s.name] }));
+                        setShowHeaderCitySuggestions(false);
+                      }}
+                      className="flex w-full items-center gap-3 border-b border-white/[0.04] px-4 py-3 text-left transition last:border-0 hover:bg-white/[0.05]"
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-[#00F5FF]/60">location_on</span>
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-[14px] font-semibold text-white">{s.name}</span>
+                        <span className="truncate text-[11px] text-white/40">{s.placeFormatted}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <main className="mx-auto max-w-[1200px] px-4 pb-6 pt-2 sm:px-6 sm:pb-8 sm:pt-3">
         <ProfileCompletionNudge />
         {uiInfo ? (
           <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-[#00F5FF]/35 bg-[#00F5FF]/10 p-3 text-sm text-[#B8FBFF]">
@@ -2768,25 +3083,46 @@ function ConnectionsPageContent() {
             </button>
             <button
               onClick={() => {
-                setTab("members");
-                setDiscoverMode("hosts");
-                router.replace("/connections?mode=hosts", { scroll: false });
+                setTab("events");
+                router.replace("/connections?mode=events", { scroll: false });
               }}
               className={[
                 "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
-                tab === "members" && discoverMode === "hosts"
+                tab === "events"
                   ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
                   : "text-white/70 hover:text-white/95",
               ].join(" ")}
             >
               <MSIcon
-                name="home"
+                name="celebration"
                 className={[
                   "text-[18px] transition-opacity",
-                  tab === "members" && discoverMode === "hosts" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
+                  tab === "events" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
                 ].join(" ")}
               />
-              {t("discover.hosts")}
+              Events
+            </button>
+            <button
+              onClick={() => {
+                setTab("teachers");
+                setDiscoverMode("dancers");
+                router.replace("/connections?mode=teachers", { scroll: false });
+              }}
+              className={[
+                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                tab === "teachers"
+                  ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
+                  : "text-white/70 hover:text-white/95",
+              ].join(" ")}
+            >
+              <MSIcon
+                name="school"
+                className={[
+                  "text-[18px] transition-opacity",
+                  tab === "teachers" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
+                ].join(" ")}
+              />
+              Teachers
             </button>
           </div>
         </section>
@@ -2797,8 +3133,11 @@ function ConnectionsPageContent() {
           <div className="hidden md:flex md:flex-row md:items-center md:justify-between md:gap-4">
             <div className="flex flex-row items-center gap-6">
               <p className="text-white/50 text-sm">
-                {t("discover.showing")} <span className="text-white font-semibold">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
-                {tab === "members" ? (discoverMode === "hosts" ? "hosts" : "dancers") : "travelers"}
+                {t("discover.showing")}{" "}
+                <span className="text-white font-semibold">
+                  {tab === "members" ? (hostsOnlyQuick ? members.filter((m) => isHostingListingOpen(m.canHost === true, m.hostingStatus)).length : members.length) : tab === "teachers" ? teachers.length : tab === "events" ? filteredCityEvents.length : filteredTrips.length}
+                </span>{" "}
+                {tab === "members" ? (hostsOnlyQuick ? "hosts" : "dancers") : tab === "teachers" ? "teachers" : tab === "events" ? "events" : "travelers"}
               </p>
               <div className="flex flex-row items-center gap-3 border-l border-white/10 pl-6">
                 <div className="relative">
@@ -2811,12 +3150,12 @@ function ConnectionsPageContent() {
                     <option value="newest">Newest</option>
                     <option value="name_az">Name A-Z</option>
                     <option value="city_az">City A-Z</option>
-                    {tab === "members" ? <option value="connections_desc">Most connections</option> : null}
-                    {tab === "members" ? <option value="references_desc">Most references</option> : null}
+                    {tab === "members" || tab === "teachers" ? <option value="connections_desc">Most connections</option> : null}
+                    {tab === "members" || tab === "teachers" ? <option value="references_desc">Most references</option> : null}
                   </select>
                   <MSIcon name="expand_more" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[16px] text-white/45" />
                 </div>
-                {tab === "members" || tab === "travellers" ? (
+                {tab === "members" || tab === "travellers" || tab === "teachers" ? (
                   <button
                     type="button"
                     onClick={() => { if (!myCity) return; setMyCityOnly((value) => !value); }}
@@ -2828,10 +3167,20 @@ function ConnectionsPageContent() {
                     My location
                   </button>
                 ) : null}
+                {tab === "members" ? (
+                  <button
+                    type="button"
+                    onClick={() => setHostsOnlyQuick((v) => !v)}
+                    className={["inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition", hostsOnlyQuick ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300" : "border-white/10 text-white/40 hover:text-white/70"].join(" ")}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">home</span>
+                    Hosts only
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="flex flex-row flex-wrap items-center justify-end gap-3">
-              {tab === "members" ? (
+              {tab === "members" || tab === "teachers" ? (
                 <label className="relative w-[240px]">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
                     <MSIcon name="search" className="text-[18px]" />
@@ -2840,7 +3189,7 @@ function ConnectionsPageContent() {
                     type="search"
                     value={memberSearch}
                     onChange={(e) => setMemberSearch(e.target.value)}
-                    placeholder={discoverMode === "hosts" ? "Search hosts by name" : "Search dancers by name"}
+                    placeholder={tab === "teachers" ? "Search teachers by name" : discoverMode === "hosts" ? "Search hosts by name" : "Search dancers by name"}
                     className="h-11 w-full rounded-full border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/35 hover:border-white/20 focus:border-[#00F5FF]/45"
                   />
                 </label>
@@ -2886,10 +3235,10 @@ function ConnectionsPageContent() {
               </span>
             </div>
             <p className="shrink-0 text-xs text-white/50">
-              <span className="font-semibold text-white">{tab === "members" ? members.length : filteredTrips.length}</span>{" "}
-              {tab === "members" ? (discoverMode === "hosts" ? "hosts" : "dancers") : "travelers"}
+              <span className="font-semibold text-white">{tab === "members" ? members.length : tab === "teachers" ? teachers.length : tab === "events" ? filteredCityEvents.length : filteredTrips.length}</span>{" "}
+              {tab === "members" ? (hostsOnlyQuick ? "hosts" : "dancers") : tab === "teachers" ? "teachers" : tab === "events" ? "events" : "travelers"}
             </p>
-            {tab === "members" ? (
+            {tab === "members" || tab === "teachers" ? (
               <label className="relative min-w-0 flex-1">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
                   <MSIcon name="search" className="text-[16px]" />
@@ -2898,7 +3247,7 @@ function ConnectionsPageContent() {
                   type="search"
                   value={memberSearch}
                   onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder={discoverMode === "hosts" ? "Search hosts…" : "Search dancers…"}
+                  placeholder={tab === "teachers" ? "Search teachers…" : discoverMode === "hosts" ? "Search hosts…" : "Search dancers…"}
                   className="h-10 w-full rounded-full border border-white/10 bg-white/5 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#00F5FF]/45"
                 />
               </label>
@@ -3317,15 +3666,15 @@ function ConnectionsPageContent() {
             <PaginationControls
               page={membersPage}
               totalPages={totalMembersPages}
-              totalItems={members.length}
+              totalItems={displayedMembers.length}
               pageSize={DISCOVER_PAGE_SIZE}
-              itemLabel={discoverMode === "hosts" ? "hosts" : "dancers"}
+              itemLabel={hostsOnlyQuick ? "hosts" : discoverMode === "hosts" ? "hosts" : "dancers"}
               onPageChange={setMembersPage}
             />
 
             {/* Vanish / fade effect at bottom while scrolling */}
           </div>
-        ) : (
+        ) : tab === "travellers" ? (
           <div className="relative mt-8">
             {tripsError ? (
               <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
@@ -3541,7 +3890,258 @@ function ConnectionsPageContent() {
               onPageChange={setTravellersPage}
             />
           </div>
-        )}
+        ) : null}
+
+        {/* ══ EVENTS TAB ══ */}
+        {tab === "events" ? (
+          <div className="relative mt-8">
+            {loadingCityEvents ? (
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={`esk-${i}`} className="animate-pulse overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] h-48" />
+                ))}
+              </div>
+            ) : filteredCityEvents.length === 0 ? (
+              <div className="py-20 text-center">
+                <p className="text-white/30 text-sm">No upcoming events{effectiveCityFilter ? ` in ${effectiveCityFilter}` : ""}.</p>
+                <p className="text-white/20 text-xs mt-1">Try a different city or{" "}
+                  <Link href="/events" className="text-[#00F5FF]/60 hover:text-[#00F5FF] underline underline-offset-2">browse all events</Link>.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className={`grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2`}>
+                  {filteredCityEvents.slice(0, DISCOVER_PAGE_SIZE).map((e) => {
+                    const date = e.starts_at ? (() => {
+                      const d = new Date(e.starts_at!);
+                      return {
+                        weekday: d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
+                        month: d.toLocaleDateString("en-US", { month: "short" }).toUpperCase(),
+                        day: String(d.getDate()),
+                        time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+                      };
+                    })() : null;
+                    const styles = Array.isArray(e.styles) ? e.styles as string[] : [];
+                    return (
+                      <article
+                        key={e.id}
+                        className="connections-card relative overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(13,242,242,0.14),0_16px_42px_rgba(0,245,255,0.06)]"
+                      >
+                        <div className="flex min-h-[160px] md:h-52 md:flex-row">
+                          {/* date block */}
+                          <div className="relative w-[42%] shrink-0 border-r border-white/10 bg-gradient-to-br from-[#0d1520] to-[#111318] flex flex-col items-center justify-center gap-1 md:w-1/2">
+                            {date ? (
+                              <>
+                                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">{date.weekday} · {date.month}</p>
+                                <p className="text-[52px] font-black leading-none text-white">{date.day}</p>
+                                <p className="text-[11px] text-white/40">{date.time}</p>
+                              </>
+                            ) : (
+                              <span className="text-white/10 text-[11px] uppercase tracking-widest">TBD</span>
+                            )}
+                            {styles.length > 0 && (
+                              <div className="absolute bottom-3 left-0 right-0 flex flex-wrap justify-center gap-1 px-2">
+                                {styles.slice(0, 2).map((s) => (
+                                  <span key={s} className="rounded-full border border-[#00F5FF]/20 px-2 py-0.5 text-[9px] font-semibold text-[#00F5FF]/60">{s}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {/* info */}
+                          <div className="flex flex-1 flex-col justify-between p-4">
+                            <div>
+                              <h3 className="text-[17px] font-semibold leading-snug text-white">{e.title}</h3>
+                              {(e.city || e.country) && (
+                                <p className="mt-1 text-[13px] font-medium">
+                                  <span className="text-[#00F5FF]">{e.city}</span>
+                                  {e.country ? <span className="text-white/50">, {e.country}</span> : null}
+                                </p>
+                              )}
+                              {e.venue_name && (
+                                <p className="mt-1 text-[12px] text-white/40">{e.venue_name}</p>
+                              )}
+                            </div>
+                            <div className="mt-3 flex gap-2">
+                              <Link
+                                href={`/events/${e.id}`}
+                                className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full border border-white/10 px-4 text-[11px] font-semibold uppercase tracking-widest transition hover:bg-white/5"
+                              >
+                                View
+                              </Link>
+                              <Link
+                                href={`/events/${e.id}`}
+                                className="inline-flex min-h-[40px] flex-[1.4] items-center justify-center rounded-full text-[11px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
+                                style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
+                              >
+                                Join event
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                {filteredCityEvents.length > 0 && (
+                  <Link
+                    href={`/events${effectiveCityFilter ? `?city=${encodeURIComponent(effectiveCityFilter)}` : ""}`}
+                    className="mt-6 flex items-center justify-center gap-2 rounded-full border border-white/10 py-3 text-[13px] font-semibold text-white/40 transition hover:border-white/20 hover:text-white/70"
+                  >
+                    See all {filteredCityEvents.length} events{effectiveCityFilter ? ` in ${effectiveCityFilter}` : ""} →
+                  </Link>
+                )}
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {/* ══ TEACHERS TAB ══ */}
+        {tab === "teachers" ? (
+          <div className="relative mt-8">
+            <div className={`grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3${!loadingMembers ? " animate-fade-in-grid" : ""}`}>
+              {loadingMembers ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <div key={`tsk-${i}`} className="animate-pulse overflow-hidden rounded-[24px] border border-white/10 bg-[#0e0e0e]">
+                    <div className="h-[360px] bg-white/[0.04]" />
+                    <div className="p-5 space-y-3">
+                      <div className="h-4 w-3/4 rounded bg-white/10" />
+                      <div className="flex gap-2">
+                        <div className="h-6 w-16 rounded-full bg-white/10" />
+                        <div className="h-6 w-16 rounded-full bg-white/10" />
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <div className="h-10 flex-1 rounded-full bg-white/10" />
+                        <div className="h-10 flex-[1.4] rounded-full bg-white/10" />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : teachers.length === 0 ? (
+                <div className="col-span-full py-20 text-center">
+                  <p className="text-white/30 text-sm">No teachers found{effectiveCityFilter ? ` in ${effectiveCityFilter}` : ""}.</p>
+                </div>
+              ) : (
+                paginatedTeachers.map((m) => {
+                  const refTotal = Number(m.refTotalAll ?? 0);
+                  const styles = Object.keys(m.danceSkills ?? {});
+                  return (
+                    <div key={m.id} className="group relative h-full">
+                      {/* glow halo behind card */}
+                      <div className="absolute -inset-1 rounded-[28px] bg-gradient-to-br from-[#9333ea]/25 via-transparent to-[#ff51fa]/35 opacity-50 blur-2xl transition group-hover:opacity-80" />
+                      <div className="relative h-full rounded-[24px] p-[1.5px] bg-gradient-to-br from-zinc-800/20 via-[#9333ea]/50 to-[#ff51fa]/70 transition group-hover:from-zinc-800/20 group-hover:via-[#9333ea]/80 group-hover:to-[#ff51fa]/95">
+                        <div className="relative flex h-full flex-col overflow-hidden rounded-[22px] bg-[#0e0e0e]">
+                          {/* Photo area — clicking it opens the teacher profile */}
+                          <Link
+                            href={`/profile/${encodeURIComponent(m.id)}/teacher`}
+                            className="relative block h-[280px] shrink-0 overflow-hidden"
+                            title="View teacher profile"
+                          >
+                            <div
+                              className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                              style={
+                                m.photoUrl
+                                  ? { backgroundImage: `url(${m.photoUrl})` }
+                                  : { backgroundImage: "linear-gradient(135deg, rgba(147,51,234,0.18), rgba(255,81,250,0.12))" }
+                              }
+                            />
+                            {/* gradient overlay bottom */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-[#0e0e0e] via-[#0e0e0e]/40 to-transparent" />
+
+                            {/* Top right: subtle "View profile" affordance on hover */}
+                            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/45 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/70 opacity-0 backdrop-blur-md transition group-hover:opacity-100">
+                              <MSIcon name="visibility" className="text-[12px]" />
+                              View profile
+                            </span>
+
+                            {/* Bottom: name, role, location, ref */}
+                            <div className="absolute inset-x-0 bottom-0 p-4">
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="text-[22px] font-black leading-tight tracking-tight text-white drop-shadow-2xl">{m.name}</h3>
+                                {m.verified ? <VerifiedBadge size={17} /> : null}
+                              </div>
+                              <div className="mt-1 flex items-center gap-3 text-[11px] text-white/70">
+                                {m.displayRole ? (
+                                  <span className="font-bold uppercase tracking-[0.18em] text-[#c1fffe]/80">{m.displayRole}</span>
+                                ) : null}
+                                {refTotal > 0 && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <MSIcon name="workspace_premium" className="text-[13px] text-[#ff51fa]" />
+                                    <span className="font-semibold text-white/85">{refTotal}</span>
+                                  </span>
+                                )}
+                              </div>
+                              {(m.city || m.country) && (
+                                <p className="mt-1 text-[11px] font-semibold text-white/55">
+                                  <span className="text-white/75">{m.city}</span>
+                                  {m.city && m.country ? <span className="text-white/40"> · </span> : null}
+                                  <span className="text-white/55">{m.country}</span>
+                                </p>
+                              )}
+                            </div>
+                          </Link>
+
+                          {/* Bottom info section — flex-1 so buttons align at bottom across cards */}
+                          <div className="flex flex-1 flex-col justify-between gap-3 p-4">
+                            <div className="space-y-3">
+                              {styles.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {styles.slice(0, 4).map((s) => (
+                                    <span
+                                      key={s}
+                                      className="rounded-full border border-[#ff51fa]/30 bg-[#ff51fa]/[0.06] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#ff8df0]"
+                                    >
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {m.langs?.length ? (
+                                <div className="flex items-center gap-1.5">
+                                  <MSIcon name="translate" className="text-[14px] text-[#9333ea]" />
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {m.langs.slice(0, 4).map((l) => (
+                                      <div key={l} className="flex size-[22px] items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-[9px] font-bold text-white/75">{l}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openConnect({ targetUserId: m.id, targetName: m.name, targetPhotoUrl: m.photoUrl ?? null, targetRoles: m.roles, connectContext: "member", tripId: null })}
+                                className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-full border border-white/10 px-4 text-[11px] font-bold uppercase tracking-[0.16em] text-white/70 transition hover:border-white/25 hover:bg-white/[0.04] hover:text-white"
+                              >
+                                <MSIcon name="forum" className="text-[14px]" /> Request info
+                              </button>
+                              <button
+                                className="flex min-h-[40px] flex-[1.4] items-center justify-center gap-1.5 rounded-full px-4 text-[11px] font-bold uppercase tracking-[0.16em] text-[#0A0A0A]"
+                                style={{ backgroundImage: "linear-gradient(135deg,#9333ea,#ff51fa)" }}
+                                onClick={() => setBookSessionTeacher({ id: m.id, name: m.name, photoUrl: m.photoUrl ?? null })}
+                              >
+                                <MSIcon name="bolt" className="text-[14px]" /> Book a class
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {teachers.length > DISCOVER_PAGE_SIZE && (
+              <PaginationControls
+                page={membersPage}
+                totalPages={Math.max(1, Math.ceil(teachers.length / DISCOVER_PAGE_SIZE))}
+                totalItems={teachers.length}
+                pageSize={DISCOVER_PAGE_SIZE}
+                itemLabel="teachers"
+                onPageChange={setMembersPage}
+              />
+            )}
+          </div>
+        ) : null}
       </main>
 
       {filtersOpen ? (
@@ -3627,103 +4227,126 @@ function ConnectionsPageContent() {
                 ) : null}
               </section>
 
-              <section className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Location</h3>
-
-                <div>
-                  <label className="text-sm font-semibold text-white/90">Country</label>
-                  <div className="relative mt-2">
-                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/30 pointer-events-none">search</span>
-                    <input
-                      type="text"
-                      value={countryQuery || filters.country || ""}
-                      placeholder="Search country…"
-                      autoComplete="off"
-                      onChange={(e) => { setCountryQuery(e.target.value); setCountryDropdownOpen(true); }}
-                      onFocus={() => setCountryDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setCountryDropdownOpen(false), 150)}
-                      className="w-full min-h-[48px] rounded-xl border border-white/10 bg-[#1B1B1B] pl-9 pr-9 py-3 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 placeholder:text-white/30"
-                    />
-                    {(filters.country || countryQuery) && (
-                      <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70"
-                        onClick={() => { setCountryQuery(""); setCountryDropdownOpen(false); setFilters((p) => ({ ...p, country: undefined, cities: [] })); }}>
-                        <span className="material-symbols-outlined text-[16px]">close</span>
+              {tab === "events" ? (
+                <>
+                  {/* DATE */}
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Date</h3>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {([
+                        { id: "today", label: "Today" },
+                        { id: "tomorrow", label: "Tomorrow" },
+                        { id: "this_weekend", label: "This weekend" },
+                        { id: "this_week", label: "This week" },
+                        { id: "next_week", label: "Next week" },
+                        { id: "this_month", label: "This month" },
+                      ] as Array<{ id: EventDatePreset; label: string }>).map((preset) => {
+                        const selected = filters.eventDatePreset === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => setFilters((p) => ({ ...p, eventDatePreset: selected ? "any" : preset.id, eventDateFrom: undefined, eventDateTo: undefined }))}
+                            className={["py-2.5 px-3 rounded-2xl border text-sm font-medium transition text-center", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => setFilters((p) => ({ ...p, eventDatePreset: p.eventDatePreset === "custom" ? "any" : "custom" }))}
+                        className={["py-2.5 px-3 rounded-2xl border text-sm font-medium transition text-center", filters.eventDatePreset === "custom" ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
+                      >
+                        Custom range
                       </button>
-                    )}
-                    {countryDropdownOpen && filteredCountryNames.length > 0 && (
-                      <ul className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-white/10 bg-[#141414] shadow-xl">
-                        {filteredCountryNames.map((c) => (
-                          <li key={c}>
-                            <button type="button" className="w-full px-4 py-3 text-left text-sm text-white/80 hover:bg-white/[0.06] hover:text-white"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => { setFilters((p) => ({ ...p, country: c, cities: [] })); setCountryQuery(""); setCountryDropdownOpen(false); setCityQuery(""); }}>
-                              {c}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-semibold text-white/90">Cities (Max 3)</label>
-                    <span className="rounded-full bg-[#00F5FF]/15 px-2 py-0.5 text-xs font-bold text-[#00F5FF]">
-                      {filters.cities.length}/3
-                    </span>
-                  </div>
-                  <input
-                    value={cityQuery}
-                    onChange={(e) => setCityQuery(e.target.value)}
-                    disabled={!filters.country}
-                    placeholder={filters.country ? "Search cities..." : "Select country first"}
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-4 py-3 text-sm text-white/85 outline-none placeholder:text-white/35 focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  {!filters.country ? (
-                    <p className="mt-2 text-[11px] text-white/45">
-                      Choose a country to load city options.
-                    </p>
-                  ) : null}
-                  {filters.cities.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {filters.cities.map((city) => (
-                        <button
-                          key={`selected-${city}`}
-                          type="button"
-                          onClick={() =>
-                            setFilters((p) => ({ ...p, cities: p.cities.filter((c) => c !== city) }))
-                          }
-                          className="flex items-center gap-1 rounded-full border border-[#00F5FF]/40 bg-[#00F5FF]/10 px-3 py-1 text-xs font-semibold text-[#00F5FF]"
-                        >
-                          {city}
-                          <MSIcon name="cancel" className="text-[14px]" />
-                        </button>
-                      ))}
                     </div>
-                  ) : null}
-                  {filters.country && citySuggestions.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {citySuggestions.map((city) => (
-                        <button
-                          key={`suggestion-${city}`}
-                          type="button"
-                          disabled={filters.cities.length >= 3}
-                          onClick={() =>
-                            setFilters((p) =>
-                              p.cities.length >= 3 ? p : { ...p, cities: [...p.cities, city] }
-                            )
-                          }
-                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold text-white/70 transition hover:border-[#00F5FF]/50 hover:text-[#00F5FF] disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {city}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </section>
+                    {filters.eventDatePreset === "custom" ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="text-xs font-semibold text-white/70">From</label>
+                          <input
+                            type="date"
+                            value={filters.eventDateFrom ?? ""}
+                            onChange={(e) => setFilters((p) => ({ ...p, eventDateFrom: e.target.value || undefined }))}
+                            className="mt-1.5 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-3 py-2.5 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-white/70">To</label>
+                          <input
+                            type="date"
+                            value={filters.eventDateTo ?? ""}
+                            onChange={(e) => setFilters((p) => ({ ...p, eventDateTo: e.target.value || undefined }))}
+                            className="mt-1.5 w-full rounded-xl border border-white/10 bg-[#1B1B1B] px-3 py-2.5 text-sm text-white/90 outline-none focus:border-[#00F5FF]/60"
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
 
+                  {/* EVENT MODE */}
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Event Mode</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["public", "private"] as const).map((mode) => {
+                        const selected = filters.eventVisibility === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setFilters((p) => ({ ...p, eventVisibility: selected ? undefined : mode }))}
+                            className={["py-3 px-3 rounded-2xl border text-sm font-medium transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
+                          >
+                            {mode === "public" ? "Public event" : "Private event"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {/* EVENT TYPE */}
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Event Type</h3>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {EVENT_TYPE_OPTIONS.map((type) => {
+                        const selected = filters.eventTypes.includes(type);
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => setFilters((p) => ({ ...p, eventTypes: selected ? p.eventTypes.filter((t) => t !== type) : [...p.eventTypes, type] }))}
+                            className={["py-2.5 px-3 rounded-2xl border text-sm font-medium transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
+                          >
+                            {type}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {/* DANCE STYLES */}
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Dance Styles</h3>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {EVENT_STYLE_OPTIONS.map((s) => {
+                        const selected = filters.eventStyles.includes(s);
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setFilters((p) => ({ ...p, eventStyles: selected ? p.eventStyles.filter((x) => x !== s) : [...p.eventStyles, s] }))}
+                            className={["py-2.5 px-3 rounded-2xl border text-sm font-medium transition", selected ? "border-[#00F5FF] bg-[#00F5FF]/10 text-[#00F5FF]" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"].join(" ")}
+                          >
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                </>
+              ) : (
+              <>
               <section className="space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Role Preference</h3>
                 <div className="grid grid-cols-2 gap-2">
@@ -3951,6 +4574,8 @@ function ConnectionsPageContent() {
 
                 </section>
               ) : null}
+              </>
+              )}
             </div>
 
             <div className="absolute inset-x-0 bottom-0 flex items-center gap-4 border-t border-white/10 bg-[#0A0A0A]/95 px-6 py-4 backdrop-blur">
@@ -3990,6 +4615,15 @@ function ConnectionsPageContent() {
   targetPhotoUrl={connectModal.targetPhotoUrl ?? null}
   connectContext={connectModal.connectContext ?? "member"}
   tripId={connectModal.tripId ?? null}
+/>
+
+<BookSessionModal
+  open={bookSessionTeacher !== null}
+  teacherUserId={bookSessionTeacher?.id ?? ""}
+  teacherName={bookSessionTeacher?.name ?? "Teacher"}
+  teacherPhotoUrl={bookSessionTeacher?.photoUrl ?? null}
+  mode="profile"
+  onClose={() => setBookSessionTeacher(null)}
 />
 
       {tripJoinModal.open ? (
