@@ -10,6 +10,7 @@
  * when auth is required.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { gotoAuthed, injectAuthSession } from "./helpers/auth-e2e";
 
 const KNOWN_NOISE = ["download the react devtools", "fast refresh"];
 
@@ -24,10 +25,8 @@ function attachErrorCollector(page: Page, issues: string[]) {
 }
 
 async function gotoMessages(page: Page) {
-  await page.goto("/messages");
-  await page.waitForLoadState("domcontentloaded");
-  // Redirect to auth if unauthenticated — that's acceptable
-  if (page.url().includes("/auth")) return false;
+  const ok = await gotoAuthed(page, "/messages");
+  if (!ok || page.url().includes("/auth")) return false;
   await expect(page.getByRole("heading", { name: /^Inbox$/i })).toBeVisible({ timeout: 8_000 });
   return true;
 }
@@ -152,9 +151,8 @@ test("nav unread badge is a reasonable number (not stale inflated count)", async
   const authed = await gotoMessages(page);
   if (!authed) return;
 
-  // Navigate away so Nav is visible
-  await page.goto("/connections");
-  await page.waitForLoadState("domcontentloaded");
+  // Navigate to connections (authed) so Nav badge is visible
+  await gotoAuthed(page, "/connections");
   await page.waitForTimeout(1_500); // let badge settle
 
   const badge = page.locator("[data-testid='unread-badge'], .unread-badge").first();
