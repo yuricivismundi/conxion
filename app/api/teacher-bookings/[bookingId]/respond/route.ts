@@ -198,8 +198,8 @@ export async function POST(req: Request, { params }: RouteParams) {
     // Best-effort: schedule reference prompts for after the session date
     try {
       const sessionDateMs = new Date(booking.session_date).getTime();
-      const dueAt = new Date(sessionDateMs + 24 * 60 * 60 * 1000).toISOString();   // session date + 1 day
-      const expiresAt = new Date(sessionDateMs + 10 * 24 * 60 * 60 * 1000).toISOString(); // + 10 days
+      const dueAt = new Date(sessionDateMs + 24 * 60 * 60 * 1000).toISOString();
+      const expiresAt = new Date(sessionDateMs + 10 * 24 * 60 * 60 * 1000).toISOString();
       const promptBase = {
         source_table: "teacher_session_bookings",
         source_id: booking.id,
@@ -208,12 +208,11 @@ export async function POST(req: Request, { params }: RouteParams) {
         expires_at: expiresAt,
         status: "pending",
       };
-      await (auth.serviceClient as unknown as { from: (t: string) => { upsert: (rows: unknown[], opts: unknown) => Promise<unknown> } })
-        .from("reference_requests")
-        .upsert([
-          { ...promptBase, user_id: booking.student_id, peer_user_id: booking.teacher_id },
-          { ...promptBase, user_id: booking.teacher_id, peer_user_id: booking.student_id },
-        ], { onConflict: "user_id,peer_user_id,source_id" });
+      const rr = auth.serviceClient as unknown as { from: (t: string) => { insert: (rows: unknown[]) => Promise<{ error: { code?: string } | null }> } };
+      await rr.from("reference_requests").insert([
+        { ...promptBase, user_id: booking.student_id, peer_user_id: booking.teacher_id },
+        { ...promptBase, user_id: booking.teacher_id, peer_user_id: booking.student_id },
+      ]);
     } catch { /* non-fatal */ }
 
     return NextResponse.json({ ok: true, status: "accepted", calendarUrl });
