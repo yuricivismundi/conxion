@@ -77,7 +77,7 @@ const AVAILABILITY_OPTIONS = [
 type AvailabilityOption = (typeof AVAILABILITY_OPTIONS)[number];
 
 type ServiceType = (typeof SERVICE_TYPES)[number]["value"];
-type ActiveTab = "profile" | "classes" | "inquiries" | "events" | "bookings";
+type ActiveTab = "profile" | "classes" | "inquiries" | "events" | "bookings" | "references";
 
 // ─── DB Row Types ─────────────────────────────────────────────────────────────
 
@@ -185,6 +185,38 @@ function emptyEventDraft(): EventDraft {
   };
 }
 
+type TeacherReferenceRow = {
+  id: string;
+  client_name: string;
+  client_context: string | null;
+  testimonial: string;
+  rating: number | null;
+  reference_year: number | null;
+  is_public: boolean;
+  status: string;
+  sort_order: number;
+};
+
+type RefDraft = {
+  client_name: string;
+  client_context: string;
+  testimonial: string;
+  rating: string;
+  reference_year: string;
+  is_public: boolean;
+};
+
+function emptyRefDraft(): RefDraft {
+  return {
+    client_name: "",
+    client_context: "",
+    testimonial: "",
+    rating: "",
+    reference_year: "",
+    is_public: true,
+  };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatTime(t: string | null) {
@@ -288,7 +320,27 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   const [savingEvent, setSavingEvent] = useState(false);
   const [eventCities, setEventCities] = useState<string[]>([]);
 
+  // References UI
+  const [references, setReferences] = useState<TeacherReferenceRow[]>([]);
+  const [refsLoading, setRefsLoading] = useState(false);
+  const [showRefForm, setShowRefForm] = useState(false);
+  const [editingRefId, setEditingRefId] = useState<string | null>(null);
+  const [savingRef, setSavingRef] = useState(false);
+  const [busyRefId, setBusyRefId] = useState<string | null>(null);
+  const [refDraft, setRefDraft] = useState<RefDraft>(emptyRefDraft());
+
   const eligible = canManageTeacherInfo(roles);
+
+  // ── URL-based tab switching ────────────────────────────────────────────────
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    const validTabs: ActiveTab[] = ["profile", "classes", "inquiries", "events", "bookings", "references"];
+    if (tab && (validTabs as string[]).includes(tab)) {
+      setActiveTab(tab as ActiveTab);
+    }
+  }, []);
 
   // ── Auto-dismiss messages ──────────────────────────────────────────────────
 
@@ -422,6 +474,16 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
         setRegularClasses((classesRes.data as RegularClassRow[]) ?? []);
         setEventTeaching((eventsRes.data as EventTeachingRow[]) ?? []);
+
+        // Load references
+        const refsRes = await supabase
+          .from("teacher_references")
+          .select("*")
+          .eq("teacher_user_id", currentUser.id)
+          .order("sort_order", { ascending: true });
+        if (!cancelled && refsRes.data) {
+          setReferences(refsRes.data as TeacherReferenceRow[]);
+        }
       } catch (loadError) {
         if (!cancelled) {
           setError(
@@ -757,6 +819,77 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   const defaultView = teacherProfile?.default_public_view ?? "social";
   const teacherProfileLocked = trialExpired && !paymentVerified;
 
+  // ── References handlers ───────────────────────────────────────────────────
+
+  async function handleSaveRef() {
+    if (!userId) return;
+    setSavingRef(true);
+    setError(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? "";
+      const payload = {
+        clientName: refDraft.client_name.trim(),
+        clientContext: refDraft.client_context.trim() || null,
+        testimonial: refDraft.testimonial.trim(),
+        rating: refDraft.rating ? Number(refDraft.rating) : null,
+        referenceYear: refDraft.reference_year ? Number(refDraft.reference_year) : null,
+        isPublic: refDraft.is_public,
+      };
+
+      if (editingRefId) {
+        const res = await fetch(`/api/teacher-references/${editingRefId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json() as { ok: boolean; error?: string; reference?: TeacherReferenceRow };
+        if (!json.ok) throw new Error(json.error ?? "Failed to update reference.");
+        setReferences((prev) => prev.map((r) => r.id === editingRefId ? (json.reference ?? r) : r));
+      } else {
+        const res = await fetch("/api/teacher-references", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json() as { ok: boolean; error?: string; reference?: TeacherReferenceRow };
+        if (!json.ok) throw new Error(json.error ?? "Failed to add reference.");
+        if (json.reference) setReferences((prev) => [...prev, json.reference!]);
+      }
+
+      setShowRefForm(false);
+      setEditingRefId(null);
+      setRefDraft(emptyRefDraft());
+      setInfo(editingRefId ? "Reference updated." : "Reference added.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save reference.");
+    } finally {
+      setSavingRef(false);
+    }
+  }
+
+  async function handleDeleteRef(id: string) {
+    if (!userId) return;
+    setBusyRefId(id);
+    setError(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? "";
+      const res = await fetch(`/api/teacher-references/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json() as { ok: boolean; error?: string };
+      if (!json.ok) throw new Error(json.error ?? "Failed to delete.");
+      setReferences((prev) => prev.filter((r) => r.id !== id));
+      setInfo("Reference deleted.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete reference.");
+    } finally {
+      setBusyRefId(null);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -915,7 +1048,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         )}
 
         {/* ── Trial / verification status banner ─────────────────────────── */}
-        {trialExpired && (
+        {teacherProfileLocked && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
             <span>Trial ended. Upgrade to Plus to continue.</span>
             <Link
@@ -995,6 +1128,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
               { key: "inquiries", label: "Inquiries" },
               { key: "events", label: "Events" },
               { key: "bookings", label: "Booking" },
+              { key: "references", label: "References" },
             ] as const
           ).map(({ key, label }) => (
             <button
@@ -1831,6 +1965,205 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                       setShowEventForm(false);
                       setEditingEventId(null);
                       setEventDraft(emptyEventDraft());
+                    }}
+                    className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-400 hover:bg-white/[0.04] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ── References tab ──────────────────────────────────────────────── */}
+        {activeTab === "references" && (
+          <section className="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Student References</p>
+              {!showRefForm && (
+                <button
+                  type="button"
+                  onClick={() => { setShowRefForm(true); setEditingRefId(null); setRefDraft(emptyRefDraft()); }}
+                  className="rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-white/[0.04] transition-colors"
+                >
+                  + Add reference
+                </button>
+              )}
+            </div>
+
+            {refsLoading && (
+              <p className="text-xs text-slate-500 animate-pulse">Loading…</p>
+            )}
+
+            {!refsLoading && references.length === 0 && !showRefForm && (
+              <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center">
+                <p className="text-sm text-slate-500">No references yet.</p>
+                <p className="text-xs text-slate-600 mt-1">Add testimonials from previous students to build trust on your public profile.</p>
+              </div>
+            )}
+
+            {!refsLoading && references.length > 0 && (
+              <div className="space-y-3 mb-4">
+                {references.map((ref) => (
+                  <div key={ref.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="text-sm font-semibold text-white">{ref.client_name}</span>
+                          {ref.client_context && (
+                            <span className="text-xs text-slate-500">{ref.client_context}</span>
+                          )}
+                          {ref.reference_year && (
+                            <span className="text-xs text-slate-600">{ref.reference_year}</span>
+                          )}
+                          {ref.rating && (
+                            <span className="text-xs text-[#0df2f2]">{"★".repeat(ref.rating)}</span>
+                          )}
+                          <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border ${ref.status === "published" ? "border-emerald-800 text-emerald-500" : "border-zinc-700 text-zinc-500"}`}>
+                            {ref.status}
+                          </span>
+                          {!ref.is_public && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-500">Private</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 line-clamp-2">&ldquo;{ref.testimonial}&rdquo;</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRefId(ref.id);
+                            setRefDraft({
+                              client_name: ref.client_name,
+                              client_context: ref.client_context ?? "",
+                              testimonial: ref.testimonial,
+                              rating: ref.rating ? String(ref.rating) : "",
+                              reference_year: ref.reference_year ? String(ref.reference_year) : "",
+                              is_public: ref.is_public,
+                            });
+                            setShowRefForm(true);
+                          }}
+                          className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-slate-400 hover:bg-white/[0.04] transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyRefId === ref.id}
+                          onClick={() => void handleDeleteRef(ref.id)}
+                          className="rounded-lg border border-red-900/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-900/10 transition-colors disabled:opacity-50"
+                        >
+                          {busyRefId === ref.id ? "…" : "Delete"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showRefForm && (
+              <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-4 mt-3">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                  {editingRefId ? "Edit reference" : "New reference"}
+                </p>
+
+                {/* Client name */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-slate-400">Student name <span className="text-red-400">*</span></label>
+                    <span className="text-xs text-slate-600">{refDraft.client_name.length}/80</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={refDraft.client_name}
+                    onChange={(e) => setRefDraft((d) => ({ ...d, client_name: e.target.value.slice(0, 80) }))}
+                    placeholder="e.g. Maria G."
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
+                  />
+                </div>
+
+                {/* Client context */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-slate-400">Context (optional)</label>
+                    <span className="text-xs text-slate-600">{refDraft.client_context.length}/80</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={refDraft.client_context}
+                    onChange={(e) => setRefDraft((d) => ({ ...d, client_context: e.target.value.slice(0, 80) }))}
+                    placeholder="e.g. Bachata student, 2 years"
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
+                  />
+                </div>
+
+                {/* Testimonial */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-slate-400">Testimonial <span className="text-red-400">*</span></label>
+                    <span className="text-xs text-slate-600">{refDraft.testimonial.length}/500</span>
+                  </div>
+                  <textarea
+                    value={refDraft.testimonial}
+                    onChange={(e) => setRefDraft((d) => ({ ...d, testimonial: e.target.value.slice(0, 500) }))}
+                    rows={3}
+                    placeholder="What the student said about your teaching…"
+                    className="w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
+                  />
+                </div>
+
+                {/* Rating and Year */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400">Rating (1–5)</label>
+                    <select
+                      value={refDraft.rating}
+                      onChange={(e) => setRefDraft((d) => ({ ...d, rating: e.target.value }))}
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+                    >
+                      <option value="">No rating</option>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <option key={n} value={n}>{n} star{n !== 1 ? "s" : ""}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400">Year</label>
+                    <input
+                      type="number"
+                      value={refDraft.reference_year}
+                      onChange={(e) => setRefDraft((d) => ({ ...d, reference_year: e.target.value }))}
+                      placeholder="e.g. 2023"
+                      min={1990}
+                      max={2030}
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-white/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Public toggle */}
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-slate-400">Show on public profile</label>
+                  <Toggle checked={refDraft.is_public} onChange={(v) => setRefDraft((d) => ({ ...d, is_public: v }))} />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveRef()}
+                    disabled={savingRef}
+                    className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-[#06121a] disabled:opacity-60"
+                  >
+                    {savingRef ? "Saving…" : editingRefId ? "Update" : "Add reference"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRefForm(false);
+                      setEditingRefId(null);
+                      setRefDraft(emptyRefDraft());
                     }}
                     className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-400 hover:bg-white/[0.04] transition-colors"
                   >

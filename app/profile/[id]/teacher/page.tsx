@@ -18,6 +18,8 @@ import type { ProfileMediaItem } from "@/lib/profile-media/types";
 import TeacherExperiencesSection from "@/components/teacher/TeacherExperiencesSection";
 import TeacherOwnerActions from "@/components/teacher/TeacherOwnerActions";
 import ProfileSettingsMenu from "@/components/teacher/ProfileSettingsMenu";
+import ShareTeacherProfileButton from "@/components/teacher/ShareTeacherProfileButton";
+import TeacherReferencesSection from "@/components/teacher/TeacherReferencesSection";
 
 // ---------------------------------------------------------------------------
 // Supabase helper (public anon client — reads public data only)
@@ -77,6 +79,16 @@ type EventTeaching = {
   start_date: string | null;
   end_date: string | null;
   notes: string | null;
+};
+
+type TeacherReference = {
+  id: string;
+  client_name: string;
+  client_context: string | null;
+  testimonial: string;
+  rating: number | null;
+  reference_year: number | null;
+  sort_order: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +193,7 @@ export default async function TeacherProfilePage({
     regularClassesResult,
     eventTeachingResult,
     profileMediaResult,
+    referencesResult,
   ] = await Promise.allSettled([
     supabase
       .from("teacher_info_blocks")
@@ -204,6 +217,14 @@ export default async function TeacherProfilePage({
       .select("*")
       .eq("user_id", id)
       .eq("status", "ready"),
+    supabase
+      .from("teacher_references")
+      .select("id,client_name,client_context,testimonial,rating,reference_year,sort_order")
+      .eq("teacher_user_id", id)
+      .eq("is_public", true)
+      .eq("status", "published")
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   const infoBlocks: TeacherInfoBlock[] =
@@ -232,6 +253,11 @@ export default async function TeacherProfilePage({
         )
       : [];
 
+  const teacherReferences: TeacherReference[] =
+    referencesResult.status === "fulfilled" && referencesResult.value.data
+      ? (referencesResult.value.data as TeacherReference[])
+      : [];
+
   // ── Derived values ───────────────────────────────────────────────────────
   const displayName: string = profileRow.display_name ?? "Unknown";
   const avatarUrl = resolveAvatarUrl({ avatarUrl: profileRow.avatar_url });
@@ -251,18 +277,20 @@ export default async function TeacherProfilePage({
 
         {/* ── Hero ────────────────────────────────────────────────────────── */}
         <section className="relative grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10 lg:gap-12 mb-12 sm:mb-20 lg:mb-24">
-          {/* Settings + Switch Profile - Top right of hero section (desktop, aligned with photo top) */}
+          {/* Share + Switch Profile - Top right of hero section (desktop) */}
           <div className="hidden lg:flex items-center gap-2 absolute top-0 right-0 z-30">
-            <ProfileSettingsMenu profileUserId={id} teacherProfileEnabled />
+            <ShareTeacherProfileButton displayName={displayName} size="compact" />
             <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
           </div>
 
           {/* Left: photo */}
           <div className="lg:col-span-5">
-            {/* Settings + Switcher row (mobile only) */}
-            <div className="flex items-center justify-between mb-2 lg:hidden">
-              <ProfileSettingsMenu profileUserId={id} teacherProfileEnabled />
-              <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
+            {/* Share + Switcher row (mobile only) */}
+            <div className="flex items-center justify-end mb-2 lg:hidden">
+              <div className="flex items-center gap-2">
+                <ShareTeacherProfileButton displayName={displayName} size="compact" />
+                <TeacherOwnerActions profileUserId={id} socialProfileHref={socialProfileHref} size="compact" />
+              </div>
             </div>
 
             <div className="relative">
@@ -478,6 +506,8 @@ export default async function TeacherProfilePage({
           </div>
         </section>
 
+        {/* ── Student References ───────────────────────────────────────────── */}
+        <TeacherReferencesSection references={teacherReferences} />
 
       </div>
     </div>

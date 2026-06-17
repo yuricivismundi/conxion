@@ -993,7 +993,11 @@ function EditMePage() {
         setHostingTransitAccess(nextHostingTransitAccess);
         setHostingNotes(nextHostingNotes);
         setHouseRules(nextHouseRules);
-        setPaymentVerified(profile?.verified === true);
+        setPaymentVerified(
+          profile?.verified === true &&
+          typeof profile?.verified_label === "string" &&
+          profile.verified_label.trim().toLowerCase() === VERIFIED_VIA_PAYMENT_LABEL.toLowerCase()
+        );
         setAvatarUrl(nextAvatarUrl);
         setLocalAvatarPreviewUrl(null);
 
@@ -1047,7 +1051,7 @@ function EditMePage() {
                   const diff = new Date(endsAt).getTime() - Date.now();
                   if (diff > 0) {
                     setTrialDaysLeft(Math.ceil(diff / (1000 * 60 * 60 * 24)));
-                  } else if (startedAt) {
+                  } else if (startedAt && !paymentVerified) {
                     setTrialExpiredBadge(true);
                   }
                 }

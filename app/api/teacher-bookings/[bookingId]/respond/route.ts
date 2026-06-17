@@ -195,6 +195,27 @@ export async function POST(req: Request, { params }: RouteParams) {
       await emitTeacherBookingEvent({ serviceClient: auth.serviceClient, threadId, senderId: auth.userId, body: `${teacherName} accepted the booking for ${formatShortDate(booking.session_date)} at ${formatShortTime(booking.session_time)}.`, statusTag: "accepted", metadata: { booking_id: booking.id, calendar_url: calendarUrl } });
     } catch { /* non-fatal */ }
 
+    // Best-effort: schedule reference prompts for after the session date
+    try {
+      const sessionDateMs = new Date(booking.session_date).getTime();
+      const dueAt = new Date(sessionDateMs + 24 * 60 * 60 * 1000).toISOString();   // session date + 1 day
+      const expiresAt = new Date(sessionDateMs + 10 * 24 * 60 * 60 * 1000).toISOString(); // + 10 days
+      const promptBase = {
+        source_table: "teacher_session_bookings",
+        source_id: booking.id,
+        context_tag: "private_class",
+        due_at: dueAt,
+        expires_at: expiresAt,
+        status: "pending",
+      };
+      await (auth.serviceClient as unknown as { from: (t: string) => { upsert: (rows: unknown[], opts: unknown) => Promise<unknown> } })
+        .from("reference_requests")
+        .upsert([
+          { ...promptBase, user_id: booking.student_id, peer_user_id: booking.teacher_id },
+          { ...promptBase, user_id: booking.teacher_id, peer_user_id: booking.student_id },
+        ], { onConflict: "user_id,peer_user_id,source_id" });
+    } catch { /* non-fatal */ }
+
     return NextResponse.json({ ok: true, status: "accepted", calendarUrl });
   } catch (error) {
     return NextResponse.json(
