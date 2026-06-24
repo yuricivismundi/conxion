@@ -19,7 +19,7 @@ import TeacherExperiencesSection from "@/components/teacher/TeacherExperiencesSe
 import TeacherOwnerActions from "@/components/teacher/TeacherOwnerActions";
 import ProfileSettingsMenu from "@/components/teacher/ProfileSettingsMenu";
 import ShareTeacherProfileButton from "@/components/teacher/ShareTeacherProfileButton";
-import TeacherReferencesSection from "@/components/teacher/TeacherReferencesSection";
+import TeacherReferencesSection, { type AnyTeacherReference } from "@/components/teacher/TeacherReferencesSection";
 
 // ---------------------------------------------------------------------------
 // Supabase helper (public anon client — reads public data only)
@@ -30,6 +30,15 @@ function getSupabasePublicClient() {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) throw new Error("Missing Supabase configuration");
   return createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function getSupabaseServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase service configuration");
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -81,15 +90,6 @@ type EventTeaching = {
   notes: string | null;
 };
 
-type TeacherReference = {
-  id: string;
-  client_name: string;
-  client_context: string | null;
-  testimonial: string;
-  rating: number | null;
-  reference_year: number | null;
-  sort_order: number;
-};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -188,12 +188,14 @@ export default async function TeacherProfilePage({
   }
 
   // ── 3–7. Parallel fetches ───────────────────────────────────────────────
+  const serviceSupabase = getSupabaseServiceClient();
   const [
     infoBlocksResult,
     regularClassesResult,
     eventTeachingResult,
     profileMediaResult,
-    referencesResult,
+    manualRefsResult,
+    verifiedRefsResult,
   ] = await Promise.allSettled([
     supabase
       .from("teacher_info_blocks")
@@ -225,6 +227,12 @@ export default async function TeacherProfilePage({
       .eq("status", "published")
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    serviceSupabase
+      .from("references")
+      .select("id,author_id,feedback,body,rating,created_at,reply_text,context_tag")
+      .eq("recipient_id", id)
+      .eq("context_tag", "private_class")
+      .order("created_at", { ascending: false }),
   ]);
 
   const infoBlocks: TeacherInfoBlock[] =
@@ -253,10 +261,49 @@ export default async function TeacherProfilePage({
         )
       : [];
 
-  const teacherReferences: TeacherReference[] =
-    referencesResult.status === "fulfilled" && referencesResult.value.data
-      ? (referencesResult.value.data as TeacherReference[])
+  const manualRefs: AnyTeacherReference[] =
+    manualRefsResult.status === "fulfilled" && manualRefsResult.value.data
+      ? (manualRefsResult.value.data as Array<Record<string, unknown>>).map((r) => ({
+          id: r.id as string,
+          client_name: r.client_name as string,
+          client_context: (r.client_context as string | null) ?? null,
+          testimonial: r.testimonial as string,
+          rating: (r.rating as number | null) ?? null,
+          reference_year: (r.reference_year as number | null) ?? null,
+          kind: "manual" as const,
+        }))
       : [];
+
+  const rawVerifiedRefs = verifiedRefsResult.status === "fulfilled" ? (verifiedRefsResult.value.data ?? []) as Array<Record<string, unknown>> : [];
+
+  // Fetch author profiles separately (author_id is FK to auth.users, not profiles)
+  const authorIds = [...new Set(rawVerifiedRefs.map((r) => r.author_id as string).filter(Boolean))];
+  const authorProfilesMap: Record<string, { display_name: string | null; avatar_url: string | null }> = {};
+  if (authorIds.length > 0) {
+    const { data: authorProfiles } = await serviceSupabase
+      .from("profiles")
+      .select("user_id,display_name,avatar_url")
+      .in("user_id", authorIds);
+    for (const p of (authorProfiles ?? []) as Array<Record<string, unknown>>) {
+      authorProfilesMap[p.user_id as string] = { display_name: p.display_name as string | null, avatar_url: p.avatar_url as string | null };
+    }
+  }
+
+  const verifiedRefs: AnyTeacherReference[] = rawVerifiedRefs.map((r) => {
+    const profile = authorProfilesMap[r.author_id as string] ?? null;
+    return {
+      id: r.id as string,
+      author_display_name: profile?.display_name ?? null,
+      author_avatar_url: profile?.avatar_url ?? null,
+      body: ((r.body ?? r.feedback) as string) ?? "",
+      rating: (r.rating as number | null) ?? null,
+      created_at: r.created_at as string,
+      reply_text: (r.reply_text as string | null) ?? null,
+      kind: "verified" as const,
+    };
+  });
+
+  const allReferences: AnyTeacherReference[] = [...verifiedRefs, ...manualRefs];
 
   // ── Derived values ───────────────────────────────────────────────────────
   const displayName: string = profileRow.display_name ?? "Unknown";
@@ -384,7 +431,7 @@ export default async function TeacherProfilePage({
             <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
           </div>
-          <div className="sm:rounded-[28px] sm:overflow-hidden sm:bg-[#242428]">
+          <div>
             <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
           </div>
         </section>
@@ -507,7 +554,7 @@ export default async function TeacherProfilePage({
         </section>
 
         {/* ── Student References ───────────────────────────────────────────── */}
-        <TeacherReferencesSection references={teacherReferences} />
+        <TeacherReferencesSection references={allReferences} teacherUserId={id} />
 
       </div>
     </div>

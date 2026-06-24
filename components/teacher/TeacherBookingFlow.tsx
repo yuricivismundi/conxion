@@ -344,7 +344,7 @@ export default function TeacherBookingFlow({
 
   function renderMonthSection(month: { label: string; cells: Array<{ key: string; date: string | null; inMonth: boolean; available: boolean }> }) {
     return (
-      <section key={month.label} className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-white/[0.07]" style={{ background: "#181c20" }}>
+      <section key={month.label} className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-white/[0.12] bg-white/[0.08]">
         <div className="flex items-center justify-between px-4 pb-3 pt-4">
           <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
           {month.cells.some((c) => c.available) ? (
@@ -663,7 +663,7 @@ export default function TeacherBookingFlow({
 
   if (variant === "inline") {
     return (
-      <div className="w-full min-w-0 max-w-full overflow-hidden p-2 sm:p-8 lg:p-10">
+      <div className="w-full min-w-0 max-w-full overflow-hidden">
 
         <div className="space-y-6">
           {renderStateBanners()}
@@ -672,7 +672,7 @@ export default function TeacherBookingFlow({
         <div className="mt-6 grid w-full min-w-0 gap-8 xl:grid-cols-[minmax(0,2fr)_360px]">
           <div className="min-w-0 space-y-6">{renderCalendarGrid()}</div>
 
-          <aside ref={slotsRef} className="scroll-mt-6 min-w-0 break-words rounded-2xl border border-white/[0.07] p-5" style={{ background: "#181c20", overflowWrap: "anywhere" }}>
+          <aside ref={slotsRef} className="scroll-mt-6 min-w-0 break-words rounded-2xl border border-white/[0.12] bg-white/[0.08] p-5" style={{ overflowWrap: "anywhere" }}>
             {/* Back to calendar — mobile only */}
             {selectedDate && (
               <button

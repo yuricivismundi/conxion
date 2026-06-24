@@ -1049,9 +1049,12 @@ function EditMePage() {
                 const startedAt = tpRes.data.teacher_profile_trial_started_at as string | null;
                 if (endsAt) {
                   const diff = new Date(endsAt).getTime() - Date.now();
+                  const isVerified = profile?.verified === true &&
+                    typeof profile?.verified_label === "string" &&
+                    profile.verified_label.trim().toLowerCase() === VERIFIED_VIA_PAYMENT_LABEL.toLowerCase();
                   if (diff > 0) {
                     setTrialDaysLeft(Math.ceil(diff / (1000 * 60 * 60 * 24)));
-                  } else if (startedAt && !paymentVerified) {
+                  } else if (startedAt && !isVerified) {
                     setTrialExpiredBadge(true);
                   }
                 }
