@@ -245,6 +245,39 @@ async function resolveCompletedSource(params: {
     };
   }
 
+  if (sourceTable === "teacher_session_bookings") {
+    const res = await params.supabase
+      .from("teacher_session_bookings")
+      .select("id,teacher_id,student_id,status,session_date,accepted_at")
+      .eq("id", params.sourceId)
+      .maybeSingle();
+    if (res.error || !res.data) {
+      return {
+        completed: false,
+        reason: "References are only available after the session is confirmed.",
+        publicCategory,
+        sourceType,
+      };
+    }
+    const row = res.data as Record<string, unknown>;
+    const teacherId = normalizeText(row.teacher_id);
+    const studentId = normalizeText(row.student_id);
+    const status = normalizeText(row.status).toLowerCase();
+    const samePair =
+      (teacherId === params.authorUserId && studentId === params.recipientUserId) ||
+      (teacherId === params.recipientUserId && studentId === params.authorUserId);
+    if (!samePair || status !== "accepted") {
+      return {
+        completed: false,
+        reason: "References are only available after the session is confirmed.",
+        publicCategory,
+        sourceType,
+      };
+    }
+    const sessionDate = normalizeIso(row.session_date) || normalizeIso(row.accepted_at) || new Date().toISOString();
+    return { completed: true, completedAt: sessionDate, publicCategory: "Classes", sourceType };
+  }
+
   if (sourceTable === "trip_requests") {
     const res = await params.supabase
       .from("trip_requests")

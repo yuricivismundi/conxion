@@ -182,6 +182,7 @@ export function referenceSourceTypeForOrigin(params: {
   if (sourceTable === "connection_syncs" && contextTag === "social_dance") return "social_dance_activity";
   if (sourceTable === "connection_syncs" && contextTag === "private_class") return "class_activity";
   if (sourceTable === "connection_syncs" && contextTag === "practice") return "practice_activity";
+  if (sourceTable === "teacher_session_bookings") return "class_activity";
 
   switch (contextTag) {
     case "practice":

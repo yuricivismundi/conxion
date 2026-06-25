@@ -14,6 +14,7 @@ import ReferencesHubView from "@/components/network/ReferencesHubView";
 import ProfileMediaShowcase from "@/components/profile/ProfileMediaShowcase";
 import TeacherBadge from "@/components/profile/TeacherBadge";
 import BookSessionModal from "@/components/teacher/BookSessionModal";
+import GuestBookingModal from "@/components/teacher/GuestBookingModal";
 import RequestInfoModal from "@/components/teacher/RequestInfoModal";
 import { DashboardEmbedModeProvider } from "@/components/dashboard/DashboardEmbedMode";
 import VerifiedBadge from "@/components/VerifiedBadge";
@@ -1698,6 +1699,12 @@ function MemberProfilePage() {
   useEffect(() => {
     if (!loading) setAnimateMetrics(true);
   }, [loading]);
+
+  useEffect(() => {
+    if (searchParams.get("book") === "1" && canBookSession) {
+      setBookingOpen(true);
+    }
+  }, [searchParams, canBookSession]);
 
   useEffect(() => {
     const verificationState = searchParams.get("verification");
@@ -3588,13 +3595,23 @@ function MemberProfilePage() {
           />
         ) : null}
 
-        {profileUserId && profile ? (
+        {profileUserId && profile && meId ? (
           <BookSessionModal
             open={bookingOpen}
             teacherUserId={profileUserId}
             teacherName={profile.displayName}
             onClose={() => setBookingOpen(false)}
             onSubmitted={(message) => setInfoFeedback(message)}
+          />
+        ) : null}
+
+        {profileUserId && profile && !meId ? (
+          <GuestBookingModal
+            open={bookingOpen}
+            teacherUserId={profileUserId}
+            teacherName={profile.displayName}
+            teacherPhotoUrl={profile.photoUrl}
+            onClose={() => setBookingOpen(false)}
           />
         ) : null}
 

@@ -1331,13 +1331,13 @@ function EventsExplorePageContent() {
                 Browse public dance events by location and date. Create an account to unlock the full event experience.
               </p>
             </div>
-            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
-              <p className="whitespace-nowrap text-[12px] text-white/40">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <p className="whitespace-nowrap text-[12px] text-white/40 sm:order-first">
                 Showing <span className="font-semibold text-white/70">{discoverEvents.length}</span>{" "}
                 {effectivePastOnly ? "past events" : "events"}
               </p>
               <div className="flex items-center gap-2">
-              <label className="group relative">
+              <label className="group relative flex-1 sm:flex-none">
                 <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
                   search
                 </span>
@@ -1346,7 +1346,7 @@ function EventsExplorePageContent() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search events, cities, venues..."
-                  className="h-10 w-[220px] rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25"
+                  className="h-10 w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-3 text-[13px] text-white/90 outline-none placeholder:text-white/35 transition focus:border-[#00F5FF]/50 focus:ring-1 focus:ring-[#00F5FF]/25 sm:w-[220px]"
                 />
               </label>
               <button

@@ -107,20 +107,55 @@ export async function fetchUnreadThreadTokens(userId: string): Promise<{ tokens:
     if (id) threadMap.set(id, raw);
   }
 
-  const unreadTokens = new Set<string>();
+  // Build the candidate set first: threads where last_message_at > last_read_at.
+  // Then verify the LAST message in each candidate was NOT sent by the current user
+  // — otherwise their own outgoing message inflates the unread count even though
+  // there's nothing new for them to read.
+  const candidates: Array<{ threadId: string; lastReadAt: number; thread: ThreadRow }> = [];
   for (const row of activeParticipants) {
     const threadId = typeof row.thread_id === "string" ? row.thread_id : "";
     if (!threadId) continue;
-
     const thread = threadMap.get(threadId);
-    const lastMessageAt = toEpoch(thread?.last_message_at);
+    if (!thread) continue;
+    const lastMessageAt = toEpoch(thread.last_message_at);
     if (!lastMessageAt) continue;
-
     const lastReadAt = toEpoch(row.last_read_at);
-    if (!lastReadAt || lastMessageAt > lastReadAt) {
-      const token = toThreadToken(thread ?? {});
-      if (token) unreadTokens.add(token);
-    }
+    if (lastReadAt && lastMessageAt <= lastReadAt) continue;
+    candidates.push({ threadId, lastReadAt, thread });
+  }
+
+  if (candidates.length === 0) return { tokens: new Set<string>(), error: null };
+
+  // Fetch incoming messages (from someone other than the user) across all candidate
+  // threads. We only care whether any incoming message exists newer than this user's
+  // last_read_at for each thread.
+  const candidateIds = candidates.map((c) => c.threadId);
+  const messagesRes = await supabase
+    .from("thread_messages")
+    .select("thread_id,sender_id,created_at")
+    .in("thread_id", candidateIds)
+    .neq("sender_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(candidateIds.length * 5, 200));
+
+  if (messagesRes.error) return { tokens: new Set<string>(), error: messagesRes.error.message };
+
+  const latestIncomingByThread = new Map<string, number>();
+  for (const raw of (messagesRes.data ?? []) as Array<{ thread_id?: string | null; created_at?: string | null }>) {
+    const tid = typeof raw.thread_id === "string" ? raw.thread_id : "";
+    if (!tid) continue;
+    if (latestIncomingByThread.has(tid)) continue; // ordered desc, first hit wins
+    const ts = toEpoch(raw.created_at);
+    if (ts) latestIncomingByThread.set(tid, ts);
+  }
+
+  const unreadTokens = new Set<string>();
+  for (const c of candidates) {
+    const latestIncoming = latestIncomingByThread.get(c.threadId);
+    if (!latestIncoming) continue; // no incoming messages → user is alone or sent the last one
+    if (c.lastReadAt && latestIncoming <= c.lastReadAt) continue; // already read past it
+    const token = toThreadToken(c.thread);
+    if (token) unreadTokens.add(token);
   }
 
   return { tokens: unreadTokens, error: null };
