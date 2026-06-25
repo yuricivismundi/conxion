@@ -15,7 +15,7 @@ export const LEGAL_PROFILE: LegalProfile = {
   brandName: "ConXion",
   serviceDomain: "conxion.social",
   operatorName: "Yuri Bucio",
-  privacyEmail: "privacy@conxion.app",
+  privacyEmail: "privacy@conxion.social",
   supportEmail: "support@conxion.social",
   postalAddressLines: ["Liivalaia 40", "Tallinn"],
   postalCountry: "Estonia",
