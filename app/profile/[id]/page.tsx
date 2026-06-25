@@ -3610,7 +3610,7 @@ function MemberProfilePage() {
             open={bookingOpen}
             teacherUserId={profileUserId}
             teacherName={profile.displayName}
-            teacherPhotoUrl={profile.photoUrl}
+            teacherPhotoUrl={profile.avatarUrl}
             onClose={() => setBookingOpen(false)}
           />
         ) : null}
