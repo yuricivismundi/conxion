@@ -182,21 +182,13 @@ export async function POST(req: Request) {
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: mapConnectionActionErrorStatus(error.message) });
       const requesterId = typeof connectionRow?.requester_id === "string" ? connectionRow.requester_id : "";
       if (requesterId && connId) {
-        await Promise.all([
-          sendAppEmailBestEffort({
-            kind: "connection_request_declined",
-            recipientUserId: requesterId,
-            actorUserId: authData.user.id,
-            connectionId: connId,
-          }),
-          sendConnectionNotification({
+        await sendConnectionNotification({
             service,
             recipientId: requesterId,
             actorId: authData.user.id,
             kind: "connection_request_declined",
             connectionId: connId,
-          }),
-        ]);
+          });
       }
       return NextResponse.json({ ok: true });
     }

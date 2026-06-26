@@ -8,10 +8,8 @@ type DispatchBody = {
 };
 
 const ALLOWED_KINDS: LifecycleEmailKind[] = [
-  "sync_upcoming",
+  "activity_upcoming",
   "event_starting_soon",
-  "travel_plan_upcoming",
-  "inbox_digest",
 ];
 
 function isLocalDev() {
