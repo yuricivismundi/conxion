@@ -135,35 +135,25 @@ function formatSupportStatusLabel(value: string | null | undefined) {
 export function buildCtaPath(params: AppEmailParams) {
   switch (params.kind) {
     case "connection_request_received":
-    case "connection_request_declined":
       return "/messages?tab=requests";
     case "connection_request_accepted":
       return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
     case "trip_request_received":
     case "trip_request_accepted":
     case "trip_request_declined":
-    case "travel_plan_upcoming":
       return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : params.hostingRequestId ? "/activity?tab=hosting" : "/activity?tab=trips";
     case "hosting_request_received":
     case "hosting_request_accepted":
     case "hosting_request_declined":
       return "/activity?tab=hosting";
-    case "sync_proposed":
-    case "sync_accepted":
-    case "sync_declined":
-    case "sync_upcoming":
+    case "activity_upcoming":
       return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
-    case "sync_completed":
     case "reference_received":
       return "/references";
     case "reference_prompt_due":
-    case "reference_prompt_reminder":
       return params.actorUserId
         ? `/references?userId=${encodeURIComponent(params.actorUserId)}`
         : "/references";
-    case "event_request_received":
-    case "event_joined":
-      return params.eventId ? `/events/${params.eventId}/inbox` : "/events";
     case "event_request_accepted":
     case "event_request_declined":
     case "event_starting_soon":
@@ -171,8 +161,6 @@ export function buildCtaPath(params: AppEmailParams) {
     case "welcome_member":
     case "pro_upgrade":
       return "/discover";
-    case "inbox_digest":
-      return "/messages";
     case "support_case_received":
     case "support_case_updated":
       return params.supportClaimId ? `/support/cases/${params.supportClaimId}` : "/support";
@@ -239,16 +227,6 @@ export function buildEmailCopy(params: {
         details: [],
         ctaLabel: "Open connection",
         footerNote: "The connection is now active in your network.",
-      };
-    case "connection_request_declined":
-      return {
-        eyebrow: "Connection Update",
-        subject: `${params.actorName} declined your connection request`,
-        title: "Connection request declined",
-        intro: `${params.actorName} declined your connection request.`,
-        details: [],
-        ctaLabel: "View requests",
-        footerNote: "You can keep exploring dancers and send a new request elsewhere.",
       };
     case "trip_request_received":
       return {
@@ -350,62 +328,6 @@ export function buildEmailCopy(params: {
         ctaLabel: "Open hosting inbox",
         footerNote: "You can keep exploring hosts or send another offer when relevant.",
       };
-    case "sync_proposed":
-      return {
-        eyebrow: "Sync Request",
-        subject: `${params.actorName} proposed a ${syncLabel}`,
-        title: "New sync request",
-        intro: `${params.actorName} wants to sync with you.`,
-        details: [],
-        ctaLabel: "Review sync",
-        footerNote: "",
-        ctaHint: syncStart ? `Scheduled for ${syncStart}` : "Open the request and respond.",
-        titleSizePx: 30,
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
-    case "sync_accepted":
-      return {
-        eyebrow: "Sync Accepted",
-        subject: `${params.actorName} accepted your ${syncLabel}`,
-        title: "Sync accepted",
-        intro: `${params.actorName} accepted your ${syncLabel}.`,
-        details: syncStart ? [`Scheduled for: ${syncStart}`] : [],
-        ctaLabel: "Open connection",
-        footerNote: "The session is confirmed. Use chat to align timing and logistics.",
-      };
-    case "sync_declined":
-      return {
-        eyebrow: "Sync Declined",
-        subject: `${params.actorName} declined your ${syncLabel}`,
-        title: "Sync declined",
-        intro: `${params.actorName} declined your ${syncLabel}.`,
-        details: syncStart ? [`Scheduled for: ${syncStart}`] : [],
-        ctaLabel: "Open connection",
-        footerNote: "You can propose another sync later from the same connection.",
-      };
-    case "sync_completed":
-      return {
-        eyebrow: "Reference Opportunity",
-        subject: `${params.actorName} marked your ${syncLabel} as completed`,
-        title: "Session completed",
-        intro: `${params.actorName} marked your ${syncLabel} as completed. You can now leave a reference.`,
-        details: [],
-        ctaLabel: "Leave a reference",
-        footerNote: "A strong network grows from timely feedback after real interactions.",
-      };
-    case "event_request_received":
-      return {
-        eyebrow: "Event Access Request",
-        subject: `${params.actorName} requested access to ${eventLabel}`,
-        title: "New event access request",
-        intro: `${params.actorName} requested access to ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "Review request",
-        footerNote: "Approve or decline from the event inbox.",
-      };
     case "event_request_accepted":
       return {
         eyebrow: "Event Access Accepted",
@@ -425,16 +347,6 @@ export function buildEmailCopy(params: {
         details: eventStart ? [`Starts: ${eventStart}`] : [],
         ctaLabel: "View event",
         footerNote: "Keep exploring events that match your travel and dance plans.",
-      };
-    case "event_joined":
-      return {
-        eyebrow: "New Attendee",
-        subject: `${params.actorName} joined ${eventLabel}`,
-        title: "New event attendee",
-        intro: `${params.actorName} joined ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "Open event inbox",
-        footerNote: "The event inbox has the latest attendance and request activity.",
       };
     case "reference_received":
       return {
@@ -465,17 +377,6 @@ export function buildEmailCopy(params: {
           "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
       };
     }
-    case "reference_prompt_reminder":
-      return {
-        eyebrow: "Reference Request",
-        subject: `Leave a reference for your ${referenceContextLabel} with ${params.actorName}`,
-        title: "Your reference is ready",
-        intro: `Your ${referenceContextLabel} with ${params.actorName} is still waiting for a reference.`,
-        details: promptExpires ? [`Expires: ${promptExpires}`] : [],
-        ctaLabel: "Leave a reference",
-        footerNote:
-          "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
-      };
     case "welcome_member":
       return {
         eyebrow: "Welcome",
@@ -492,14 +393,14 @@ export function buildEmailCopy(params: {
         showFooterNote: false,
         showFallbackLink: false,
       };
-    case "sync_upcoming":
+    case "activity_upcoming":
       return {
         eyebrow: "Starting Soon",
-        subject: `Your ${syncLabel} with ${params.actorName} is coming up`,
-        title: "Your sync is coming up",
-        intro: `${syncLabel[0]?.toUpperCase() ?? "S"}${syncLabel.slice(1)} with ${params.actorName} is scheduled soon.`,
+        subject: `Your activity with ${params.actorName} is coming up`,
+        title: "Your activity is coming up",
+        intro: `${syncLabel[0]?.toUpperCase() ?? "A"}${syncLabel.slice(1)} with ${params.actorName} is scheduled soon.`,
         details: syncStart ? [`Starts: ${syncStart}`] : [],
-        ctaLabel: "Open sync",
+        ctaLabel: "Open activity",
         footerNote: "Use the connection thread to confirm timing or any last details.",
       };
     case "event_starting_soon":
@@ -511,34 +412,6 @@ export function buildEmailCopy(params: {
         details: eventStart ? [`Starts: ${eventStart}`] : [],
         ctaLabel: "Open event",
         footerNote: "Check the event page for attendees, updates, and final logistics.",
-      };
-    case "travel_plan_upcoming":
-      return {
-        eyebrow: "Travel Reminder",
-        subject: params.hosting ? "Your hosting plan starts soon" : `${tripLabel} starts soon`,
-        title: params.hosting ? "Your hosting plan starts soon" : "Your trip starts soon",
-        intro: params.hosting
-          ? `Your ${hostingLabel} with ${params.actorName} is coming up soon.`
-          : `${tripLabel} is coming up soon on ConXion.`,
-        details: hostingWindow ? [`Stay window: ${hostingWindow}`] : tripWindow ? [`Trip dates: ${tripWindow}`] : [],
-        ctaLabel: params.hosting ? "Open hosting" : "Open trip",
-        footerNote: "Review your thread now so travel details are aligned before the date arrives.",
-      };
-    case "inbox_digest":
-      return {
-        eyebrow: "Inbox",
-        subject: `${unreadCount} unread conversation${unreadCount === 1 ? "" : "s"} on ConXion`,
-        title: unreadCount === 1 ? "You have 1 unread message" : `You have ${unreadCount} unread messages`,
-        intro: "Open your inbox and catch up.",
-        details: [],
-        ctaLabel: "Open inbox",
-        footerNote: "",
-        ctaHint: "Fast replies keep momentum.",
-        titleSizePx: 30,
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
       };
     case "support_case_received":
       return {

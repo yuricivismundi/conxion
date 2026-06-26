@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
-import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 
 type SyncAction = "propose" | "accept" | "decline" | "cancel" | "complete";
 
@@ -535,13 +534,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: insertRes.error.message }, { status: 400 });
       }
 
-      await sendAppEmailBestEffort({
-        kind: "sync_proposed",
-        recipientUserId: recipientId,
-        actorUserId: meId,
-        connectionId,
-        syncId: insertRes.data.id,
-      });
       await createSyncNotificationCompat({
         service,
         userId: recipientId,
@@ -726,14 +718,6 @@ export async function POST(req: Request) {
           : action === "decline"
             ? "sync_declined"
             : "sync_completed";
-
-      await sendAppEmailBestEffort({
-        kind,
-        recipientUserId,
-        actorUserId: meId,
-        connectionId: sync.connection_id,
-        syncId,
-      });
 
       await createSyncNotificationCompat({
         service,
