@@ -211,22 +211,22 @@ export function buildEmailCopy(params: {
     case "connection_request_received":
       return {
         eyebrow: "Connection Request",
-        subject: `${params.actorName} sent you a connection request`,
-        title: "New connection request",
-        intro: `${params.actorName} wants to connect with you on ConXion.`,
+        subject: `${params.actorName} wants to connect`,
+        title: `${params.actorName} sent you a request`,
+        intro: `Review their profile and accept or decline.`,
         details: [],
         ctaLabel: "Review request",
-        footerNote: "Accept or decline the request inside your ConXion inbox.",
+        footerNote: "",
       };
     case "connection_request_accepted":
       return {
         eyebrow: "Connection Accepted",
-        subject: `${params.actorName} accepted your connection request`,
-        title: "Connection request accepted",
-        intro: `${params.actorName} accepted your request. You can continue in chat now.`,
+        subject: `${params.actorName} accepted your request`,
+        title: "You're now connected",
+        intro: `Start a conversation with ${params.actorName}.`,
         details: [],
-        ctaLabel: "Open connection",
-        footerNote: "The connection is now active in your network.",
+        ctaLabel: "Open chat",
+        footerNote: "",
       };
     case "trip_request_received":
       return {
@@ -312,79 +312,77 @@ export function buildEmailCopy(params: {
       return {
         eyebrow: "Hosting Accepted",
         subject: `Your ${hostingLabel} was accepted`,
-        title: "Hosting request accepted",
-        intro: `${params.actorName} accepted your ${hostingLabel}.`,
-        details: hostingWindow ? [`Stay window: ${hostingWindow}`] : [],
+        title: `${params.actorName} said yes`,
+        intro: hostingWindow ? `Your stay is set for ${hostingWindow}.` : "Coordinate the details in your inbox thread.",
+        details: [],
         ctaLabel: "Open hosting inbox",
-        footerNote: "Use the inbox thread to coordinate arrival details and expectations.",
+        footerNote: "",
       };
     case "hosting_request_declined":
       return {
         eyebrow: "Hosting Declined",
         subject: `Your ${hostingLabel} was declined`,
-        title: "Hosting request declined",
-        intro: `${params.actorName} declined your ${hostingLabel}.`,
-        details: hostingWindow ? [`Stay window: ${hostingWindow}`] : [],
+        title: `${params.actorName} can't host this time`,
+        intro: "You can explore other hosts or send a new offer when timing works.",
+        details: [],
         ctaLabel: "Open hosting inbox",
-        footerNote: "You can keep exploring hosts or send another offer when relevant.",
+        footerNote: "",
       };
     case "event_request_accepted":
       return {
         eyebrow: "Event Access Accepted",
-        subject: `Your request for ${eventLabel} was accepted`,
-        title: "Event request accepted",
-        intro: `${params.actorName} accepted your request for ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
+        subject: `You're in — ${eventLabel}`,
+        title: "Access granted",
+        intro: eventStart ? `${eventLabel} starts ${eventStart}.` : `You can now view ${eventLabel}.`,
+        details: [],
         ctaLabel: "Open event",
-        footerNote: "You can now view the event and any chat or attendance updates.",
+        footerNote: "",
       };
     case "event_request_declined":
       return {
         eyebrow: "Event Access Declined",
         subject: `Your request for ${eventLabel} was declined`,
-        title: "Event request declined",
-        intro: `${params.actorName} declined your request for ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "View event",
-        footerNote: "Keep exploring events that match your travel and dance plans.",
+        title: "Request declined",
+        intro: `${params.actorName} couldn't approve your request this time.`,
+        details: [],
+        ctaLabel: "Browse events",
+        footerNote: "",
       };
     case "reference_received":
       return {
         eyebrow: "New Reference",
         subject: `${params.actorName} left you a reference`,
-        title: "New reference received",
-        intro: `${params.actorName} left you a reference on ConXion.`,
+        title: "You got a reference",
+        intro: "Read it and leave yours if you haven't yet.",
         details: [],
         ctaLabel: "Read reference",
-        footerNote: "Open your references to review and respond if needed.",
+        footerNote: "",
       };
     case "reference_prompt_due": {
       const activityLabel = params.activityTitle
         ? capitalizeLabel(params.activityTitle)
         : capitalizeLabel(referenceContextLabel);
       const details: string[] = [];
-      if (activityDate) details.push(`Activity: ${activityLabel} on ${activityDate}`);
-      else details.push(`Activity type: ${activityLabel}`);
-      if (promptExpires) details.push(`Expires: ${promptExpires} (14 days to submit)`);
+      if (activityDate) details.push(`${activityLabel} on ${activityDate}`);
+      if (promptExpires) details.push(`Expires: ${promptExpires}`);
       return {
         eyebrow: "Reference Request",
-        subject: `Leave a reference for your ${activityLabel.toLowerCase()} with ${params.actorName}`,
-        title: "Your reference is ready",
-        intro: `Your ${activityLabel.toLowerCase()} with ${params.actorName} is now eligible for a reference. Leave your feedback while the experience is still fresh.`,
+        subject: `Leave a reference for ${params.actorName}`,
+        title: "Leave a reference",
+        intro: `Your ${activityLabel.toLowerCase()} with ${params.actorName} is eligible. References expire after 14 days.`,
         details,
         ctaLabel: "Leave a reference",
-        footerNote:
-          "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
+        footerNote: "",
       };
     }
     case "welcome_member":
       return {
         eyebrow: "Welcome",
-        subject: "Explore dancers on ConXion",
-        title: "Start your journey",
-        intro: "Find dancers, hosts, events and more.",
+        subject: "You're on ConXion",
+        title: "Start connecting",
+        intro: "Find dancers, explore events, plan trips.",
         details: [],
-        ctaLabel: "Explore dancers",
+        ctaLabel: "Explore",
         footerNote: "",
         ctaHint: "Most users start with one connection.",
         titleSizePx: 32,
@@ -397,63 +395,62 @@ export function buildEmailCopy(params: {
       return {
         eyebrow: "Starting Soon",
         subject: `Your activity with ${params.actorName} is coming up`,
-        title: "Your activity is coming up",
-        intro: `${syncLabel[0]?.toUpperCase() ?? "A"}${syncLabel.slice(1)} with ${params.actorName} is scheduled soon.`,
-        details: syncStart ? [`Starts: ${syncStart}`] : [],
+        title: "Activity coming up",
+        intro: syncStart
+          ? `You have an activity with ${params.actorName} on ${syncStart}.`
+          : `You have an activity scheduled with ${params.actorName}.`,
+        details: [],
         ctaLabel: "Open activity",
-        footerNote: "Use the connection thread to confirm timing or any last details.",
+        footerNote: "",
       };
     case "event_starting_soon":
       return {
         eyebrow: "Event Reminder",
         subject: `${eventLabel} starts soon`,
-        title: "Your event starts soon",
-        intro: `${eventLabel} is coming up soon on ConXion.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
+        title: "Your event is coming up",
+        intro: eventStart ? `${eventLabel} starts ${eventStart}.` : `${eventLabel} is starting soon.`,
+        details: [],
         ctaLabel: "Open event",
-        footerNote: "Check the event page for attendees, updates, and final logistics.",
+        footerNote: "",
       };
     case "support_case_received":
       return {
         eyebrow: "Support Ticket",
         subject: ticketCode ? `[${ticketCode}] Request received` : "Support request received",
-        title: ticketCode ? `${ticketCode} received` : "Support request received",
-        intro: `We received your report for "${supportSubject}" and added it to the moderation queue.`,
-        details: [
-          `Status: ${supportStatus}`,
-          "Replies by email are not enabled yet. Add new context from your Support page inside ConXion.",
-        ],
+        title: ticketCode ? `Ticket ${ticketCode}` : "Request received",
+        intro: `We received your report for "${supportSubject}". We'll review it shortly.`,
+        details: [`Status: ${supportStatus}`],
         ctaLabel: "Open support",
-        footerNote: "We review safety and trust cases directly in the admin console so moderation history stays consistent.",
+        footerNote: "",
       };
     case "support_case_updated":
       return {
         eyebrow: "Support Update",
         subject: ticketCode ? `[${ticketCode}] Status updated` : "Support request updated",
-        title: ticketCode ? `${ticketCode} updated` : "Support request updated",
+        title: ticketCode ? `Ticket ${ticketCode} updated` : "Request updated",
         intro: `Your report for "${supportSubject}" is now ${(supportStatus ?? "updated").toLowerCase()}.`,
-        details: [`Current status: ${supportStatus}`],
+        details: [],
         ctaLabel: "Open support",
-        footerNote: "Check the case details in ConXion for the latest moderation status and notes.",
+        footerNote: "",
       };
     case "pro_upgrade":
       return {
         eyebrow: "Plus Active",
         subject: "Welcome to ConXion Plus",
-        title: "You're now on Plus",
-        intro: "Thank you for upgrading. Your new limits are active and ready to use.",
+        title: "You're on Plus",
+        intro: "Your new limits are active.",
         details: [
-          "60 connection requests per month",
-          "30 active chat threads per month",
-          "10 hosting offers per month",
-          "5 trips per month",
-          "5 events per month",
-          "3 additional profile photos",
+          "60 connection requests / month",
+          "30 active chat threads / month",
+          "10 hosting offers / month",
+          "5 trips / month",
+          "5 events / month",
+          "3 extra profile photos",
           "Better visibility in discovery",
         ],
         detailStyle: "list",
-        ctaLabel: "Explore the community",
-        footerNote: "Your Plus subscription renews monthly. Manage it any time from your account settings.",
+        ctaLabel: "Explore",
+        footerNote: "Manage your subscription any time from account settings.",
         showFallbackLink: false,
       };
   }
