@@ -384,7 +384,7 @@ export default async function TeacherProfilePage({
             <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
           </div>
-          <div className="sm:rounded-[28px] sm:overflow-hidden sm:bg-[#242428]">
+          <div>
             <TeacherBookingCalendar teacherUserId={id} teacherName={displayName} />
           </div>
         </section>
