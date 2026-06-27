@@ -41,7 +41,7 @@ export default function BookSessionModal({
   const description =
     mode === "chat"
       ? "Teacher is already selected. Pick a date and slot, then send the request."
-      : "Select a service, bookable date, and slot.";
+      : "Pick a bookable date and slot, then send the request.";
 
   return (
     <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 backdrop-blur-md sm:items-center sm:px-3 sm:py-3">

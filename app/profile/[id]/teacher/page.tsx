@@ -88,7 +88,8 @@ type TeacherReference = {
   testimonial: string;
   rating: number | null;
   reference_year: number | null;
-  sort_order: number;
+  sort_order?: number;
+  verified: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -193,7 +194,8 @@ export default async function TeacherProfilePage({
     regularClassesResult,
     eventTeachingResult,
     profileMediaResult,
-    referencesResult,
+    manualRefsResult,
+    verifiedRefsResult,
   ] = await Promise.allSettled([
     supabase
       .from("teacher_info_blocks")
@@ -225,6 +227,11 @@ export default async function TeacherProfilePage({
       .eq("status", "published")
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    supabase
+      .from("references")
+      .select("id,reference_from_user_id,reference_context_tag,reference_content,rating,created_at,profiles!reference_from_user_id(display_name)")
+      .eq("reference_to_user_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const infoBlocks: TeacherInfoBlock[] =
@@ -253,10 +260,25 @@ export default async function TeacherProfilePage({
         )
       : [];
 
-  const teacherReferences: TeacherReference[] =
-    referencesResult.status === "fulfilled" && referencesResult.value.data
-      ? (referencesResult.value.data as TeacherReference[])
+  const manualRefs: TeacherReference[] =
+    manualRefsResult.status === "fulfilled" && manualRefsResult.value.data
+      ? (manualRefsResult.value.data as any[]).map((r) => ({ ...r, verified: false }))
       : [];
+
+  const verifiedRefs: TeacherReference[] =
+    verifiedRefsResult.status === "fulfilled" && verifiedRefsResult.value.data
+      ? (verifiedRefsResult.value.data as any[]).map((r) => ({
+          id: r.id,
+          client_name: (r.profiles as any)?.display_name ?? "Member",
+          client_context: r.reference_context_tag ?? null,
+          testimonial: r.reference_content ?? "",
+          rating: typeof r.rating === "number" ? r.rating : null,
+          reference_year: r.created_at ? new Date(r.created_at).getFullYear() : null,
+          verified: true,
+        }))
+      : [];
+
+  const teacherReferences: TeacherReference[] = [...verifiedRefs, ...manualRefs];
 
   // ── Derived values ───────────────────────────────────────────────────────
   const displayName: string = profileRow.display_name ?? "Unknown";
@@ -380,7 +402,7 @@ export default async function TeacherProfilePage({
 
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
         <section className="mb-12 sm:mb-24">
-          <div className="mb-6">
+          <div className="mb-3">
             <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
           </div>
