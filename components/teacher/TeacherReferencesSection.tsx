@@ -1,3 +1,7 @@
+"use client";
+
+import { useRef, useState, useEffect } from "react";
+
 type TeacherReference = {
   id: string;
   client_name: string;
@@ -5,6 +9,7 @@ type TeacherReference = {
   testimonial: string;
   rating: number | null;
   reference_year: number | null;
+  verified: boolean;
 };
 
 type Props = {
@@ -16,15 +21,62 @@ type Props = {
 export default function TeacherReferencesSection({ references, isOwner, teacherUserId }: Props) {
   if (references.length === 0 && !isOwner) return null;
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  function updateArrows() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }
+
+  useEffect(() => {
+    updateArrows();
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", updateArrows, { passive: true });
+    const ro = new ResizeObserver(updateArrows);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", updateArrows); ro.disconnect(); };
+  }, [references]);
+
+  function scroll(dir: "left" | "right") {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === "right" ? 380 : -380, behavior: "smooth" });
+  }
+
   return (
     <section className="mb-12 sm:mb-20">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-white tracking-tight">
-          What students say
-        </h2>
-        {references.length > 0 && (
-          <span className="text-xs text-zinc-500 font-medium">{references.length} reference{references.length !== 1 ? "s" : ""}</span>
-        )}
+        <h2 className="text-xl font-bold text-white tracking-tight">What students say</h2>
+        <div className="flex items-center gap-3">
+          {references.length > 0 && (
+            <span className="text-xs text-zinc-500 font-medium">{references.length} reference{references.length !== 1 ? "s" : ""}</span>
+          )}
+          {(canScrollLeft || canScrollRight) && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => scroll("left")}
+                disabled={!canScrollLeft}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/50 transition hover:border-white/20 hover:text-white disabled:opacity-25 disabled:cursor-default"
+              >
+                <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => scroll("right")}
+                disabled={!canScrollRight}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/50 transition hover:border-white/20 hover:text-white disabled:opacity-25 disabled:cursor-default"
+              >
+                <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {references.length === 0 && isOwner && (
@@ -42,13 +94,15 @@ export default function TeacherReferencesSection({ references, isOwner, teacherU
       )}
 
       {references.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div
+          ref={scrollRef}
+          className="flex gap-4 overflow-x-auto scroll-smooth no-scrollbar"
+        >
           {references.map((ref) => (
             <div
               key={ref.id}
-              className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5 flex flex-col gap-3"
+              className="w-[360px] shrink-0 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5 flex flex-col gap-3"
             >
-              {/* Stars */}
               {ref.rating && (
                 <div className="flex gap-0.5">
                   {Array.from({ length: 5 }).map((_, i) => (
@@ -62,24 +116,29 @@ export default function TeacherReferencesSection({ references, isOwner, teacherU
                   ))}
                 </div>
               )}
-
-              {/* Testimonial */}
               <p className="text-sm text-zinc-300 leading-relaxed">&ldquo;{ref.testimonial}&rdquo;</p>
-
-              {/* Client info */}
               <div className="flex items-center justify-between mt-auto pt-2 border-t border-white/[0.04]">
                 <div>
-                  <p className="text-xs font-semibold text-white">{ref.client_name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs font-semibold text-white">{ref.client_name}</p>
+                    {ref.verified ? (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-[#5DD8D8]/30 bg-[#5DD8D8]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#5DD8D8]">
+                        <span className="material-symbols-outlined text-[9px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
+                        Added by User
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white/30">
+                        Added by Teacher
+                      </span>
+                    )}
+                  </div>
                   {ref.client_context && (
                     <p className="text-[11px] text-zinc-500 mt-0.5">{ref.client_context}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  {ref.reference_year && (
-                    <span className="text-[11px] text-zinc-600">{ref.reference_year}</span>
-                  )}
-                  <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-zinc-600 border border-zinc-700 rounded px-1.5 py-0.5">Reference</span>
-                </div>
+                {ref.reference_year && (
+                  <span className="text-[11px] text-zinc-600">{ref.reference_year}</span>
+                )}
               </div>
             </div>
           ))}

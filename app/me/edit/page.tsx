@@ -1051,7 +1051,7 @@ function EditMePage() {
                   const diff = new Date(endsAt).getTime() - Date.now();
                   if (diff > 0) {
                     setTrialDaysLeft(Math.ceil(diff / (1000 * 60 * 60 * 24)));
-                  } else if (startedAt && !paymentVerified) {
+                  } else if (startedAt && !profile?.verified) {
                     setTrialExpiredBadge(true);
                   }
                 }
