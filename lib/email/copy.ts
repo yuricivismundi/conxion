@@ -138,16 +138,10 @@ export function buildCtaPath(params: AppEmailParams) {
       return "/messages?tab=requests";
     case "connection_request_accepted":
       return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
-    case "trip_request_received":
     case "trip_request_accepted":
-    case "trip_request_declined":
-      return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : params.hostingRequestId ? "/activity?tab=hosting" : "/activity?tab=trips";
-    case "hosting_request_received":
+      return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/activity?tab=trips";
     case "hosting_request_accepted":
-    case "hosting_request_declined":
       return "/activity?tab=hosting";
-    case "activity_upcoming":
-      return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
     case "reference_received":
       return "/references";
     case "reference_prompt_due":
@@ -156,7 +150,6 @@ export function buildCtaPath(params: AppEmailParams) {
         : "/references";
     case "event_request_accepted":
     case "event_request_declined":
-    case "event_starting_soon":
       return params.eventId ? `/events/${params.eventId}` : "/events";
     case "welcome_member":
     case "pro_upgrade":
@@ -228,26 +221,6 @@ export function buildEmailCopy(params: {
         ctaLabel: "Open chat",
         footerNote: "",
       };
-    case "trip_request_received":
-      return {
-        eyebrow: "Trip Request",
-        subject: `${params.actorName} requested to join ${tripLabel}`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: formatTripCity(params.trip),
-        heroSubtitle: formatTripCountry(params.trip) || undefined,
-        heroBody: `${params.actorName} wants to join your trip.`,
-        heroTheme: "trip",
-        ctaLabel: "Review trip request",
-        footerNote: "",
-        ctaHint: "Open the trip request and respond.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
     case "trip_request_accepted":
       return {
         eyebrow: "Trip Request",
@@ -268,46 +241,6 @@ export function buildEmailCopy(params: {
         showFooterNote: false,
         showFallbackLink: false,
       };
-    case "trip_request_declined":
-      return {
-        eyebrow: "Trip Request",
-        subject: `Your trip request to ${tripLabel} was declined`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: formatTripCity(params.trip),
-        heroSubtitle: formatTripCountry(params.trip) || undefined,
-        heroBody: `${params.actorName} couldn't accommodate your request this time. You can explore other trips.`,
-        heroTheme: "trip",
-        ctaLabel: "Explore trips",
-        footerNote: "",
-        ctaHint: "Browse available trips and send a new request.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
-    case "hosting_request_received":
-      return {
-        eyebrow: "Hosting Request",
-        subject: `${params.actorName} sent a ${hostingLabel}`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatHostingDateBadge(params.hosting) ?? formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: params.trip?.city?.trim() || capitalizeLabel(hostingLabel),
-        heroSubtitle: params.trip?.country?.trim().toUpperCase() || undefined,
-        heroBody: `${params.actorName} sent you a ${hostingLabel}.`,
-        heroTheme: "trip",
-        ctaLabel: "Review hosting request",
-        footerNote: "",
-        ctaHint: "Open the hosting request and respond.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
     case "hosting_request_accepted":
       return {
         eyebrow: "Hosting Accepted",
@@ -318,32 +251,22 @@ export function buildEmailCopy(params: {
         ctaLabel: "Open hosting inbox",
         footerNote: "",
       };
-    case "hosting_request_declined":
-      return {
-        eyebrow: "Hosting Declined",
-        subject: `Your ${hostingLabel} was declined`,
-        title: `${params.actorName} can't host this time`,
-        intro: "You can explore other hosts or send a new offer when timing works.",
-        details: [],
-        ctaLabel: "Open hosting inbox",
-        footerNote: "",
-      };
     case "event_request_accepted":
       return {
-        eyebrow: "Event Access Accepted",
+        eyebrow: "You're In",
         subject: `You're in — ${eventLabel}`,
-        title: "Access granted",
-        intro: eventStart ? `${eventLabel} starts ${eventStart}.` : `You can now view ${eventLabel}.`,
+        title: "You're in",
+        intro: eventStart ? `${params.actorName} approved your request. ${eventLabel} starts ${eventStart}.` : `${params.actorName} approved your request to join ${eventLabel}.`,
         details: [],
         ctaLabel: "Open event",
         footerNote: "",
       };
     case "event_request_declined":
       return {
-        eyebrow: "Event Access Declined",
+        eyebrow: "Request Declined",
         subject: `Your request for ${eventLabel} was declined`,
         title: "Request declined",
-        intro: `${params.actorName} couldn't approve your request this time.`,
+        intro: `${params.actorName} couldn't approve your request for ${eventLabel} this time.`,
         details: [],
         ctaLabel: "Browse events",
         footerNote: "",
@@ -391,28 +314,6 @@ export function buildEmailCopy(params: {
         showFooterNote: false,
         showFallbackLink: false,
       };
-    case "activity_upcoming":
-      return {
-        eyebrow: "Starting Soon",
-        subject: `Your activity with ${params.actorName} is coming up`,
-        title: "Activity coming up",
-        intro: syncStart
-          ? `You have an activity with ${params.actorName} on ${syncStart}.`
-          : `You have an activity scheduled with ${params.actorName}.`,
-        details: [],
-        ctaLabel: "Open activity",
-        footerNote: "",
-      };
-    case "event_starting_soon":
-      return {
-        eyebrow: "Event Reminder",
-        subject: `${eventLabel} starts soon`,
-        title: "Your event is coming up",
-        intro: eventStart ? `${eventLabel} starts ${eventStart}.` : `${eventLabel} is starting soon.`,
-        details: [],
-        ctaLabel: "Open event",
-        footerNote: "",
-      };
     case "support_case_received":
       return {
         eyebrow: "Support Ticket",
@@ -441,7 +342,8 @@ export function buildEmailCopy(params: {
         intro: "Your new limits are active.",
         details: [
           "60 connection requests / month",
-          "30 chat activations / month",
+          "30 active chat threads / month",
+          "10 hosting offers / month",
           "15 activity requests / month",
           "5 trips / month + 3 accepted",
           "5 events / month + unlimited invites",
@@ -452,7 +354,11 @@ export function buildEmailCopy(params: {
         ],
         detailStyle: "list",
         ctaLabel: "Explore",
-        footerNote: "Manage your subscription any time from account settings.",
+        footerLinkLabel: "View full plan details →",
+        footerLinkUrl: "/pricing",
+        ctaHint: "Manage your subscription in account settings →",
+        ctaHintUrl: "/account-settings",
+        footerNote: "",
         showFallbackLink: false,
       };
   }

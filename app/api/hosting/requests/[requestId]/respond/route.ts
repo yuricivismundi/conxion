@@ -61,9 +61,9 @@ export async function POST(
 
     const senderUserId = typeof requestRow?.sender_user_id === "string" ? requestRow.sender_user_id : "";
     const tripId = typeof requestRow?.trip_id === "string" ? requestRow.trip_id : null;
-    if (senderUserId) {
+    if (senderUserId && action === "accepted") {
       await sendAppEmailBestEffort({
-        kind: action === "accepted" ? "hosting_request_accepted" : "hosting_request_declined",
+        kind: "hosting_request_accepted",
         recipientUserId: senderUserId,
         actorUserId: authData.user.id,
         hostingRequestId: requestId,
