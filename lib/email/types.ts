@@ -1,29 +1,11 @@
 export type AppEmailKind =
-  | "connection_request_received"
-  | "connection_request_accepted"
-  | "connection_request_declined"
-  | "trip_request_received"
   | "trip_request_accepted"
-  | "trip_request_declined"
-  | "hosting_request_received"
   | "hosting_request_accepted"
-  | "hosting_request_declined"
-  | "sync_proposed"
-  | "sync_accepted"
-  | "sync_declined"
-  | "sync_completed"
-  | "event_request_received"
   | "event_request_accepted"
   | "event_request_declined"
-  | "event_joined"
   | "reference_received"
   | "reference_prompt_due"
-  | "reference_prompt_reminder"
   | "welcome_member"
-  | "sync_upcoming"
-  | "event_starting_soon"
-  | "travel_plan_upcoming"
-  | "inbox_digest"
   | "support_case_received"
   | "support_case_updated"
   | "pro_upgrade";
@@ -71,6 +53,9 @@ export type EmailCopy = {
   ctaLabel: string;
   footerNote: string;
   ctaHint?: string;
+  ctaHintUrl?: string;
+  footerLinkLabel?: string;
+  footerLinkUrl?: string;
   titleSizePx?: number;
   logoWidthPx?: number;
   showGreeting?: boolean;

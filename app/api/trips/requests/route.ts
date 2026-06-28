@@ -345,12 +345,6 @@ export async function POST(req: Request) {
     }
 
     if (createdRequest && ownerId && ownerId !== authData.user.id) {
-      await sendAppEmailBestEffort({
-        kind: "trip_request_received",
-        recipientUserId: ownerId,
-        actorUserId: authData.user.id,
-        tripId,
-      });
       if (usedFallback && requestId) {
         try {
           await createTripRequestNotificationCompat({

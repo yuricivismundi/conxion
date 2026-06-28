@@ -7,12 +7,7 @@ type DispatchBody = {
   userId?: unknown;
 };
 
-const ALLOWED_KINDS: LifecycleEmailKind[] = [
-  "sync_upcoming",
-  "event_starting_soon",
-  "travel_plan_upcoming",
-  "inbox_digest",
-];
+const ALLOWED_KINDS: LifecycleEmailKind[] = [];
 
 function isLocalDev() {
   return process.env.NODE_ENV !== "production";

@@ -25,30 +25,12 @@ type PreviewSeed = {
 
 const DEFAULT_KINDS: AppEmailKind[] = [
   "welcome_member",
-  "inbox_digest",
-  "connection_request_received",
-  "connection_request_accepted",
-  "connection_request_declined",
-  "trip_request_received",
   "trip_request_accepted",
-  "trip_request_declined",
-  "travel_plan_upcoming",
-  "hosting_request_received",
   "hosting_request_accepted",
-  "hosting_request_declined",
-  "sync_proposed",
-  "sync_accepted",
-  "sync_declined",
-  "sync_upcoming",
-  "sync_completed",
-  "event_request_received",
   "event_request_accepted",
   "event_request_declined",
-  "event_joined",
-  "event_starting_soon",
   "reference_received",
   "reference_prompt_due",
-  "reference_prompt_reminder",
 ];
 
 function isLocalDev() {

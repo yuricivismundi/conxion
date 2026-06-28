@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
-import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { buildRateLimitKey, consumeRateLimit } from "@/lib/security/rate-limit";
 import { validateCsrfOrigin, csrfError } from "@/lib/security/csrf";
@@ -185,14 +184,6 @@ export async function POST(
         );
       }
 
-      if (hostUserId && hostUserId !== authData.user.id) {
-        await sendAppEmailBestEffort({
-          kind: "event_joined",
-          recipientUserId: hostUserId,
-          actorUserId: authData.user.id,
-          eventId,
-        });
-      }
       return NextResponse.json({ ok: true, status: data ?? null });
     }
 
@@ -237,14 +228,6 @@ export async function POST(
             recipientUserId: hostUserId,
           });
         }
-      }
-      if (hostUserId && hostUserId !== authData.user.id) {
-        await sendAppEmailBestEffort({
-          kind: "event_request_received",
-          recipientUserId: hostUserId,
-          actorUserId: authData.user.id,
-          eventId,
-        });
       }
       return NextResponse.json({ ok: true, request_id: data ?? null });
     }

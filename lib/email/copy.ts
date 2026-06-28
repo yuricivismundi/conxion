@@ -134,45 +134,22 @@ function formatSupportStatusLabel(value: string | null | undefined) {
 
 export function buildCtaPath(params: AppEmailParams) {
   switch (params.kind) {
-    case "connection_request_received":
-    case "connection_request_declined":
-      return "/messages?tab=requests";
-    case "connection_request_accepted":
-      return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
-    case "trip_request_received":
     case "trip_request_accepted":
-    case "trip_request_declined":
-    case "travel_plan_upcoming":
-      return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : params.hostingRequestId ? "/activity?tab=hosting" : "/activity?tab=trips";
-    case "hosting_request_received":
+      return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/activity?tab=trips";
     case "hosting_request_accepted":
-    case "hosting_request_declined":
       return "/activity?tab=hosting";
-    case "sync_proposed":
-    case "sync_accepted":
-    case "sync_declined":
-    case "sync_upcoming":
-      return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
-    case "sync_completed":
     case "reference_received":
       return "/references";
     case "reference_prompt_due":
-    case "reference_prompt_reminder":
       return params.actorUserId
         ? `/references?userId=${encodeURIComponent(params.actorUserId)}`
         : "/references";
-    case "event_request_received":
-    case "event_joined":
-      return params.eventId ? `/events/${params.eventId}/inbox` : "/events";
     case "event_request_accepted":
     case "event_request_declined":
-    case "event_starting_soon":
       return params.eventId ? `/events/${params.eventId}` : "/events";
     case "welcome_member":
     case "pro_upgrade":
       return "/discover";
-    case "inbox_digest":
-      return "/messages";
     case "support_case_received":
     case "support_case_updated":
       return params.supportClaimId ? `/support/cases/${params.supportClaimId}` : "/support";
@@ -220,367 +197,147 @@ export function buildEmailCopy(params: {
   const supportSubject = params.supportSubject?.trim() || "Reference report";
 
   switch (params.kind) {
-    case "connection_request_received":
+    case "trip_request_accepted": {
+      const namedTripLabel = tripLabel !== "your trip" ? tripLabel : null;
+      const tripIntro = tripWindow
+        ? namedTripLabel
+          ? `Your trip to ${namedTripLabel} is set for ${tripWindow}.`
+          : `Your trip is set for ${tripWindow}.`
+        : namedTripLabel
+          ? `${params.actorName} confirmed your request to join ${namedTripLabel}.`
+          : "Coordinate the details in your inbox thread.";
       return {
-        eyebrow: "Connection Request",
-        subject: `${params.actorName} sent you a connection request`,
-        title: "New connection request",
-        intro: `${params.actorName} wants to connect with you on ConXion.`,
+        eyebrow: "Trip Confirmed",
+        subject: namedTripLabel
+          ? `Your trip to ${namedTripLabel} was accepted`
+          : "Your trip request was accepted",
+        title: `${params.actorName} said yes`,
+        intro: tripIntro,
         details: [],
-        ctaLabel: "Review request",
-        footerNote: "Accept or decline the request inside your ConXion inbox.",
-      };
-    case "connection_request_accepted":
-      return {
-        eyebrow: "Connection Accepted",
-        subject: `${params.actorName} accepted your connection request`,
-        title: "Connection request accepted",
-        intro: `${params.actorName} accepted your request. You can continue in chat now.`,
-        details: [],
-        ctaLabel: "Open connection",
-        footerNote: "The connection is now active in your network.",
-      };
-    case "connection_request_declined":
-      return {
-        eyebrow: "Connection Update",
-        subject: `${params.actorName} declined your connection request`,
-        title: "Connection request declined",
-        intro: `${params.actorName} declined your connection request.`,
-        details: [],
-        ctaLabel: "View requests",
-        footerNote: "You can keep exploring dancers and send a new request elsewhere.",
-      };
-    case "trip_request_received":
-      return {
-        eyebrow: "Trip Request",
-        subject: `${params.actorName} requested to join ${tripLabel}`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: formatTripCity(params.trip),
-        heroSubtitle: formatTripCountry(params.trip) || undefined,
-        heroBody: `${params.actorName} wants to join your trip.`,
-        heroTheme: "trip",
-        ctaLabel: "Review trip request",
-        footerNote: "",
-        ctaHint: "Open the trip request and respond.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
-    case "trip_request_accepted":
-      return {
-        eyebrow: "Trip Request",
-        subject: `Your trip request to ${tripLabel} was accepted`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: formatTripCity(params.trip),
-        heroSubtitle: formatTripCountry(params.trip) || undefined,
-        heroBody: `${params.actorName} accepted your request. Your trip to ${tripLabel} is confirmed.`,
-        heroTheme: "trip",
         ctaLabel: "View trip",
         footerNote: "",
-        ctaHint: "Open the trip to see details and connect with the host.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
       };
-    case "trip_request_declined":
-      return {
-        eyebrow: "Trip Request",
-        subject: `Your trip request to ${tripLabel} was declined`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: formatTripCity(params.trip),
-        heroSubtitle: formatTripCountry(params.trip) || undefined,
-        heroBody: `${params.actorName} couldn't accommodate your request this time. You can explore other trips.`,
-        heroTheme: "trip",
-        ctaLabel: "Explore trips",
-        footerNote: "",
-        ctaHint: "Browse available trips and send a new request.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
-    case "hosting_request_received":
-      return {
-        eyebrow: "Hosting Request",
-        subject: `${params.actorName} sent a ${hostingLabel}`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatHostingDateBadge(params.hosting) ?? formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: params.trip?.city?.trim() || capitalizeLabel(hostingLabel),
-        heroSubtitle: params.trip?.country?.trim().toUpperCase() || undefined,
-        heroBody: `${params.actorName} sent you a ${hostingLabel}.`,
-        heroTheme: "trip",
-        ctaLabel: "Review hosting request",
-        footerNote: "",
-        ctaHint: "Open the hosting request and respond.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
+    }
     case "hosting_request_accepted":
       return {
         eyebrow: "Hosting Accepted",
         subject: `Your ${hostingLabel} was accepted`,
-        title: "Hosting request accepted",
-        intro: `${params.actorName} accepted your ${hostingLabel}.`,
-        details: hostingWindow ? [`Stay window: ${hostingWindow}`] : [],
-        ctaLabel: "Open hosting inbox",
-        footerNote: "Use the inbox thread to coordinate arrival details and expectations.",
-      };
-    case "hosting_request_declined":
-      return {
-        eyebrow: "Hosting Declined",
-        subject: `Your ${hostingLabel} was declined`,
-        title: "Hosting request declined",
-        intro: `${params.actorName} declined your ${hostingLabel}.`,
-        details: hostingWindow ? [`Stay window: ${hostingWindow}`] : [],
-        ctaLabel: "Open hosting inbox",
-        footerNote: "You can keep exploring hosts or send another offer when relevant.",
-      };
-    case "sync_proposed":
-      return {
-        eyebrow: "Sync Request",
-        subject: `${params.actorName} proposed a ${syncLabel}`,
-        title: "New sync request",
-        intro: `${params.actorName} wants to sync with you.`,
+        title: `${params.actorName} said yes`,
+        intro: hostingWindow ? `Your stay is set for ${hostingWindow}.` : "Coordinate the details in your inbox thread.",
         details: [],
-        ctaLabel: "Review sync",
+        ctaLabel: "Open hosting inbox",
         footerNote: "",
-        ctaHint: syncStart ? `Scheduled for ${syncStart}` : "Open the request and respond.",
-        titleSizePx: 30,
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
-    case "sync_accepted":
-      return {
-        eyebrow: "Sync Accepted",
-        subject: `${params.actorName} accepted your ${syncLabel}`,
-        title: "Sync accepted",
-        intro: `${params.actorName} accepted your ${syncLabel}.`,
-        details: syncStart ? [`Scheduled for: ${syncStart}`] : [],
-        ctaLabel: "Open connection",
-        footerNote: "The session is confirmed. Use chat to align timing and logistics.",
-      };
-    case "sync_declined":
-      return {
-        eyebrow: "Sync Declined",
-        subject: `${params.actorName} declined your ${syncLabel}`,
-        title: "Sync declined",
-        intro: `${params.actorName} declined your ${syncLabel}.`,
-        details: syncStart ? [`Scheduled for: ${syncStart}`] : [],
-        ctaLabel: "Open connection",
-        footerNote: "You can propose another sync later from the same connection.",
-      };
-    case "sync_completed":
-      return {
-        eyebrow: "Reference Opportunity",
-        subject: `${params.actorName} marked your ${syncLabel} as completed`,
-        title: "Session completed",
-        intro: `${params.actorName} marked your ${syncLabel} as completed. You can now leave a reference.`,
-        details: [],
-        ctaLabel: "Leave a reference",
-        footerNote: "A strong network grows from timely feedback after real interactions.",
-      };
-    case "event_request_received":
-      return {
-        eyebrow: "Event Access Request",
-        subject: `${params.actorName} requested access to ${eventLabel}`,
-        title: "New event access request",
-        intro: `${params.actorName} requested access to ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "Review request",
-        footerNote: "Approve or decline from the event inbox.",
       };
     case "event_request_accepted":
       return {
-        eyebrow: "Event Access Accepted",
-        subject: `Your request for ${eventLabel} was accepted`,
-        title: "Event request accepted",
-        intro: `${params.actorName} accepted your request for ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
+        eyebrow: "You're In",
+        subject: `You're in — ${eventLabel}`,
+        title: "You're in",
+        intro: eventStart ? `${params.actorName} approved your request. ${eventLabel} starts ${eventStart}.` : `${params.actorName} approved your request to join ${eventLabel}.`,
+        details: [],
         ctaLabel: "Open event",
-        footerNote: "You can now view the event and any chat or attendance updates.",
+        footerNote: "",
       };
     case "event_request_declined":
       return {
-        eyebrow: "Event Access Declined",
+        eyebrow: "Request Declined",
         subject: `Your request for ${eventLabel} was declined`,
-        title: "Event request declined",
-        intro: `${params.actorName} declined your request for ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "View event",
-        footerNote: "Keep exploring events that match your travel and dance plans.",
-      };
-    case "event_joined":
-      return {
-        eyebrow: "New Attendee",
-        subject: `${params.actorName} joined ${eventLabel}`,
-        title: "New event attendee",
-        intro: `${params.actorName} joined ${eventLabel}.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "Open event inbox",
-        footerNote: "The event inbox has the latest attendance and request activity.",
+        title: "Request declined",
+        intro: `${params.actorName} couldn't approve your request for ${eventLabel} this time.`,
+        details: [],
+        ctaLabel: "Browse events",
+        footerNote: "",
       };
     case "reference_received":
       return {
         eyebrow: "New Reference",
         subject: `${params.actorName} left you a reference`,
-        title: "New reference received",
-        intro: `${params.actorName} left you a reference on ConXion.`,
+        title: "You got a reference",
+        intro: "Read it and leave yours if you haven't yet.",
         details: [],
         ctaLabel: "Read reference",
-        footerNote: "Open your references to review and respond if needed.",
+        footerNote: "",
       };
     case "reference_prompt_due": {
       const activityLabel = params.activityTitle
         ? capitalizeLabel(params.activityTitle)
         : capitalizeLabel(referenceContextLabel);
       const details: string[] = [];
-      if (activityDate) details.push(`Activity: ${activityLabel} on ${activityDate}`);
-      else details.push(`Activity type: ${activityLabel}`);
-      if (promptExpires) details.push(`Expires: ${promptExpires} (14 days to submit)`);
+      if (activityDate) details.push(`${activityLabel} on ${activityDate}`);
+      if (promptExpires) details.push(`Expires: ${promptExpires}`);
       return {
         eyebrow: "Reference Request",
-        subject: `Leave a reference for your ${activityLabel.toLowerCase()} with ${params.actorName}`,
-        title: "Your reference is ready",
-        intro: `Your ${activityLabel.toLowerCase()} with ${params.actorName} is now eligible for a reference. Leave your feedback while the experience is still fresh.`,
+        subject: `Leave a reference for ${params.actorName}`,
+        title: "Leave a reference",
+        intro: `Your ${activityLabel.toLowerCase()} with ${params.actorName} is eligible. References expire after 14 days.`,
         details,
         ctaLabel: "Leave a reference",
-        footerNote:
-          "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
+        footerNote: "",
       };
     }
-    case "reference_prompt_reminder":
-      return {
-        eyebrow: "Reference Request",
-        subject: `Leave a reference for your ${referenceContextLabel} with ${params.actorName}`,
-        title: "Your reference is ready",
-        intro: `Your ${referenceContextLabel} with ${params.actorName} is still waiting for a reference.`,
-        details: promptExpires ? [`Expires: ${promptExpires}`] : [],
-        ctaLabel: "Leave a reference",
-        footerNote:
-          "References appear on both profiles as soon as both sides submit, or 10 days after you submit if the other side hasn't — whichever comes first.",
-      };
     case "welcome_member":
       return {
-        eyebrow: "Welcome",
-        subject: "Explore dancers on ConXion",
-        title: "Start your journey",
-        intro: "Find dancers, hosts, events and more.",
-        details: [],
-        ctaLabel: "Explore dancers",
+        eyebrow: "Welcome to ConXion",
+        subject: "You're in — welcome to ConXion",
+        title: "Your dance world, connected",
+        intro: "ConXion is where dancers find each other — to travel together, host each other, join events, and book private classes. You're now part of it.",
+        details: [
+          "Connect with dancers in your city or abroad",
+          "Plan trips and coordinate who travels together",
+          "Offer or request hosting with trusted members",
+          "Join private events and workshops",
+          "Book or offer private lessons",
+        ],
+        detailStyle: "list",
+        ctaLabel: "Explore ConXion",
         footerNote: "",
-        ctaHint: "Most users start with one connection.",
-        titleSizePx: 32,
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
-      };
-    case "sync_upcoming":
-      return {
-        eyebrow: "Starting Soon",
-        subject: `Your ${syncLabel} with ${params.actorName} is coming up`,
-        title: "Your sync is coming up",
-        intro: `${syncLabel[0]?.toUpperCase() ?? "S"}${syncLabel.slice(1)} with ${params.actorName} is scheduled soon.`,
-        details: syncStart ? [`Starts: ${syncStart}`] : [],
-        ctaLabel: "Open sync",
-        footerNote: "Use the connection thread to confirm timing or any last details.",
-      };
-    case "event_starting_soon":
-      return {
-        eyebrow: "Event Reminder",
-        subject: `${eventLabel} starts soon`,
-        title: "Your event starts soon",
-        intro: `${eventLabel} is coming up soon on ConXion.`,
-        details: eventStart ? [`Starts: ${eventStart}`] : [],
-        ctaLabel: "Open event",
-        footerNote: "Check the event page for attendees, updates, and final logistics.",
-      };
-    case "travel_plan_upcoming":
-      return {
-        eyebrow: "Travel Reminder",
-        subject: params.hosting ? "Your hosting plan starts soon" : `${tripLabel} starts soon`,
-        title: params.hosting ? "Your hosting plan starts soon" : "Your trip starts soon",
-        intro: params.hosting
-          ? `Your ${hostingLabel} with ${params.actorName} is coming up soon.`
-          : `${tripLabel} is coming up soon on ConXion.`,
-        details: hostingWindow ? [`Stay window: ${hostingWindow}`] : tripWindow ? [`Trip dates: ${tripWindow}`] : [],
-        ctaLabel: params.hosting ? "Open hosting" : "Open trip",
-        footerNote: "Review your thread now so travel details are aligned before the date arrives.",
-      };
-    case "inbox_digest":
-      return {
-        eyebrow: "Inbox",
-        subject: `${unreadCount} unread conversation${unreadCount === 1 ? "" : "s"} on ConXion`,
-        title: unreadCount === 1 ? "You have 1 unread message" : `You have ${unreadCount} unread messages`,
-        intro: "Open your inbox and catch up.",
-        details: [],
-        ctaLabel: "Open inbox",
-        footerNote: "",
-        ctaHint: "Fast replies keep momentum.",
-        titleSizePx: 30,
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
+        ctaHint: "Start by searching for dancers near you or browse upcoming events.",
       };
     case "support_case_received":
       return {
         eyebrow: "Support Ticket",
         subject: ticketCode ? `[${ticketCode}] Request received` : "Support request received",
-        title: ticketCode ? `${ticketCode} received` : "Support request received",
-        intro: `We received your report for "${supportSubject}" and added it to the moderation queue.`,
-        details: [
-          `Status: ${supportStatus}`,
-          "Replies by email are not enabled yet. Add new context from your Support page inside ConXion.",
-        ],
+        title: ticketCode ? `Ticket ${ticketCode}` : "Request received",
+        intro: `We received your report for "${supportSubject}". We'll review it shortly.`,
+        details: [`Status: ${supportStatus}`],
         ctaLabel: "Open support",
-        footerNote: "We review safety and trust cases directly in the admin console so moderation history stays consistent.",
+        footerNote: "",
       };
     case "support_case_updated":
       return {
         eyebrow: "Support Update",
         subject: ticketCode ? `[${ticketCode}] Status updated` : "Support request updated",
-        title: ticketCode ? `${ticketCode} updated` : "Support request updated",
+        title: ticketCode ? `Ticket ${ticketCode} updated` : "Request updated",
         intro: `Your report for "${supportSubject}" is now ${(supportStatus ?? "updated").toLowerCase()}.`,
-        details: [`Current status: ${supportStatus}`],
+        details: [],
         ctaLabel: "Open support",
-        footerNote: "Check the case details in ConXion for the latest moderation status and notes.",
+        footerNote: "",
       };
     case "pro_upgrade":
       return {
         eyebrow: "Plus Active",
         subject: "Welcome to ConXion Plus",
-        title: "You're now on Plus",
-        intro: "Thank you for upgrading. Your new limits are active and ready to use.",
+        title: "You're on Plus",
+        intro: "Your new limits are active.",
         details: [
-          "60 connection requests per month",
-          "30 active chat threads per month",
-          "10 hosting offers per month",
-          "5 trips per month",
-          "5 events per month",
-          "3 additional profile photos",
-          "Better visibility in discovery",
+          "60 connection requests / month",
+          "30 active chat threads / month",
+          "10 hosting offers / month",
+          "15 activity requests / month",
+          "5 trips / month + 3 accepted",
+          "5 events / month + unlimited invites",
+          "15 teacher booking requests / month",
+          "3 extra profile photos",
+          "Appear before free users in Discover",
+          "Private mode — hide from Discover and search",
         ],
         detailStyle: "list",
-        ctaLabel: "Explore the community",
-        footerNote: "Your Plus subscription renews monthly. Manage it any time from your account settings.",
+        ctaLabel: "Explore",
+        footerLinkLabel: "View full plan details →",
+        footerLinkUrl: "/pricing",
+        ctaHint: "Manage your subscription in account settings →",
+        ctaHintUrl: "/account-settings",
+        footerNote: "",
         showFallbackLink: false,
       };
   }

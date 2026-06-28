@@ -333,9 +333,9 @@ export default function TeacherBookingFlow({
           </div>
         ) : null}
         {isSelf ? (
-          <div className="flex items-start gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] px-4 py-3 text-sm text-amber-200">
-            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px] text-amber-400">info</span>
-            This is your own teacher profile. Visitors can use this flow to request private classes.
+          <div className="flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3">
+            <span className="material-symbols-outlined shrink-0 text-[16px] text-amber-300">info</span>
+            <p className="text-xs text-amber-200">You can&apos;t send a booking to yourself.</p>
           </div>
         ) : null}
       </>
@@ -344,7 +344,7 @@ export default function TeacherBookingFlow({
 
   function renderMonthSection(month: { label: string; cells: Array<{ key: string; date: string | null; inMonth: boolean; available: boolean }> }) {
     return (
-      <section key={month.label} className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-white/[0.12] bg-white/[0.08]">
+      <section key={month.label} className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-white/[0.07]" style={{ background: "#272d36" }}>
         <div className="flex items-center justify-between px-4 pb-3 pt-4">
           <h3 className="text-[13px] font-black tracking-tight text-white">{month.label}</h3>
           {month.cells.some((c) => c.available) ? (
@@ -375,12 +375,12 @@ export default function TeacherBookingFlow({
                 className={[
                   "flex h-8 min-w-0 items-center justify-center rounded-md text-[11px] font-bold transition-all sm:h-11 sm:rounded-lg sm:text-[12px] lg:h-12",
                   selectedDate === cell.date
-                    ? "scale-110 shadow-[0_0_12px_rgba(93,216,216,0.35)] text-[#040a0f]"
+                    ? "scale-110 shadow-[0_0_16px_rgba(93,216,216,0.4)] text-[#040a0f]"
                     : cell.available
                       ? "border border-white/[0.08] bg-white/[0.04] text-white hover:border-[#5DD8D8]/30 hover:bg-[#5DD8D8]/[0.08] hover:text-[#5DD8D8]"
                       : "text-white/40 cursor-default",
                 ].join(" ")}
-                style={selectedDate === cell.date ? { background: "linear-gradient(135deg,#5DD8D8,#B670CC)" } : undefined}
+                style={selectedDate === cell.date ? { background: "linear-gradient(135deg,#5DD8D8,#3ab8b8)" } : undefined}
               >
                 {dayNumber(cell.date)}
               </button>
@@ -538,17 +538,17 @@ export default function TeacherBookingFlow({
               className={[
                 "relative w-full overflow-hidden rounded-2xl border px-4 py-3 transition-all",
                 isSelected
-                  ? "border-[#B670CC]/40 text-white shadow-[0_0_20px_rgba(182,112,204,0.15)]"
+                  ? "border-[#5DD8D8]/45 text-white shadow-[0_0_24px_rgba(93,216,216,0.18)]"
                   : "border-white/[0.07] bg-white/[0.03] text-white/70",
               ].join(" ")}
               style={
                 isSelected
-                  ? { background: "linear-gradient(135deg,rgba(93,216,216,0.1),rgba(182,112,204,0.12))" }
+                  ? { background: "linear-gradient(135deg,rgba(93,216,216,0.08),rgba(93,216,216,0.12))" }
                   : undefined
               }
             >
               {isSelected && (
-                <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#5DD8D8,#B670CC)" }} />
+                <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#5DD8D8,#3ab8b8)" }} />
               )}
               <button
                 type="button"
@@ -563,7 +563,7 @@ export default function TeacherBookingFlow({
                   ) : null}
                 </div>
                 {isSelected ? (
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#5DD8D8,#B670CC)" }}>
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#5DD8D8,#3ab8b8)" }}>
                     <span className="material-symbols-outlined text-[12px] text-[#040a0f]">check</span>
                   </span>
                 ) : (
@@ -575,28 +575,33 @@ export default function TeacherBookingFlow({
 
               {isSelected ? (
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-white/45">Your start</span>
-                    <input
-                      type="time"
-                      value={requestedStartTime}
-                      min={windowStart}
-                      max={windowEnd}
-                      onChange={(e) => setRequestedStartTime(e.target.value)}
-                      className="mt-1 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-[#5DD8D8]/40"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-white/45">Your end</span>
-                    <input
-                      type="time"
-                      value={requestedEndTime}
-                      min={requestedStartTime || windowStart}
-                      max={windowEnd}
-                      onChange={(e) => setRequestedEndTime(e.target.value)}
-                      className="mt-1 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-[#5DD8D8]/40"
-                    />
-                  </label>
+                  {(() => {
+                    function timeToMinutes(t: string) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+                    function minutesToValue(mins: number) { const h = Math.floor(mins / 60); const m = mins % 60; return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`; }
+                    function minutesToLabel(mins: number) { const h = Math.floor(mins / 60); const m = mins % 60; const suffix = h >= 12 ? "PM" : "AM"; const dh = h % 12 === 0 ? 12 : h % 12; return `${dh}:${String(m).padStart(2,"0")} ${suffix}`; }
+                    const winStartMins = timeToMinutes(windowStart);
+                    const winEndMins = timeToMinutes(windowEnd);
+                    const startOptions: number[] = [];
+                    for (let t = winStartMins; t < winEndMins; t += 15) startOptions.push(t);
+                    const endMin = requestedStartTime ? timeToMinutes(requestedStartTime) + 15 : winStartMins + 15;
+                    const endOptions: number[] = [];
+                    for (let t = endMin; t <= winEndMins; t += 15) endOptions.push(t);
+                    const selectClass = "mt-1 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-[#5DD8D8]/40 appearance-none cursor-pointer";
+                    return (<>
+                      <label className="block">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-white/45">Your start</span>
+                        <select value={requestedStartTime} onChange={(e) => setRequestedStartTime(e.target.value)} className={selectClass}>
+                          {startOptions.map((m) => <option key={m} value={minutesToValue(m)}>{minutesToLabel(m)}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-white/45">Your end</span>
+                        <select value={requestedEndTime} onChange={(e) => setRequestedEndTime(e.target.value)} className={selectClass}>
+                          {endOptions.map((m) => <option key={m} value={minutesToValue(m)}>{minutesToLabel(m)}</option>)}
+                        </select>
+                      </label>
+                    </>);
+                  })()}
                   <div className="col-span-2 flex items-center justify-between text-[11px] text-white/45">
                     <span>Pick any range within the window.</span>
                     {requestedMinutes ? (
@@ -632,7 +637,7 @@ export default function TeacherBookingFlow({
               ? `Add a quick note for ${teacherName}.`
               : `Share your level, goals, or anything ${teacherName} should know.`
           }
-          className="w-full resize-none rounded-2xl border border-white/[0.07] bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition focus:border-[#5DD8D8]/25 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(93,216,216,0.06)]"
+          className="w-full resize-none rounded-2xl border border-white/[0.07] bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition focus:border-[#5DD8D8]/30 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(93,216,216,0.08)]"
         />
         {selectedSlot ? (
           <p className="flex items-center gap-1.5 text-[11px] text-white/35">
@@ -652,7 +657,7 @@ export default function TeacherBookingFlow({
         onClick={() => void submitBooking()}
         disabled={!selectedAvailabilityId || busy || loading || isSelf || atLimit}
         className={[
-          "w-full rounded-2xl bg-gradient-to-r from-[#5DD8D8] via-[#7c3aff] to-[#ff00ff] px-5 py-3 text-sm font-black text-[#040a0f] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40",
+          "w-full rounded-2xl bg-gradient-to-r from-[#5DD8D8] via-[#3ab8b8] to-[#B670CC] px-5 py-3 text-sm font-black text-[#040a0f] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 shadow-[0_8px_24px_rgba(93,216,216,0.15)]",
           extraClassName,
         ].join(" ")}
       >
@@ -672,7 +677,7 @@ export default function TeacherBookingFlow({
         <div className="mt-6 grid w-full min-w-0 gap-8 xl:grid-cols-[minmax(0,2fr)_360px]">
           <div className="min-w-0 space-y-6">{renderCalendarGrid()}</div>
 
-          <aside ref={slotsRef} className="scroll-mt-6 min-w-0 break-words rounded-2xl border border-white/[0.12] bg-white/[0.08] p-5" style={{ overflowWrap: "anywhere" }}>
+          <aside ref={slotsRef} className="scroll-mt-6 min-w-0 break-words rounded-2xl border border-white/[0.07] p-5" style={{ background: "#272d36", overflowWrap: "anywhere" }}>
             {/* Back to calendar — mobile only */}
             {selectedDate && (
               <button
@@ -716,16 +721,13 @@ export default function TeacherBookingFlow({
   if (variant === "chat") {
     return (
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center rounded-full border border-cyan-300/25 bg-cyan-300/8 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">
-            {serviceLabel(serviceType)}
-          </span>
-          {contextLabel ? (
+        {contextLabel ? (
+          <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
               {contextLabel}
             </span>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         {renderStateBanners()}
 
@@ -750,34 +752,9 @@ export default function TeacherBookingFlow({
     <div className="w-full min-w-0 max-w-full space-y-5">
       {renderStateBanners()}
 
-      <section className="space-y-2">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">1. Service</p>
-        {SERVICE_OPTIONS.map((option) => (
-          <div
-            key={option.id}
-            className="relative overflow-hidden rounded-2xl border border-[#5DD8D8]/25 px-5 py-4"
-            style={{ background: "linear-gradient(135deg,rgba(93,216,216,0.07) 0%,rgba(182,112,204,0.07) 100%)" }}
-          >
-            <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: "linear-gradient(90deg,#5DD8D8,#B670CC)" }} />
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-black text-white">{option.label}</p>
-                <p className="mt-1 text-xs leading-5 text-white/50">{option.description}</p>
-              </div>
-              <span
-                className="mt-0.5 shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-[#5DD8D8]"
-                style={{ background: "rgba(93,216,216,0.1)" }}
-              >
-                Selected
-              </span>
-            </div>
-          </div>
-        ))}
-      </section>
-
       <div className="grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(0,1.3fr)_300px]">
         <section className="min-w-0 space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">2. Date</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">1. Date</p>
           {renderCalendarGrid()}
         </section>
 
@@ -786,11 +763,11 @@ export default function TeacherBookingFlow({
           style={{ background: "radial-gradient(circle at 50% 0%,rgba(93,216,216,0.04),transparent 60%),rgba(255,255,255,0.015)", overflowWrap: "anywhere" }}
         >
           <div>
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-white/30">3. Slot</p>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-white/30">2. Slot</p>
             {renderSlotButtons(true)}
           </div>
 
-          {renderNoteField("4. Note (optional)")}
+          {renderNoteField("3. Note (optional)")}
           {renderSubmitButton()}
         </aside>
       </div>

@@ -155,17 +155,17 @@ export async function POST(req: Request) {
             promptId: body.promptId ?? null,
             contextTag: body.contextTag ?? "travel",
             promptDueAt: body.promptDueAt ?? new Date().toISOString(),
-            reminderCount: body.reminderCount ?? (kind === "reference_prompt_reminder" ? 1 : 0),
+            reminderCount: body.reminderCount ?? 0,
           }
         : null;
 
-    if (!payload && (kind === "reference_prompt_due" || kind === "reference_prompt_reminder")) {
+    if (!payload && kind === "reference_prompt_due") {
       const promptPayload = await resolvePromptSimulation(body?.promptId ?? null);
       if (promptPayload) {
         payload = {
           ...promptPayload,
           kind,
-          reminderCount: kind === "reference_prompt_reminder" ? 1 : 0,
+          reminderCount: 0,
         };
       }
     }
@@ -185,7 +185,7 @@ export async function POST(req: Request) {
         actorUserId: users.actorUserId,
         contextTag: body?.contextTag ?? "travel",
         promptDueAt: body?.promptDueAt ?? new Date().toISOString(),
-        reminderCount: body?.reminderCount ?? (kind === "reference_prompt_reminder" ? 1 : 0),
+        reminderCount: body?.reminderCount ?? 0,
       };
     }
 

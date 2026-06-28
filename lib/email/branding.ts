@@ -16,6 +16,9 @@ type RenderBrandedEmailParams = {
   ctaUrl: string;
   footerNote: string;
   ctaHint?: string;
+  ctaHintUrl?: string;
+  footerLinkLabel?: string;
+  footerLinkUrl?: string;
   titleSizePx?: number;
   logoWidthPx?: number;
   showGreeting?: boolean;
@@ -163,7 +166,14 @@ export function renderBrandedEmail(params: RenderBrandedEmailParams) {
           </div>
           ${
             params.ctaHint?.trim()
-              ? `<p style="margin:12px 0 0;font-size:12px;line-height:1.6;color:#8F99AA;">${escapeHtml(params.ctaHint)}</p>`
+              ? `<p style="margin:12px 0 0;font-size:12px;line-height:1.6;color:#8F99AA;">${params.ctaHintUrl ? `<a href="${absoluteAppUrl(params.ctaHintUrl)}" style="color:#8F99AA;text-decoration:underline;">${escapeHtml(params.ctaHint)}</a>` : escapeHtml(params.ctaHint)}</p>`
+              : ""
+          }
+          ${
+            params.footerLinkLabel && params.footerLinkUrl
+              ? `<p style="margin:16px 0 0;font-size:12px;line-height:1.75;color:${EMAIL_BRAND.muted};">
+            <a href="${absoluteAppUrl(params.footerLinkUrl)}" style="color:${EMAIL_BRAND.cyan};text-decoration:underline;">${escapeHtml(params.footerLinkLabel)}</a>
+          </p>`
               : ""
           }
           ${

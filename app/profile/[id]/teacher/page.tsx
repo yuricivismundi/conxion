@@ -19,7 +19,7 @@ import TeacherExperiencesSection from "@/components/teacher/TeacherExperiencesSe
 import TeacherOwnerActions from "@/components/teacher/TeacherOwnerActions";
 import ProfileSettingsMenu from "@/components/teacher/ProfileSettingsMenu";
 import ShareTeacherProfileButton from "@/components/teacher/ShareTeacherProfileButton";
-import TeacherReferencesSection, { type AnyTeacherReference } from "@/components/teacher/TeacherReferencesSection";
+import TeacherReferencesSection from "@/components/teacher/TeacherReferencesSection";
 
 // ---------------------------------------------------------------------------
 // Supabase helper (public anon client — reads public data only)
@@ -30,15 +30,6 @@ function getSupabasePublicClient() {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) throw new Error("Missing Supabase configuration");
   return createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-function getSupabaseServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing Supabase service configuration");
-  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -90,6 +81,16 @@ type EventTeaching = {
   notes: string | null;
 };
 
+type TeacherReference = {
+  id: string;
+  client_name: string;
+  client_context: string | null;
+  testimonial: string;
+  rating: number | null;
+  reference_year: number | null;
+  sort_order?: number;
+  verified: boolean;
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -188,7 +189,6 @@ export default async function TeacherProfilePage({
   }
 
   // ── 3–7. Parallel fetches ───────────────────────────────────────────────
-  const serviceSupabase = getSupabaseServiceClient();
   const [
     infoBlocksResult,
     regularClassesResult,
@@ -227,11 +227,10 @@ export default async function TeacherProfilePage({
       .eq("status", "published")
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
-    serviceSupabase
+    supabase
       .from("references")
-      .select("id,author_id,feedback,body,rating,created_at,reply_text,context_tag")
-      .eq("recipient_id", id)
-      .eq("context_tag", "private_class")
+      .select("id,reference_from_user_id,reference_context_tag,reference_content,rating,created_at,profiles!reference_from_user_id(display_name)")
+      .eq("reference_to_user_id", id)
       .order("created_at", { ascending: false }),
   ]);
 
@@ -261,49 +260,25 @@ export default async function TeacherProfilePage({
         )
       : [];
 
-  const manualRefs: AnyTeacherReference[] =
+  const manualRefs: TeacherReference[] =
     manualRefsResult.status === "fulfilled" && manualRefsResult.value.data
-      ? (manualRefsResult.value.data as Array<Record<string, unknown>>).map((r) => ({
-          id: r.id as string,
-          client_name: r.client_name as string,
-          client_context: (r.client_context as string | null) ?? null,
-          testimonial: r.testimonial as string,
-          rating: (r.rating as number | null) ?? null,
-          reference_year: (r.reference_year as number | null) ?? null,
-          kind: "manual" as const,
+      ? (manualRefsResult.value.data as any[]).map((r) => ({ ...r, verified: false }))
+      : [];
+
+  const verifiedRefs: TeacherReference[] =
+    verifiedRefsResult.status === "fulfilled" && verifiedRefsResult.value.data
+      ? (verifiedRefsResult.value.data as any[]).map((r) => ({
+          id: r.id,
+          client_name: (r.profiles as any)?.display_name ?? "Member",
+          client_context: r.reference_context_tag ?? null,
+          testimonial: r.reference_content ?? "",
+          rating: typeof r.rating === "number" ? r.rating : null,
+          reference_year: r.created_at ? new Date(r.created_at).getFullYear() : null,
+          verified: true,
         }))
       : [];
 
-  const rawVerifiedRefs = verifiedRefsResult.status === "fulfilled" ? (verifiedRefsResult.value.data ?? []) as Array<Record<string, unknown>> : [];
-
-  // Fetch author profiles separately (author_id is FK to auth.users, not profiles)
-  const authorIds = [...new Set(rawVerifiedRefs.map((r) => r.author_id as string).filter(Boolean))];
-  const authorProfilesMap: Record<string, { display_name: string | null; avatar_url: string | null }> = {};
-  if (authorIds.length > 0) {
-    const { data: authorProfiles } = await serviceSupabase
-      .from("profiles")
-      .select("user_id,display_name,avatar_url")
-      .in("user_id", authorIds);
-    for (const p of (authorProfiles ?? []) as Array<Record<string, unknown>>) {
-      authorProfilesMap[p.user_id as string] = { display_name: p.display_name as string | null, avatar_url: p.avatar_url as string | null };
-    }
-  }
-
-  const verifiedRefs: AnyTeacherReference[] = rawVerifiedRefs.map((r) => {
-    const profile = authorProfilesMap[r.author_id as string] ?? null;
-    return {
-      id: r.id as string,
-      author_display_name: profile?.display_name ?? null,
-      author_avatar_url: profile?.avatar_url ?? null,
-      body: ((r.body ?? r.feedback) as string) ?? "",
-      rating: (r.rating as number | null) ?? null,
-      created_at: r.created_at as string,
-      reply_text: (r.reply_text as string | null) ?? null,
-      kind: "verified" as const,
-    };
-  });
-
-  const allReferences: AnyTeacherReference[] = [...verifiedRefs, ...manualRefs];
+  const teacherReferences: TeacherReference[] = [...verifiedRefs, ...manualRefs];
 
   // ── Derived values ───────────────────────────────────────────────────────
   const displayName: string = profileRow.display_name ?? "Unknown";
@@ -427,7 +402,7 @@ export default async function TeacherProfilePage({
 
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
         <section className="mb-12 sm:mb-24">
-          <div className="mb-6">
+          <div className="mb-3">
             <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>
           </div>
@@ -554,7 +529,7 @@ export default async function TeacherProfilePage({
         </section>
 
         {/* ── Student References ───────────────────────────────────────────── */}
-        <TeacherReferencesSection references={allReferences} teacherUserId={id} />
+        <TeacherReferencesSection references={teacherReferences} />
 
       </div>
     </div>
