@@ -334,7 +334,6 @@ export default async function LandingPage(props: PageProps) {
                 {t.nav_blog}
               </Link>
             ) : null}
-            <LanguageSwitcher current={locale} />
             <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/auth">
               {t.nav_login}
             </Link>
@@ -347,7 +346,6 @@ export default async function LandingPage(props: PageProps) {
           </div>
 
           <div className="flex items-center gap-2 md:hidden">
-            <LanguageSwitcher current={locale} />
             <Link
               href="/auth"
               className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-4 py-2 text-xs font-bold text-black"
@@ -793,8 +791,9 @@ export default async function LandingPage(props: PageProps) {
           </div>
 
           <div className="mt-10 flex flex-col gap-4 border-t border-white/5 pt-7 text-xs text-white/35 sm:flex-row sm:items-center sm:justify-between">
-            <p>© 2024 ConXion Community Platform. All rights reserved.</p>
+            <p>© 2026 ConXion. All rights reserved.</p>
             <div className="flex items-center gap-5">
+              <LanguageSwitcher current={locale} />
               <Link href="/privacy" className="transition hover:text-white">
                 Privacy Policy
               </Link>
