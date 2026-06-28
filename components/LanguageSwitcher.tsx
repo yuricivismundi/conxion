@@ -12,7 +12,11 @@ type Props = {
 const LABELS: Record<Locale, string> = {
   en: "EN",
   es: "ES",
-  pt: "PT",
+  fr: "FR",
+  de: "DE",
+  it: "IT",
+  nl: "NL",
+  pl: "PL",
 };
 
 export default function LanguageSwitcher({ current, className }: Props) {
