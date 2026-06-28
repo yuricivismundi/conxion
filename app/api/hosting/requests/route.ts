@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBillingAccountState } from "@/lib/billing/account-state";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
-import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { isPaymentVerified } from "@/lib/verification";
@@ -281,15 +280,6 @@ export async function POST(req: Request) {
         });
       }
     }
-
-    await sendAppEmailBestEffort({
-      kind: "hosting_request_received",
-      recipientUserId,
-      actorUserId: authData.user.id,
-      hostingRequestId: requestId || null,
-      tripId,
-      requestType,
-    });
 
     return NextResponse.json({ ok: true, id: data ?? null });
   } catch (error: unknown) {
