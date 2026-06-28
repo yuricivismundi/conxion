@@ -134,10 +134,6 @@ function formatSupportStatusLabel(value: string | null | undefined) {
 
 export function buildCtaPath(params: AppEmailParams) {
   switch (params.kind) {
-    case "connection_request_received":
-      return "/messages?tab=requests";
-    case "connection_request_accepted":
-      return params.connectionId ? `/connections/${params.connectionId}` : "/network/connections";
     case "trip_request_accepted":
       return params.tripId ? `/messages?thread=trip%3A${params.tripId}` : "/activity?tab=trips";
     case "hosting_request_accepted":
@@ -201,46 +197,27 @@ export function buildEmailCopy(params: {
   const supportSubject = params.supportSubject?.trim() || "Reference report";
 
   switch (params.kind) {
-    case "connection_request_received":
+    case "trip_request_accepted": {
+      const namedTripLabel = tripLabel !== "your trip" ? tripLabel : null;
+      const tripIntro = tripWindow
+        ? namedTripLabel
+          ? `Your trip to ${namedTripLabel} is set for ${tripWindow}.`
+          : `Your trip is set for ${tripWindow}.`
+        : namedTripLabel
+          ? `${params.actorName} confirmed your request to join ${namedTripLabel}.`
+          : "Coordinate the details in your inbox thread.";
       return {
-        eyebrow: "Connection Request",
-        subject: `${params.actorName} wants to connect`,
-        title: `${params.actorName} sent you a request`,
-        intro: `Review their profile and accept or decline.`,
+        eyebrow: "Trip Confirmed",
+        subject: namedTripLabel
+          ? `Your trip to ${namedTripLabel} was accepted`
+          : "Your trip request was accepted",
+        title: `${params.actorName} said yes`,
+        intro: tripIntro,
         details: [],
-        ctaLabel: "Review request",
-        footerNote: "",
-      };
-    case "connection_request_accepted":
-      return {
-        eyebrow: "Connection Accepted",
-        subject: `${params.actorName} accepted your request`,
-        title: "You're now connected",
-        intro: `Start a conversation with ${params.actorName}.`,
-        details: [],
-        ctaLabel: "Open chat",
-        footerNote: "",
-      };
-    case "trip_request_accepted":
-      return {
-        eyebrow: "Trip Request",
-        subject: `Your trip request to ${tripLabel} was accepted`,
-        title: tripLabel,
-        intro: "",
-        details: [],
-        heroBadge: formatTripDateBadge(params.trip) ?? undefined,
-        heroTitle: formatTripCity(params.trip),
-        heroSubtitle: formatTripCountry(params.trip) || undefined,
-        heroBody: `${params.actorName} accepted your request. Your trip to ${tripLabel} is confirmed.`,
-        heroTheme: "trip",
         ctaLabel: "View trip",
         footerNote: "",
-        ctaHint: "Open the trip to see details and connect with the host.",
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
       };
+    }
     case "hosting_request_accepted":
       return {
         eyebrow: "Hosting Accepted",
@@ -300,19 +277,21 @@ export function buildEmailCopy(params: {
     }
     case "welcome_member":
       return {
-        eyebrow: "Welcome",
-        subject: "You're on ConXion",
-        title: "Start connecting",
-        intro: "Find dancers, explore events, plan trips.",
-        details: [],
-        ctaLabel: "Explore",
+        eyebrow: "Welcome to ConXion",
+        subject: "You're in — welcome to ConXion",
+        title: "Your dance world, connected",
+        intro: "ConXion is where dancers find each other — to travel together, host each other, join events, and book private classes. You're now part of it.",
+        details: [
+          "Connect with dancers in your city or abroad",
+          "Plan trips and coordinate who travels together",
+          "Offer or request hosting with trusted members",
+          "Join private events and workshops",
+          "Book or offer private lessons",
+        ],
+        detailStyle: "list",
+        ctaLabel: "Explore ConXion",
         footerNote: "",
-        ctaHint: "Most users start with one connection.",
-        titleSizePx: 32,
-        logoWidthPx: 168,
-        showGreeting: false,
-        showFooterNote: false,
-        showFallbackLink: false,
+        ctaHint: "Start by searching for dancers near you or browse upcoming events.",
       };
     case "support_case_received":
       return {

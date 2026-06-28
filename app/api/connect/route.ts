@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { sendAppEmailBestEffort } from "@/lib/email/app-events";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 
@@ -93,15 +92,6 @@ export async function POST(req: Request) {
     }
 
     const connectionId = typeof data === "string" ? data : null;
-
-    if (targetId !== requesterId) {
-      await sendAppEmailBestEffort({
-        kind: "connection_request_received",
-        recipientUserId: targetId,
-        actorUserId: requesterId,
-        connectionId,
-      });
-    }
 
     // In-app notification so the target can tap through to review the request
     if (connectionId && targetId !== requesterId) {

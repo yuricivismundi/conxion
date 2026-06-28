@@ -1,6 +1,4 @@
 export type AppEmailKind =
-  | "connection_request_received"
-  | "connection_request_accepted"
   | "trip_request_accepted"
   | "hosting_request_accepted"
   | "event_request_accepted"

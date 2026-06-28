@@ -25,8 +25,6 @@ type PreviewSeed = {
 
 const DEFAULT_KINDS: AppEmailKind[] = [
   "welcome_member",
-  "connection_request_received",
-  "connection_request_accepted",
   "trip_request_accepted",
   "hosting_request_accepted",
   "event_request_accepted",
