@@ -9320,7 +9320,7 @@ function MessagesPageContent() {
           <div className="flex flex-col gap-4 px-3 pt-4 pb-2 sm:px-4 sm:pt-5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
-                  <h1 className="shrink-0 text-2xl font-bold leading-tight">Inbox</h1>
+                  <h1 data-tour="tour-inbox-heading" className="shrink-0 text-2xl font-bold leading-tight">Inbox</h1>
                   {inboxSectionLabel ? (
                     <span className="bg-gradient-to-r from-[#6ee7f9] to-[#d946ef] bg-clip-text text-[11px] font-black uppercase tracking-[0.18em] text-transparent">
                       {inboxSectionLabel}
@@ -9441,6 +9441,7 @@ function MessagesPageContent() {
                   type="button"
                   onClick={() => setInboxFilterMenuOpen((prev) => !prev)}
                   data-testid="thread-filter-menu-button"
+                  data-tour="tour-inbox-filter"
                   className={[
                     "relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors",
                     inboxFilterMenuOpen || kindFilter !== "connection" || activeTab === "archived"

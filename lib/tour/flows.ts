@@ -54,6 +54,50 @@ export const TOUR_FLOWS: TourFlow[] = [
       },
     ],
   },
+  {
+    id: "navigate-inbox",
+    title: "Navigate your inbox",
+    description: "Learn how to use your inbox — threads, filters, bookings, and composing messages.",
+    icon: "inbox",
+    steps: [
+      {
+        id: "step-inbox-heading",
+        target: "tour-inbox-heading",
+        route: "/messages",
+        placement: "bottom",
+        title: "Your inbox",
+        description:
+          "All your conversations live here — connections, events, groups, bookings, and service inquiries in one place.",
+      },
+      {
+        id: "step-inbox-filter",
+        target: "tour-inbox-filter",
+        route: "/messages",
+        placement: "bottom",
+        title: "Switch inbox type",
+        description:
+          "Tap the filter icon to switch between Connections, Events, Groups, Bookings, and Service Inquiries.",
+      },
+      {
+        id: "step-inbox-tabs",
+        target: "tour-inbox-tabs",
+        route: "/messages",
+        placement: "bottom",
+        title: "Filter by status",
+        description:
+          "Use the tabs to filter threads — Accepted, Requests, Past, or All. The badge shows pending items.",
+      },
+      {
+        id: "step-compose",
+        target: "tour-compose",
+        route: "/messages",
+        placement: "left",
+        title: "Start a conversation",
+        description:
+          "Tap the compose button to start a new message with any of your connections.",
+      },
+    ],
+  },
 ];
 
 export function getFlowById(id: string): TourFlow | undefined {
