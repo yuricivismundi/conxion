@@ -1586,6 +1586,7 @@ export default function EventDetailsPage() {
                             });
                             setActionError(null);
                           }}
+                          data-tour="tour-event-join"
                           disabled={actionBusy || hasEnded}
                           className={cx(
                             "inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-semibold transition",

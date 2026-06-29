@@ -98,6 +98,38 @@ export const TOUR_FLOWS: TourFlow[] = [
       },
     ],
   },
+  {
+    id: "join-event",
+    title: "Join an event",
+    description: "Find festivals, workshops, and socials near you and request to join.",
+    icon: "festival",
+    steps: [
+      {
+        id: "step-events-heading",
+        target: "tour-events-heading",
+        route: "/events",
+        placement: "bottom",
+        title: "Browse events",
+        description: "This is where you find festivals, workshops, socials, and competitions happening near you or anywhere in the world.",
+      },
+      {
+        id: "step-events-filters",
+        target: "tour-events-filters",
+        route: "/events",
+        placement: "bottom",
+        title: "Filter by location & date",
+        description: "Use filters to narrow down by city, country, date range, dance style, or event type.",
+      },
+      {
+        id: "step-event-card",
+        target: "tour-event-card",
+        route: "/events",
+        placement: "top",
+        title: "Open an event",
+        description: "Click any event card to see full details — lineup, schedule, location, and who's attending.",
+      },
+    ],
+  },
 ];
 
 export function getFlowById(id: string): TourFlow | undefined {
