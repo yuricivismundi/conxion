@@ -34,6 +34,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         title: "Send a connection",
         description:
           "Tap Connect on any profile to send a request. They'll get notified and can accept or decline.",
+        fallbackMessage: "No dancers found in your area yet. Try searching a different city to find people to connect with.",
       },
       {
         id: "step-inbox-tabs",
@@ -130,6 +131,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         placement: "top",
         title: "Open an event",
         description: "Click any event card to see full details — lineup, schedule, location, and who's attending.",
+        fallbackMessage: "No events found for your current filters. Try clearing the city filter or changing the date range.",
       },
     ],
   },
@@ -157,6 +159,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         title: "Explore a teacher",
         description:
           "Each card shows the teacher's styles, references, and rates. Click it to open their full teacher profile.",
+        fallbackMessage: "No teachers with active profiles in your area yet. Try changing your city filter or check back later.",
       },
       {
         id: "step-book-session",
@@ -166,6 +169,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         title: "Book a session",
         description:
           "Tap Book a class to open the booking flow directly — pick a date, choose your duration, and send the request to the teacher.",
+        fallbackMessage: "No teachers available to book right now. Once teachers activate their profiles in your area, you'll see the Book a class button here.",
       },
     ],
   },
@@ -310,6 +314,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         title: "Connect and join",
         description:
           "Connect with a traveler you want to join, then message them to coordinate. You can also create your own trip from My Activities.",
+        fallbackMessage: "No travelers found right now. Check back later or create your own trip from My Activities → Trips.",
       },
     ],
   },

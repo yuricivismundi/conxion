@@ -54,6 +54,7 @@ function getTooltipStyle(
 export default function TourSpotlight() {
   const { step, totalSteps, currentStep, next, skip } = useTour();
   const [rect, setRect] = useState<Rect | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const rafRef = useRef<number | null>(null);
@@ -82,6 +83,7 @@ export default function TourSpotlight() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     if (pollRef.current !== null) { clearInterval(pollRef.current); pollRef.current = null; }
     setRect(null);
+    setNotFound(false);
 
     let elapsed = 0;
     pollRef.current = setInterval(() => {
@@ -114,6 +116,7 @@ export default function TourSpotlight() {
       if (elapsed >= 3000 && pollRef.current !== null) {
         clearInterval(pollRef.current);
         pollRef.current = null;
+        setNotFound(true);
       }
     }, 100);
 
@@ -130,6 +133,46 @@ export default function TourSpotlight() {
     : { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
 
   const isLast = step + 1 === totalSteps;
+
+  const fallbackMsg = currentStep.fallbackMessage ?? "Nothing to highlight here yet — this feature becomes available once there's content in your area.";
+
+  // Not-found overlay: full dim + centered card
+  if (notFound) {
+    return createPortal(
+      <>
+        <div aria-hidden="true" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 9998, pointerEvents: "none" }} />
+        <div
+          role="dialog"
+          aria-modal="false"
+          style={{ position: "fixed", zIndex: 10000, width: TOOLTIP_W, top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
+          className="rounded-2xl border border-amber-400/25 bg-[#111318] p-5 shadow-2xl"
+        >
+          <div className="mb-3 flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-amber-400">info</span>
+            <p className="text-xs font-semibold text-amber-400/80 uppercase tracking-widest">{step + 1} / {totalSteps}</p>
+          </div>
+          <h3 className="mb-2 text-base font-bold text-white">{currentStep.title}</h3>
+          <p className="mb-3 text-sm leading-relaxed text-white/65">{currentStep.description}</p>
+          <p className="mb-4 text-xs leading-relaxed text-amber-300/70 border border-amber-400/15 bg-amber-400/[0.06] rounded-xl px-3 py-2">
+            {fallbackMsg}
+          </p>
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" onClick={skip} className="text-sm text-white/40 transition hover:text-white/70">
+              Skip
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              className="rounded-full bg-[#00F5FF] px-4 py-2 text-sm font-bold text-black transition hover:opacity-90 active:scale-95"
+            >
+              {isLast ? "Done ✓" : "Next →"}
+            </button>
+          </div>
+        </div>
+      </>,
+      document.body
+    );
+  }
 
   return createPortal(
     <>
