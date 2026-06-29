@@ -1017,6 +1017,10 @@ function MemberProfilePage() {
         );
         setTeacherPageAvailable(teacherViewAllowed);
         setTeacherBookingAvailable(teacherViewAllowed && !availabilityRes.error && (availabilityRes.count ?? 0) > 0);
+        // Redirect self to teacher profile if it's set as default or is available
+        if (!cancelled && isSelf && teacherViewAllowed && profileUserId && data?.default_public_view === "teacher") {
+          router.replace(`/profile/${profileUserId}/teacher`);
+        }
       } catch {
         if (!cancelled) {
           setTeacherPageAvailable(false);
@@ -1034,12 +1038,13 @@ function MemberProfilePage() {
     () =>
       [
         { href: "/me/edit", label: "Profile settings", icon: "manage_accounts" },
+        ...(teacherPageAvailable ? [{ href: "/me/edit/teacher-profile", label: "Teacher profile settings", icon: "school" }] : []),
         { href: "/account-settings", label: "Account settings", icon: "settings" },
         { href: "/notifications", label: "Notifications", icon: "notifications" },
         { href: "/pricing", label: "Upgrade your plan", icon: "workspace_premium" },
         ...(viewerIsAdmin ? [{ href: "/admin/space", label: "Admin control", icon: "admin_panel_settings" }] : []),
       ],
-    [viewerIsAdmin]
+    [viewerIsAdmin, teacherPageAvailable]
   );
 
   const skillList = useMemo(() => {
@@ -3748,6 +3753,7 @@ function MemberProfilePage() {
                   ) : null}
                   {hostingAvailable ? (
                     <button
+                      data-tour="tour-request-hosting"
                       type="button"
                       onClick={() => {
                         closeActionMenu();

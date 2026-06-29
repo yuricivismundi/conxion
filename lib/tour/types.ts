@@ -12,5 +12,6 @@ export type TourFlow = {
   title: string;
   description: string;   // short tagline shown on welcome card
   icon: string;          // material symbol name
+  category: string;      // section label in the welcome modal
   steps: TourStep[];
 };

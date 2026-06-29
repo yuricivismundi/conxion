@@ -168,7 +168,7 @@ export default function PricingPage() {
                   if (!verifiedPlan || !billingState) return null;
                   const isVerified = billingState.currentPlanId === "verified" || billingState.isVerified;
                   return (
-                    <article className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
+                    <article data-tour="tour-verified-card" className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
                       <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(52,211,153,0.14),transparent_68%)]" />
                       <div className="relative">
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-400/70">One-time payment</p>

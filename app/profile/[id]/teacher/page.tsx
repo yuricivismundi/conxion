@@ -401,7 +401,7 @@ export default async function TeacherProfilePage({
         />
 
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
-        <section className="mb-12 sm:mb-24">
+        <section data-tour="tour-book-session" className="mb-12 sm:mb-24">
           <div className="mb-3">
             <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Session Availability</h2>
             <p className="mt-2 text-sm text-zinc-500">Browse open slots and book a private class directly.</p>

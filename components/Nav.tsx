@@ -54,6 +54,7 @@ export default function Nav({ title }: NavProps) {
   const { t } = useAppLanguage();
   const { openWelcome } = useTour();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -477,35 +478,128 @@ export default function Nav({ title }: NavProps) {
       {title ? <div className="mx-auto w-full max-w-[1440px] px-4 pb-3 text-sm text-white/55 sm:px-6">{title}</div> : null}
     </header>
     {!isPublicContext ? (
-      <nav className="fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0A0A0A]/96 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-2 backdrop-blur-md md:hidden">
-        <div className="mx-auto grid max-w-[520px] grid-cols-6 gap-1">
-          {[...tabs, { href: accountHref, activeKey: "/account", label: t("nav.mySpace"), icon: "person" }].map((tab) => {
-            const active = activeTab === ("activeKey" in tab ? tab.activeKey : tab.href);
-            const showMessagesLoading = tab.href === "/messages" && unreadMessagesLoading;
-            const showMessagesBadge = tab.href === "/messages" && !unreadMessagesLoading && unreadMessageThreads > 0;
-            return (
+      <>
+        {/* Mobile settings sheet */}
+        {mobileMenuOpen ? (
+          <>
+            <div
+              className="fixed inset-0 z-[70] bg-black/60 md:hidden"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <div className="fixed inset-x-0 bottom-0 z-[80] rounded-t-2xl border-t border-white/10 bg-[#111318] px-4 pt-5 pb-[calc(env(safe-area-inset-bottom)+24px)] md:hidden">
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
               <Link
-                key={`mobile-${tab.href}`}
-                href={tab.href}
-                className={cx(
-                  "relative flex min-h-[60px] flex-col items-center justify-center gap-[3px] rounded-2xl px-1 py-2 transition-colors active:scale-95",
-                  active ? "bg-cyan-300/12 text-white" : "text-gray-400 hover:text-white"
-                )}
+                href={accountHref}
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
               >
-                <span className={cx("material-symbols-outlined text-[22px]", active ? "text-[#22d3ee]" : "")}>{tab.icon}</span>
-                <span className={cx("max-w-full truncate text-[11px] leading-none font-medium", active ? "text-white" : "text-gray-400")}>{tab.label}</span>
-                {showMessagesBadge ? (
-                  <span className="absolute right-1.5 top-1.5 rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-1.5 py-[1px] text-[9px] font-black text-black">
-                    {unreadMessageThreads > 99 ? "99+" : unreadMessageThreads}
-                  </span>
-                ) : null}
-                {showMessagesLoading ? <span className="absolute right-1.5 top-1.5 h-4 w-6 animate-pulse rounded-full bg-white/[0.08]" /> : null}
-                {active ? <span className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-[#22d3ee]" /> : null}
+                <span className="material-symbols-outlined text-[20px]">person</span>
+                <span className="text-sm font-medium">My Profile</span>
               </Link>
-            );
-          })}
-        </div>
-      </nav>
+              <Link
+                href="/me/edit"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[20px]">manage_accounts</span>
+                <span className="text-sm font-medium">{t("nav.profileSettings")}</span>
+              </Link>
+              <Link
+                href="/account-settings"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[20px]">settings</span>
+                <span className="text-sm font-medium">{t("nav.accountSettings")}</span>
+              </Link>
+              <Link
+                href="/notifications"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[20px]">notifications</span>
+                <span className="text-sm font-medium">{t("nav.notifications")}</span>
+              </Link>
+              <Link
+                href="/pricing"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[20px]">workspace_premium</span>
+                <span className="text-sm font-medium">Upgrade your plan</span>
+              </Link>
+              {isAdmin ? (
+                <Link
+                  href="/admin/space"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+                >
+                  <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+                  <span className="text-sm font-medium">{t("nav.adminConsole")}</span>
+                </Link>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => { setMobileMenuOpen(false); openWelcome(); }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[20px]">explore</span>
+                <span className="text-sm font-medium">Take a tour</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMobileMenuOpen(false); void signOut(); }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/70 hover:bg-white/5 hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[20px]">logout</span>
+                <span className="text-sm font-medium">{t("nav.logout")}</span>
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        <nav className="fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0A0A0A]/96 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-2 backdrop-blur-md md:hidden">
+          <div className="mx-auto grid max-w-[520px] grid-cols-6 gap-1">
+            {tabs.map((tab) => {
+              const active = activeTab === tab.href;
+              const showMessagesLoading = tab.href === "/messages" && unreadMessagesLoading;
+              const showMessagesBadge = tab.href === "/messages" && !unreadMessagesLoading && unreadMessageThreads > 0;
+              return (
+                <Link
+                  key={`mobile-${tab.href}`}
+                  href={tab.href}
+                  className={cx(
+                    "relative flex min-h-[60px] flex-col items-center justify-center gap-[3px] rounded-2xl px-1 py-2 transition-colors active:scale-95",
+                    active ? "bg-cyan-300/12 text-white" : "text-gray-400 hover:text-white"
+                  )}
+                >
+                  <span className={cx("material-symbols-outlined text-[22px]", active ? "text-[#22d3ee]" : "")}>{tab.icon}</span>
+                  <span className={cx("max-w-full truncate text-[11px] leading-none font-medium", active ? "text-white" : "text-gray-400")}>{tab.label}</span>
+                  {showMessagesBadge ? (
+                    <span className="absolute right-1.5 top-1.5 rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-1.5 py-[1px] text-[9px] font-black text-black">
+                      {unreadMessageThreads > 99 ? "99+" : unreadMessageThreads}
+                    </span>
+                  ) : null}
+                  {showMessagesLoading ? <span className="absolute right-1.5 top-1.5 h-4 w-6 animate-pulse rounded-full bg-white/[0.08]" /> : null}
+                  {active ? <span className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-[#22d3ee]" /> : null}
+                </Link>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className={cx(
+                "relative flex min-h-[60px] flex-col items-center justify-center gap-[3px] rounded-2xl px-1 py-2 transition-colors active:scale-95",
+                myProfileActive ? "bg-cyan-300/12 text-white" : "text-gray-400 hover:text-white"
+              )}
+            >
+              <span className={cx("material-symbols-outlined text-[22px]", myProfileActive ? "text-[#22d3ee]" : "")}>person</span>
+              <span className={cx("max-w-full truncate text-[11px] leading-none font-medium", myProfileActive ? "text-white" : "text-gray-400")}>{t("nav.mySpace")}</span>
+              {myProfileActive ? <span className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-[#22d3ee]" /> : null}
+            </button>
+          </div>
+        </nav>
+      </>
     ) : null}
     </>
   );

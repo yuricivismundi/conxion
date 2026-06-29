@@ -288,7 +288,7 @@ function CreateGroupForm() {
           {/* Form body */}
           <div className="space-y-5 px-5 py-6">
             {/* Name & Description */}
-            <section className="space-y-3">
+            <section data-tour="tour-group-details" className="space-y-3">
               <h2 className="text-lg font-bold text-white">Group Details</h2>
               <div className="space-y-1">
                 <label className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Group Name <span className="text-rose-400">*</span></label>
@@ -451,7 +451,7 @@ function CreateGroupForm() {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-t border-white/10 px-5 py-4">
+          <div data-tour="tour-group-create-btn" className="flex items-center justify-between border-t border-white/10 px-5 py-4">
             <button
               type="button"
               onClick={() => router.back()}
