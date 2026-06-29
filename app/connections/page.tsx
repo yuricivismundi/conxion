@@ -3035,7 +3035,7 @@ function ConnectionsPageContent() {
 
         <section className="border-b border-white/6 pb-3 sm:pb-4">
           <div
-            className="mx-auto grid w-full max-w-none grid-cols-3 gap-2 px-0 pb-1 sm:flex sm:max-w-[560px] sm:items-center sm:justify-center sm:gap-8 sm:overflow-visible sm:px-0 sm:pb-0"
+            className="mx-auto grid w-full max-w-none grid-cols-4 gap-1.5 px-0 pb-1 sm:flex sm:max-w-[560px] sm:items-center sm:justify-center sm:gap-8 sm:overflow-visible sm:px-0 sm:pb-0"
             style={{ scrollbarWidth: "none" }}
           >
             <button
@@ -3046,7 +3046,7 @@ function ConnectionsPageContent() {
                 router.replace("/connections?mode=dancers", { scroll: false });
               }}
             className={[
-                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                "group inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full px-2 text-[11px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
                 tab === "members" && discoverMode === "dancers"
                   ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
                   : "text-white/70 hover:text-white/95",
@@ -3055,7 +3055,7 @@ function ConnectionsPageContent() {
               <MSIcon
                 name="person"
                 className={[
-                  "text-[18px] transition-opacity",
+                  "text-[15px] sm:text-[18px] transition-opacity",
                   tab === "members" && discoverMode === "dancers" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
                 ].join(" ")}
               />
@@ -3068,7 +3068,7 @@ function ConnectionsPageContent() {
                 router.replace("/connections?mode=travelers", { scroll: false });
               }}
               className={[
-                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                "group inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full px-2 text-[11px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
                 tab === "travellers"
                   ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
                   : "text-white/70 hover:text-white/95",
@@ -3077,7 +3077,7 @@ function ConnectionsPageContent() {
               <MSIcon
                 name="flight"
                 className={[
-                  "text-[18px] transition-opacity",
+                  "text-[15px] sm:text-[18px] transition-opacity",
                   tab === "travellers" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
                 ].join(" ")}
               />
@@ -3089,7 +3089,7 @@ function ConnectionsPageContent() {
                 router.replace("/connections?mode=events", { scroll: false });
               }}
               className={[
-                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                "group inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full px-2 text-[11px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
                 tab === "events"
                   ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
                   : "text-white/70 hover:text-white/95",
@@ -3098,20 +3098,21 @@ function ConnectionsPageContent() {
               <MSIcon
                 name="celebration"
                 className={[
-                  "text-[18px] transition-opacity",
+                  "text-[15px] sm:text-[18px] transition-opacity",
                   tab === "events" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
                 ].join(" ")}
               />
               Events
             </button>
             <button
+              data-tour="tour-teachers-tab"
               onClick={() => {
                 setTab("teachers");
                 setDiscoverMode("dancers");
                 router.replace("/connections?mode=teachers", { scroll: false });
               }}
               className={[
-                "group inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-4 text-[13px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
+                "group inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full px-2 text-[11px] sm:shrink-0 sm:w-auto sm:gap-2.5 sm:px-5 sm:text-[16px] font-semibold tracking-tight transition-all duration-200 hover:-translate-y-px",
                 tab === "teachers"
                   ? "border border-[#00F5FF]/40 bg-[linear-gradient(135deg,rgba(0,255,255,0.14),rgba(255,255,255,0.06))] text-[#00F5FF] shadow-[0_0_16px_rgba(0,255,255,0.28)]"
                   : "text-white/70 hover:text-white/95",
@@ -3120,7 +3121,7 @@ function ConnectionsPageContent() {
               <MSIcon
                 name="school"
                 className={[
-                  "text-[18px] transition-opacity",
+                  "text-[15px] sm:text-[18px] transition-opacity",
                   tab === "teachers" ? "opacity-100" : "opacity-80 group-hover:opacity-100",
                 ].join(" ")}
               />
@@ -3171,6 +3172,7 @@ function ConnectionsPageContent() {
                 ) : null}
                 {tab === "members" ? (
                   <button
+                    data-tour="tour-hosts-filter"
                     type="button"
                     onClick={() => setHostsOnlyQuick((v) => !v)}
                     className={["inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition", hostsOnlyQuick ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-300" : "border-white/10 text-white/40 hover:text-white/70"].join(" ")}
@@ -4067,11 +4069,11 @@ function ConnectionsPageContent() {
                   <p className="text-white/30 text-sm">No teachers found{effectiveCityFilter ? ` in ${effectiveCityFilter}` : ""}.</p>
                 </div>
               ) : (
-                paginatedTeachers.map((m) => {
+                paginatedTeachers.map((m, idx) => {
                   const refTotal = Number(m.refTotalAll ?? 0);
                   const styles = Object.keys(m.danceSkills ?? {});
                   return (
-                    <div key={m.id} className="group relative h-full">
+                    <div key={m.id} {...(idx === 0 ? { "data-tour": "tour-teacher-card" } : {})} className="group relative h-full">
                       {/* glow halo behind card */}
                       <div className="absolute -inset-1 rounded-[28px] bg-gradient-to-br from-[#9333ea]/25 via-transparent to-[#ff51fa]/35 opacity-50 blur-2xl transition group-hover:opacity-80" />
                       <div className="relative h-full rounded-[24px] p-[1.5px] bg-gradient-to-br from-zinc-800/20 via-[#9333ea]/50 to-[#ff51fa]/70 transition group-hover:from-zinc-800/20 group-hover:via-[#9333ea]/80 group-hover:to-[#ff51fa]/95">

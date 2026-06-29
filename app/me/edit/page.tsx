@@ -1836,7 +1836,7 @@ function EditMePage() {
                     </Link>
                   )}
                 </div>
-                <div className="relative flex max-w-full gap-1 overflow-x-auto border-b border-white/10 px-1 no-scrollbar">
+                <div data-tour="tour-edit-tabs" className="relative flex max-w-full gap-1 overflow-x-auto border-b border-white/10 px-1 no-scrollbar">
                   {editTabs.map((tab) => {
                     const active = activeTab === tab.id;
                     return (
@@ -1888,7 +1888,7 @@ function EditMePage() {
               {activeTab === "profile" ? (
               <>
               {/* Basic info section header */}
-              <div className="flex items-center justify-between">
+              <div data-tour="tour-profile-basic-info" className="flex items-center justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">person</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Basic Info</h2>
                   {!openSections.info && (
@@ -2080,7 +2080,7 @@ function EditMePage() {
               ) : null}
 
             {activeTab === "hosting" ? (
-            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+            <div data-tour="tour-hosting-settings" className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
               <div className="space-y-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -2284,7 +2284,7 @@ function EditMePage() {
             ) : null}
 
             {activeTab === "profile" ? (
-            <div className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.dance ? "p-6 sm:p-7" : "px-5 py-3.5")}>
+            <div data-tour="tour-profile-dance-styles" className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.dance ? "p-6 sm:p-7" : "px-5 py-3.5")}>
               <header className="flex items-center justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">music_note</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Dance Style</h2>

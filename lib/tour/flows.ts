@@ -6,6 +6,7 @@ export const TOUR_FLOWS: TourFlow[] = [
     title: "Make your first connection",
     description: "Learn how to find dancers near you and send your first connection request.",
     icon: "connecting_airports",
+    category: "Discovery",
     steps: [
       {
         id: "step-discover-heading",
@@ -59,6 +60,7 @@ export const TOUR_FLOWS: TourFlow[] = [
     title: "Navigate your inbox",
     description: "Learn how to use your inbox — threads, filters, bookings, and composing messages.",
     icon: "inbox",
+    category: "Discovery",
     steps: [
       {
         id: "step-inbox-heading",
@@ -103,6 +105,7 @@ export const TOUR_FLOWS: TourFlow[] = [
     title: "Join an event",
     description: "Find festivals, workshops, and socials near you and request to join.",
     icon: "festival",
+    category: "Discovery",
     steps: [
       {
         id: "step-events-heading",
@@ -127,6 +130,357 @@ export const TOUR_FLOWS: TourFlow[] = [
         placement: "top",
         title: "Open an event",
         description: "Click any event card to see full details — lineup, schedule, location, and who's attending.",
+      },
+    ],
+  },
+  {
+    id: "book-teacher",
+    title: "Book a teacher",
+    description: "Find a dance teacher, explore their profile, and book a private session.",
+    icon: "school",
+    category: "Teachers",
+    steps: [
+      {
+        id: "step-teachers-tab",
+        target: "tour-teachers-tab",
+        route: "/connections",
+        placement: "bottom",
+        title: "Find teachers",
+        description:
+          "Switch to the Teachers tab to browse professional dance teachers with active profiles in your area.",
+      },
+      {
+        id: "step-teacher-card",
+        target: "tour-teacher-card",
+        route: "/connections?mode=teachers",
+        placement: "bottom",
+        title: "Explore a teacher",
+        description:
+          "Each card shows the teacher's styles, references, and rates. Click it to open their full teacher profile.",
+      },
+      {
+        id: "step-book-session",
+        target: "tour-book-session",
+        route: "/connections?mode=teachers",
+        placement: "top",
+        title: "Book a session",
+        description:
+          "Open a teacher's profile, pick an open slot from the calendar, choose your duration, and send a booking request directly to the teacher.",
+      },
+    ],
+  },
+  {
+    id: "setup-teacher-profile",
+    title: "Set up your teacher profile",
+    description: "Enable your public teacher page, add your bio, and open your booking calendar.",
+    icon: "edit_note",
+    category: "Teachers",
+    steps: [
+      {
+        id: "step-teacher-enable",
+        target: "tour-teacher-enable",
+        route: "/me/edit/teacher-profile",
+        placement: "bottom",
+        title: "Enable your teacher profile",
+        description:
+          "Toggle your teacher profile on to make it visible to other dancers. You can also set whether your teacher or social profile is shown by default.",
+      },
+      {
+        id: "step-teacher-profile-info",
+        target: "tour-teacher-profile-info",
+        route: "/me/edit/teacher-profile",
+        placement: "top",
+        title: "Fill in your profile info",
+        description:
+          "Add a headline, bio, your dance styles, languages, and rates. This is what students see when they visit your teacher page.",
+      },
+      {
+        id: "step-teacher-tabs",
+        target: "tour-teacher-tabs",
+        route: "/me/edit/teacher-profile",
+        placement: "bottom",
+        title: "Manage bookings & classes",
+        description:
+          "Switch to Booking to set your availability and session rates, or Weekly Classes to list your group lessons. Inquiries and References are here too.",
+      },
+    ],
+  },
+  {
+    id: "trips-activities",
+    title: "Trips & group activities",
+    description: "Create a trip, start a group, or join an activity with your connections.",
+    icon: "luggage",
+    category: "Trips",
+    steps: [
+      {
+        id: "step-activity-heading",
+        target: "tour-activity-heading",
+        route: "/activity",
+        placement: "bottom",
+        title: "Your activities hub",
+        description:
+          "Everything you organise lives here — events you attend, trips you plan, groups you run, and hosting requests.",
+      },
+      {
+        id: "step-activity-tabs",
+        target: "tour-activity-tabs",
+        route: "/activity",
+        placement: "bottom",
+        title: "Switch between activity types",
+        description:
+          "Use the tabs to navigate between Events, Trips, Groups, and Hosting. Each tab shows your activity for that type.",
+      },
+      {
+        id: "step-activity-create",
+        target: "tour-activity-create",
+        route: "/activity?tab=trips",
+        placement: "bottom",
+        title: "Create a trip",
+        description:
+          "Tap Create trip to plan a dance travel with your connections. Set dates, destination, and invite who you want to travel with.",
+      },
+    ],
+  },
+  {
+    id: "find-hosting",
+    title: "Find a place to stay",
+    description: "Browse dancers who offer hosting and send a request directly from their profile.",
+    icon: "home",
+    category: "Hosting",
+    steps: [
+      {
+        id: "step-hosts-filter",
+        target: "tour-hosts-filter",
+        route: "/connections",
+        placement: "bottom",
+        title: "Filter to hosts only",
+        description:
+          "Toggle Hosts only to show only dancers who are currently accepting guests. The filter turns cyan when active.",
+      },
+      {
+        id: "step-connect-host",
+        target: "tour-connect-button",
+        route: "/connections",
+        placement: "top",
+        title: "Open a host's profile",
+        description:
+          "Click any dancer card to view their full profile — hosting details, space type, and how many guests they accept.",
+      },
+      {
+        id: "step-request-hosting",
+        target: "tour-request-hosting",
+        route: "/connections",
+        placement: "top",
+        title: "Send a hosting request",
+        description:
+          "Tap Request Hosting from their profile, choose your travel dates and reason, and send your request. They'll get notified in their inbox.",
+      },
+    ],
+  },
+  {
+    id: "join-trip",
+    title: "Join a trip",
+    description: "Browse trips planned by other dancers and request to travel together.",
+    icon: "flight_takeoff",
+    category: "Trips",
+    steps: [
+      {
+        id: "step-activity-tabs-trips",
+        target: "tour-activity-tabs",
+        route: "/activity",
+        placement: "bottom",
+        title: "Open your activities",
+        description:
+          "Head to My Activities to see trips, groups, events, and hosting all in one place.",
+      },
+      {
+        id: "step-discover-travelers",
+        target: "tour-dancers-tab",
+        route: "/connections",
+        placement: "bottom",
+        title: "Find travelers",
+        description:
+          "Switch to the Travelers tab in Discover to browse dancers planning trips. Filter by destination or travel window.",
+      },
+      {
+        id: "step-activity-create-trip",
+        target: "tour-activity-create",
+        route: "/activity?tab=trips",
+        placement: "bottom",
+        title: "Create or join a trip",
+        description:
+          "Tap Create trip to start your own, or connect with a traveler and propose joining their trip from the Travelers tab.",
+      },
+    ],
+  },
+  {
+    id: "offer-hosting",
+    title: "Offer hosting to dancers",
+    description: "Set up your space to welcome visiting dancers and appear in the host directory.",
+    icon: "night_shelter",
+    category: "Hosting",
+    steps: [
+      {
+        id: "step-edit-tabs",
+        target: "tour-edit-tabs",
+        route: "/me/edit",
+        placement: "bottom",
+        title: "Open your profile settings",
+        description:
+          "Go to Profile settings and switch to the Hosting tab to configure your space details.",
+      },
+      {
+        id: "step-hosting-settings",
+        target: "tour-hosting-settings",
+        route: "/me/edit?tab=hosting",
+        placement: "top",
+        title: "Enable hosting",
+        description:
+          "Toggle Accepting hosting on, set max guests, space type, and add notes about your place. Dancers in your city will be able to find and request your space.",
+      },
+      {
+        id: "step-hosts-filter-verify",
+        target: "tour-hosts-filter",
+        route: "/connections",
+        placement: "bottom",
+        title: "Check you appear as a host",
+        description:
+          "Head back to Discover and toggle Hosts only — your profile should now appear in the list for dancers near you.",
+      },
+    ],
+  },
+  {
+    id: "setup-social-profile",
+    title: "Set up your social profile",
+    description: "Add your photo, city, dance styles, and bio so dancers can find and connect with you.",
+    icon: "account_circle",
+    category: "Profile",
+    steps: [
+      {
+        id: "step-profile-edit-tabs",
+        target: "tour-edit-tabs",
+        route: "/me/edit",
+        placement: "bottom",
+        title: "Your profile settings",
+        description:
+          "This is where you manage everything about your public profile — info, media, hosting, and teacher profile.",
+      },
+      {
+        id: "step-profile-basic-info",
+        target: "tour-profile-basic-info",
+        route: "/me/edit",
+        placement: "bottom",
+        title: "Fill in your basic info",
+        description:
+          "Add your display name, username, and city. Your city is key — it's how other dancers in your area discover you.",
+      },
+      {
+        id: "step-profile-dance-styles",
+        target: "tour-profile-dance-styles",
+        route: "/me/edit",
+        placement: "top",
+        title: "Add your dance styles",
+        description:
+          "Select the styles you dance and your level for each. This appears on your profile and helps with matching in Discover.",
+      },
+    ],
+  },
+  {
+    id: "get-verified",
+    title: "Get verified",
+    description: "Understand what verification unlocks and how to get your badge.",
+    icon: "verified",
+    category: "Profile",
+    steps: [
+      {
+        id: "step-pricing-page",
+        target: "tour-verified-card",
+        route: "/pricing",
+        placement: "top",
+        title: "Verification badge",
+        description:
+          "Verification is a one-time payment that adds a trust badge to your profile. It unlocks hosting requests, booking, and higher visibility in Discover.",
+      },
+      {
+        id: "step-hosts-filter-verified",
+        target: "tour-hosts-filter",
+        route: "/connections",
+        placement: "bottom",
+        title: "Why it matters",
+        description:
+          "Only verified members can send hosting requests and book private sessions with teachers. Toggle Hosts only to see it in action.",
+      },
+    ],
+  },
+  {
+    id: "create-group",
+    title: "Create & manage a group",
+    description: "Start a practice group, community, or crew and invite your connections.",
+    icon: "group",
+    category: "Community",
+    steps: [
+      {
+        id: "step-activity-groups",
+        target: "tour-activity-tabs",
+        route: "/activity?tab=groups",
+        placement: "bottom",
+        title: "Your groups",
+        description:
+          "The Groups tab in My Activities shows all groups you admin or belong to. You can search, filter, and manage them here.",
+      },
+      {
+        id: "step-group-details",
+        target: "tour-group-details",
+        route: "/groups/new",
+        placement: "bottom",
+        title: "Name your group",
+        description:
+          "Give your group a name, description, and pick whether it's open or invite-only. Add a cover photo to make it stand out.",
+      },
+      {
+        id: "step-group-create",
+        target: "tour-group-create-btn",
+        route: "/groups/new",
+        placement: "top",
+        title: "Create it",
+        description:
+          "Tap Create Group to publish it. You can then invite connections from the group page and manage members and settings.",
+      },
+    ],
+  },
+  {
+    id: "create-event",
+    title: "Create an event",
+    description: "Publish a festival, workshop, social, or class and manage attendees.",
+    icon: "edit_calendar",
+    category: "Community",
+    steps: [
+      {
+        id: "step-events-create",
+        target: "tour-activity-create",
+        route: "/activity",
+        placement: "bottom",
+        title: "Start from Activities",
+        description:
+          "Head to My Activities and tap Create event to open the event builder. You can also go directly from the Events page.",
+      },
+      {
+        id: "step-event-essentials",
+        target: "tour-event-essentials",
+        route: "/events/new",
+        placement: "bottom",
+        title: "Fill in the essentials",
+        description:
+          "Add a title, event type, dates, venue, and description. A cover photo makes your event more discoverable.",
+      },
+      {
+        id: "step-event-publish",
+        target: "tour-event-publish",
+        route: "/events/new",
+        placement: "top",
+        title: "Save a draft or publish",
+        description:
+          "Save as draft to keep editing, or Publish to make it live. Published events appear in the Events discovery page for all members.",
       },
     ],
   },

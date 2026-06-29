@@ -723,7 +723,7 @@ function CreateEventForm() {
           </section>
 
           {!isGroupCreate ? (
-            <section className="space-y-4">
+            <section data-tour="tour-event-essentials" className="space-y-4">
               <h2 className="text-lg font-bold text-white">Essentials</h2>
               <div className="grid gap-4">
                 <label className="space-y-1">
@@ -1277,7 +1277,7 @@ function CreateEventForm() {
               </div>
             </section>
           ) : null}
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div data-tour="tour-event-publish" className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <Link href="/events" className="text-sm font-semibold text-slate-400 hover:text-white">
               Cancel
             </Link>
