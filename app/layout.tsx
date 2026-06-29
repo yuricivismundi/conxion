@@ -10,9 +10,7 @@ import IosInstallBanner from "@/components/IosInstallBanner";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import { ToastProvider } from "@/components/Toast";
 import { readPublicAppUrl } from "@/lib/public-app-url";
-import dynamic from "next/dynamic";
-
-const TourShell = dynamic(() => import("@/components/tour/TourShell"), { ssr: false });
+import TourShellLoader from "@/components/tour/TourShellLoader";
 
 const appUrl = readPublicAppUrl();
 
@@ -72,7 +70,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to main content
           </a>
           <ToastProvider>
-            <TourShell>
+            <TourShellLoader>
               <ErrorBoundary>
                 {children}
                 <AppFooter />
@@ -81,7 +79,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <IosInstallBanner />
                 <ServiceWorkerRegistrar />
               </ErrorBoundary>
-            </TourShell>
+            </TourShellLoader>
           </ToastProvider>
         </AppLanguageProvider>
       </body>
