@@ -4164,6 +4164,7 @@ function ConnectionsPageContent() {
                                 <MSIcon name="forum" className="text-[14px]" /> Request info
                               </button>
                               <button
+                                {...(idx === 0 ? { "data-tour": "tour-book-session" } : {})}
                                 className="flex min-h-[40px] flex-[1.4] items-center justify-center gap-1.5 rounded-full px-4 text-[11px] font-bold uppercase tracking-[0.16em] text-[#0A0A0A]"
                                 style={{ backgroundImage: "linear-gradient(135deg,#9333ea,#ff51fa)" }}
                                 onClick={() => setBookSessionTeacher({ id: m.id, name: m.name, photoUrl: m.photoUrl ?? null })}

@@ -455,7 +455,7 @@ function ActivityPageContent() {
                   </div>
                 ) : (
                   <Link
-                    data-tour="tour-activity-create"
+                    data-tour={activeTab === "trips" ? "tour-create-trip" : "tour-activity-create"}
                     href={primaryAction.href}
                     className="inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-black text-[#071116] transition hover:opacity-90"
                     style={{ backgroundImage: "linear-gradient(90deg,#00F5FF 0%,#FF00FF 100%)" }}

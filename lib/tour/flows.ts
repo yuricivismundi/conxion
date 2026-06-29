@@ -162,10 +162,10 @@ export const TOUR_FLOWS: TourFlow[] = [
         id: "step-book-session",
         target: "tour-book-session",
         route: "/connections?mode=teachers",
-        placement: "top",
+        placement: "left",
         title: "Book a session",
         description:
-          "Open a teacher's profile, pick an open slot from the calendar, choose your duration, and send a booking request directly to the teacher.",
+          "Tap Book a class to open the booking flow directly — pick a date, choose your duration, and send the request to the teacher.",
       },
     ],
   },
@@ -215,24 +215,24 @@ export const TOUR_FLOWS: TourFlow[] = [
       {
         id: "step-activity-heading",
         target: "tour-activity-heading",
-        route: "/activity",
+        route: "/activity?tab=trips",
         placement: "bottom",
         title: "Your activities hub",
         description:
-          "Everything you organise lives here — events you attend, trips you plan, groups you run, and hosting requests.",
+          "Everything you organise lives here — trips you plan, groups you run, events you attend, and hosting requests.",
       },
       {
         id: "step-activity-tabs",
         target: "tour-activity-tabs",
-        route: "/activity",
+        route: "/activity?tab=trips",
         placement: "bottom",
         title: "Switch between activity types",
         description:
-          "Use the tabs to navigate between Events, Trips, Groups, and Hosting. Each tab shows your activity for that type.",
+          "Use the tabs to navigate between Trips, Groups, Events, and Hosting. Each tab shows your activity for that type.",
       },
       {
-        id: "step-activity-create",
-        target: "tour-activity-create",
+        id: "step-create-trip",
+        target: "tour-create-trip",
         route: "/activity?tab=trips",
         placement: "bottom",
         title: "Create a trip",
