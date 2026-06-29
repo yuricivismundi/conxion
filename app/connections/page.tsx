@@ -3062,6 +3062,7 @@ function ConnectionsPageContent() {
               {t("discover.dancers")}
             </button>
             <button
+              data-tour="tour-travellers-tab"
               onClick={() => {
                 setTab("travellers");
                 setDiscoverMode("travelers");

@@ -295,7 +295,7 @@ export const TOUR_FLOWS: TourFlow[] = [
       },
       {
         id: "step-discover-travelers",
-        target: "tour-dancers-tab",
+        target: "tour-travellers-tab",
         route: "/connections",
         placement: "bottom",
         title: "Find travelers",
