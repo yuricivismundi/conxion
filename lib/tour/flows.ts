@@ -153,7 +153,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         id: "step-teacher-card",
         target: "tour-teacher-card",
         route: "/connections?mode=teachers",
-        placement: "bottom",
+        placement: "right",
         title: "Explore a teacher",
         description:
           "Each card shows the teacher's styles, references, and rates. Click it to open their full teacher profile.",
