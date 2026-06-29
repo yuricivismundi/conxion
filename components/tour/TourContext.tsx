@@ -7,66 +7,106 @@ import React, {
   useEffect,
   useState,
 } from "react";
-import { TOUR_STEPS } from "@/lib/tour/steps";
+import { useRouter, usePathname } from "next/navigation";
+import { getFlowById } from "@/lib/tour/flows";
+import type { TourStep } from "@/lib/tour/types";
 import { supabase } from "@/lib/supabase/client";
 
 const TOUR_DONE_KEY = "cx_tour_done";
 
-type TourContextValue = {
+type TourState = {
+  // Welcome screen
+  welcomeOpen: boolean;
+  openWelcome: () => void;
+  closeWelcome: () => void;
+
+  // Active tour
   active: boolean;
+  flowId: string | null;
   step: number;
-  total: number;
+  totalSteps: number;
+  currentStep: TourStep | null;
+
+  // Actions
+  startFlow: (flowId: string) => void;
   next: () => void;
   skip: () => void;
-  start: () => void;
 };
 
-const TourContext = createContext<TourContextValue>({
+const TourContext = createContext<TourState>({
+  welcomeOpen: false,
+  openWelcome: () => undefined,
+  closeWelcome: () => undefined,
+
   active: false,
+  flowId: null,
   step: 0,
-  total: TOUR_STEPS.length,
+  totalSteps: 0,
+  currentStep: null,
+
+  startFlow: () => undefined,
   next: () => undefined,
   skip: () => undefined,
-  start: () => undefined,
 });
 
 export function TourProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [active, setActive] = useState(false);
+  const [flowId, setFlowId] = useState<string | null>(null);
   const [step, setStep] = useState(0);
+
+  const flow = flowId ? getFlowById(flowId) : null;
+  const totalSteps = flow?.steps.length ?? 0;
+  const currentStep = flow?.steps[step] ?? null;
+
+  const openWelcome = useCallback(() => setWelcomeOpen(true), []);
+  const closeWelcome = useCallback(() => setWelcomeOpen(false), []);
 
   const finish = useCallback(() => {
     setActive(false);
-    try {
-      localStorage.setItem(TOUR_DONE_KEY, "1");
-    } catch {
-      // ignore storage errors
-    }
+    setFlowId(null);
   }, []);
+
+  const skip = useCallback(() => finish(), [finish]);
+
+  const startFlow = useCallback(
+    (id: string) => {
+      const f = getFlowById(id);
+      if (!f) return;
+      setFlowId(id);
+      setStep(0);
+      setActive(true);
+      setWelcomeOpen(false);
+      // Navigate to first step's route if needed
+      if (f.steps[0] && pathname !== f.steps[0].route) {
+        router.push(f.steps[0].route);
+      }
+    },
+    [pathname, router]
+  );
 
   const next = useCallback(() => {
-    setStep((prev) => {
-      const nextStep = prev + 1;
-      if (nextStep >= TOUR_STEPS.length) {
-        finish();
-        return prev;
-      }
-      return nextStep;
-    });
-  }, [finish]);
+    if (!flow) return;
+    const nextStep = step + 1;
+    if (nextStep >= flow.steps.length) {
+      finish();
+      return;
+    }
+    const nextStepData = flow.steps[nextStep];
+    setStep(nextStep);
+    if (nextStepData && pathname !== nextStepData.route) {
+      router.push(nextStepData.route);
+    }
+  }, [flow, step, finish, pathname, router]);
 
-  const skip = useCallback(() => {
-    finish();
-  }, [finish]);
-
-  const start = useCallback(() => {
-    setStep(0);
-    setActive(true);
-  }, []);
-
+  // Auto-show welcome on first login
   useEffect(() => {
     let cancelled = false;
 
-    const checkAndStart = async () => {
+    const checkAndOpen = async () => {
       try {
         const alreadyDone = localStorage.getItem(TOUR_DONE_KEY);
         if (alreadyDone) return;
@@ -80,8 +120,15 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
         if (!sessionData.session?.user) return;
 
         const timer = setTimeout(() => {
-          if (!cancelled) start();
-        }, 1500);
+          if (!cancelled) {
+            setWelcomeOpen(true);
+            try {
+              localStorage.setItem(TOUR_DONE_KEY, "1");
+            } catch {
+              // ignore
+            }
+          }
+        }, 2000);
 
         return () => clearTimeout(timer);
       } catch {
@@ -89,20 +136,34 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    void checkAndStart();
+    void checkAndOpen();
 
     return () => {
       cancelled = true;
     };
-  }, [start]);
+  }, []);
 
   return (
-    <TourContext.Provider value={{ active, step, total: TOUR_STEPS.length, next, skip, start }}>
+    <TourContext.Provider
+      value={{
+        welcomeOpen,
+        openWelcome,
+        closeWelcome,
+        active,
+        flowId,
+        step,
+        totalSteps,
+        currentStep,
+        startFlow,
+        next,
+        skip,
+      }}
+    >
       {children}
     </TourContext.Provider>
   );
 }
 
-export function useTour(): TourContextValue {
+export function useTour(): TourState {
   return useContext(TourContext);
 }

@@ -9352,6 +9352,7 @@ function MessagesPageContent() {
                   ) : null}
                   {kindFilter !== "event" && kindFilter !== "group" ? (
                   <button
+                    data-tour="tour-compose"
                     aria-label="New Message"
                     onClick={() => setComposeOpen(true)}
                     className="flex size-11 items-center justify-center rounded-full bg-[#0df2f2]/10 text-[#0df2f2] transition-colors hover:bg-[#0df2f2]/20"
@@ -9400,7 +9401,7 @@ function MessagesPageContent() {
             </div>
 
             <div className="flex items-center gap-1.5 min-w-0">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div data-tour="tour-inbox-tabs" className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {inboxViewTabs.map((tab) => {
                 const archiveMode = activeTab === "archived";
                 const selected = archiveMode ? kindFilter === tab.key : activeTab === tab.key;
