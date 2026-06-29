@@ -5,6 +5,7 @@ export type TourStep = {
   title: string;
   description: string;
   placement: "top" | "bottom" | "left" | "right";
+  fallbackMessage?: string; // shown when target element not found after timeout
 };
 
 export type TourFlow = {

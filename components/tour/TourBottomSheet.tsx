@@ -7,11 +7,32 @@ import { useTour } from "./TourContext";
 export default function TourBottomSheet() {
   const { step, totalSteps, currentStep, next, skip } = useTour();
   const [mounted, setMounted] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     return () => setMounted(false);
   }, []);
+
+  // Mirror the same 3s polling to detect not-found on mobile
+  useEffect(() => {
+    if (!currentStep) return;
+    setNotFound(false);
+    let elapsed = 0;
+    const poll = setInterval(() => {
+      elapsed += 100;
+      const el = document.querySelector<HTMLElement>(`[data-tour="${currentStep.target}"]`);
+      if (el && el.getBoundingClientRect().width > 0) {
+        clearInterval(poll);
+        return;
+      }
+      if (elapsed >= 3000) {
+        clearInterval(poll);
+        setNotFound(true);
+      }
+    }, 100);
+    return () => clearInterval(poll);
+  }, [currentStep]);
 
   if (!mounted || !currentStep) return null;
 
@@ -42,7 +63,15 @@ export default function TourBottomSheet() {
           {step + 1} / {totalSteps}
         </p>
         <h3 className="mb-2 text-lg font-bold text-white">{currentStep.title}</h3>
-        <p className="mb-6 text-sm leading-relaxed text-white/65">{currentStep.description}</p>
+        <p className="mb-4 text-sm leading-relaxed text-white/65">{currentStep.description}</p>
+        {notFound && (
+          <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2.5">
+            <span className="material-symbols-outlined shrink-0 text-[15px] text-amber-400 mt-0.5">info</span>
+            <p className="text-xs leading-relaxed text-amber-300/80">
+              {currentStep.fallbackMessage ?? "Nothing to highlight here yet — this feature becomes available once there's content in your area."}
+            </p>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <button
             type="button"
