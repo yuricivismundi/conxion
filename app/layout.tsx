@@ -10,8 +10,9 @@ import IosInstallBanner from "@/components/IosInstallBanner";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import { ToastProvider } from "@/components/Toast";
 import { readPublicAppUrl } from "@/lib/public-app-url";
-import { TourProvider } from "@/components/tour/TourContext";
-import { TourOverlay } from "@/components/tour/TourOverlay";
+import dynamic from "next/dynamic";
+
+const TourShell = dynamic(() => import("@/components/tour/TourShell"), { ssr: false });
 
 const appUrl = readPublicAppUrl();
 
@@ -71,7 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to main content
           </a>
           <ToastProvider>
-            <TourProvider>
+            <TourShell>
               <ErrorBoundary>
                 {children}
                 <AppFooter />
@@ -79,9 +80,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <PwaInstallBanner />
                 <IosInstallBanner />
                 <ServiceWorkerRegistrar />
-                <TourOverlay />
               </ErrorBoundary>
-            </TourProvider>
+            </TourShell>
           </ToastProvider>
         </AppLanguageProvider>
       </body>
