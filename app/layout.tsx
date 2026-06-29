@@ -10,6 +10,8 @@ import IosInstallBanner from "@/components/IosInstallBanner";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import { ToastProvider } from "@/components/Toast";
 import { readPublicAppUrl } from "@/lib/public-app-url";
+import { TourProvider } from "@/components/tour/TourContext";
+import { TourOverlay } from "@/components/tour/TourOverlay";
 
 const appUrl = readPublicAppUrl();
 
@@ -69,14 +71,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to main content
           </a>
           <ToastProvider>
-            <ErrorBoundary>
-              {children}
-              <AppFooter />
-              <OfflineBanner />
-              <PwaInstallBanner />
-              <IosInstallBanner />
-              <ServiceWorkerRegistrar />
-            </ErrorBoundary>
+            <TourProvider>
+              <ErrorBoundary>
+                {children}
+                <AppFooter />
+                <OfflineBanner />
+                <PwaInstallBanner />
+                <IosInstallBanner />
+                <ServiceWorkerRegistrar />
+                <TourOverlay />
+              </ErrorBoundary>
+            </TourProvider>
           </ToastProvider>
         </AppLanguageProvider>
       </body>
