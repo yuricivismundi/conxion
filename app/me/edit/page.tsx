@@ -551,6 +551,11 @@ function EditMePage() {
   const rawTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<EditProfileTab>(isValidTab(rawTab) ? rawTab : "profile");
 
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (isValidTab(t)) setActiveTab(t);
+  }, [searchParams]);
+
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
   const [followersCount, setFollowersCount] = useState<number | null>(null);

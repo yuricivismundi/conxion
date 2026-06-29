@@ -391,6 +391,42 @@ export const TOUR_FLOWS: TourFlow[] = [
     ],
   },
   {
+    id: "go-plus",
+    title: "Upgrade to Plus",
+    description: "See what Go Plus unlocks and how to upgrade your plan.",
+    icon: "workspace_premium",
+    category: "Profile",
+    steps: [
+      {
+        id: "step-plan-grid",
+        target: "tour-plan-grid",
+        route: "/pricing",
+        placement: "bottom",
+        title: "Your plan options",
+        description:
+          "With has three plans — Starter (free), Plus (monthly), and Verified (one-time). Each unlocks more reach, connections, and features.",
+      },
+      {
+        id: "step-plus-card",
+        target: "tour-plus-card",
+        route: "/pricing",
+        placement: "left",
+        title: "Go Plus",
+        description:
+          "Plus gives you more connection requests, more active threads, private mode, extended hosting and trip limits, and higher visibility in Discover.",
+      },
+      {
+        id: "step-verified-card",
+        target: "tour-verified-card",
+        route: "/pricing",
+        placement: "left",
+        title: "Get Verified too",
+        description:
+          "Verification is a separate one-time payment that adds a trust badge. It's required to send hosting requests and book private teacher sessions.",
+      },
+    ],
+  },
+  {
     id: "get-verified",
     title: "Get verified",
     description: "Understand what verification unlocks and how to get your badge.",
@@ -446,7 +482,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         id: "step-group-create",
         target: "tour-group-create-btn",
         route: "/groups/new",
-        placement: "top",
+        placement: "right",
         title: "Create it",
         description:
           "Tap Create Group to publish it. You can then invite connections from the group page and manage members and settings.",
@@ -473,7 +509,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         id: "step-event-essentials",
         target: "tour-event-essentials",
         route: "/events/new",
-        placement: "bottom",
+        placement: "top",
         title: "Fill in the essentials",
         description:
           "Add a title, event type, dates, venue, and description. A cover photo makes your event more discoverable.",

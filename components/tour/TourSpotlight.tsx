@@ -95,10 +95,7 @@ export default function TourSpotlight() {
           clearInterval(pollRef.current!);
           pollRef.current = null;
 
-          // Scroll element into view on mobile
-          if (window.matchMedia("(max-width: 767px)").matches) {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
-          }
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
 
           const update = () => {
             const fresh = document.querySelector<HTMLElement>(`[data-tour="${target}"]`);

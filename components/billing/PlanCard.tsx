@@ -7,15 +7,17 @@ type Props = {
   plan: PlanDefinition;
   currentPlanId?: PlanId | null;
   onSelect?: (planId: PlanId) => void;
+  dataTour?: string;
 };
 
 
-export default function PlanCard({ plan, currentPlanId, onSelect }: Props) {
+export default function PlanCard({ plan, currentPlanId, onSelect, dataTour }: Props) {
   const isCurrent = currentPlanId === plan.id;
   const usePremiumCta = plan.isRecommended || plan.id === "verified";
 
   return (
     <article
+      {...(dataTour ? { "data-tour": dataTour } : {})}
       className={cx(
         "relative overflow-hidden rounded-[28px] border p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6",
         plan.isRecommended

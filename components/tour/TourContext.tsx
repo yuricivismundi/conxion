@@ -97,7 +97,8 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     }
     const nextStepData = flow.steps[nextStep];
     setStep(nextStep);
-    if (nextStepData && pathname !== nextStepData.route) {
+    const currentFull = typeof window !== "undefined" ? window.location.pathname + window.location.search : pathname;
+    if (nextStepData && currentFull !== nextStepData.route) {
       router.push(nextStepData.route);
     }
   }, [flow, step, finish, pathname, router]);
