@@ -24,15 +24,8 @@ export default function TourBottomSheet() {
       aria-modal="false"
       aria-label={`Tour step ${step + 1} of ${totalSteps}: ${currentStep.title}`}
     >
-      {/* Dim overlay */}
-      <div
-        aria-hidden="true"
-        className="fixed inset-0 z-[9998] bg-black/50"
-        onClick={skip}
-      />
-
-      {/* Bottom sheet */}
-      <div className="fixed inset-x-0 bottom-0 z-[9999] rounded-t-2xl border-t border-white/10 bg-[#111318] px-6 pt-5 pb-8">
+      {/* Bottom sheet — spotlight handles the dim overlay */}
+      <div className="fixed inset-x-0 bottom-0 z-[10000] rounded-t-2xl border-t border-white/10 bg-[#111318] px-6 pt-5 pb-8">
         {/* Progress dots */}
         <div className="mb-4 flex items-center justify-center gap-2">
           {Array.from({ length: totalSteps }).map((_, i) => (
@@ -40,19 +33,16 @@ export default function TourBottomSheet() {
               key={i}
               className={[
                 "rounded-full transition-all",
-                i === step
-                  ? "h-2 w-6 bg-[#00F5FF]"
-                  : i < step
-                  ? "h-2 w-2 bg-[#00F5FF]/40"
-                  : "h-2 w-2 bg-white/20",
+                i === step ? "h-2 w-6 bg-[#00F5FF]" : i < step ? "h-2 w-2 bg-[#00F5FF]/40" : "h-2 w-2 bg-white/20",
               ].join(" ")}
             />
           ))}
         </div>
-
+        <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#00F5FF]/70">
+          {step + 1} / {totalSteps}
+        </p>
         <h3 className="mb-2 text-lg font-bold text-white">{currentStep.title}</h3>
         <p className="mb-6 text-sm leading-relaxed text-white/65">{currentStep.description}</p>
-
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -61,11 +51,7 @@ export default function TourBottomSheet() {
           >
             {isLast ? "Done ✓" : "Next →"}
           </button>
-          <button
-            type="button"
-            onClick={skip}
-            className="text-sm text-white/40 transition hover:text-white/70"
-          >
+          <button type="button" onClick={skip} className="text-sm text-white/40 transition hover:text-white/70">
             Skip
           </button>
         </div>
