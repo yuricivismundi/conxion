@@ -306,6 +306,7 @@ export default function OnboardingWelcomePage() {
                 <Link
                   key={s.id}
                   href={s.href}
+                  onClick={() => { try { localStorage.setItem("cx_show_tour", "1"); } catch { /* ignore */ } }}
                   className={cx(
                     "group flex items-start gap-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 transition hover:border-white/15 hover:bg-white/[0.05]",
                     index === 0 ? "border-cyan-400/25 bg-cyan-400/[0.04]" : ""
@@ -335,6 +336,7 @@ export default function OnboardingWelcomePage() {
         <div className="mt-10 flex items-center justify-center gap-4 text-center">
           <Link
             href="/connections"
+            onClick={() => { try { localStorage.setItem("cx_show_tour", "1"); } catch { /* ignore */ } }}
             className="rounded-full bg-white/[0.04] px-5 py-2.5 text-[13px] font-semibold text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
           >
             Skip — take me to the feed
