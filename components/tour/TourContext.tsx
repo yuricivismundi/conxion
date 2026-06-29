@@ -105,6 +105,9 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
 
   // Auto-show welcome on first login
   useEffect(() => {
+    // Never auto-open on auth or public pages
+    if (pathname.startsWith("/auth") || pathname.startsWith("/pricing") || pathname === "/privacy" || pathname === "/terms") return;
+
     let cancelled = false;
 
     const checkAndOpen = async () => {
@@ -142,7 +145,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname]);
 
   return (
     <TourContext.Provider
