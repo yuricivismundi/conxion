@@ -240,11 +240,11 @@ export default function Nav({ title }: NavProps) {
   }, []);
 
   const tabs = [
-    { href: "/connections", label: t("nav.discover"), icon: "explore" },
-    { href: "/messages", label: t("nav.messages"), icon: "chat" },
-    { href: "/events", label: t("nav.events"), icon: "calendar_today" },
-    { href: "/network", label: t("nav.network"), icon: "hub" },
-    { href: "/activity", label: t("nav.trips"), icon: "dashboard_customize" },
+    { href: "/connections", label: t("nav.discover"), icon: "explore", tourId: "discover" },
+    { href: "/messages", label: t("nav.messages"), icon: "chat", tourId: "messages" },
+    { href: "/events", label: t("nav.events"), icon: "calendar_today", tourId: "events" },
+    { href: "/network", label: t("nav.network"), icon: "hub", tourId: "network" },
+    { href: "/activity", label: t("nav.trips"), icon: "dashboard_customize", tourId: "activity" },
   ];
 
   async function signOut() {
@@ -311,6 +311,7 @@ export default function Nav({ title }: NavProps) {
                   <Link
                     key={tab.href}
                     href={tab.href}
+                    data-tour={tab.tourId}
                     className={cx(
                       "group relative flex min-h-10 items-center gap-2 rounded-full px-2.5 py-2 text-sm font-medium transition-colors",
                       active ? "text-white" : "text-gray-500 hover:text-white"
