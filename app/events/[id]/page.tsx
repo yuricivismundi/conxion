@@ -1403,7 +1403,7 @@ export default function EventDetailsPage() {
         {!isHost && !isAuthenticated ? (
           <Link
             href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-            className="ml-auto inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-4 py-1.5 text-xs font-bold text-white hover:opacity-90 active:scale-95 transition"
+            className="ml-auto inline-flex items-center justify-center rounded-full bg-[#00F5FF] px-4 py-1.5 text-xs font-bold text-black hover:opacity-90 active:scale-95 transition"
           >
             Sign in to Join
           </Link>
@@ -1696,7 +1696,7 @@ export default function EventDetailsPage() {
                     {isHost && event.accessType === "request" ? (
                       <Link
                         href={`/events/${event.id}/inbox`}
-                        className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-3 py-2 text-sm font-bold text-white hover:opacity-90"
+                        className="inline-flex items-center justify-center rounded-xl bg-[#00F5FF] px-3 py-2 text-sm font-bold text-black hover:opacity-90"
                       >
                         Manage Requests
                       </Link>
@@ -1706,7 +1706,7 @@ export default function EventDetailsPage() {
                     {!isHost && !isAuthenticated ? (
                       <Link
                         href={`/auth?next=${encodeURIComponent(`/events/${event.id}`)}`}
-                        className="hidden md:inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-3 py-2 text-sm font-bold text-white hover:opacity-90"
+                        className="hidden md:inline-flex items-center justify-center rounded-xl bg-[#00F5FF] px-3 py-2 text-sm font-bold text-black hover:opacity-90"
                       >
                         Sign in to Join
                       </Link>
