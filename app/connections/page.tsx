@@ -2922,6 +2922,7 @@ function ConnectionsPageContent() {
 
           {/* City title */}
           <h1
+            data-tour="tour-discover-heading"
             className="mt-1 break-words font-black leading-[0.95] tracking-[-0.02em] text-white"
             style={{
               fontSize: (() => {
@@ -3038,6 +3039,7 @@ function ConnectionsPageContent() {
             style={{ scrollbarWidth: "none" }}
           >
             <button
+              data-tour="tour-dancers-tab"
               onClick={() => {
                 setTab("members");
                 setDiscoverMode("dancers");
@@ -3477,6 +3479,7 @@ function ConnectionsPageContent() {
                             </button>
                           ) : (
                             <button
+                              data-tour="tour-connect-button"
                               className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-[11px] font-semibold uppercase tracking-widest text-[#0A0A0A]"
                               style={{ backgroundImage: "linear-gradient(135deg,#0df2f2,#ff00ff)" }}
                               onClick={() => {

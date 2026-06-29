@@ -1,16 +1,19 @@
 "use client";
 
 import { useTour } from "./TourContext";
-import { TourSpotlight } from "./TourSpotlight";
-import { TourBottomSheet } from "./TourBottomSheet";
+import TourWelcome from "./TourWelcome";
+import TourSpotlight from "./TourSpotlight";
+import TourBottomSheet from "./TourBottomSheet";
 
 export function TourOverlay() {
-  const { active } = useTour();
-  if (!active) return null;
+  const { welcomeOpen, active } = useTour();
   return (
     <>
-      <TourSpotlight />
-      <TourBottomSheet />
+      {welcomeOpen && <TourWelcome />}
+      {active && <TourSpotlight />}
+      {active && <TourBottomSheet />}
     </>
   );
 }
+
+export default TourOverlay;

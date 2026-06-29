@@ -10,6 +10,7 @@ import { BLOG_ENABLED } from "@/content/blog/posts";
 import NotificationsBell from "@/components/NotificationsBell";
 import { fetchUnreadThreadTokens } from "@/lib/messages/unread";
 import { cx } from "@/lib/cx";
+import { useTour } from "@/components/tour/TourContext";
 
 type NavProps = { title?: string };
 
@@ -51,6 +52,7 @@ function writeManualUnreadThreadTokensToStorage(tokens: Set<string>): void {
 export default function Nav({ title }: NavProps) {
   const pathname = usePathname();
   const { t } = useAppLanguage();
+  const { openWelcome } = useTour();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -451,6 +453,14 @@ export default function Nav({ title }: NavProps) {
                       {t("nav.adminConsole")}
                     </Link>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => { setMenuOpen(false); openWelcome(); }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">explore</span>
+                    Take a tour
+                  </button>
                   <button
                     type="button"
                     onClick={signOut}
