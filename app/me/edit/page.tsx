@@ -1282,6 +1282,7 @@ function EditMePage() {
 
   function addLanguage(nextValue?: string) {
     const normalized = (nextValue ?? languageDraft).trim();
+    if (!(LANGUAGE_OPTIONS as readonly string[]).includes(normalized)) return;
     if (!normalized) return;
     if (languages.includes(normalized)) {
       setLanguageDraft("");
@@ -2488,7 +2489,7 @@ function EditMePage() {
                   <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">translate</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Languages</h2>
                   {!openSections.langs && languages.length > 0 && (
                     <p className="truncate text-sm text-white/50">
-                      {languages.slice(0, 3).join(", ")}{languages.length > 3 ? ` +${languages.length - 3}` : ""}
+                      {languages.join(", ")}
                     </p>
                   )}
                 </div>
@@ -2517,7 +2518,7 @@ function EditMePage() {
                     list="language-options-list"
                     disabled={languages.length >= 5}
                     className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 disabled:opacity-50"
-                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Type to search languages…"}
+                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Search and select from list…"}
                     autoComplete="off"
                   />
                   <datalist id="language-options-list">
