@@ -977,10 +977,13 @@ function EditMePage() {
         setOtherStyleEnabled(Boolean(existingOtherStyle));
         setCustomStyleDraft(existingOtherStyle);
         const normalizedRoles = normalizeLegacyRoles(nextRoles);
-        setRoles(normalizedRoles.length > 0 ? normalizedRoles : ["Social Dancer"]);
+        const effectiveRoles = normalizedRoles.length > 0 ? normalizedRoles : ["Social Dancer"];
+        const effectiveInterests = nextInterests.length > 0 ? nextInterests : ["Social dancing"];
+        const effectiveAvailability = nextAvailability.length > 0 ? nextAvailability : ["Rather not say"];
+        setRoles(effectiveRoles);
         setDisplayRole(typeof profile.display_role === "string" && profile.display_role ? profile.display_role : null);
-        setInterests(nextInterests.length > 0 ? nextInterests : ["Social dancing"]);
-        setAvailability(nextAvailability.length > 0 ? nextAvailability : ["Rather not say"]);
+        setInterests(effectiveInterests);
+        setAvailability(effectiveAvailability);
         setLanguages(nextLanguages);
         setInstagramHandle(nextInstagram);
         setWhatsappHandle(nextWhatsapp);
@@ -1014,10 +1017,10 @@ function EditMePage() {
             city: nextCity,
             nationality: nextNationality,
             danceSkills: nextDanceSkills,
-            roles: nextRoles,
+            roles: effectiveRoles,
             languages: nextLanguages,
-            interests: nextInterests,
-            availability: nextAvailability,
+            interests: effectiveInterests,
+            availability: effectiveAvailability,
             instagramHandle: nextInstagram,
             whatsappHandle: nextWhatsapp,
             youtubeUrl: nextYoutube,
