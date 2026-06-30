@@ -8,10 +8,9 @@ export default function IosInstallBanner() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    // Only show when already installed as standalone PWA (not in browser)
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
-    const dismissed = Boolean(localStorage.getItem(DISMISSED_KEY));
-    if (isIos && !isStandalone && !dismissed) setVisible(true);
+    if (!isStandalone) return;
   }, []);
 
   if (!visible) return null;
