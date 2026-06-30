@@ -447,8 +447,7 @@ export default function OnboardingProfilePage() {
     city.trim().length >= 1 &&
     roles.length > 0 &&
     usernameStatus.available &&
-    !usernameStatus.checking &&
-    Boolean(avatarPath);
+    !usernameStatus.checking;
 
   if (!hydrated) {
     return (
@@ -523,7 +522,7 @@ export default function OnboardingProfilePage() {
               {avatarStatus === "pending" ? (
                 <p className="mt-2 text-center text-[11px] text-white/45 lg:text-left">Your photo will be reviewed</p>
               ) : !avatarPath ? (
-                <p className="mt-2 text-center text-[11px] text-amber-400/70 lg:text-left">Photo required to continue</p>
+                <p className="mt-2 text-center text-[11px] text-white/40 lg:text-left">Optional — you can add later</p>
               ) : null}
             </div>
           </div>
