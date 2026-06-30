@@ -2513,30 +2513,39 @@ function EditMePage() {
                   <p className="text-sm font-medium text-slate-300">Languages spoken</p>
                   <p className="text-xs text-slate-500">{languages.length}/5</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="relative">
                   <input
                     value={languageDraft}
                     onChange={(event) => setLanguageDraft(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addLanguage(); } }}
-                    list="language-options-list"
+                    onKeyDown={(event) => { if (event.key === "Escape") setLanguageDraft(""); }}
                     disabled={languages.length >= 5}
                     className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 disabled:opacity-50"
-                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Search and select from list…"}
+                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Search languages…"}
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                   />
-                  <datalist id="language-options-list">
-                    {LANGUAGE_OPTIONS.filter((item) => !languages.includes(item)).map((item) => (
-                      <option key={item} value={item} />
-                    ))}
-                  </datalist>
-                  <button
-                    type="button"
-                    onClick={() => addLanguage()}
-                    disabled={languages.length >= 5 || !languageDraft.trim()}
-                    className="rounded-xl border border-cyan-300/35 bg-cyan-300/15 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Add
-                  </button>
+                  {languageDraft.trim().length > 0 && languages.length < 5 && (() => {
+                    const q = languageDraft.trim().toLowerCase();
+                    const matches = LANGUAGE_OPTIONS.filter((item) => !languages.includes(item) && item.toLowerCase().includes(q));
+                    if (matches.length === 0) return <p className="mt-1 px-1 text-xs text-slate-500">No languages found</p>;
+                    return (
+                      <ul className="absolute z-20 mt-1 w-full rounded-xl border border-white/15 bg-[#0f1724] shadow-xl max-h-52 overflow-y-auto">
+                        {matches.map((item) => (
+                          <li key={item}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => { e.preventDefault(); setLanguages((prev) => [...prev, item]); setLanguageDraft(""); }}
+                              className="w-full px-4 py-2.5 text-left text-sm text-white hover:bg-white/[0.08] active:bg-white/[0.12]"
+                            >
+                              {item}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {languages.length > 0 ? (
