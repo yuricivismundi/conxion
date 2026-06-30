@@ -807,7 +807,7 @@ function ConnectionsPageContent() {
   }, []);
 
   const navigateToProfile = useCallback((url: string) => {
-    if (viewerAvatarStatus !== "approved") { setPhotoGateOpen(true); return; }
+    if (viewerAvatarStatus !== "approved" && viewerAvatarStatus !== "pending") { setPhotoGateOpen(true); return; }
     router.push(url);
   }, [viewerAvatarStatus, router]);
 
@@ -1684,7 +1684,7 @@ function ConnectionsPageContent() {
                 "max_guests",
               ].join(",")
             )
-            .eq("avatar_status", "approved")
+            .in("avatar_status", ["approved", "pending"])
             .limit(2000);
           if (meId) fallbackQueryLite = fallbackQueryLite.neq("user_id", meId);
           const { data: fallbackDataLite, error: fallbackErrorLite } = await fallbackQueryLite;
@@ -1706,7 +1706,7 @@ function ConnectionsPageContent() {
           let fallbackQueryMinimal = supabase
             .from("profiles")
             .select("user_id,username,display_name,created_at,city,country,avatar_url,verified,verified_label")
-            .eq("avatar_status", "approved")
+            .in("avatar_status", ["approved", "pending"])
             .limit(2000);
           if (meId) fallbackQueryMinimal = fallbackQueryMinimal.neq("user_id", meId);
           const { data: fallbackDataMinimal, error: fallbackErrorMinimal } = await fallbackQueryMinimal;
@@ -1928,7 +1928,7 @@ function ConnectionsPageContent() {
               .from("profiles")
               .select("user_id,username,display_name,avatar_url,roles,languages")
               .in("user_id", ids)
-              .eq("avatar_status", "approved");
+              .in("avatar_status", ["approved", "pending"]);
             if (!fallbackProfErr) {
               profileRows = (fallbackProfs ?? []).map((row) => {
                 const p = row as ProfileFeedLiteRow;
@@ -1945,7 +1945,7 @@ function ConnectionsPageContent() {
               .from("profiles")
               .select("user_id,username,display_name,avatar_url,roles,languages")
               .in("user_id", ids)
-              .eq("avatar_status", "approved");
+              .in("avatar_status", ["approved", "pending"]);
             if (!fallbackProfErrLite) {
               profileRows = (fallbackProfsLite ?? []).map((row) => {
                 const p = row as ProfileFeedLiteRow;
