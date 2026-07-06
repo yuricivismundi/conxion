@@ -3197,20 +3197,6 @@ function ConnectionsPageContent() {
               </div>
             </div>
             <div className="flex flex-row flex-wrap items-center justify-end gap-3">
-              {tab === "members" || tab === "teachers" ? (
-                <label className="relative w-[240px]">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
-                    <MSIcon name="search" className="text-[18px]" />
-                  </span>
-                  <input
-                    type="search"
-                    value={memberSearch}
-                    onChange={(e) => setMemberSearch(e.target.value)}
-                    placeholder={tab === "teachers" ? "Search teachers by name" : discoverMode === "hosts" ? "Search hosts by name" : "Search dancers by name"}
-                    className="h-11 w-full rounded-full border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/35 hover:border-white/20 focus:border-[#00F5FF]/45"
-                  />
-                </label>
-              ) : null}
               {tab === "travellers" ? (
                 <RangeDatePicker
                   start={filters.tripDateFrom}
@@ -4218,9 +4204,9 @@ function ConnectionsPageContent() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-5 pb-36 space-y-7">
-              <section className="space-y-4 md:hidden">
-                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">View</h3>
-                {tab === "members" || tab === "teachers" ? (
+              {tab === "members" || tab === "teachers" ? (
+                <section className="space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">Search</h3>
                   <label className="relative block">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/45">
                       <MSIcon name="search" className="text-[18px]" />
@@ -4233,7 +4219,10 @@ function ConnectionsPageContent() {
                       className="h-11 w-full rounded-full border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#00F5FF]/45"
                     />
                   </label>
-                ) : null}
+                </section>
+              ) : null}
+              <section className="space-y-4 md:hidden">
+                <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[#00F5FF]">View</h3>
                 <div className="grid grid-cols-2 gap-2">
                   {tab === "members" || tab === "travellers" ? (
                     <button
