@@ -229,7 +229,7 @@ export default function EventCoverCropDialog({
         </div>
 
         <div className="min-h-0 overflow-y-auto overscroll-contain">
-        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="grid grid-cols-1 gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="space-y-4">
             <div className="rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(14,24,29,0.98),rgba(7,11,15,0.98))] p-4 sm:p-5">
               <div

@@ -418,7 +418,7 @@ export default function TeacherBookingsManager({ teacherUserId, teacherName }: P
         </div>
       ) : null}
 
-      <div className="grid w-full min-w-0 gap-6 lg:gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-6 lg:gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <div className="min-w-0 border-0 p-0 lg:rounded-2xl lg:border lg:border-white/10 lg:bg-black/20 lg:p-4">
           <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Add private class slot</p>
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">

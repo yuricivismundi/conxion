@@ -752,7 +752,7 @@ export default function TeacherBookingFlow({
     <div className="w-full min-w-0 max-w-full space-y-5">
       {renderStateBanners()}
 
-      <div className="grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(0,1.3fr)_300px]">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.3fr)_300px]">
         <section className="min-w-0 space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">1. Date</p>
           {renderCalendarGrid()}

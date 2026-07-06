@@ -17,7 +17,7 @@ export default function ProfileLoading() {
             </div>
           </div>
         </section>
-        <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
           <div className="space-y-4">
             <div className="h-40 animate-pulse rounded-2xl bg-white/[0.04]" />
             <div className="h-56 animate-pulse rounded-2xl bg-white/[0.04]" />

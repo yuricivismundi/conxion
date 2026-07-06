@@ -134,7 +134,7 @@ export default async function BlogArticlePage({ params }: PageProps) {
           <p className="mt-5 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg">{post.excerpt}</p>
         </header>
 
-        <div className="grid gap-10 border-t border-white/10 p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:p-10">
+        <div className="grid grid-cols-1 gap-10 border-t border-white/10 p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:p-10">
           <div className="space-y-8">
             <div className="relative overflow-hidden rounded-[28px] aspect-[1200/630] min-h-[280px]">
               <Image

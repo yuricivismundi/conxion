@@ -38,7 +38,7 @@ export default function ShopPage() {
       description="ConXion shirt drop. Pick your fit, send the order details by email, and we will confirm the rest manually."
     >
       <article className="overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))]">
-        <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="relative min-h-[340px] border-b border-white/10 lg:min-h-[560px] lg:border-b-0 lg:border-r">
             <Image
               src="/images/shop-shirts-v2.png"

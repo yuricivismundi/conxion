@@ -14,18 +14,20 @@ export default function PwaInstallBanner() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    // Don't show if already installed (standalone mode) or already dismissed
+    // Don't show if already installed (standalone mode) or already shown once before
     if (window.matchMedia("(display-mode: standalone)").matches) return;
     if (localStorage.getItem(DISMISSED_KEY)) return;
-    // Desktop only — detect mobile via user agent (viewport width is unreliable)
+    // iOS has no beforeinstallprompt event — handled separately by IosInstallBanner
     const ua = navigator.userAgent;
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-    if (isMobile) return;
+    const isIos = /iPhone|iPad|iPod/i.test(ua);
+    if (isIos) return;
 
     const handler = (e: Event) => {
       e.preventDefault();
       setPromptEvent(e as BeforeInstallPromptEvent);
       setVisible(true);
+      // Mark as shown immediately so it only ever appears on first visit
+      localStorage.setItem(DISMISSED_KEY, "1");
     };
 
     window.addEventListener("beforeinstallprompt", handler);
@@ -37,8 +39,7 @@ export default function PwaInstallBanner() {
   const handleInstall = async () => {
     setVisible(false);
     await promptEvent.prompt();
-    const { outcome } = await promptEvent.userChoice;
-    if (outcome === "dismissed") localStorage.setItem(DISMISSED_KEY, "1");
+    await promptEvent.userChoice;
   };
 
   const handleDismiss = () => {

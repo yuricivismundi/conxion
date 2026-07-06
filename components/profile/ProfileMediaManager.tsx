@@ -1466,7 +1466,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
             </div>
 
             <div className="overflow-y-auto overscroll-contain">
-              <div className="grid gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,360px)]">
+              <div className="grid grid-cols-1 gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,360px)]">
               <div className="overflow-hidden rounded-[24px] border border-white/10 bg-black/30 flex items-center justify-center" style={{ minHeight: "240px" }}>
                 <video
                   ref={trimVideoRef}

@@ -2775,7 +2775,7 @@ function DashboardPageContent({
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]">
+                      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]">
                         <article className="rounded-2xl border border-white/10 bg-black/35 p-4">
                           <div className="flex items-end justify-between gap-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">14-day activity split</p>

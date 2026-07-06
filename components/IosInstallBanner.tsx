@@ -8,9 +8,19 @@ export default function IosInstallBanner() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    // Only show when already installed as standalone PWA (not in browser)
+    // Only show in Safari on iOS (no standalone install prompt API there) —
+    // and only if not already installed and not shown before.
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
-    if (!isStandalone) return;
+    if (isStandalone) return;
+    if (localStorage.getItem(DISMISSED_KEY)) return;
+
+    const ua = navigator.userAgent;
+    const isIos = /iPhone|iPad|iPod/i.test(ua);
+    if (!isIos) return;
+
+    setVisible(true);
+    // Mark as shown immediately so it only ever appears on first visit
+    localStorage.setItem(DISMISSED_KEY, "1");
   }, []);
 
   if (!visible) return null;
