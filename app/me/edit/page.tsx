@@ -551,6 +551,11 @@ function EditMePage() {
   const rawTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<EditProfileTab>(isValidTab(rawTab) ? rawTab : "profile");
 
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (isValidTab(t)) setActiveTab(t);
+  }, [searchParams]);
+
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
   const [followersCount, setFollowersCount] = useState<number | null>(null);
@@ -972,10 +977,13 @@ function EditMePage() {
         setOtherStyleEnabled(Boolean(existingOtherStyle));
         setCustomStyleDraft(existingOtherStyle);
         const normalizedRoles = normalizeLegacyRoles(nextRoles);
-        setRoles(normalizedRoles.length > 0 ? normalizedRoles : ["Social Dancer"]);
+        const effectiveRoles = normalizedRoles.length > 0 ? normalizedRoles : ["Social Dancer"];
+        const effectiveInterests = nextInterests.length > 0 ? nextInterests : ["Social dancing"];
+        const effectiveAvailability = nextAvailability.length > 0 ? nextAvailability : ["Rather not say"];
+        setRoles(effectiveRoles);
         setDisplayRole(typeof profile.display_role === "string" && profile.display_role ? profile.display_role : null);
-        setInterests(nextInterests.length > 0 ? nextInterests : ["Social dancing"]);
-        setAvailability(nextAvailability.length > 0 ? nextAvailability : ["Rather not say"]);
+        setInterests(effectiveInterests);
+        setAvailability(effectiveAvailability);
         setLanguages(nextLanguages);
         setInstagramHandle(nextInstagram);
         setWhatsappHandle(nextWhatsapp);
@@ -1009,10 +1017,10 @@ function EditMePage() {
             city: nextCity,
             nationality: nextNationality,
             danceSkills: nextDanceSkills,
-            roles: nextRoles,
+            roles: effectiveRoles,
             languages: nextLanguages,
-            interests: nextInterests,
-            availability: nextAvailability,
+            interests: effectiveInterests,
+            availability: effectiveAvailability,
             instagramHandle: nextInstagram,
             whatsappHandle: nextWhatsapp,
             youtubeUrl: nextYoutube,
@@ -1277,6 +1285,7 @@ function EditMePage() {
 
   function addLanguage(nextValue?: string) {
     const normalized = (nextValue ?? languageDraft).trim();
+    if (!(LANGUAGE_OPTIONS as readonly string[]).includes(normalized)) return;
     if (!normalized) return;
     if (languages.includes(normalized)) {
       setLanguageDraft("");
@@ -1836,7 +1845,7 @@ function EditMePage() {
                     </Link>
                   )}
                 </div>
-                <div className="relative flex max-w-full gap-1 overflow-x-auto border-b border-white/10 px-1 no-scrollbar">
+                <div data-tour="tour-edit-tabs" className="relative flex max-w-full gap-1 overflow-x-auto border-b border-white/10 px-1 no-scrollbar">
                   {editTabs.map((tab) => {
                     const active = activeTab === tab.id;
                     return (
@@ -1888,7 +1897,7 @@ function EditMePage() {
               {activeTab === "profile" ? (
               <>
               {/* Basic info section header */}
-              <div className="flex items-center justify-between">
+              <div data-tour="tour-profile-basic-info" className="flex items-center justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">person</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Basic Info</h2>
                   {!openSections.info && (
@@ -2080,7 +2089,7 @@ function EditMePage() {
               ) : null}
 
             {activeTab === "hosting" ? (
-            <div className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
+            <div data-tour="tour-hosting-settings" className="rounded-3xl border border-white/10 bg-[#0b1418]/88 p-6 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm sm:p-7">
               <div className="space-y-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -2284,7 +2293,7 @@ function EditMePage() {
             ) : null}
 
             {activeTab === "profile" ? (
-            <div className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.dance ? "p-6 sm:p-7" : "px-5 py-3.5")}>
+            <div data-tour="tour-profile-dance-styles" className={cx("rounded-3xl border border-white/10 bg-[#0b1418]/88 shadow-[0_22px_60px_rgba(0,0,0,0.42)] backdrop-blur-sm transition-all", openSections.dance ? "p-6 sm:p-7" : "px-5 py-3.5")}>
               <header className="flex items-center justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">music_note</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Dance Style</h2>
@@ -2483,7 +2492,7 @@ function EditMePage() {
                   <span className="material-symbols-outlined text-[16px] text-white/40 shrink-0">translate</span><h2 className="shrink-0 text-sm font-semibold text-white/70">Languages</h2>
                   {!openSections.langs && languages.length > 0 && (
                     <p className="truncate text-sm text-white/50">
-                      {languages.slice(0, 3).join(", ")}{languages.length > 3 ? ` +${languages.length - 3}` : ""}
+                      {languages.join(", ")}
                     </p>
                   )}
                 </div>
@@ -2504,30 +2513,39 @@ function EditMePage() {
                   <p className="text-sm font-medium text-slate-300">Languages spoken</p>
                   <p className="text-xs text-slate-500">{languages.length}/5</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="relative">
                   <input
                     value={languageDraft}
                     onChange={(event) => setLanguageDraft(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addLanguage(); } }}
-                    list="language-options-list"
+                    onKeyDown={(event) => { if (event.key === "Escape") setLanguageDraft(""); }}
                     disabled={languages.length >= 5}
                     className="w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition hover:border-white/30 focus:border-cyan-300/70 focus:ring-2 focus:ring-cyan-300/35 disabled:opacity-50"
-                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Type to search languages…"}
+                    placeholder={languages.length >= 5 ? "Max 5 languages reached" : "Search languages…"}
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                   />
-                  <datalist id="language-options-list">
-                    {LANGUAGE_OPTIONS.filter((item) => !languages.includes(item)).map((item) => (
-                      <option key={item} value={item} />
-                    ))}
-                  </datalist>
-                  <button
-                    type="button"
-                    onClick={() => addLanguage()}
-                    disabled={languages.length >= 5 || !languageDraft.trim()}
-                    className="rounded-xl border border-cyan-300/35 bg-cyan-300/15 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Add
-                  </button>
+                  {languageDraft.trim().length > 0 && languages.length < 5 && (() => {
+                    const q = languageDraft.trim().toLowerCase();
+                    const matches = LANGUAGE_OPTIONS.filter((item) => !languages.includes(item) && item.toLowerCase().includes(q));
+                    if (matches.length === 0) return <p className="mt-1 px-1 text-xs text-slate-500">No languages found</p>;
+                    return (
+                      <ul className="absolute z-20 mt-1 w-full rounded-xl border border-white/15 bg-[#0f1724] shadow-xl max-h-52 overflow-y-auto">
+                        {matches.map((item) => (
+                          <li key={item}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => { e.preventDefault(); setLanguages((prev) => [...prev, item]); setLanguageDraft(""); }}
+                              className="w-full px-4 py-2.5 text-left text-sm text-white hover:bg-white/[0.08] active:bg-white/[0.12]"
+                            >
+                              {item}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {languages.length > 0 ? (

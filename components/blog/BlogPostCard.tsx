@@ -31,7 +31,7 @@ export default function BlogPostCard({
       className={[
         "group overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.03] shadow-[0_18px_45px_rgba(0,0,0,0.24)] transition-[border-color,box-shadow,background-color]",
         "hover:border-white/15 hover:bg-white/[0.04] hover:shadow-[0_22px_52px_rgba(0,0,0,0.28)]",
-        featured ? "grid gap-0 lg:grid-cols-[1.2fr_0.8fr]" : "flex h-full flex-col",
+        featured ? "grid grid-cols-1 gap-0 lg:grid-cols-[1.2fr_0.8fr]" : "flex h-full flex-col",
       ].join(" ")}
     >
       <Link href={getBlogPostUrl(post.slug)} className={featured ? "order-2 lg:order-1" : ""}>

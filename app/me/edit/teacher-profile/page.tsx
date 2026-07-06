@@ -1073,7 +1073,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         )}
 
         {/* ── Enable / disable toggle + default view ──────────────────────── */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
+        <div data-tour="tour-teacher-enable" className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
           <div className="flex items-center gap-3">
             <Toggle checked={isEnabled} onChange={handleToggleEnabled} disabled={autoSaving} />
             <div className="flex items-center gap-2">
@@ -1119,7 +1119,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         </div>
 
         {/* ── Tabs ────────────────────────────────────────────────────────── */}
-        <div className="mb-4 overflow-x-auto">
+        <div data-tour="tour-teacher-tabs" className="mb-4 overflow-x-auto">
           <div className="flex w-full gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
           {(
             [
@@ -1150,7 +1150,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
         {/* ── Profile info form ───────────────────────────────────────────── */}
         {activeTab === "profile" && (
-        <section className="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+        <section data-tour="tour-teacher-profile-info" className="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
           <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Profile info
           </p>

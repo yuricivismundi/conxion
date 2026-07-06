@@ -1075,6 +1075,7 @@ function EventsExplorePageContent() {
     return (
       <article
         key={event.id}
+        data-tour="tour-event-card"
         className="relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-[#121212] shadow-[0_6px_20px_rgba(0,0,0,0.3)] transition hover:-translate-y-0.5 hover:border-cyan-300/30"
         style={{ height: "336px" }}
         onClick={() => router.push(`/events/${event.id}`)}
@@ -1326,7 +1327,7 @@ function EventsExplorePageContent() {
         {!isAuthenticated ? (
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Events</h1>
+              <h1 data-tour="tour-events-heading" className="text-4xl font-black tracking-tight text-white sm:text-5xl">Events</h1>
               <p className="mt-2 max-w-xl text-sm leading-6 text-white/68">
                 Browse public dance events by location and date. Create an account to unlock the full event experience.
               </p>
@@ -1443,6 +1444,7 @@ function EventsExplorePageContent() {
             ) : null}
             <button
               type="button"
+              data-tour="tour-events-filters"
               onClick={(event) => { event.stopPropagation(); setFiltersOpen((value) => !value); }}
               aria-label="Open event filters"
               className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#00F5FF] px-4 text-sm font-bold text-[#0A0A0A] transition hover:opacity-90"

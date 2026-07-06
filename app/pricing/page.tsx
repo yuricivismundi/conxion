@@ -124,7 +124,7 @@ export default function PricingPage() {
         <div className="absolute inset-x-0 top-0 h-[360px] bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_45%),radial-gradient(circle_at_top_right,rgba(217,70,239,0.14),transparent_30%)]" />
         <div className="relative mx-auto w-full max-w-[1180px] px-4 pb-20 pt-8 sm:px-6 sm:pt-10">
           <section className="py-6 text-center">
-            <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl">Upgrade your Plan</h1>
+            <h1 data-tour="tour-plan-grid" className="text-2xl font-black tracking-tight text-white sm:text-3xl">Upgrade your Plan</h1>
             {checkoutMessage ? (
               <div className="mx-auto mt-5 max-w-[720px] rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-50">
                 {checkoutMessage}
@@ -160,6 +160,7 @@ export default function PricingPage() {
                     plan={plan}
                     currentPlanId={billingState?.currentPlanId}
                     onSelect={(selectedPlanId) => void handleCheckout(selectedPlanId)}
+                    dataTour={plan.id === "pro" ? "tour-plus-card" : undefined}
                   />
                 ))}
 
@@ -168,7 +169,7 @@ export default function PricingPage() {
                   if (!verifiedPlan || !billingState) return null;
                   const isVerified = billingState.currentPlanId === "verified" || billingState.isVerified;
                   return (
-                    <article className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
+                    <article data-tour="tour-verified-card" className="relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(8,22,18,0.96),rgba(6,16,14,0.92))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:p-6">
                       <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(52,211,153,0.14),transparent_68%)]" />
                       <div className="relative">
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-400/70">One-time payment</p>

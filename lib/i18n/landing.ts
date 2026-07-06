@@ -1,9 +1,9 @@
 // Quick i18n for the landing page + onboarding welcome.
 // Supports en (default), es, pt. Add more by extending the dictionaries.
 
-export type Locale = "en" | "es" | "pt";
+export type Locale = "en" | "es" | "fr" | "de" | "it" | "nl" | "pl";
 
-export const SUPPORTED_LOCALES: Locale[] = ["en", "es", "pt"];
+export const SUPPORTED_LOCALES: Locale[] = ["en", "es", "fr", "de", "it", "nl", "pl"];
 
 export function isSupportedLocale(value: string | null | undefined): value is Locale {
   return value === "en" || value === "es" || value === "pt";
@@ -271,7 +271,317 @@ const pt: Dict = {
   welcome_already: "Já tem uma conta? Entrar",
 };
 
-const DICTS: Record<Locale, Dict> = { en, es, pt };
+const fr: Dict = {
+  nav_blog: "Blog",
+  nav_login: "Connexion",
+  nav_join: "Rejoindre ConXion",
+  nav_join_short: "Rejoindre",
+
+  hero_h1_top: "Connecte-toi avec",
+  hero_h1_accent: "des danseurs du monde entier",
+  hero_sub: "Découvre des danseurs, voyage en groupe et fais évoluer ta passion pour la danse.",
+  hero_cta_join: "Rejoindre ConXion",
+  hero_cta_events: "Voir les événements",
+
+  card_teacher: "Professeur",
+  card_traveling: "En voyage",
+  card_attending: "danseurs présents",
+  card_refs: "réf.",
+
+  pillars_discovery_t: "Découverte",
+  pillars_discovery_d: "Explore des événements, voyages et danseurs près de chez toi.",
+  pillars_connection_t: "Connexion",
+  pillars_connection_d: "Connecte-toi en rejoignant ou en demandant l'accès.",
+  pillars_interaction_t: "Interaction",
+  pillars_interaction_d: "Lance des conversations et planifie ensemble.",
+  pillars_activity_t: "Activité",
+  pillars_activity_d: "Transforme tes connexions en expériences réelles.",
+  pillars_reference_t: "Référence",
+  pillars_reference_d: "Partage ton avis après chaque interaction.",
+  pillars_growth_t: "Croissance",
+  pillars_growth_d: "Développe ton réseau, débloque des fonctionnalités et atteins plus de la communauté.",
+
+  events_h2: "Conçu pour la communauté mondiale de la danse",
+  events_sub: "Explore des événements en direct dans les grandes villes de danse.",
+  events_attending: "présents",
+  events_best_of: "Le meilleur de",
+  events_empty_title: "Pas encore d'événements en direct à mettre en avant.",
+  events_empty_sub: "Explore la page des événements pour voir ce qui sera publié prochainement.",
+  events_cta: "Voir tous les événements",
+
+  safety_h2: "Confiance à travers la communauté.",
+  safety_sub: "Nous avons construit ConXion avec la sécurité au cœur, centrée sur le respect mutuel.",
+  safety_ref: "Système de références",
+  safety_verified: "Profils vérifiés",
+  safety_guidelines: "Règles de sécurité",
+  safety_report: "Outils de signalement",
+  safety_quote: "\"ConXion m'a permis de voyager à Rome et de me sentir en sécurité dès le premier jour en trouvant des locaux.\"",
+  safety_quote_author: "— Maria S., Bachatera",
+
+  final_h2: "Prêt à construire ton réseau de danse ?",
+  final_cta: "Rejoindre ConXion",
+
+  footer_company: "Entreprise",
+  footer_trust: "Confiance",
+  footer_help: "Aide",
+  footer_social: "Réseaux",
+  footer_tagline: "Connecter la communauté mondiale de la danse par la confiance et le mouvement.",
+
+  welcome_h1: "Bienvenue sur ConXion",
+  welcome_sub: "La communauté mondiale de la danse. Trouve des danseurs, planifie des voyages, accueille des voyageurs et fais grandir ta scène.",
+  welcome_cta: "Commencer",
+  welcome_already: "Déjà un compte ? Se connecter",
+};
+
+const de: Dict = {
+  nav_blog: "Blog",
+  nav_login: "Anmelden",
+  nav_join: "ConXion beitreten",
+  nav_join_short: "Beitreten",
+
+  hero_h1_top: "Verbinde dich mit",
+  hero_h1_accent: "Tänzern weltweit",
+  hero_sub: "Entdecke Tänzer, reise gemeinsam und entwickle deine Tanzleidenschaft weiter.",
+  hero_cta_join: "ConXion beitreten",
+  hero_cta_events: "Events entdecken",
+
+  card_teacher: "Lehrer",
+  card_traveling: "Auf Reisen",
+  card_attending: "Tänzer nehmen teil",
+  card_refs: "Ref.",
+
+  pillars_discovery_t: "Entdeckung",
+  pillars_discovery_d: "Erkunde Events, Reisen und Tänzer in deiner Nähe.",
+  pillars_connection_t: "Verbindung",
+  pillars_connection_d: "Verbinde dich durch Beitreten oder Zugang anfragen.",
+  pillars_interaction_t: "Interaktion",
+  pillars_interaction_d: "Starte Gespräche und plane gemeinsam.",
+  pillars_activity_t: "Aktivität",
+  pillars_activity_d: "Verwandle Verbindungen in echte Erlebnisse.",
+  pillars_reference_t: "Referenz",
+  pillars_reference_d: "Teile dein Feedback nach jeder Interaktion.",
+  pillars_growth_t: "Wachstum",
+  pillars_growth_d: "Baue dein Netzwerk aus, schalte Funktionen frei und erreiche mehr der Community.",
+
+  events_h2: "Für die globale Tanzgemeinschaft gebaut",
+  events_sub: "Entdecke Live-Events in den wichtigsten Tanzstädten.",
+  events_attending: "nehmen teil",
+  events_best_of: "Das Beste aus",
+  events_empty_title: "Noch keine Live-Events zum Vorstellen.",
+  events_empty_sub: "Erkunde die Events-Seite, um zu sehen, was als nächstes veröffentlicht wird.",
+  events_cta: "Alle Events entdecken",
+
+  safety_h2: "Vertrauen durch die Community.",
+  safety_sub: "Wir haben ConXion mit Sicherheit als Kern gebaut, basierend auf gegenseitigem Respekt.",
+  safety_ref: "Referenzsystem",
+  safety_verified: "Verifizierte Profile",
+  safety_guidelines: "Sicherheitsrichtlinien",
+  safety_report: "Meldetools",
+  safety_quote: "\"ConXion ermöglichte mir, nach Rom zu reisen und mich sofort sicher zu fühlen, indem ich lokale Socials fand.\"",
+  safety_quote_author: "— Maria S., Bachatera",
+
+  final_h2: "Bereit, dein Tanznetzwerk aufzubauen?",
+  final_cta: "ConXion beitreten",
+
+  footer_company: "Unternehmen",
+  footer_trust: "Vertrauen",
+  footer_help: "Hilfe",
+  footer_social: "Social",
+  footer_tagline: "Die globale Tanzgemeinschaft durch Vertrauen und Bewegung verbinden.",
+
+  welcome_h1: "Willkommen bei ConXion",
+  welcome_sub: "Die globale Tanzgemeinschaft. Finde Tänzer, plane Reisen, beherberge Reisende und lass deine Szene wachsen.",
+  welcome_cta: "Loslegen",
+  welcome_already: "Bereits ein Konto? Anmelden",
+};
+
+const it: Dict = {
+  nav_blog: "Blog",
+  nav_login: "Accedi",
+  nav_join: "Unisciti a ConXion",
+  nav_join_short: "Unisciti",
+
+  hero_h1_top: "Connettiti con",
+  hero_h1_accent: "ballerini di tutto il mondo",
+  hero_sub: "Scopri ballerini, viaggia insieme e fai crescere la tua passione per la danza.",
+  hero_cta_join: "Unisciti a ConXion",
+  hero_cta_events: "Esplora eventi",
+
+  card_teacher: "Insegnante",
+  card_traveling: "In viaggio",
+  card_attending: "ballerini presenti",
+  card_refs: "ref.",
+
+  pillars_discovery_t: "Scoperta",
+  pillars_discovery_d: "Esplora eventi, viaggi e ballerini vicino a te.",
+  pillars_connection_t: "Connessione",
+  pillars_connection_d: "Connettiti unendoti o richiedendo l'accesso.",
+  pillars_interaction_t: "Interazione",
+  pillars_interaction_d: "Avvia conversazioni e pianifica insieme.",
+  pillars_activity_t: "Attività",
+  pillars_activity_d: "Trasforma le connessioni in esperienze reali.",
+  pillars_reference_t: "Referenza",
+  pillars_reference_d: "Condividi il tuo feedback dopo ogni interazione.",
+  pillars_growth_t: "Crescita",
+  pillars_growth_d: "Espandi la tua rete, sblocca funzionalità e raggiungi più community.",
+
+  events_h2: "Creato per la comunità globale della danza",
+  events_sub: "Esplora eventi live nelle principali città della danza.",
+  events_attending: "presenti",
+  events_best_of: "Il meglio di",
+  events_empty_title: "Nessun evento live da mostrare per ora.",
+  events_empty_sub: "Esplora la pagina degli eventi per vedere cosa verrà pubblicato prossimamente.",
+  events_cta: "Esplora tutti gli eventi",
+
+  safety_h2: "Fiducia attraverso la comunità.",
+  safety_sub: "Abbiamo costruito ConXion con la sicurezza al centro, basata sul rispetto reciproco.",
+  safety_ref: "Sistema di referenze",
+  safety_verified: "Profili verificati",
+  safety_guidelines: "Linee guida sulla sicurezza",
+  safety_report: "Strumenti di segnalazione",
+  safety_quote: "\"ConXion mi ha permesso di viaggiare a Roma e sentirmi subito al sicuro trovando i locali.\"",
+  safety_quote_author: "— Maria S., Bachatera",
+
+  final_h2: "Pronto a costruire la tua rete di danza?",
+  final_cta: "Unisciti a ConXion",
+
+  footer_company: "Azienda",
+  footer_trust: "Fiducia",
+  footer_help: "Aiuto",
+  footer_social: "Social",
+  footer_tagline: "Connettere la comunità mondiale della danza attraverso fiducia e movimento.",
+
+  welcome_h1: "Benvenuto su ConXion",
+  welcome_sub: "La comunità globale della danza. Trova ballerini, pianifica viaggi, ospita viaggiatori e fai crescere la tua scena.",
+  welcome_cta: "Inizia",
+  welcome_already: "Hai già un account? Accedi",
+};
+
+const nl: Dict = {
+  nav_blog: "Blog",
+  nav_login: "Inloggen",
+  nav_join: "Meedoen met ConXion",
+  nav_join_short: "Meedoen",
+
+  hero_h1_top: "Verbind je met",
+  hero_h1_accent: "dansers wereldwijd",
+  hero_sub: "Ontdek dansers, reis samen en laat je dansleven groeien.",
+  hero_cta_join: "Meedoen met ConXion",
+  hero_cta_events: "Verken evenementen",
+
+  card_teacher: "Leraar",
+  card_traveling: "Op reis",
+  card_attending: "dansers aanwezig",
+  card_refs: "ref.",
+
+  pillars_discovery_t: "Ontdekking",
+  pillars_discovery_d: "Verken evenementen, reizen en dansers bij jou in de buurt.",
+  pillars_connection_t: "Verbinding",
+  pillars_connection_d: "Maak verbinding door deel te nemen of toegang aan te vragen.",
+  pillars_interaction_t: "Interactie",
+  pillars_interaction_d: "Start gesprekken en plan samen.",
+  pillars_activity_t: "Activiteit",
+  pillars_activity_d: "Zet verbindingen om in echte ervaringen.",
+  pillars_reference_t: "Referentie",
+  pillars_reference_d: "Deel je feedback na elke interactie.",
+  pillars_growth_t: "Groei",
+  pillars_growth_d: "Breid je netwerk uit, ontgrendel functies en bereik meer van de community.",
+
+  events_h2: "Gebouwd voor de wereldwijde dansgemeenschap",
+  events_sub: "Verken live evenementen in de belangrijkste danssteden.",
+  events_attending: "aanwezig",
+  events_best_of: "Het beste van",
+  events_empty_title: "Nog geen live evenementen om te tonen.",
+  events_empty_sub: "Verken de evenementenpagina om te zien wat er binnenkort verschijnt.",
+  events_cta: "Bekijk alle evenementen",
+
+  safety_h2: "Vertrouwen door de community.",
+  safety_sub: "We hebben ConXion gebouwd met veiligheid als kern, gebaseerd op wederzijds respect.",
+  safety_ref: "Referentiesysteem",
+  safety_verified: "Geverifieerde profielen",
+  safety_guidelines: "Veiligheidsrichtlijnen",
+  safety_report: "Meldtools",
+  safety_quote: "\"ConXion stelde me in staat om naar Rome te reizen en me meteen veilig te voelen door lokale socials te vinden.\"",
+  safety_quote_author: "— Maria S., Bachatera",
+
+  final_h2: "Klaar om je dansnetwerk op te bouwen?",
+  final_cta: "Meedoen met ConXion",
+
+  footer_company: "Bedrijf",
+  footer_trust: "Vertrouwen",
+  footer_help: "Hulp",
+  footer_social: "Sociaal",
+  footer_tagline: "De wereldwijde dansgemeenschap verbinden door vertrouwen en beweging.",
+
+  welcome_h1: "Welkom bij ConXion",
+  welcome_sub: "De wereldwijde dansgemeenschap. Vind dansers, plan reizen, ontvang reizigers en laat je scene groeien.",
+  welcome_cta: "Aan de slag",
+  welcome_already: "Al een account? Inloggen",
+};
+
+const pl: Dict = {
+  nav_blog: "Blog",
+  nav_login: "Zaloguj się",
+  nav_join: "Dołącz do ConXion",
+  nav_join_short: "Dołącz",
+
+  hero_h1_top: "Połącz się z",
+  hero_h1_accent: "tancerzami z całego świata",
+  hero_sub: "Odkryj tancerzy, podróżuj razem i rozwijaj swoją pasję do tańca.",
+  hero_cta_join: "Dołącz do ConXion",
+  hero_cta_events: "Przeglądaj wydarzenia",
+
+  card_teacher: "Nauczyciel",
+  card_traveling: "W podróży",
+  card_attending: "tancerzy uczestniczy",
+  card_refs: "ref.",
+
+  pillars_discovery_t: "Odkrywanie",
+  pillars_discovery_d: "Odkryj wydarzenia, podróże i tancerzy w pobliżu.",
+  pillars_connection_t: "Połączenie",
+  pillars_connection_d: "Łącz się, dołączając lub prosząc o dostęp.",
+  pillars_interaction_t: "Interakcja",
+  pillars_interaction_d: "Rozpocznij rozmowy i planuj razem.",
+  pillars_activity_t: "Aktywność",
+  pillars_activity_d: "Zamień połączenia w prawdziwe doświadczenia.",
+  pillars_reference_t: "Referencja",
+  pillars_reference_d: "Podziel się opinią po każdej interakcji.",
+  pillars_growth_t: "Wzrost",
+  pillars_growth_d: "Rozwijaj sieć, odblokowuj funkcje i docieraj do większej części społeczności.",
+
+  events_h2: "Stworzony dla globalnej społeczności tanecznej",
+  events_sub: "Przeglądaj wydarzenia na żywo w najważniejszych miastach tańca.",
+  events_attending: "uczestniczy",
+  events_best_of: "Najlepsze z",
+  events_empty_title: "Brak wydarzeń na żywo do wyróżnienia.",
+  events_empty_sub: "Przeglądaj stronę wydarzeń, aby zobaczyć, co zostanie opublikowane jako następne.",
+  events_cta: "Przeglądaj wszystkie wydarzenia",
+
+  safety_h2: "Zaufanie przez społeczność.",
+  safety_sub: "Zbudowaliśmy ConXion z bezpieczeństwem w centrum, opartym na wzajemnym szacunku.",
+  safety_ref: "System referencji",
+  safety_verified: "Zweryfikowane profile",
+  safety_guidelines: "Wytyczne bezpieczeństwa",
+  safety_report: "Narzędzia zgłaszania",
+  safety_quote: "\"ConXion pozwoliło mi pojechać do Rzymu i od razu poczuć się bezpiecznie znajdując lokalne socials.\"",
+  safety_quote_author: "— Maria S., Bachatera",
+
+  final_h2: "Gotowy, by zbudować swoją sieć taneczną?",
+  final_cta: "Dołącz do ConXion",
+
+  footer_company: "Firma",
+  footer_trust: "Zaufanie",
+  footer_help: "Pomoc",
+  footer_social: "Social",
+  footer_tagline: "Łącząc globalną społeczność taneczną przez zaufanie i ruch.",
+
+  welcome_h1: "Witaj w ConXion",
+  welcome_sub: "Globalna społeczność taneczna. Znajdź tancerzy, planuj podróże, goszcz podróżników i rozwijaj swoją scenę.",
+  welcome_cta: "Rozpocznij",
+  welcome_already: "Masz już konto? Zaloguj się",
+};
+
+const DICTS: Record<Locale, Dict> = { en, es, fr, de, it, nl, pl };
 
 export function getT(locale: Locale): Dict {
   return DICTS[locale];

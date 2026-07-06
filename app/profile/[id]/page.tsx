@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase/client";
 import { resolveAvatarUrl } from "@/lib/avatar-storage";
 import DashboardPage from "@/app/dashboard/page";
 import Nav from "@/components/Nav";
+import { useTour } from "@/components/tour/TourContext";
 import Avatar from "@/components/Avatar";
 import EventHeroImage from "@/components/events/EventHeroImage";
 import ReferencesHubView from "@/components/network/ReferencesHubView";
@@ -938,6 +939,7 @@ function MemberProfilePage() {
   const [requestInfoOpen, setRequestInfoOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const { openWelcome } = useTour();
   const [teacherInquiryEnabled, setTeacherInquiryEnabled] = useState(false);
   const [teacherPageAvailable, setTeacherPageAvailable] = useState(false);
   const [teacherBookingAvailable, setTeacherBookingAvailable] = useState(false);
@@ -1015,6 +1017,10 @@ function MemberProfilePage() {
         );
         setTeacherPageAvailable(teacherViewAllowed);
         setTeacherBookingAvailable(teacherViewAllowed && !availabilityRes.error && (availabilityRes.count ?? 0) > 0);
+        // Redirect self to teacher profile if it's set as default or is available
+        if (!cancelled && isSelf && teacherViewAllowed && profileUserId && data?.default_public_view === "teacher") {
+          router.replace(`/profile/${profileUserId}/teacher`);
+        }
       } catch {
         if (!cancelled) {
           setTeacherPageAvailable(false);
@@ -1031,13 +1037,14 @@ function MemberProfilePage() {
   const mobileSettingsLinks = useMemo(
     () =>
       [
-        { href: "/me/edit", label: "Profile settings", icon: "person_edit" },
+        { href: "/me/edit", label: "Profile settings", icon: "manage_accounts" },
+        ...(teacherPageAvailable ? [{ href: "/me/edit/teacher-profile", label: "Teacher profile settings", icon: "school" }] : []),
         { href: "/account-settings", label: "Account settings", icon: "settings" },
         { href: "/notifications", label: "Notifications", icon: "notifications" },
         { href: "/pricing", label: "Upgrade your plan", icon: "workspace_premium" },
         ...(viewerIsAdmin ? [{ href: "/admin/space", label: "Admin control", icon: "admin_panel_settings" }] : []),
       ],
-    [viewerIsAdmin]
+    [viewerIsAdmin, teacherPageAvailable]
   );
 
   const skillList = useMemo(() => {
@@ -3746,6 +3753,7 @@ function MemberProfilePage() {
                   ) : null}
                   {hostingAvailable ? (
                     <button
+                      data-tour="tour-request-hosting"
                       type="button"
                       onClick={() => {
                         closeActionMenu();
@@ -3911,6 +3919,20 @@ function MemberProfilePage() {
                     <span className="material-symbols-outlined text-[18px] text-slate-500">chevron_right</span>
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileSettingsOpen(false);
+                    openWelcome();
+                  }}
+                  className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm text-white/85"
+                >
+                  <span className="inline-flex items-center gap-3">
+                    <span className="material-symbols-outlined text-[18px] text-cyan-200/90">explore</span>
+                    Take a tour
+                  </span>
+                  <span className="material-symbols-outlined text-[18px] text-slate-500">chevron_right</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {

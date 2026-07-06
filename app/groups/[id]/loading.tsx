@@ -12,7 +12,7 @@ export default function GroupLoading() {
         </div>
 
         {/* Body skeleton */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_280px]">
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_280px]">
           <div className="space-y-4">
             <div className="h-64 rounded-[20px] bg-white/[0.04]" />
             <div className="h-24 rounded-[20px] bg-white/[0.04]" />

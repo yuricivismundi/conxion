@@ -128,7 +128,7 @@ export default function CareersPage() {
       description="Build trust-first products for dancers worldwide. Explore open roles and submit your CV with a focused cover letter."
     >
       <section className="overflow-hidden rounded-3xl border border-cyan-300/25 bg-[linear-gradient(135deg,rgba(13,242,242,0.12),rgba(219,39,119,0.12),rgba(255,255,255,0.02))] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.3)] sm:p-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_320px] lg:items-end">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_320px] lg:items-end">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-100/90">Hiring now</p>
             <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">Product, Community, and Growth Roles</h2>
