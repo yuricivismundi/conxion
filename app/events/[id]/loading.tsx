@@ -16,7 +16,7 @@ export default function EventLoading() {
         </div>
 
         {/* Body skeleton */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
             <div className="h-40 rounded-[20px] bg-white/[0.04]" />
             <div className="h-32 rounded-[20px] bg-white/[0.04]" />

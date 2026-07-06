@@ -363,68 +363,32 @@ export default function OnboardingFinalizePage() {
           <div className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">Languages</div>
 
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <div className="sm:hidden">
-              <SearchableMobileSelect
-                label="Language"
-                value=""
-                options={LANGUAGES.filter((l) => !langs.includes(l))}
-                placeholder={canAddMoreLanguages ? "Search languages..." : "Max 5 languages"}
-                searchPlaceholder="Search languages..."
-                disabled={!canAddMoreLanguages}
-                emptyMessage="No languages left to add."
-                onSelect={(value) => addLang(value as Language)}
-                buttonClassName="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left text-sm text-[#E0E0E0] outline-none disabled:opacity-50"
-              />
-            </div>
-
-            <div className="hidden flex-col gap-3 sm:flex sm:flex-row sm:items-center">
-              <select
-                value={langPick}
-                onChange={(e) => setLangPick((e.target.value as Language) || "")}
-                disabled={!canAddMoreLanguages}
-                className="w-full rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-sm text-[#E0E0E0] outline-none focus:border-[#00F5FF]/60 focus:ring-1 focus:ring-[#00F5FF]/30 disabled:opacity-50"
-              >
-                <option value="">{canAddMoreLanguages ? "Select a language…" : "Max 5 languages"}</option>
-                {LANGUAGES.filter((l) => !langs.includes(l)).map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={() => addLang()}
-                disabled={!canAddMoreLanguages || !langPick}
-                className={
-                  !canAddMoreLanguages || !langPick
-                    ? "w-full sm:w-auto rounded-xl px-5 py-3 text-xs font-bold bg-white/10 text-white/40 cursor-not-allowed"
-                    : "w-full sm:w-auto rounded-xl px-5 py-3 text-xs font-bold border border-white/10 text-white/70 hover:text-white hover:border-white/20"
-                }
-              >
-                Add
-              </button>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {langs.length ? (
-                langs.map((l) => (
+            {/* Inline chip grid — tap to toggle, works great on mobile and desktop */}
+            <div className="flex flex-wrap gap-2">
+              {LANGUAGES.map((l) => {
+                const selected = langs.includes(l);
+                const disabled = !selected && !canAddMoreLanguages;
+                return (
                   <button
                     key={l}
                     type="button"
-                    onClick={() => removeLang(l)}
-                    className="rounded-full bg-[#00F5FF] px-4 py-2 min-h-[44px] text-sm font-bold text-[#121212] hover:opacity-90"
-                    title="Remove"
+                    disabled={disabled}
+                    onClick={() => selected ? removeLang(l) : addLang(l)}
+                    className={[
+                      "rounded-full px-4 py-2 min-h-[44px] text-sm font-semibold transition",
+                      selected
+                        ? "bg-[#00F5FF] text-[#121212]"
+                        : disabled
+                          ? "border border-white/10 text-white/25 cursor-not-allowed"
+                          : "border border-white/15 text-white/70 hover:border-white/30 hover:text-white",
+                    ].join(" ")}
                   >
-                    {l} <span className="ml-1">×</span>
+                    {l}
                   </button>
-                ))
-              ) : (
-                <div className="text-sm text-white/40">No languages selected.</div>
-              )}
+                );
+              })}
             </div>
-
-            <div className="mt-2 text-[11px] text-white/35">Select up to 5.</div>
+            <div className="mt-2 text-[11px] text-white/35">Tap to select up to 5.</div>
           </div>
         </section>
 

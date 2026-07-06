@@ -97,51 +97,25 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     }
     const nextStepData = flow.steps[nextStep];
     setStep(nextStep);
-    if (nextStepData && pathname !== nextStepData.route) {
+    const currentFull = typeof window !== "undefined" ? window.location.pathname + window.location.search : pathname;
+    if (nextStepData && currentFull !== nextStepData.route) {
       router.push(nextStepData.route);
     }
   }, [flow, step, finish, pathname, router]);
 
-  // Auto-show welcome on first login
+  // Show welcome after onboarding completes — only when landing on /connections with the flag set
   useEffect(() => {
-    let cancelled = false;
-
-    const checkAndOpen = async () => {
-      try {
-        const alreadyDone = localStorage.getItem(TOUR_DONE_KEY);
-        if (alreadyDone) return;
-      } catch {
-        return;
-      }
-
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (cancelled) return;
-        if (!sessionData.session?.user) return;
-
-        const timer = setTimeout(() => {
-          if (!cancelled) {
-            setWelcomeOpen(true);
-            try {
-              localStorage.setItem(TOUR_DONE_KEY, "1");
-            } catch {
-              // ignore
-            }
-          }
-        }, 2000);
-
-        return () => clearTimeout(timer);
-      } catch {
-        // ignore auth errors
-      }
-    };
-
-    void checkAndOpen();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (pathname !== "/connections") return;
+    try {
+      const shouldShow = localStorage.getItem("cx_show_tour");
+      if (!shouldShow) return;
+      localStorage.removeItem("cx_show_tour");
+    } catch {
+      return;
+    }
+    const timer = setTimeout(() => setWelcomeOpen(true), 800);
+    return () => clearTimeout(timer);
+  }, [pathname]);
 
   return (
     <TourContext.Provider

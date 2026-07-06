@@ -521,6 +521,8 @@ export default function OnboardingProfilePage() {
               </button>
               {avatarStatus === "pending" ? (
                 <p className="mt-2 text-center text-[11px] text-white/45 lg:text-left">Your photo will be reviewed</p>
+              ) : !avatarPath ? (
+                <p className="mt-2 text-center text-[11px] text-white/40 lg:text-left">Optional — you can add later</p>
               ) : null}
             </div>
           </div>

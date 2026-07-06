@@ -679,6 +679,8 @@ function ConnectionsPageContent() {
   const [myCity, setMyCity] = useState<string | null>(null);
   const [myCountry, setMyCountry] = useState<string | null>(null);
   const [viewerVerified, setViewerVerified] = useState(false);
+  const [viewerAvatarStatus, setViewerAvatarStatus] = useState<string | null>(null);
+  const [photoGateOpen, setPhotoGateOpen] = useState(false);
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [myLangCodes, setMyLangCodes] = useState<string[]>([]);
   const [myStyleLevels, setMyStyleLevels] = useState<Partial<Record<Style, Level>>>({});
@@ -803,6 +805,11 @@ function ConnectionsPageContent() {
       tripId: params.tripId ?? null,
     });
   }, []);
+
+  const navigateToProfile = useCallback((url: string) => {
+    if (viewerAvatarStatus !== "approved" && viewerAvatarStatus !== "pending") { setPhotoGateOpen(true); return; }
+    router.push(url);
+  }, [viewerAvatarStatus, router]);
 
   const openHostingRequest = useCallback((params: {
     targetUserId: string;
@@ -1501,7 +1508,7 @@ function ConnectionsPageContent() {
           }
           const { data: myProfile } = await supabase
             .from("profiles")
-            .select("city,country,roles,languages,dance_skills,verified,verified_label")
+            .select("city,country,roles,languages,dance_skills,verified,verified_label,avatar_status")
             .eq("user_id", user.id)
             .maybeSingle();
           const city = isNonEmptyString((myProfile as { city?: string | null } | null)?.city)
@@ -1534,6 +1541,7 @@ function ConnectionsPageContent() {
             setMyCity(city);
             setMyCountry(country);
             setViewerVerified(isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null));
+            setViewerAvatarStatus((myProfile as { avatar_status?: string | null } | null)?.avatar_status ?? null);
             setMyRoles(myRoleList);
             setMyLangCodes(myLangList);
             setMyStyleLevels(myStyles);
@@ -1676,6 +1684,7 @@ function ConnectionsPageContent() {
                 "max_guests",
               ].join(",")
             )
+            .in("avatar_status", ["approved", "pending"])
             .limit(2000);
           if (meId) fallbackQueryLite = fallbackQueryLite.neq("user_id", meId);
           const { data: fallbackDataLite, error: fallbackErrorLite } = await fallbackQueryLite;
@@ -1697,6 +1706,7 @@ function ConnectionsPageContent() {
           let fallbackQueryMinimal = supabase
             .from("profiles")
             .select("user_id,username,display_name,created_at,city,country,avatar_url,verified,verified_label")
+            .in("avatar_status", ["approved", "pending"])
             .limit(2000);
           if (meId) fallbackQueryMinimal = fallbackQueryMinimal.neq("user_id", meId);
           const { data: fallbackDataMinimal, error: fallbackErrorMinimal } = await fallbackQueryMinimal;
@@ -1917,7 +1927,8 @@ function ConnectionsPageContent() {
             const { data: fallbackProfs, error: fallbackProfErr } = await supabase
               .from("profiles")
               .select("user_id,username,display_name,avatar_url,roles,languages")
-              .in("user_id", ids);
+              .in("user_id", ids)
+              .in("avatar_status", ["approved", "pending"]);
             if (!fallbackProfErr) {
               profileRows = (fallbackProfs ?? []).map((row) => {
                 const p = row as ProfileFeedLiteRow;
@@ -1933,7 +1944,8 @@ function ConnectionsPageContent() {
             const { data: fallbackProfsLite, error: fallbackProfErrLite } = await supabase
               .from("profiles")
               .select("user_id,username,display_name,avatar_url,roles,languages")
-              .in("user_id", ids);
+              .in("user_id", ids)
+              .in("avatar_status", ["approved", "pending"]);
             if (!fallbackProfErrLite) {
               profileRows = (fallbackProfsLite ?? []).map((row) => {
                 const p = row as ProfileFeedLiteRow;
@@ -3356,7 +3368,7 @@ function ConnectionsPageContent() {
                       <div className="relative w-[42%] shrink-0 border-r border-white/10">
                         <button
                           type="button"
-                          onClick={() => router.push(`/profile/${encodeURIComponent(m.id)}`)}
+                          onClick={() => navigateToProfile(`/profile/${encodeURIComponent(m.id)}`)}
                           className="h-full w-full overflow-hidden bg-white/5"
                           title="View profile"
                         >
@@ -3457,13 +3469,14 @@ function ConnectionsPageContent() {
                         </div>
 
                         <div className="mt-3 grid grid-cols-2 gap-2">
-                          <Link
-                            href={`/profile/${encodeURIComponent(m.id)}`}
+                          <button
+                            type="button"
+                            onClick={() => navigateToProfile(`/profile/${encodeURIComponent(m.id)}`)}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-full border border-white/10 px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-widest transition-colors hover:bg-white/5"
                             title="View profile"
                           >
                             View
-                          </Link>
+                          </button>
                           {discoverMode === "hosts" ? (
                             <button
                               className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-full px-2 py-2.5 text-[10px] font-semibold uppercase tracking-tight text-[#0A0A0A]"
@@ -3609,13 +3622,14 @@ function ConnectionsPageContent() {
 
                         <div className="pt-3">
                           <div className="flex items-center gap-2">
-                            <Link
-                              href={`/profile/${encodeURIComponent(m.id)}`}
+                            <button
+                              type="button"
+                              onClick={() => navigateToProfile(`/profile/${encodeURIComponent(m.id)}`)}
                               className="inline-flex min-h-[42px] flex-1 items-center justify-center whitespace-nowrap rounded-full border border-white/10 px-4 py-2.5 text-center text-[10px] font-semibold uppercase tracking-widest transition-colors hover:bg-white/5"
                               title="View profile"
                             >
                               View
-                            </Link>
+                            </button>
                             {discoverMode === "hosts" ? (
                               <button
                                 className="flex min-h-[42px] flex-1 items-center justify-center whitespace-nowrap rounded-full px-2 py-2.5 text-[10px] font-semibold uppercase tracking-tight text-[#0A0A0A]"
@@ -3771,8 +3785,8 @@ function ConnectionsPageContent() {
                           <h2
                             role="button"
                             tabIndex={0}
-                            onClick={() => router.push(`/profile/${t.user_id}?fromTrip=${t.id}`)}
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/profile/${t.user_id}?fromTrip=${t.id}`); } }}
+                            onClick={() => navigateToProfile(`/profile/${t.user_id}?fromTrip=${t.id}`)}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigateToProfile(`/profile/${t.user_id}?fromTrip=${t.id}`); } }}
                             className="max-w-full break-words text-[34px] font-black leading-[0.95] tracking-tighter text-white drop-shadow-2xl transition-opacity hover:opacity-90 sm:text-4xl xl:text-[32px]"
                           >
                             {t.destination_city}
@@ -4080,9 +4094,10 @@ function ConnectionsPageContent() {
                       <div className="relative h-full rounded-[24px] p-[1.5px] bg-gradient-to-br from-zinc-800/20 via-[#9333ea]/50 to-[#ff51fa]/70 transition group-hover:from-zinc-800/20 group-hover:via-[#9333ea]/80 group-hover:to-[#ff51fa]/95">
                         <div className="relative flex h-full flex-col overflow-hidden rounded-[22px] bg-[#0e0e0e]">
                           {/* Photo area — clicking it opens the teacher profile */}
-                          <Link
-                            href={`/profile/${encodeURIComponent(m.id)}/teacher`}
-                            className="relative block h-[280px] shrink-0 overflow-hidden"
+                          <button
+                            type="button"
+                            onClick={() => navigateToProfile(`/profile/${encodeURIComponent(m.id)}/teacher`)}
+                            className="relative block h-[280px] w-full shrink-0 overflow-hidden"
                             title="View teacher profile"
                           >
                             <div
@@ -4127,7 +4142,7 @@ function ConnectionsPageContent() {
                                 </p>
                               )}
                             </div>
-                          </Link>
+                          </button>
 
                           {/* Bottom info section — flex-1 so buttons align at bottom across cards */}
                           <div className="flex flex-1 flex-col justify-between gap-3 p-4">
@@ -5320,6 +5335,33 @@ function ConnectionsPageContent() {
           }
         }}
       />
+
+      {photoGateOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/75 px-4 pb-6 sm:items-center" onClick={() => setPhotoGateOpen(false)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/15 bg-[#0b1418] p-6 text-center shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-300/10">
+              <span className="material-symbols-outlined text-[28px] text-cyan-300">photo_camera</span>
+            </div>
+            <h2 className="mb-2 text-base font-bold text-white">Add a photo to view profiles</h2>
+            <p className="mb-6 text-sm text-slate-400">Upload a profile photo to connect with other members and view their full profiles.</p>
+            <Link
+              href="/me/edit?tab=photo"
+              className="block w-full rounded-2xl py-3 text-sm font-bold text-[#040a0f] transition hover:brightness-110"
+              style={{ backgroundImage: "linear-gradient(90deg,#0df2f2,#7c3aff)" }}
+              onClick={() => setPhotoGateOpen(false)}
+            >
+              Add photo
+            </Link>
+            <button
+              type="button"
+              onClick={() => setPhotoGateOpen(false)}
+              className="mt-3 w-full rounded-2xl border border-white/[0.07] py-2.5 text-sm text-white/40 transition hover:text-white/60"
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      ) : null}
 
     </div>
   );

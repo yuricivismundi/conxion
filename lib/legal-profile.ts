@@ -14,11 +14,11 @@ export type LegalProfile = {
 export const LEGAL_PROFILE: LegalProfile = {
   brandName: "ConXion",
   serviceDomain: "conxion.social",
-  operatorName: "Yuri Bucio",
+  operatorName: "ConXion",
   privacyEmail: "privacy@conxion.social",
   supportEmail: "support@conxion.social",
-  postalAddressLines: ["Liivalaia 40", "Tallinn"],
-  postalCountry: "Estonia",
+  postalAddressLines: [],
+  postalCountry: null,
   governingLaw: null,
   jurisdiction: null,
 };

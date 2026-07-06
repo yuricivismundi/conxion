@@ -590,7 +590,7 @@ export default function AccountSettingsPage() {
             <SectionHeader icon="shield" label="Safety" />
             <div className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 divide-y divide-white/[0.05]">
               {/* Stats */}
-              <div className="flex gap-6 py-4">
+              <div className="flex flex-wrap gap-4 py-4">
                 <div>
                   <p className="text-2xl font-black text-white">{blockedMembers.length}</p>
                   <p className="text-[10px] uppercase tracking-widest text-white/35">Blocked</p>
@@ -600,11 +600,11 @@ export default function AccountSettingsPage() {
                   <p className="text-2xl font-black text-white">{reports.length}</p>
                   <p className="text-[10px] uppercase tracking-widest text-white/35">Reports</p>
                 </div>
-                <div className="ml-auto flex items-center gap-2">
-                  <Link href="/safety-center" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/15 transition-colors">
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <Link href="/safety-center" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-300/25 bg-cyan-300/8 px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-300/15 transition-colors">
                     Safety Center
                   </Link>
-                  <Link href="/support" className="inline-flex min-h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/60 hover:text-white transition-colors">
+                  <Link href="/support" className="inline-flex min-h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white/60 hover:text-white transition-colors">
                     Support
                   </Link>
                 </div>

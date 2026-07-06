@@ -91,14 +91,14 @@ export async function POST(req: Request) {
         await service.storage.from("avatars").remove([profile.avatar_path]).catch(() => null);
       }
 
-      // The DB constraint (profiles_avatar_not_blank) requires avatar_url >= 10 chars so
-      // it cannot be set to null. On rejection we reset it to the system placeholder
-      // so the storage file (already deleted) is no longer referenced and the profile
-      // shows no custom photo. avatar_status = 'rejected' hides them from discovery.
+      // On rejection: clear the photo path and mark as rejected.
+      // avatar_status = 'rejected' hides the user from Discover.
+      // avatar_url is set to a sentinel value — DB constraint requires ≥10 chars.
+      // Avatar component filters out non-http URLs and shows initials fallback.
       const updatePayload: Record<string, unknown> =
         action === "approve"
           ? { avatar_status: "approved" }
-          : { avatar_status: "rejected", avatar_path: null, avatar_url: "https://i.pravatar.cc/300" };
+          : { avatar_status: "rejected", avatar_path: null, avatar_url: "/no-avatar-photo" };
 
       const profilesTable = service.from("profiles" as never) as unknown as {
         update: (values: Record<string, unknown>) => {
