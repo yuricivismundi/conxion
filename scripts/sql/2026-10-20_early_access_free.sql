@@ -37,6 +37,11 @@ begin
     return 100;
   end if;
 
+  -- Verified organizers keep their higher cap (production behaviour).
+  if public.is_organizer_verified(p_user_id) then
+    return 25;
+  end if;
+
   if public.is_early_access() then
     return 5;
   end if;
@@ -51,7 +56,7 @@ begin
     return 5;
   end if;
 
-  return 2;
+  return 3;
 end;
 $function$;
 
