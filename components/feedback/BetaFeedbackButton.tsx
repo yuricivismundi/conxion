@@ -1,12 +1,10 @@
 "use client";
 
+import { BETA_WHATSAPP_URL } from "@/lib/community";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
-
-/** WhatsApp community for beta testers. Hidden when not configured. */
-const BETA_WHATSAPP_URL = process.env.NEXT_PUBLIC_BETA_WHATSAPP_URL ?? "";
 
 const HIDDEN_PREFIXES = ["/auth", "/onboarding", "/admin"];
 
