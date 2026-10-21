@@ -1,5 +1,6 @@
 "use client";
 
+import { BETA_WHATSAPP_URL, SUPPORT_EMAIL } from "@/lib/community";
 import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -281,6 +282,22 @@ export default function SupportPage() {
               Start with the FAQ topics below for {EARLY_ACCESS_ENABLED ? "your Dance Page" : "plans"}, references, hosting, request-linked chat windows, and support. Open the Trust &amp; Safety Guidelines when you need policy detail, and use Support Cases only when moderation or manual review is actually needed.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href={`mailto:${SUPPORT_EMAIL}`}
+                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2.5 text-sm font-bold text-[#06121a] hover:brightness-110"
+              >
+                <span className="material-symbols-outlined text-[16px]">mail</span>
+                {SUPPORT_EMAIL}
+              </a>
+              <a
+                href={BETA_WHATSAPP_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-emerald-300/30 bg-emerald-400/10 px-4 py-2.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/20"
+              >
+                <span className="material-symbols-outlined text-[16px]">groups</span>
+                Beta WhatsApp group
+              </a>
               <Link
                 href="#faq-topics"
                 className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white/85 hover:border-white/30 hover:text-white"
