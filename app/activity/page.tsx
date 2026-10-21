@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED, paidUpgradeHint } from "@/lib/billing/early-access";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
@@ -450,7 +451,7 @@ function ActivityPageContent() {
                       {primaryAction.label}
                     </span>
                     <span className="pointer-events-none absolute bottom-full left-1/2 z-[200] mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1a1a2e] border border-white/10 px-3 py-1.5 text-[12px] font-semibold text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                      Upgrade to Plus to create more
+                      {EARLY_ACCESS_ENABLED ? "Monthly limit reached, resets next month" : "Upgrade to Plus to create more"}
                     </span>
                   </div>
                 ) : (
@@ -1103,8 +1104,8 @@ function HostingPanel({ externalCityQuery = "", externalStatusFilter = "current"
                     compact
                     upgradeHint={
                       sentHostingView === "request_hosting"
-                        ? "Upgrade to Plus to send more Request Hosting messages this month."
-                        : "Upgrade to Plus to send more Offer Hosting messages this month."
+                        ? paidUpgradeHint("Upgrade to Plus to send more Request Hosting messages this month.")
+                        : paidUpgradeHint("Upgrade to Plus to send more Offer Hosting messages this month.")
                     }
                   />
                 ) : null}

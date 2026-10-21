@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import InfoPageShell from "@/components/InfoPageShell";
@@ -261,7 +262,11 @@ export default function SupportPage() {
   return (
     <InfoPageShell
       title="Help Center"
-      description="Answers for plans, upgrades, trust, references, activities, trips, and account support. Tickets and help articles live in the same place so users always have a clear next step."
+      description={
+        EARLY_ACCESS_ENABLED
+          ? "Answers for your Dance Page, trust, references, activities, trips, and account support. Tickets and help articles live in the same place so users always have a clear next step."
+          : "Answers for plans, upgrades, trust, references, activities, trips, and account support. Tickets and help articles live in the same place so users always have a clear next step."
+      }
     >
       {error ? (
         <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
@@ -273,7 +278,7 @@ export default function SupportPage() {
             <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/45">Help Desk</p>
             <h2 className="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">What do you need help with?</h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-200/85">
-              Start with the FAQ topics below for plans, references, hosting, request-linked chat windows, and support. Open the Trust &amp; Safety Guidelines when you need policy detail, and use Support Cases only when moderation or manual review is actually needed.
+              Start with the FAQ topics below for {EARLY_ACCESS_ENABLED ? "your Dance Page" : "plans"}, references, hosting, request-linked chat windows, and support. Open the Trust &amp; Safety Guidelines when you need policy detail, and use Support Cases only when moderation or manual review is actually needed.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Link
@@ -310,7 +315,7 @@ export default function SupportPage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search plans, upgrades, references, hosting, account access..."
+                placeholder={EARLY_ACCESS_ENABLED ? "Search Dance Page, references, hosting, account access..." : "Search plans, upgrades, references, hosting, account access..."}
                 className="min-h-10 w-full bg-transparent px-3 text-sm text-white outline-none placeholder:text-white/30"
               />
             </div>
@@ -338,7 +343,7 @@ export default function SupportPage() {
                 ))}
               </div>
             ) : (
-              <p className="mt-3 text-sm text-white/55">No matches yet. Try “plus”, “verified”, “hosting”, “references”, or “account”.</p>
+              <p className="mt-3 text-sm text-white/55">No matches yet. Try {EARLY_ACCESS_ENABLED ? "“dance page”, “free”" : "“plus”, “verified”"}, “hosting”, “references”, or “account”.</p>
             )}
           </div>
         ) : null}
@@ -349,7 +354,7 @@ export default function SupportPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-bold text-white">FAQ Topics</h2>
-              <p className="mt-1 text-sm text-slate-400">Core product, upgrade, hosting, and trust questions for the current MVP.</p>
+              <p className="mt-1 text-sm text-slate-400">{EARLY_ACCESS_ENABLED ? "Core product, hosting, and trust questions for early access." : "Core product, upgrade, hosting, and trust questions for the current MVP."}</p>
             </div>
             <Link
               href="/safety-center"

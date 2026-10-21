@@ -1,6 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Link from "next/link";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -954,7 +955,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                 />
               </div>
               <p className="mt-1.5 text-[10px] text-slate-500">
-                {billingPlanId === "pro" ? "Plus plan" : "Starter plan"} · MP4 / MOV · max 15s
+                {billingPlanId === "pro" ? (EARLY_ACCESS_ENABLED ? "Early access" : "Plus plan") : "Starter plan"} · MP4 / MOV · max 15s
               </p>
               <div className="mt-3">
                 {counts.videoLimit === null || counts.videos < counts.videoLimit ? (
@@ -995,7 +996,7 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
                     />
                   </div>
                   <p className="mt-1.5 text-[10px] text-slate-500">
-                    {isPlus ? "Plus plan · 3 showcase slots" : "Upgrade for 3 showcase photos"} · JPEG / PNG / WebP
+                    {isPlus ? (EARLY_ACCESS_ENABLED ? "3 showcase slots" : "Plus plan · 3 showcase slots") : "Upgrade for 3 showcase photos"} · JPEG / PNG / WebP
                   </p>
                   <div className="mt-3">
                     {canUploadShowcase ? (
@@ -1090,9 +1091,11 @@ export default function ProfileMediaManager({ embedded = false }: { embedded?: b
 
             <div className="rounded-[24px] border border-white/10 bg-black/25 p-4 text-sm text-slate-200 md:col-span-2 xl:col-span-1">
               <p className="font-semibold text-white">Current media plan</p>
-              <p className="mt-2 text-sm text-slate-200">{billingPlanId === "pro" ? "Plus" : "Starter / Verified"}</p>
+              <p className="mt-2 text-sm text-slate-200">{EARLY_ACCESS_ENABLED ? "Free during early access" : billingPlanId === "pro" ? "Plus" : "Starter / Verified"}</p>
               <p className="mt-2 text-xs leading-5 text-slate-400">
-                Verified keeps Starter media limits. Your avatar already uses the included photo slot. Plus unlocks extra showcase photos while keeping the same video count.
+                {EARLY_ACCESS_ENABLED
+                  ? "Your avatar uses the included photo slot. You also get 3 showcase photos and 2 videos, free while Conxion is in early access."
+                  : "Verified keeps Starter media limits. Your avatar already uses the included photo slot. Plus unlocks extra showcase photos while keeping the same video count."}
               </p>
               {checkoutPlanId ? (
                 <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100/80">

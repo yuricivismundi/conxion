@@ -1,3 +1,5 @@
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
+
 // ─── Eligible roles ───────────────────────────────────────────────────────────
 
 export const TEACHER_PROFILE_ELIGIBLE_ROLES = [
@@ -10,6 +12,8 @@ export const TEACHER_PROFILE_ELIGIBLE_ROLES = [
 // ─── Eligibility check ────────────────────────────────────────────────────────
 
 export function isTeacherProfileEligible(roles: string[]): boolean {
+  // Early access: every member can have a Dance Page, whatever their role.
+  if (EARLY_ACCESS_ENABLED) return true;
   const normalized = new Set(roles.map((r) => r.trim().toLowerCase()));
   return (TEACHER_PROFILE_ELIGIBLE_ROLES as readonly string[]).some((role) =>
     normalized.has(role)
@@ -23,6 +27,7 @@ export type TeacherProfileAccessLevel =
   | "trial_active"
   | "trial_expired"
   | "verified"
+  | "early_access"
   | "disabled";
 
 export type GetTeacherProfileAccessLevelParams = {
@@ -40,6 +45,7 @@ export function getTeacherProfileAccessLevel(
   if (!isTeacherProfileEligible(roles)) return "ineligible";
   if (!teacherProfileEnabled) return "disabled";
   if (isVerified) return "verified";
+  if (EARLY_ACCESS_ENABLED) return "early_access";
 
   if (trialEndsAt !== null) {
     const endsAt = new Date(trialEndsAt);
@@ -56,7 +62,7 @@ export type CanUseTeacherProfileParams = GetTeacherProfileAccessLevelParams;
 
 export function canUseTeacherProfile(params: CanUseTeacherProfileParams): boolean {
   const level = getTeacherProfileAccessLevel(params);
-  return level === "trial_active" || level === "verified";
+  return level === "trial_active" || level === "verified" || level === "early_access";
 }
 
 // ─── Trial helpers ────────────────────────────────────────────────────────────

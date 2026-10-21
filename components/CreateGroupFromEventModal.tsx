@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -202,8 +203,12 @@ export default function CreateGroupFromEventModal({
               <div>
                 <p className="text-base font-bold text-white">Group limit reached</p>
                 <p className="mt-1 text-sm text-slate-400">
-                  You&apos;ve reached your <span className="font-semibold text-fuchsia-300">{monthlyLimit}</span>-group limit on Starter.<br />
-                  Upgrade to Plus to own up to 10 groups.
+                  {EARLY_ACCESS_ENABLED ? (
+                    <>You&apos;ve reached your <span className="font-semibold text-fuchsia-300">{monthlyLimit}</span>-group limit. Leave or close a group to create a new one.</>
+                  ) : (
+                    <>You&apos;ve reached your <span className="font-semibold text-fuchsia-300">{monthlyLimit}</span>-group limit on Starter.<br />
+                  Upgrade to Plus to own up to 10 groups.</>
+                  )}
                 </p>
               </div>
             </div>
@@ -330,7 +335,7 @@ export default function CreateGroupFromEventModal({
           >
             Cancel
           </button>
-          {atLimit ? (
+          {atLimit && !EARLY_ACCESS_ENABLED ? (
             <a
               href="/pricing"
               className="flex-1 rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400 py-2.5 text-center text-sm font-bold text-[#052328] transition hover:opacity-95"

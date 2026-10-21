@@ -8,6 +8,8 @@ import TeacherInfoManager from "@/components/teacher/TeacherInfoManager";
 import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { canManageTeacherInfo } from "@/lib/teacher-info/roles";
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
+import { DANCE_PAGE_LABELS, dancePagePath, resolveDancePageLabel, showsTeachingSections } from "@/lib/dance-page";
 import { isPaymentVerified } from "@/lib/verification";
 import {
   getCachedCitiesOfCountry,
@@ -97,6 +99,7 @@ type TeacherProfileRow = {
   teacher_profile_trial_started_at: string | null;
   teacher_profile_trial_ends_at: string | null;
   is_public: boolean;
+  page_label?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -274,6 +277,8 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
+  const [username, setUsername] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [paymentVerified, setPaymentVerified] = useState(false);
 
   // Data
@@ -329,7 +334,8 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
   const [busyRefId, setBusyRefId] = useState<string | null>(null);
   const [refDraft, setRefDraft] = useState<RefDraft>(emptyRefDraft());
 
-  const eligible = canManageTeacherInfo(roles);
+  // Early access: every member can build a Dance Page.
+  const eligible = EARLY_ACCESS_ENABLED || canManageTeacherInfo(roles);
 
   // ── URL-based tab switching ────────────────────────────────────────────────
 
@@ -378,7 +384,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
 
         const profileRes = await supabase
           .from("profiles")
-          .select("user_id,display_name,roles,verified,verified_label")
+          .select("user_id,display_name,roles,verified,verified_label,username")
           .eq("user_id", currentUser.id)
           .maybeSingle();
 
@@ -405,6 +411,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
             : "Teacher"
         );
         setRoles(nextRoles);
+        setUsername(typeof (profileRow as { username?: unknown }).username === "string" ? (profileRow as { username: string }).username : null);
         setPaymentVerified(isPaymentVerified(profileRow));
 
         // Fetch teacher_profiles
@@ -512,6 +519,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
       // Determine trial fields if enabling for the first time
       let extraFields: Partial<TeacherProfileRow> = {};
       if (
+        !EARLY_ACCESS_ENABLED &&
         "teacher_profile_enabled" in fields &&
         fields.teacher_profile_enabled === true &&
         (!teacherProfile || !teacherProfile.teacher_profile_trial_started_at)
@@ -552,15 +560,6 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
       prev ? { ...prev, teacher_profile_enabled: nextEnabled } : null
     );
     void autoSaveField({ teacher_profile_enabled: nextEnabled });
-  }
-
-  // ── Default view ──────────────────────────────────────────────────────────
-
-  function handleSetDefaultView(view: "social" | "teacher") {
-    setTeacherProfile((prev) =>
-      prev ? { ...prev, default_public_view: view } : null
-    );
-    void autoSaveField({ default_public_view: view });
   }
 
   // ── Save profile info ─────────────────────────────────────────────────────
@@ -816,8 +815,9 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
     teacherProfile?.teacher_profile_trial_started_at != null &&
     teacherProfile?.teacher_profile_trial_ends_at != null &&
     new Date(teacherProfile.teacher_profile_trial_ends_at).getTime() <= Date.now();
-  const defaultView = teacherProfile?.default_public_view ?? "social";
-  const teacherProfileLocked = trialExpired && !paymentVerified;
+  const teacherProfileLocked = !EARLY_ACCESS_ENABLED && trialExpired && !paymentVerified;
+  const pageLabel = resolveDancePageLabel(teacherProfile?.page_label, roles);
+  const showTeaching = showsTeachingSections(pageLabel, roles);
 
   // ── References handlers ───────────────────────────────────────────────────
 
@@ -955,7 +955,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
         {!embedded && <Nav />}
         <div className="mx-auto max-w-xl px-4 py-16 text-center">
           <p className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">
-            Teacher profile feature is being set up. Check back soon.
+            Dance Page is being set up. Check back soon.
           </p>
         </div>
       </div>
@@ -1035,7 +1035,7 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
                 <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </Link>
-            <h1 className="text-lg font-semibold tracking-tight">Teacher Profile</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Dance Page</h1>
             {autoSaving && (
               <span className="ml-auto text-xs text-slate-500 animate-pulse">Saving…</span>
             )}
@@ -1072,50 +1072,77 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
           </div>
         )}
 
-        {/* ── Enable / disable toggle + default view ──────────────────────── */}
+        {/* ── Enable / disable + the shareable link ──────────────────────── */}
         <div data-tour="tour-teacher-enable" className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
           <div className="flex items-center gap-3">
             <Toggle checked={isEnabled} onChange={handleToggleEnabled} disabled={autoSaving} />
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-semibold text-white">Teacher profile</p>
-              {isEnabled && userId ? (
-                <a
-                  href={`/profile/${userId}/teacher`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-cyan-300/70 hover:text-cyan-200"
-                  title="View public page"
-                >
-                  <span className="material-symbols-outlined text-[14px]">open_in_new</span>
-                </a>
-              ) : null}
-            </div>
+            <p className="text-sm font-semibold text-white">Dance Page {isEnabled ? "on" : "off"}</p>
           </div>
 
-          {isEnabled ? (
-            <div className="flex items-center gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Default profile</p>
-              <div className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] p-0.5">
-                {(["social", "teacher"] as const).map((view) => (
-                  <button
-                    key={view}
-                    type="button"
-                    onClick={() => handleSetDefaultView(view)}
-                    disabled={autoSaving}
-                    className={[
-                      "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
-                      defaultView === view
-                        ? "bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-[#06121a]"
-                        : "text-slate-400 hover:text-slate-200",
-                      autoSaving ? "cursor-not-allowed opacity-50" : "",
-                    ].filter(Boolean).join(" ")}
-                  >
-                    {view === "social" ? "Social" : "Teacher"}
-                  </button>
-                ))}
-              </div>
+          {isEnabled && userId ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <a
+                href={dancePagePath({ username, userId })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-w-0 truncate rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1 text-xs text-cyan-200 hover:text-cyan-100"
+                title="Open your Dance Page"
+              >
+                {(typeof window !== "undefined" ? window.location.host : "conxion.social") + dancePagePath({ username, userId })}
+              </a>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(`${window.location.origin}${dancePagePath({ username, userId })}`);
+                    setLinkCopied(true);
+                    window.setTimeout(() => setLinkCopied(false), 2000);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3 py-1 text-xs font-semibold text-[#06121a]"
+              >
+                <span className="material-symbols-outlined text-[14px]">{linkCopied ? "check" : "content_copy"}</span>
+                {linkCopied ? "Copied" : "Copy link"}
+              </button>
             </div>
           ) : null}
+        </div>
+
+        {/* ── What's public ────────────────────────────────────────────────── */}
+        <p className="mb-4 flex items-start gap-2 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.05] px-3 py-2.5 text-xs leading-5 text-cyan-100/80">
+          <span className="material-symbols-outlined mt-0.5 text-[15px]">public</span>
+          <span>
+            {isEnabled
+              ? "Your Dance Page is public. Anyone with the link sees your bio, videos, upcoming public events and your competition history (add competitions in Dance Tools)."
+              : "When you turn it on, anyone with the link sees your bio, videos, upcoming public events and your competition history (add competitions in Dance Tools)."}
+          </span>
+        </p>
+
+        {/* ── Page label (shown on the public page) ───────────────────────── */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-white/[0.06] pb-4">
+          <p className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">I am a</p>
+          {DANCE_PAGE_LABELS.map((label) => (
+            <button
+              key={label}
+              type="button"
+              disabled={autoSaving}
+              onClick={() => {
+                setTeacherProfile((prev) => (prev ? { ...prev, page_label: label } : prev));
+                void autoSaveField({ page_label: label });
+              }}
+              className={[
+                "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                pageLabel === label
+                  ? "border-transparent bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-[#06121a]"
+                  : "border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-slate-200",
+                autoSaving ? "cursor-not-allowed opacity-50" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* ── Tabs ────────────────────────────────────────────────────────── */}
@@ -1123,14 +1150,14 @@ export default function TeacherProfilePage({ embedded = false }: { embedded?: bo
           <div className="flex w-full gap-0.5 rounded-2xl border border-white/10 bg-white/[0.03] p-0.5">
           {(
             [
-              { key: "profile", label: "Profile info" },
-              { key: "classes", label: "Weekly classes" },
-              { key: "inquiries", label: "Inquiries" },
-              { key: "events", label: "Events" },
-              { key: "bookings", label: "Booking" },
-              { key: "references", label: "References" },
+              { key: "profile", label: "Profile info", teaching: false },
+              { key: "classes", label: "Weekly classes", teaching: true },
+              { key: "inquiries", label: "Inquiries", teaching: true },
+              { key: "events", label: "Stage presence", teaching: false },
+              { key: "bookings", label: "Booking", teaching: true },
+              { key: "references", label: "References", teaching: false },
             ] as const
-          ).map(({ key, label }) => (
+          ).filter((tab) => showTeaching || !tab.teaching).map(({ key, label }) => (
             <button
               key={key}
               type="button"

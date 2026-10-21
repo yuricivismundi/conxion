@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PlanCard from "@/components/billing/PlanCard";
+import EarlyAccessPerks from "@/components/billing/EarlyAccessPerks";
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import PricingFAQ from "@/components/billing/PricingFAQ";
 import StripeCheckoutDialog from "@/components/billing/StripeCheckoutDialog";
 import Nav from "@/components/Nav";
@@ -43,6 +45,12 @@ function readCheckoutMessageFromLocation() {
 }
 
 export default function PricingPage() {
+  // Early access: no paid plans; show what founding members get instead.
+  if (EARLY_ACCESS_ENABLED) return <EarlyAccessPerks />;
+  return <PaidPricingPage />;
+}
+
+function PaidPricingPage() {
   const plans = useMemo(() => getAllPlanDefinitions(), []);
   const faqItems = useMemo(() => getPricingFaqItems(), []);
   const [billingState, setBillingState] = useState<BillingAccountState | null>(null);

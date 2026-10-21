@@ -25,7 +25,9 @@ function buildPhotoThreadMessage(params: {
     const reason = params.note ? `\n\nReason: ${params.note}` : "";
     return `Your ${params.photoLabel} was rejected by admin.${reason}\n\nPlease upload a new photo that is clear, shows your face, and meets our community guidelines. Your profile will not appear in discovery until a new photo has been submitted.`;
   }
-  return params.note || `Your ${params.photoLabel} needs changes before it can stay on your profile.`;
+  // request_update: feedback only. The photo stays and remains pending review.
+  const note = params.note || `Your profile needs a few changes before it can be approved.`;
+  return `${note}\n\nOnce you've updated your profile, an admin will review it again. A complete profile with an approved photo is required to request hosting. Reply here if you have questions.`;
 }
 
 export async function POST(req: Request) {
@@ -85,7 +87,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Profile not found." }, { status: 404 });
     }
 
-    if (photoType !== "cover") {
+    // "request_update" only sends feedback: no change to the photo or its status.
+    if (photoType !== "cover" && action !== "request_update") {
       if (action === "reject" && profile.avatar_path) {
         // Delete the file from storage — ignore errors (file may already be gone)
         await service.storage.from("avatars").remove([profile.avatar_path]).catch(() => null);
@@ -117,7 +120,7 @@ export async function POST(req: Request) {
         ? `${photoLabel[0].toUpperCase()}${photoLabel.slice(1)} approved`
         : action === "reject"
           ? `${photoLabel[0].toUpperCase()}${photoLabel.slice(1)} rejected`
-          : `${photoLabel[0].toUpperCase()}${photoLabel.slice(1)} needs changes`;
+          : "Your profile needs a few changes";
 
     let threadToken: string | null = null;
     let notificationWarning: string | null = null;
@@ -135,7 +138,9 @@ export async function POST(req: Request) {
         notificationBody:
           action === "approve"
             ? `Admin approved your ${photoLabel}.`
-            : `Admin sent you feedback about your ${photoLabel}.`,
+            : action === "request_update"
+              ? "Admin sent you feedback about your profile."
+              : `Admin sent you feedback about your ${photoLabel}.`,
         metadata: {
           source: "admin_photo_review",
           photo_type: photoType,

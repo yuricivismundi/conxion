@@ -33,6 +33,14 @@ type Dict = {
   hero_sub: string;
   hero_cta_join: string;
   hero_cta_events: string;
+  hero_early_access: string;
+  hero_micro: string;
+  why_page_t: string;
+  why_page_d: string;
+  why_travel_t: string;
+  why_travel_d: string;
+  why_host_t: string;
+  why_host_d: string;
 
   card_teacher: string;
   card_traveling: string;
@@ -91,11 +99,19 @@ const en: Dict = {
   nav_join: "Join ConXion",
   nav_join_short: "Join",
 
-  hero_h1_top: "Connect with",
-  hero_h1_accent: "dancers worldwide",
-  hero_sub: "Discover dancers, travel together, and grow your dance journey.",
-  hero_cta_join: "Join ConXion",
+  hero_h1_top: "Dance anywhere.",
+  hero_h1_accent: "Belong everywhere.",
+  hero_sub: "Meet dancers, find socials when you travel, and share your Dance Page.",
+  hero_cta_join: "Create account",
   hero_cta_events: "Explore events",
+  hero_early_access: "Free · Founding member",
+  hero_micro: "Free · Takes 2 minutes · No card",
+  why_page_t: "Your Dance Page",
+  why_page_d: "One link with your bio, videos, upcoming events and competitions. Put it in your Instagram bio.",
+  why_travel_t: "Dance when you travel",
+  why_travel_d: "Find socials, festivals and local dancers in any city before you land.",
+  why_host_t: "Get hosted, safely",
+  why_host_d: "Stay with dancers whose profiles and photos our team has reviewed.",
 
   card_teacher: "Teacher",
   card_traveling: "Traveling",
@@ -132,8 +148,8 @@ const en: Dict = {
   safety_quote: "\"ConXion allowed me to travel to Rome and immediately feel safe finding local socials.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Ready to build your dance network?",
-  final_cta: "Join ConXion",
+  final_h2: "Ready to dance?",
+  final_cta: "Create account",
 
   footer_company: "Company",
   footer_trust: "Trust",
@@ -153,11 +169,19 @@ const es: Dict = {
   nav_join: "Únete a ConXion",
   nav_join_short: "Únete",
 
-  hero_h1_top: "Conecta con",
-  hero_h1_accent: "bailarines del mundo",
-  hero_sub: "Descubre bailarines, viaja en grupo y haz crecer tu camino en el baile.",
-  hero_cta_join: "Únete a ConXion",
+  hero_h1_top: "Baila en cualquier lugar.",
+  hero_h1_accent: "Siéntete en casa.",
+  hero_sub: "Conoce bailarines, encuentra sociales cuando viajas y comparte tu Dance Page.",
+  hero_cta_join: "Crear cuenta",
   hero_cta_events: "Ver eventos",
+  hero_early_access: "Gratis · Miembro fundador",
+  hero_micro: "Gratis · 2 minutos · Sin tarjeta",
+  why_page_t: "Tu Dance Page",
+  why_page_d: "Un enlace con tu bio, videos, próximos eventos y competencias. Ponlo en tu bio de Instagram.",
+  why_travel_t: "Baila cuando viajas",
+  why_travel_d: "Encuentra sociales, festivales y bailarines locales en cualquier ciudad antes de llegar.",
+  why_host_t: "Hospédate con confianza",
+  why_host_d: "Quédate con bailarines cuyos perfiles y fotos revisa nuestro equipo.",
 
   card_teacher: "Profesor",
   card_traveling: "De viaje",
@@ -194,8 +218,8 @@ const es: Dict = {
   safety_quote: "\"ConXion me permitió viajar a Roma y sentirme segura desde el primer día encontrando socials locales.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "¿Listo para construir tu red de baile?",
-  final_cta: "Únete a ConXion",
+  final_h2: "¿Listo para bailar?",
+  final_cta: "Crear cuenta",
 
   footer_company: "Empresa",
   footer_trust: "Confianza",
@@ -215,11 +239,19 @@ const pt: Dict = {
   nav_join: "Entrar na ConXion",
   nav_join_short: "Entrar",
 
-  hero_h1_top: "Conecte-se com",
-  hero_h1_accent: "dançarinos do mundo",
-  hero_sub: "Descubra dançarinos, viaje em grupo e faça sua jornada na dança crescer.",
-  hero_cta_join: "Entrar na ConXion",
+  hero_h1_top: "Dance em qualquer lugar.",
+  hero_h1_accent: "Sinta-se em casa.",
+  hero_sub: "Conheça dançarinos, encontre sociais quando viajar e compartilhe sua Dance Page.",
+  hero_cta_join: "Criar conta",
   hero_cta_events: "Ver eventos",
+  hero_early_access: "Grátis · Membro fundador",
+  hero_micro: "Grátis · 2 minutos · Sem cartão",
+  why_page_t: "Sua Dance Page",
+  why_page_d: "Um link com sua bio, vídeos, próximos eventos e competições. Coloque na bio do Instagram.",
+  why_travel_t: "Dance quando viajar",
+  why_travel_d: "Encontre sociais, festivais e dançarinos locais em qualquer cidade antes de chegar.",
+  why_host_t: "Hospede-se com segurança",
+  why_host_d: "Fique com dançarinos cujos perfis e fotos nossa equipe revisou.",
 
   card_teacher: "Professor",
   card_traveling: "Em viagem",
@@ -256,8 +288,8 @@ const pt: Dict = {
   safety_quote: "\"ConXion me permitiu viajar para Roma e me sentir segura desde o primeiro dia encontrando socials locais.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Pronto para construir sua rede de dança?",
-  final_cta: "Entrar na ConXion",
+  final_h2: "Pronto para dançar?",
+  final_cta: "Criar conta",
 
   footer_company: "Empresa",
   footer_trust: "Confiança",
@@ -277,11 +309,19 @@ const fr: Dict = {
   nav_join: "Rejoindre ConXion",
   nav_join_short: "Rejoindre",
 
-  hero_h1_top: "Connecte-toi avec",
-  hero_h1_accent: "des danseurs du monde entier",
-  hero_sub: "Découvre des danseurs, voyage en groupe et fais évoluer ta passion pour la danse.",
-  hero_cta_join: "Rejoindre ConXion",
+  hero_h1_top: "Danse partout.",
+  hero_h1_accent: "Sens-toi chez toi.",
+  hero_sub: "Rencontre des danseurs, trouve des soirées en voyage et partage ta Dance Page.",
+  hero_cta_join: "Créer un compte",
   hero_cta_events: "Voir les événements",
+  hero_early_access: "Gratuit · Membre fondateur",
+  hero_micro: "Gratuit · 2 minutes · Sans carte",
+  why_page_t: "Ta Dance Page",
+  why_page_d: "Un lien avec ta bio, tes vidéos, tes prochains événements et compétitions. À mettre dans ta bio Instagram.",
+  why_travel_t: "Danse en voyage",
+  why_travel_d: "Trouve soirées, festivals et danseurs locaux dans n'importe quelle ville avant d'arriver.",
+  why_host_t: "Sois hébergé en confiance",
+  why_host_d: "Loge chez des danseurs dont les profils et photos sont vérifiés par notre équipe.",
 
   card_teacher: "Professeur",
   card_traveling: "En voyage",
@@ -318,8 +358,8 @@ const fr: Dict = {
   safety_quote: "\"ConXion m'a permis de voyager à Rome et de me sentir en sécurité dès le premier jour en trouvant des locaux.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Prêt à construire ton réseau de danse ?",
-  final_cta: "Rejoindre ConXion",
+  final_h2: "Prêt à danser ?",
+  final_cta: "Créer un compte",
 
   footer_company: "Entreprise",
   footer_trust: "Confiance",
@@ -339,11 +379,19 @@ const de: Dict = {
   nav_join: "ConXion beitreten",
   nav_join_short: "Beitreten",
 
-  hero_h1_top: "Verbinde dich mit",
-  hero_h1_accent: "Tänzern weltweit",
-  hero_sub: "Entdecke Tänzer, reise gemeinsam und entwickle deine Tanzleidenschaft weiter.",
-  hero_cta_join: "ConXion beitreten",
+  hero_h1_top: "Tanz überall.",
+  hero_h1_accent: "Fühl dich zuhause.",
+  hero_sub: "Lerne Tänzer kennen, finde Socials auf Reisen und teile deine Dance Page.",
+  hero_cta_join: "Konto erstellen",
   hero_cta_events: "Events entdecken",
+  hero_early_access: "Kostenlos · Gründungsmitglied",
+  hero_micro: "Kostenlos · 2 Minuten · Keine Karte",
+  why_page_t: "Deine Dance Page",
+  why_page_d: "Ein Link mit Bio, Videos, kommenden Events und Wettbewerben. Perfekt für deine Instagram-Bio.",
+  why_travel_t: "Tanzen auf Reisen",
+  why_travel_d: "Finde Socials, Festivals und lokale Tänzer in jeder Stadt, bevor du ankommst.",
+  why_host_t: "Sicher übernachten",
+  why_host_d: "Übernachte bei Tänzern, deren Profile und Fotos unser Team geprüft hat.",
 
   card_teacher: "Lehrer",
   card_traveling: "Auf Reisen",
@@ -380,8 +428,8 @@ const de: Dict = {
   safety_quote: "\"ConXion ermöglichte mir, nach Rom zu reisen und mich sofort sicher zu fühlen, indem ich lokale Socials fand.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Bereit, dein Tanznetzwerk aufzubauen?",
-  final_cta: "ConXion beitreten",
+  final_h2: "Bereit zu tanzen?",
+  final_cta: "Konto erstellen",
 
   footer_company: "Unternehmen",
   footer_trust: "Vertrauen",
@@ -401,11 +449,19 @@ const it: Dict = {
   nav_join: "Unisciti a ConXion",
   nav_join_short: "Unisciti",
 
-  hero_h1_top: "Connettiti con",
-  hero_h1_accent: "ballerini di tutto il mondo",
-  hero_sub: "Scopri ballerini, viaggia insieme e fai crescere la tua passione per la danza.",
-  hero_cta_join: "Unisciti a ConXion",
+  hero_h1_top: "Balla ovunque.",
+  hero_h1_accent: "Sentiti a casa.",
+  hero_sub: "Conosci ballerini, trova serate quando viaggi e condividi la tua Dance Page.",
+  hero_cta_join: "Crea un account",
   hero_cta_events: "Esplora eventi",
+  hero_early_access: "Gratis · Membro fondatore",
+  hero_micro: "Gratis · 2 minuti · Nessuna carta",
+  why_page_t: "La tua Dance Page",
+  why_page_d: "Un link con bio, video, prossimi eventi e competizioni. Mettilo nella bio di Instagram.",
+  why_travel_t: "Balla quando viaggi",
+  why_travel_d: "Trova serate, festival e ballerini locali in ogni città prima di arrivare.",
+  why_host_t: "Ospitalità sicura",
+  why_host_d: "Soggiorna da ballerini con profili e foto verificati dal nostro team.",
 
   card_teacher: "Insegnante",
   card_traveling: "In viaggio",
@@ -442,8 +498,8 @@ const it: Dict = {
   safety_quote: "\"ConXion mi ha permesso di viaggiare a Roma e sentirmi subito al sicuro trovando i locali.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Pronto a costruire la tua rete di danza?",
-  final_cta: "Unisciti a ConXion",
+  final_h2: "Pronto a ballare?",
+  final_cta: "Crea un account",
 
   footer_company: "Azienda",
   footer_trust: "Fiducia",
@@ -463,11 +519,19 @@ const nl: Dict = {
   nav_join: "Meedoen met ConXion",
   nav_join_short: "Meedoen",
 
-  hero_h1_top: "Verbind je met",
-  hero_h1_accent: "dansers wereldwijd",
-  hero_sub: "Ontdek dansers, reis samen en laat je dansleven groeien.",
-  hero_cta_join: "Meedoen met ConXion",
+  hero_h1_top: "Dans overal.",
+  hero_h1_accent: "Voel je thuis.",
+  hero_sub: "Ontmoet dansers, vind socials op reis en deel je Dance Page.",
+  hero_cta_join: "Account aanmaken",
   hero_cta_events: "Verken evenementen",
+  hero_early_access: "Gratis · Founding member",
+  hero_micro: "Gratis · 2 minuten · Geen kaart",
+  why_page_t: "Jouw Dance Page",
+  why_page_d: "Eén link met je bio, video's, komende events en wedstrijden. Zet hem in je Instagram-bio.",
+  why_travel_t: "Dansen op reis",
+  why_travel_d: "Vind socials, festivals en lokale dansers in elke stad voordat je landt.",
+  why_host_t: "Veilig logeren",
+  why_host_d: "Logeer bij dansers van wie ons team profiel en foto's heeft gecontroleerd.",
 
   card_teacher: "Leraar",
   card_traveling: "Op reis",
@@ -504,8 +568,8 @@ const nl: Dict = {
   safety_quote: "\"ConXion stelde me in staat om naar Rome te reizen en me meteen veilig te voelen door lokale socials te vinden.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Klaar om je dansnetwerk op te bouwen?",
-  final_cta: "Meedoen met ConXion",
+  final_h2: "Klaar om te dansen?",
+  final_cta: "Account aanmaken",
 
   footer_company: "Bedrijf",
   footer_trust: "Vertrouwen",
@@ -525,11 +589,19 @@ const pl: Dict = {
   nav_join: "Dołącz do ConXion",
   nav_join_short: "Dołącz",
 
-  hero_h1_top: "Połącz się z",
-  hero_h1_accent: "tancerzami z całego świata",
-  hero_sub: "Odkryj tancerzy, podróżuj razem i rozwijaj swoją pasję do tańca.",
-  hero_cta_join: "Dołącz do ConXion",
+  hero_h1_top: "Tańcz wszędzie.",
+  hero_h1_accent: "Czuj się jak w domu.",
+  hero_sub: "Poznawaj tancerzy, znajduj imprezy w podróży i udostępniaj swoją Dance Page.",
+  hero_cta_join: "Załóż konto",
   hero_cta_events: "Przeglądaj wydarzenia",
+  hero_early_access: "Za darmo · Członek założyciel",
+  hero_micro: "Za darmo · 2 minuty · Bez karty",
+  why_page_t: "Twoja Dance Page",
+  why_page_d: "Jeden link z bio, filmami, nadchodzącymi wydarzeniami i zawodami. Wstaw go do bio na Instagramie.",
+  why_travel_t: "Tańcz w podróży",
+  why_travel_d: "Znajdź imprezy, festiwale i lokalnych tancerzy w każdym mieście, zanim przylecisz.",
+  why_host_t: "Bezpieczny nocleg",
+  why_host_d: "Nocuj u tancerzy, których profile i zdjęcia sprawdził nasz zespół.",
 
   card_teacher: "Nauczyciel",
   card_traveling: "W podróży",
@@ -566,8 +638,8 @@ const pl: Dict = {
   safety_quote: "\"ConXion pozwoliło mi pojechać do Rzymu i od razu poczuć się bezpiecznie znajdując lokalne socials.\"",
   safety_quote_author: "— Maria S., Bachatera",
 
-  final_h2: "Gotowy, by zbudować swoją sieć taneczną?",
-  final_cta: "Dołącz do ConXion",
+  final_h2: "Gotowy do tańca?",
+  final_cta: "Załóż konto",
 
   footer_company: "Firma",
   footer_trust: "Zaufanie",

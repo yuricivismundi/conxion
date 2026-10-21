@@ -4,10 +4,13 @@ import Image from "next/image";
 import { createClient } from "@supabase/supabase-js";
 import Nav from "@/components/Nav";
 import { resolveAvatarUrl } from "@/lib/avatar-storage";
-import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
+import type { Metadata } from "next";
+import { canUseTeacherProfile, isTeacherProfileEligible } from "@/lib/teacher-profile/access";
+import { DANCE_PAGE_NAME, dancePagePath, resolveDancePageLabel, showsTeachingSections } from "@/lib/dance-page";
+import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
+import { readPublicAppUrl } from "@/lib/public-app-url";
 import TeacherBookingCalendar from "@/components/teacher/TeacherBookingCalendar";
 import TeacherHeroActions from "@/components/teacher/TeacherHeroActions";
-import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
 import { isPaymentVerified } from "@/lib/verification";
 import {
   normalizeTeacherInfoBlockRow,
@@ -53,6 +56,29 @@ type TeacherProfile = {
   base_school: string | null;
   travel_available: boolean;
   languages: string[] | null;
+  page_label?: string | null;
+};
+
+type UpcomingEvent = {
+  id: string;
+  title: string;
+  event_type: string | null;
+  city: string | null;
+  country: string | null;
+  starts_at: string;
+  is_host: boolean;
+};
+
+type Competition = {
+  id: string;
+  event_name: string;
+  city: string | null;
+  country: string | null;
+  style: string;
+  division: string;
+  role: string;
+  result: string;
+  year: number;
 };
 
 type RegularClass = {
@@ -121,11 +147,114 @@ function formatEventDate(dateStr: string | null): string {
     .toUpperCase();
 }
 
+function formatUpcomingDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }).toUpperCase();
+}
+
+/**
+ * Upcoming public events the member hosts or attends, plus their competition
+ * history. These tables are private by RLS, so they are read with the service
+ * client and only for members whose Dance Page is public.
+ */
+async function fetchDancePageActivity(userId: string): Promise<{ upcoming: UpcomingEvent[]; competitions: Competition[] }> {
+  try {
+    const service = getSupabaseServiceClient();
+    const nowIso = new Date().toISOString();
+    const [membersRes, hostedRes, competitionsRes] = await Promise.all([
+      service
+        .from("event_members")
+        .select("event_id,status")
+        .eq("user_id", userId)
+        .in("status", ["host", "going"]),
+      service
+        .from("events")
+        .select("id")
+        .eq("host_user_id", userId)
+        .gte("starts_at", nowIso),
+      service
+        .from("dance_competitions_user")
+        .select("id,event_name,city,country,style,division,role,result,year")
+        .eq("user_id", userId)
+        .order("year", { ascending: false })
+        .limit(30),
+    ]);
+
+    const hostIds = new Set<string>((hostedRes.data ?? []).map((r: { id: string }) => r.id));
+    for (const row of (membersRes.data ?? []) as Array<{ event_id: string; status: string }>) {
+      if (row.status === "host") hostIds.add(row.event_id);
+    }
+    const eventIds = Array.from(
+      new Set<string>([...hostIds, ...((membersRes.data ?? []) as Array<{ event_id: string }>).map((r) => r.event_id)])
+    );
+
+    let upcoming: UpcomingEvent[] = [];
+    if (eventIds.length > 0) {
+      const eventsRes = await service
+        .from("events")
+        .select("id,title,event_type,city,country,starts_at,status,hidden_by_admin,event_access_type")
+        .in("id", eventIds)
+        .eq("status", "published")
+        .in("event_access_type", ["public", "request"])
+        .gte("starts_at", nowIso)
+        .order("starts_at", { ascending: true })
+        .limit(12);
+      upcoming = ((eventsRes.data ?? []) as Array<Record<string, unknown>>)
+        .filter((e) => e.hidden_by_admin !== true)
+        .map((e) => ({
+          id: String(e.id),
+          title: String(e.title ?? "Event"),
+          event_type: typeof e.event_type === "string" ? e.event_type : null,
+          city: typeof e.city === "string" ? e.city : null,
+          country: typeof e.country === "string" ? e.country : null,
+          starts_at: String(e.starts_at),
+          is_host: hostIds.has(String(e.id)),
+        }));
+    }
+
+    return { upcoming, competitions: (competitionsRes.data ?? []) as Competition[] };
+  } catch {
+    return { upcoming: [], competitions: [] };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 type Params = { id: string };
+
+export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const supabase = getSupabasePublicClient();
+    const [{ data: profile }, { data: page }] = await Promise.all([
+      supabase.from("profiles").select("display_name,avatar_url,roles,city,country,username").eq("user_id", id).maybeSingle(),
+      supabase.from("teacher_profiles").select("*").eq("user_id", id).maybeSingle(),
+    ]);
+    if (!profile?.display_name) return { title: `${DANCE_PAGE_NAME} — ConXion` };
+    const label = resolveDancePageLabel((page as TeacherProfile | null)?.page_label, profile.roles as string[] | null);
+    const name = String(profile.display_name);
+    const location = [profile.city, profile.country].filter(Boolean).join(", ");
+    const title = `${name} · ${label} — ConXion`;
+    const headline = (page as TeacherProfile | null)?.headline;
+    const description = headline
+      ? headline.slice(0, 160)
+      : `${name}${location ? ` · ${location}` : ""}. Upcoming events, competitions and dance journey on ConXion.`;
+    const avatarUrl = resolveAvatarUrl({ avatarUrl: profile.avatar_url as string | null });
+    const images = avatarUrl ? [{ url: avatarUrl, width: 400, height: 400, alt: name }] : [];
+    return {
+      title,
+      description,
+      alternates: { canonical: `${readPublicAppUrl()}${dancePagePath({ username: profile.username as string | null, userId: id })}` },
+      openGraph: { title, description, images, type: "profile" },
+      twitter: { card: "summary", title, description, images: images.map((i) => i.url) },
+    };
+  } catch {
+    return { title: `${DANCE_PAGE_NAME} — ConXion` };
+  }
+}
 
 export default async function TeacherProfilePage({
   params,
@@ -152,9 +281,9 @@ export default async function TeacherProfilePage({
     redirect(`/profile/${id}`);
   }
 
-  // Access check: must have teacher badge role
+  // Access check: Dance Page eligibility (any member during early access)
   const roles: string[] = Array.isArray(profileRow.roles) ? profileRow.roles : [];
-  if (!hasTeacherBadgeRole(roles)) {
+  if (!isTeacherProfileEligible(roles)) {
     redirect(`/profile/${id}`);
   }
 
@@ -280,13 +409,18 @@ export default async function TeacherProfilePage({
 
   const teacherReferences: TeacherReference[] = [...verifiedRefs, ...manualRefs];
 
+  const { upcoming: upcomingEvents, competitions } = await fetchDancePageActivity(id);
+  const pageLabel = resolveDancePageLabel(teacherProfile.page_label, roles);
+  const showTeaching = showsTeachingSections(pageLabel, roles);
+  const showStagePresence = eventTeaching.length > 0 || showTeaching || pageLabel === "Artist" || pageLabel === "Performer" || pageLabel === "DJ";
+
   // ── Derived values ───────────────────────────────────────────────────────
   const displayName: string = profileRow.display_name ?? "Unknown";
   const avatarUrl = resolveAvatarUrl({ avatarUrl: profileRow.avatar_url });
   const socialProfileHref =
     typeof profileRow.username === "string" && profileRow.username.trim().length > 0
-      ? `/u/${encodeURIComponent(profileRow.username)}?view=social`
-      : `/profile/${id}?view=social`;
+      ? `/u/${encodeURIComponent(profileRow.username)}`
+      : `/profile/${id}`;
   const languages: string[] = Array.isArray(teacherProfile?.languages)
     ? teacherProfile.languages!
     : [];
@@ -361,6 +495,12 @@ export default async function TeacherProfilePage({
 
           {/* Right: info */}
           <div className="lg:col-span-7 flex flex-col justify-center">
+            {/* Page label (Teacher, Artist, DJ, …) */}
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[#ff51fa]/30 bg-[#ff51fa]/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.2em] text-[#ffb3fb]">
+              <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
+              {pageLabel}
+            </span>
+
             {/* Name */}
             <h1 className="font-black text-4xl sm:text-6xl lg:text-7xl tracking-tighter text-white mt-3 lg:mt-4 leading-none">
               {displayName}
@@ -384,11 +524,23 @@ export default async function TeacherProfilePage({
             )}
 
             {/* CTA buttons */}
-            <TeacherHeroActions
-              userId={id}
-              displayName={displayName}
-              avatarUrl={avatarUrl}
-            />
+            {showTeaching ? (
+              <TeacherHeroActions
+                userId={id}
+                displayName={displayName}
+                avatarUrl={avatarUrl}
+              />
+            ) : (
+              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 pt-6">
+                <Link
+                  href={socialProfileHref}
+                  className="bg-gradient-to-r from-[#c1fffe] to-[#ff51fa] text-zinc-900 px-8 py-4 rounded-full font-black uppercase text-sm tracking-widest flex items-center justify-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(193,255,254,0.3)]"
+                >
+                  Connect on ConXion
+                  <span className="material-symbols-outlined text-[18px]">person_add</span>
+                </Link>
+              </div>
+            )}
           </div>
         </section>
 
@@ -400,6 +552,86 @@ export default async function TeacherProfilePage({
           languages={languages}
         />
 
+        {/* ── Upcoming events (where to find them next) ──────────────────────── */}
+        <section className="mb-12 sm:mb-24">
+          <div className="mb-6 sm:mb-10">
+            <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Where to find me next</h2>
+            <p className="mt-2 text-sm text-zinc-500">Upcoming events, socials and festivals on ConXion.</p>
+          </div>
+          {upcomingEvents.length === 0 ? (
+            <div className="border border-white/5 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center gap-3 text-center">
+              <span className="material-symbols-outlined text-zinc-700 text-4xl">event_upcoming</span>
+              <p className="text-zinc-600 text-sm">No upcoming events yet.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {upcomingEvents.map((event) => (
+                <Link
+                  key={event.id}
+                  href={`/events/${event.id}`}
+                  className="group flex flex-col gap-2 rounded-2xl border border-white/5 bg-zinc-900/40 p-5 transition-colors hover:border-[#c1fffe]/30 hover:bg-zinc-900/70"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff51fa]">{formatUpcomingDate(event.starts_at)}</p>
+                    {event.is_host ? (
+                      <span className="rounded-full bg-[#c1fffe]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[#c1fffe]">Hosting</span>
+                    ) : null}
+                  </div>
+                  <h4 className="text-lg font-bold leading-snug text-white group-hover:text-[#c1fffe]">{event.title}</h4>
+                  <p className="text-sm text-zinc-500">
+                    {[event.event_type, [event.city, event.country].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Competition history ──────────────────────────────────────────── */}
+        {competitions.length > 0 || pageLabel === "Competitor" ? (
+        <section className="mb-12 sm:mb-24">
+          <div className="mb-6 sm:mb-10">
+            <h2 className="font-black text-3xl sm:text-4xl tracking-tighter text-white">Competitions</h2>
+            <p className="mt-2 text-sm text-zinc-500">Results and divisions over the years.</p>
+          </div>
+          {competitions.length === 0 ? (
+            <div className="border border-white/5 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center gap-3 text-center">
+              <span className="material-symbols-outlined text-zinc-700 text-4xl">emoji_events</span>
+              <p className="text-zinc-600 text-sm">No competitions added yet.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col divide-y divide-white/5 rounded-2xl border border-white/5 bg-zinc-900/30">
+              {competitions.map((c) => (
+                <div key={c.id} className="flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4">
+                    <p className="min-w-[52px] font-black text-xl text-[#c1fffe]">{c.year}</p>
+                    <div>
+                      <h4 className="font-bold text-white">{c.event_name}</h4>
+                      <p className="text-sm text-zinc-500">
+                        {[c.style, c.division, c.role, [c.city, c.country].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`w-fit rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                      c.result === "Winner"
+                        ? "bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] text-[#071116]"
+                        : c.result === "Finalist"
+                          ? "bg-[#ff51fa]/15 text-[#ffb3fb]"
+                          : "bg-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    {c.result}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        ) : null}
+
+        {showTeaching ? (
+        <>
         {/* ── Private Class Booking ─────────────────────────────────────────── */}
         <section data-tour="tour-book-session" className="mb-12 sm:mb-24">
           <div className="mb-3">
@@ -473,16 +705,20 @@ export default async function TeacherProfilePage({
           )}
         </section>
 
-        {/* ── Global Stage Presence (event teaching) ───────────────────────── */}
+        </>
+        ) : null}
+
+        {/* ── Stage Presence (festivals taught / performed at) ─────────────── */}
+        {showStagePresence ? (
         <section className="mb-12 sm:mb-24">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16">
             <div className="lg:col-span-4">
               <h2 className="font-black text-3xl sm:text-5xl tracking-tighter leading-none mb-4 sm:mb-6 text-white">
-                <span className="lg:hidden">Global Stage Presence</span>
-                <span className="hidden lg:inline">Global<br />Stage<br />Presence</span>
+                <span className="lg:hidden">Stage Presence</span>
+                <span className="hidden lg:inline">Stage<br />Presence</span>
               </h2>
               <p className="text-zinc-500 leading-relaxed">
-                Representing the pinnacle of dance at the world&apos;s most prestigious festivals and congresses.
+                Festivals, congresses and stages taught or performed at.
               </p>
             </div>
             <div className="lg:col-span-8 space-y-10 relative">
@@ -527,8 +763,9 @@ export default async function TeacherProfilePage({
             </div>
           </div>
         </section>
+        ) : null}
 
-        {/* ── Student References ───────────────────────────────────────────── */}
+        {/* ── References ───────────────────────────────────────────────────── */}
         <TeacherReferencesSection references={teacherReferences} />
 
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -438,8 +439,16 @@ export default function Nav({ title }: NavProps) {
                     href="/pricing"
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
                   >
-                    Upgrade your plan
+                    {EARLY_ACCESS_ENABLED ? "Founding member perks" : "Upgrade your plan"}
                   </Link>
+                  {EARLY_ACCESS_ENABLED ? (
+                    <Link
+                      href="/pricing?invite=1"
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
+                    >
+                      Invite dancers
+                    </Link>
+                  ) : null}
                   <Link
                     href="/notifications"
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
@@ -526,8 +535,18 @@ export default function Nav({ title }: NavProps) {
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
               >
                 <span className="material-symbols-outlined text-[20px]">workspace_premium</span>
-                <span className="text-sm font-medium">Upgrade your plan</span>
+                <span className="text-sm font-medium">{EARLY_ACCESS_ENABLED ? "Founding member perks" : "Upgrade your plan"}</span>
               </Link>
+              {EARLY_ACCESS_ENABLED ? (
+                <Link
+                  href="/pricing?invite=1"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-white/80 hover:bg-white/5 hover:text-white"
+                >
+                  <span className="material-symbols-outlined text-[20px]">group_add</span>
+                  <span className="text-sm font-medium">Invite dancers</span>
+                </Link>
+              ) : null}
               {isAdmin ? (
                 <Link
                   href="/admin/space"

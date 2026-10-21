@@ -1,5 +1,6 @@
 "use client";
 
+import { HOSTING_TRUST_GATE_ENABLED, HOSTING_TRUST_PROFILE_COLUMNS, evaluateHostingTrust, type HostingTrustRequirement } from "@/lib/hosting/trust-gate";
 import Link from "next/link";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -73,7 +74,9 @@ import { hasTeacherBadgeRole } from "@/lib/teacher-info/roles";
 import { clearVerificationResume, loadVerificationResume } from "@/lib/verification-client";
 import { VERIFICATION_SUCCESS_MESSAGE, VERIFIED_VIA_PAYMENT_LABEL, isPaymentVerified } from "@/lib/verification";
 import { isUuidLike, normalizeProfileUsernameInput } from "@/lib/profile-username";
-import { canUseTeacherProfile } from "@/lib/teacher-profile/access";
+import { canUseTeacherProfile, isTeacherProfileEligible } from "@/lib/teacher-profile/access";
+import { EARLY_ACCESS_ENABLED, isFoundingMember } from "@/lib/billing/early-access";
+import { dancePagePath, resolveDancePageLabel } from "@/lib/dance-page";
 import DarkConnectModal from "@/components/DarkConnectModal";
 import BlockDialog from "@/components/messages/BlockDialog";
 import ActivityComposerModal from "@/components/activity/ActivityComposerModal";
@@ -897,7 +900,9 @@ function MemberProfilePage() {
   const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
 
   const [meId, setMeId] = useState<string | null>(null);
-  const [viewerVerified, setViewerVerified] = useState(false);
+  // "viewerVerified" = may request hosting (complete profile + admin-approved photo).
+  const [viewerVerified, setViewerVerified] = useState(!HOSTING_TRUST_GATE_ENABLED);
+  const [viewerHostingMissing, setViewerHostingMissing] = useState<HostingTrustRequirement[] | undefined>(undefined);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [profileMedia, setProfileMedia] = useState<ProfileMediaItem[]>([]);
   const [ownerPhotoLimit, setOwnerPhotoLimit] = useState<number>(0);
@@ -942,6 +947,7 @@ function MemberProfilePage() {
   const { openWelcome } = useTour();
   const [teacherInquiryEnabled, setTeacherInquiryEnabled] = useState(false);
   const [teacherPageAvailable, setTeacherPageAvailable] = useState(false);
+  const [dancePageLabelRaw, setDancePageLabelRaw] = useState<string | null>(null);
   const [teacherBookingAvailable, setTeacherBookingAvailable] = useState(false);
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -954,6 +960,7 @@ function MemberProfilePage() {
   const profileUserId = profile?.userId ?? (routeProfileKey && isUuidLike(routeProfileKey) ? routeProfileKey : null);
   const isSelf = meId !== null && profileUserId === meId;
   const isTeacherProfile = hasTeacherBadgeRole(profile?.roles);
+  const dancePageEligible = isTeacherProfileEligible(profile?.roles ?? []);
   const canRequestInfo = !isSelf && isTeacherProfile && teacherInquiryEnabled;
   const canBookSession = !isSelf && isTeacherProfile && teacherPageAvailable && teacherBookingAvailable;
   const canRevealContacts = isSelf || state.status === "accepted";
@@ -982,9 +989,9 @@ function MemberProfilePage() {
     [profile]
   );
 
-  // Resolve whether the teacher page is actually available so profile links stay strict.
+  // Resolve whether the Dance Page (teacher page) is actually available so profile links stay strict.
   useEffect(() => {
-    if (!isTeacherProfile || !profileUserId || !profile) {
+    if (!dancePageEligible || !profileUserId || !profile) {
       setTeacherPageAvailable(false);
       setTeacherBookingAvailable(false);
       return;
@@ -995,7 +1002,7 @@ function MemberProfilePage() {
         const [{ data }, availabilityRes] = await Promise.all([
           supabase
           .from("teacher_profiles")
-          .select("default_public_view,teacher_profile_enabled,is_public,teacher_profile_trial_ends_at")
+          .select("*")
           .eq("user_id", profileUserId)
           .maybeSingle(),
           supabase
@@ -1016,11 +1023,9 @@ function MemberProfilePage() {
             })
         );
         setTeacherPageAvailable(teacherViewAllowed);
+        setDancePageLabelRaw(typeof (data as { page_label?: unknown } | null)?.page_label === "string" ? (data as { page_label: string }).page_label : null);
         setTeacherBookingAvailable(teacherViewAllowed && !availabilityRes.error && (availabilityRes.count ?? 0) > 0);
-        // Redirect self to teacher profile if it's set as default or is available
-        if (!cancelled && isSelf && teacherViewAllowed && profileUserId && data?.default_public_view === "teacher") {
-          router.replace(`/profile/${profileUserId}/teacher`);
-        }
+        // No redirect: the profile always shows the social page. The Dance Page has its own link.
       } catch {
         if (!cancelled) {
           setTeacherPageAvailable(false);
@@ -1032,16 +1037,18 @@ function MemberProfilePage() {
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, profileUserId, isTeacherProfile]);
+  }, [profile, profileUserId, dancePageEligible]);
 
   const mobileSettingsLinks = useMemo(
     () =>
       [
         { href: "/me/edit", label: "Profile settings", icon: "manage_accounts" },
-        ...(teacherPageAvailable ? [{ href: "/me/edit/teacher-profile", label: "Teacher profile settings", icon: "school" }] : []),
+        ...(teacherPageAvailable || EARLY_ACCESS_ENABLED
+          ? [{ href: "/me/edit/teacher-profile", label: teacherPageAvailable ? "Dance Page settings" : "Create your Dance Page", icon: "badge" }]
+          : []),
         { href: "/account-settings", label: "Account settings", icon: "settings" },
         { href: "/notifications", label: "Notifications", icon: "notifications" },
-        { href: "/pricing", label: "Upgrade your plan", icon: "workspace_premium" },
+        { href: "/pricing", label: EARLY_ACCESS_ENABLED ? "Founding member perks" : "Upgrade your plan", icon: "workspace_premium" },
         ...(viewerIsAdmin ? [{ href: "/admin/space", label: "Admin control", icon: "admin_panel_settings" }] : []),
       ],
     [viewerIsAdmin, teacherPageAvailable]
@@ -1180,8 +1187,16 @@ function MemberProfilePage() {
       (typeof window !== "undefined" ? normalizePublicAppUrl(window.location.origin) : "") ||
       normalizePublicAppUrl(process.env.NEXT_PUBLIC_APP_URL) ||
       "";
-    return `${appBase}/profile/${profileUserId}/teacher`;
-  }, [profileUserId, teacherPageAvailable]);
+    return `${appBase}${dancePagePath({ username: profile?.username, userId: profileUserId })}`;
+  }, [profileUserId, teacherPageAvailable, profile?.username]);
+
+  // Banner corner: the Dance Page label when the page is on, else the Teacher role tag.
+  const dancePageHref = teacherPageAvailable && profileUserId ? dancePagePath({ username: profile?.username, userId: profileUserId }) : null;
+  const bannerLabel = teacherPageAvailable
+    ? resolveDancePageLabel(dancePageLabelRaw, profile?.roles)
+    : isTeacherProfile
+      ? "Teacher"
+      : null;
 
   const mutualConnectionUserIds = useMemo(() => {
     if (!profileUserId || !meId || meId === profileUserId) return [] as string[];
@@ -1867,7 +1882,7 @@ function MemberProfilePage() {
         ].join(",");
 
         const visibleConnectionsPromise = fetchVisibleConnections(supabase, myUserId).catch(() => [] as VisibleConnectionRow[]);
-        const viewerProfilePromise = supabase.from("profiles").select("verified,verified_label").eq("user_id", myUserId).maybeSingle();
+        const viewerProfilePromise = supabase.from("profiles").select(HOSTING_TRUST_PROFILE_COLUMNS).eq("user_id", myUserId).maybeSingle();
         const viewerAdminPromise = supabase.from("admins").select("user_id").eq("user_id", myUserId).maybeSingle();
         const profilePromise = isUuidLike(resolvedRouteProfileKey)
           ? supabase.from("profiles").select(profileSelect).eq("user_id", resolvedRouteProfileKey).maybeSingle()
@@ -1935,7 +1950,10 @@ function MemberProfilePage() {
         }
 
         if (!viewerProfileRes.error) {
-          setViewerVerified(isPaymentVerified((viewerProfileRes.data ?? null) as Record<string, unknown> | null));
+          // "viewerVerified" = viewer may request hosting (Verified badge, or the free early-access trust gate).
+          const hostingTrust = evaluateHostingTrust((viewerProfileRes.data ?? null) as Record<string, unknown> | null, user.created_at);
+          setViewerVerified(hostingTrust.allowed);
+          setViewerHostingMissing(hostingTrust.missing);
         }
         if (!viewerAdminRes.error) {
           setViewerIsAdmin(Boolean(viewerAdminRes.data));
@@ -2669,12 +2687,33 @@ function MemberProfilePage() {
             <div className="absolute inset-0 bg-[linear-gradient(98deg,#0b1017_0%,#101927_35%,#151f36_68%,#1a1431_100%)]" />
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(34,211,238,0.18),transparent_40%)]" />
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_88%_14%,rgba(217,59,255,0.16),transparent_46%)]" />
-            {isTeacherProfile ? (
-              <div className="absolute right-4 top-3 z-10 sm:right-6 sm:top-4 lg:right-8">
-                <TeacherBadge
-                  className="w-[110px] sm:w-[180px] lg:w-[230px]"
-                  href={teacherPageAvailable && profileUserId ? `/profile/${profileUserId}/teacher` : undefined}
-                />
+            {/* Top-right: role/label tag (never a redirect) */}
+            {bannerLabel ? (
+              <div className="pointer-events-none absolute right-4 top-3 z-10 sm:right-6 sm:top-4 lg:right-8">
+                <TeacherBadge className="w-[110px] sm:w-[180px] lg:w-[260px]" label={bannerLabel} />
+              </div>
+            ) : null}
+            {/* Bottom-right: the one place to open (or create) the Dance Page */}
+            {dancePageHref ? (
+              <div className="absolute bottom-2.5 right-4 z-20 sm:bottom-3 sm:right-6 lg:right-8">
+                <Link
+                  href={dancePageHref}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-3.5 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-[#06121a] shadow-[0_0_24px_rgba(217,59,255,0.25)] transition hover:brightness-110"
+                >
+                  <span className="material-symbols-outlined text-[15px]">auto_awesome</span>
+                  Dance Page
+                  <span className="material-symbols-outlined text-[14px]">arrow_outward</span>
+                </Link>
+              </div>
+            ) : isSelf && EARLY_ACCESS_ENABLED ? (
+              <div className="absolute bottom-2.5 right-4 z-20 sm:bottom-3 sm:right-6 lg:right-8">
+                <Link
+                  href="/me/edit/teacher-profile"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/30 px-3.5 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white/85 backdrop-blur-sm transition hover:bg-black/50"
+                >
+                  <span className="material-symbols-outlined text-[15px]">add</span>
+                  Create Dance Page
+                </Link>
               </div>
             ) : null}
           </div>
@@ -3145,9 +3184,15 @@ function MemberProfilePage() {
                       <div>
                         <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Member since</p>
                         <p className="text-xs font-semibold text-slate-200">{formatMonthYear(profile.createdAt)}</p>
+                        {isFoundingMember(profile.createdAt) ? (
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-fuchsia-300/30 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-fuchsia-100">
+                            <span className="material-symbols-outlined text-[11px]">workspace_premium</span>
+                            Founding member
+                          </span>
+                        ) : null}
                       </div>
                     </div>
-                    {isSelf && !profile.verified ? (
+                    {isSelf && !profile.verified && !EARLY_ACCESS_ENABLED ? (
                       <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <GetVerifiedButton
                           className="inline-flex min-h-9 items-center justify-center rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-xs font-bold text-[#06121a] hover:brightness-110"
@@ -3623,6 +3668,7 @@ function MemberProfilePage() {
         ) : null}
 
         <VerificationRequiredDialog
+          missing={viewerHostingMissing}
           open={verificationModalOpen}
           resumePayload={profileUserId ? { kind: "profile_hosting_request", profileId: profileUserId } : null}
           onClose={() => setVerificationModalOpen(false)}
@@ -3677,10 +3723,10 @@ function MemberProfilePage() {
                         </button>
                       </div>
                     </div>
-                    {/* Teacher profile — only for teachers */}
+                    {/* Dance Page — when enabled */}
                     {teacherShareUrl && (
                       <div>
-                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-white/40">Teacher Profile</p>
+                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-white/40">Dance Page</p>
                         <div className="flex items-center gap-2">
                           <div className="min-w-0 flex-1 truncate rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/80">
                             {teacherShareUrl.replace(/^https?:\/\//, "")}
@@ -3690,7 +3736,7 @@ function MemberProfilePage() {
                             onClick={async () => {
                               try {
                                 await navigator.clipboard.writeText(teacherShareUrl);
-                                pushToast("success", "Teacher profile link copied");
+                                pushToast("success", "Dance Page link copied");
                               } catch {
                                 pushToast("error", "Could not copy link");
                               }

@@ -1,3 +1,4 @@
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import type { TourFlow } from "./types";
 
 export const TOUR_FLOWS: TourFlow[] = [
@@ -175,8 +176,8 @@ export const TOUR_FLOWS: TourFlow[] = [
   },
   {
     id: "setup-teacher-profile",
-    title: "Set up your teacher profile",
-    description: "Enable your public teacher page, add your bio, and open your booking calendar.",
+    title: "Set up your Dance Page",
+    description: "Enable your public Dance Page, pick your label, add your bio, and share it.",
     icon: "edit_note",
     category: "Teachers",
     steps: [
@@ -185,9 +186,9 @@ export const TOUR_FLOWS: TourFlow[] = [
         target: "tour-teacher-enable",
         route: "/me/edit/teacher-profile",
         placement: "bottom",
-        title: "Enable your teacher profile",
+        title: "Enable your Dance Page",
         description:
-          "Toggle your teacher profile on to make it visible to other dancers. You can also set whether your teacher or social profile is shown by default.",
+          "Toggle your Dance Page on to make it visible to anyone with the link. You can also set whether your Dance Page or social profile is shown by default.",
       },
       {
         id: "step-teacher-profile-info",
@@ -196,7 +197,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         placement: "top",
         title: "Fill in your profile info",
         description:
-          "Add a headline, bio, your dance styles, languages, and rates. This is what students see when they visit your teacher page.",
+          "Add a headline, bio, your dance styles, languages, and rates. This is what people see when they visit your Dance Page.",
       },
       {
         id: "step-teacher-tabs",
@@ -368,7 +369,7 @@ export const TOUR_FLOWS: TourFlow[] = [
         placement: "bottom",
         title: "Your profile settings",
         description:
-          "This is where you manage everything about your public profile — info, media, hosting, and teacher profile.",
+          "This is where you manage everything about your public profile — info, media, hosting, and Dance Page.",
       },
       {
         id: "step-profile-basic-info",
@@ -526,6 +527,12 @@ export const TOUR_FLOWS: TourFlow[] = [
     ],
   },
 ];
+
+/** Paid-plan tours are hidden while Conxion is free during early access. */
+const PAID_TOUR_IDS = new Set(["go-plus", "get-verified"]);
+export const ACTIVE_TOUR_FLOWS: TourFlow[] = EARLY_ACCESS_ENABLED
+  ? TOUR_FLOWS.filter((flow) => !PAID_TOUR_IDS.has(flow.id))
+  : TOUR_FLOWS;
 
 export function getFlowById(id: string): TourFlow | undefined {
   return TOUR_FLOWS.find((f) => f.id === id);

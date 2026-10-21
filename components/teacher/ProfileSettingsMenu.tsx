@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -92,7 +93,7 @@ export default function ProfileSettingsMenu({ profileUserId, teacherProfileEnabl
               className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
               onClick={() => setOpen(false)}
             >
-              Teacher profile settings
+              Dance Page settings
             </Link>
           ) : null}
           <Link
@@ -107,7 +108,7 @@ export default function ProfileSettingsMenu({ profileUserId, teacherProfileEnabl
             className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-white/80 hover:bg-white/5 hover:text-white"
             onClick={() => setOpen(false)}
           >
-            Upgrade your plan
+            {EARLY_ACCESS_ENABLED ? "Founding member perks" : "Upgrade your plan"}
           </Link>
           <Link
             href="/notifications"

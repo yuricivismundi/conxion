@@ -1,6 +1,6 @@
 "use client";
 
-import { TOUR_FLOWS } from "@/lib/tour/flows";
+import { ACTIVE_TOUR_FLOWS as TOUR_FLOWS } from "@/lib/tour/flows";
 import { useTour } from "./TourContext";
 
 export default function TourWelcome() {

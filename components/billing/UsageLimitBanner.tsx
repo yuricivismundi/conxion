@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import { getRemaining } from "@/lib/billing/limits";
 import { getPlanDefinition, type PlanId } from "@/lib/billing/plans";
 import { cx } from "@/lib/cx";
@@ -20,7 +21,7 @@ export default function UsageLimitBanner({ label, current, limit, upgradePlanId,
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="font-semibold">{label}</p>
-            <p className="mt-1 text-emerald-100/80">Unlimited on your current plan.</p>
+            <p className="mt-1 text-emerald-100/80">{EARLY_ACCESS_ENABLED ? "Unlimited during early access." : "Unlimited on your current plan."}</p>
           </div>
           <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
             Unlimited
@@ -67,7 +68,7 @@ export default function UsageLimitBanner({ label, current, limit, upgradePlanId,
           <span className={cx("rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]", badgeStyles)}>
             {current}/{limit}
           </span>
-          {state === "reached" && upgradePlanId && onUpgrade ? (
+          {state === "reached" && upgradePlanId && onUpgrade && !EARLY_ACCESS_ENABLED ? (
             <button
               type="button"
               onClick={() => onUpgrade(upgradePlanId)}

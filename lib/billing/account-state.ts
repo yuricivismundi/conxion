@@ -1,10 +1,13 @@
 import type { SupabaseServiceClient } from "@/lib/supabase/service-role";
 import type { PlanId } from "@/lib/billing/plans";
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 
 export type BillingAccountState = {
   currentPlanId: PlanId;
   isVerified: boolean;
   proRenewalLabel?: string | null;
+  /** True when Plus-level access comes from the free early-access programme, not a subscription. */
+  isEarlyAccess?: boolean;
 };
 
 export type ProBillingMetadata = {
@@ -93,6 +96,15 @@ export function getBillingAccountState(params: {
       currentPlanId: "pro",
       isVerified,
       proRenewalLabel: buildProRenewalLabel(proMetadata),
+    };
+  }
+
+  if (EARLY_ACCESS_ENABLED) {
+    return {
+      currentPlanId: "pro",
+      isVerified,
+      proRenewalLabel: null,
+      isEarlyAccess: true,
     };
   }
 

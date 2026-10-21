@@ -19,8 +19,6 @@ type Props = {
 };
 
 export default function TeacherReferencesSection({ references, isOwner, teacherUserId }: Props) {
-  if (references.length === 0 && !isOwner) return null;
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -42,6 +40,8 @@ export default function TeacherReferencesSection({ references, isOwner, teacherU
     return () => { el.removeEventListener("scroll", updateArrows); ro.disconnect(); };
   }, [references]);
 
+  if (references.length === 0 && !isOwner) return null;
+
   function scroll(dir: "left" | "right") {
     const el = scrollRef.current;
     if (!el) return;
@@ -51,7 +51,7 @@ export default function TeacherReferencesSection({ references, isOwner, teacherU
   return (
     <section className="mb-12 sm:mb-20">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-white tracking-tight">What students say</h2>
+        <h2 className="text-xl font-bold text-white tracking-tight">What people say</h2>
         <div className="flex items-center gap-3">
           {references.length > 0 && (
             <span className="text-xs text-zinc-500 font-medium">{references.length} reference{references.length !== 1 ? "s" : ""}</span>
@@ -82,7 +82,7 @@ export default function TeacherReferencesSection({ references, isOwner, teacherU
       {references.length === 0 && isOwner && (
         <div className="rounded-2xl border border-dashed border-zinc-800 px-6 py-10 text-center">
           <p className="text-zinc-500 text-sm">No references yet.</p>
-          <p className="text-zinc-600 text-xs mt-1">Add testimonials from previous students to build trust.</p>
+          <p className="text-zinc-600 text-xs mt-1">Add testimonials from students, partners or organizers to build trust.</p>
           <a
             href="/me/edit/teacher-profile?tab=references"
             className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-300 hover:border-zinc-500 hover:text-white transition"
@@ -128,7 +128,7 @@ export default function TeacherReferencesSection({ references, isOwner, teacherU
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white/30">
-                        Added by Teacher
+                        Added by owner
                       </span>
                     )}
                   </div>

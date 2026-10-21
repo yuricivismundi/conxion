@@ -10,6 +10,7 @@ import { absolutePublicAppUrl, readPublicAppUrl } from "@/lib/public-app-url";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
 import { getT, isSupportedLocale, resolveLocale, type Locale } from "@/lib/i18n/landing";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +99,14 @@ export const metadata: Metadata = {
     images: [logoUrl],
   },
 };
+
+// Hero mosaic: ConXion's own images (public/images/blog). First one is the mobile background.
+const HERO_PHOTOS = [
+  { src: "/images/blog/blog-02-find-partners-clean.jpg", position: "center" },
+  { src: "/images/blog/blog-01-conxion-intro-clean.jpg", position: "center" },
+  { src: "/images/blog/blog-03-teachers-guide-clean.jpg", position: "center 30%" },
+  { src: "/images/blog/blog-04-dance-travel-clean.jpg", position: "center" },
+];
 
 type LandingEventCard = {
   id: string;
@@ -320,7 +329,7 @@ export default async function LandingPage(props: PageProps) {
         }
       `}</style>
 
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/5 bg-[#0A0A0A]/80 backdrop-blur-md">
+      <header className="absolute inset-x-0 top-0 z-50">
         <nav className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between px-4 sm:px-6">
           <Link href="/" className="flex items-center" aria-label="ConXion landing">
             <div className="relative h-10 w-40 sm:h-12 sm:w-48">
@@ -328,242 +337,87 @@ export default async function LandingPage(props: PageProps) {
             </div>
           </Link>
 
-          <div className="hidden items-center gap-3 md:flex">
+          <div className="flex items-center gap-4">
             {BLOG_ENABLED ? (
-              <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/blog">
+              <Link className="hidden text-sm font-semibold text-white/80 transition hover:text-white md:inline" href="/blog">
                 {t.nav_blog}
               </Link>
             ) : null}
-            <Link className="text-sm font-medium text-white/65 transition hover:text-white" href="/auth">
+            <Link
+              href="/auth?mode=login"
+              className="rounded-full border border-white/80 bg-white px-5 py-2 text-sm font-bold text-black transition hover:bg-white/90"
+            >
               {t.nav_login}
-            </Link>
-            <Link
-              href="/auth"
-              className="animate-conxion-glow rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-5 py-2.5 text-sm font-bold text-black transition hover:scale-105"
-            >
-              {t.nav_join}
-            </Link>
-          </div>
-
-          <div className="flex items-center gap-2 md:hidden">
-            <Link
-              href="/auth"
-              className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-4 py-2 text-xs font-bold text-black"
-            >
-              {t.nav_join_short}
             </Link>
           </div>
         </nav>
       </header>
 
       <main>
-        <section className="relative overflow-hidden border-b border-white/5 px-4 pb-16 pt-28 sm:px-6 lg:pb-20 lg:pt-32" id="hero">
-          <div className="pointer-events-none absolute right-[-120px] top-20 h-[360px] w-[360px] rounded-full bg-[#00F5FF]/15 blur-[120px]" />
-          <div className="pointer-events-none absolute bottom-[-120px] left-[-120px] h-[360px] w-[360px] rounded-full bg-[#FF00FF]/10 blur-[130px]" />
-
-          <div className="mx-auto grid w-full max-w-7xl items-center gap-12 lg:grid-cols-2">
-            <div>
-              <h1 className="text-4xl font-extrabold leading-[1.08] text-white sm:text-5xl lg:text-7xl">
-                {t.hero_h1_top}
-                <br />
-                <span className="bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] bg-clip-text text-transparent">{t.hero_h1_accent}</span>
-              </h1>
-              <p className="mt-6 max-w-xl text-base leading-relaxed text-white/75 sm:text-lg lg:text-xl">
-                {t.hero_sub}
-              </p>
-
-              <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-                <Link
-                  href="/auth"
-                  className="rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-9 py-4 text-center text-base font-extrabold text-black shadow-[0_0_30px_rgba(0,245,255,0.2)] transition hover:opacity-90"
-                >
-                  {t.hero_cta_join}
-                </Link>
-                <Link
-                  href="/events"
-                  className="rounded-full border border-[#00F5FF]/60 px-9 py-4 text-center text-base font-bold text-[#00F5FF] transition hover:bg-[#00F5FF]/10"
-                >
-                  {t.hero_cta_events}
-                </Link>
-              </div>
-            </div>
-
-            <div className="relative mx-auto h-[380px] w-full max-w-[560px] sm:h-[420px] lg:h-[500px]">
-              <div className="pointer-events-none absolute left-1/2 top-1/2 h-[340px] w-[340px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#00F5FF]/10 blur-[110px]" />
-
-              <article className="connections-card card-glow hero-card-motion-a absolute right-0 top-0 z-30 w-[250px] overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] sm:w-[285px]">
-                <div
-                  className="h-28 bg-cover bg-center"
-                  style={{
-                    backgroundImage:
-                      "url(https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?q=80&w=1200&auto=format&fit=crop)",
-                  }}
+        {/* ── Hero: one message, one action ─────────────────────────────── */}
+        <section className="relative flex min-h-[100svh] items-center justify-center overflow-hidden px-4 sm:px-6" id="hero">
+          {/* Photo mosaic */}
+          <div className="absolute inset-0 grid grid-cols-1 sm:grid-cols-2" aria-hidden="true">
+            {HERO_PHOTOS.map((photo, index) => (
+              <div key={photo.src} className={`relative ${index > 0 ? "hidden sm:block" : ""}`}>
+                <Image
+                  src={photo.src}
+                  alt=""
+                  fill
+                  priority={index < 2}
+                  // portrait phones crop a landscape photo, so request a wider image than the viewport
+                  sizes="(min-width: 640px) 50vw, 220vw"
+                  quality={85}
+                  className="object-cover"
+                  style={{ objectPosition: photo.position }}
                 />
-                <div className="space-y-2.5 p-4">
-                  <div className="flex items-center gap-2">
-                    <p className="text-base font-semibold tracking-tight text-white">Elena Rodriguez</p>
-                    <span className="material-symbols-outlined text-[15px] text-[#00F5FF]">verified</span>
-                  </div>
-                  <p className="text-[12px] font-medium text-[#00F5FF]">Madrid, Spain</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/75">
-                      {t.card_teacher}
-                    </span>
-                    <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/75">
-                      Salsa
-                    </span>
-                    <span className="rounded-md border border-white/10 bg-white/5 px-2 py-[3px] text-[9px] font-medium uppercase tracking-wider text-white/75">
-                      Bachata
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-[11px] text-white/65">
-                    <span className="inline-flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">group</span> 18
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px] text-[#00F5FF]">event_available</span> 31 {t.card_refs}
-                    </span>
-                  </div>
-                </div>
-              </article>
-
-              <article className="connections-card card-glow hero-card-motion-b absolute left-0 top-[150px] z-20 w-[265px] overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] sm:w-[315px]">
-                <div className="relative h-24 overflow-hidden">
-                  <img
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuA7QaOcwlmb9s0A6r3VZJyzfFwIDa9zH6EfYf8fzf_nIQYkRlv_o-0ZNm2o6X8UYZ_fy4G7WvJG6KMtr2OyJEFAk1NLK6nPy_l-E1eOkzpDEawDrehWO87SlIoCnbJvj1KIy9FQGimbagXNJ9YwsNLl6HbuE3aQDpudMrmyFuTNOXrEjtwRDIrHgii6MGKFbHTVF80v2GA_anJhEBR3mVZgEZ3SrR1B7fG1NBII2IMYxQNGOuQZ5Jr5TBgvCGxNdrsGOzTWg34wxAmw"
-                    alt="London Bachata Tour"
-                    className="h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
-                  <span className="absolute left-3 top-3 rounded bg-[#FF00FF]/20 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-[#FF00FF]">
-                    {t.card_traveling}
-                  </span>
-                </div>
-                <div className="space-y-2.5 p-4">
-                  <p className="text-base font-semibold text-white">London Bachata Tour</p>
-                  <div className="text-[11px] text-white/65">Oct 12 - Oct 18 • Bachata parties + socials</div>
-                  <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                    <span className="text-xs font-semibold text-white/85">15 {t.card_attending}</span>
-                    <span className="material-symbols-outlined text-[16px] text-[#00F5FF]">flight_takeoff</span>
-                  </div>
-                </div>
-              </article>
-
-              <article className="connections-card card-glow hero-card-motion-c absolute bottom-0 right-8 z-10 w-[235px] overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#121212] sm:w-[270px]">
-                <div className="relative h-32 overflow-hidden">
-                  <img
-                    src="https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=1200&auto=format&fit=crop"
-                    alt="Paris Bachata Festival"
-                    className="h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 to-transparent" />
-                  <div className="absolute left-3 top-3 rounded-full border border-cyan-300/35 bg-cyan-300/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-cyan-100">
-                    Bachata Festival
-                  </div>
-                  <div className="absolute bottom-3 left-3 right-3">
-                    <p className="text-sm font-bold text-white">Paris Bachata Festival</p>
-                    <p className="text-[10px] text-white/70">Paris, France</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between px-4 py-3 text-[11px]">
-                  <span className="inline-flex items-center gap-1 text-white/70">
-                    <span className="material-symbols-outlined text-[14px] text-cyan-300">calendar_month</span>
-                    Nov 22-25, 2026
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-cyan-100">
-                    <span className="material-symbols-outlined text-[14px] text-cyan-300">group</span>
-                    220
-                  </span>
-                </div>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Lifecycle Progress Strip ─────────────────────────────── */}
-        <section className="relative z-20 border-b border-white/5 bg-[#0A0A0A] px-4 py-16 sm:px-6" id="how-it-works">
-          <div className="relative mx-auto w-full max-w-7xl">
-              {/* Track backdrop — runs center of col 1 to center of col 6 */}
-              <div className="absolute top-10 h-px bg-white/10" style={{ left: "8.333%", width: "83.334%" }} />
-              {/* Active gradient track */}
-              <div
-                className="absolute top-10 h-px opacity-60"
-                style={{ left: "8.333%", width: "83.334%", background: "linear-gradient(90deg, #00F5FF 0%, #ff51fa 100%)" }}
-              />
-
-              <div className="relative z-10 grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-6">
-                {/* 1 Discovery */}
-                <div className="group flex flex-col items-center">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50 group-hover:shadow-[0_0_20px_rgba(0,245,255,0.3)]">
-                    <span className="material-symbols-outlined text-3xl text-[#00F5FF]">explore</span>
-                  </div>
-                  <h3 className="mb-2 font-bold text-white">{t.pillars_discovery_t}</h3>
-                  <p className="text-center text-sm leading-relaxed text-white/50">
-                    {t.pillars_discovery_d}
-                  </p>
-                </div>
-
-                {/* 2 Connection */}
-                <div className="group flex flex-col items-center">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50">
-                    <span className="material-symbols-outlined text-3xl text-[#00F5FF]">group</span>
-                  </div>
-                  <h3 className="mb-2 font-bold text-white">{t.pillars_connection_t}</h3>
-                  <p className="text-center text-sm leading-relaxed text-white/50">
-                    {t.pillars_connection_d}
-                  </p>
-                </div>
-
-                {/* 3 Interaction */}
-                <div className="group flex flex-col items-center">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#00F5FF]/20 bg-[#1a1a1a] transition-all group-hover:border-[#00F5FF]/50">
-                    <span className="material-symbols-outlined text-3xl text-[#00F5FF]">forum</span>
-                  </div>
-                  <h3 className="mb-2 font-bold text-white">{t.pillars_interaction_t}</h3>
-                  <p className="text-center text-sm leading-relaxed text-white/50">
-                    {t.pillars_interaction_d}
-                  </p>
-                </div>
-
-                {/* 4 Activity */}
-                <div className="group flex flex-col items-center">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#ff51fa]/20 bg-[#1a1a1a] transition-all group-hover:border-[#ff51fa]/50">
-                    <span className="material-symbols-outlined text-3xl text-[#ff51fa]">local_activity</span>
-                  </div>
-                  <h3 className="mb-2 font-bold text-white">{t.pillars_activity_t}</h3>
-                  <p className="text-center text-sm leading-relaxed text-white/50">
-                    {t.pillars_activity_d}
-                  </p>
-                </div>
-
-                {/* 5 Reference */}
-                <div className="group flex flex-col items-center">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-[#ff51fa]/20 bg-[#1a1a1a] transition-all group-hover:border-[#ff51fa]/50">
-                    <span className="material-symbols-outlined text-3xl text-[#ff51fa]">rate_review</span>
-                  </div>
-                  <h3 className="mb-2 font-bold text-white">{t.pillars_reference_t}</h3>
-                  <p className="text-center text-sm leading-relaxed text-white/50">
-                    {t.pillars_reference_d}
-                  </p>
-                </div>
-
-                {/* 6 Growth */}
-                <div className="group flex flex-col items-center">
-                  <div
-                    className="mb-6 flex h-20 w-20 items-center justify-center rounded-full shadow-[0_0_30px_rgba(255,81,250,0.4)]"
-                    style={{ background: "linear-gradient(135deg, #00F5FF, #ff51fa)" }}
-                  >
-                    <span className="material-symbols-outlined text-3xl text-[#0A0A0A]">trending_up</span>
-                  </div>
-                  <h3 className="mb-2 font-bold text-white">{t.pillars_growth_t}</h3>
-                  <p className="text-center text-sm leading-relaxed text-white/50">
-                    {t.pillars_growth_d}
-                  </p>
-                </div>
               </div>
+            ))}
+          </div>
+          <div className="absolute inset-0 bg-black/55" aria-hidden="true" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-transparent to-[#0A0A0A]" aria-hidden="true" />
+
+          <div className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center pt-20 text-center">
+            {EARLY_ACCESS_ENABLED ? (
+              <p className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/40 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white/90 backdrop-blur-sm">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#00F5FF]" />
+                {t.hero_early_access}
+              </p>
+            ) : null}
+            <h1 className="text-5xl font-extrabold leading-[1.02] tracking-tight text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.5)] sm:text-7xl lg:text-8xl">
+              {t.hero_h1_top}
+              <br />
+              <span className="bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] bg-clip-text text-transparent">{t.hero_h1_accent}</span>
+            </h1>
+            <p className="mt-6 max-w-xl text-base leading-relaxed text-white/85 sm:text-xl">{t.hero_sub}</p>
+            <Link
+              href="/auth"
+              className="animate-conxion-glow mt-10 inline-flex w-full max-w-xs items-center justify-center rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] px-10 py-4 text-lg font-extrabold text-black transition hover:scale-[1.03] sm:w-auto sm:px-14 sm:text-xl"
+            >
+              {t.hero_cta_join}
+            </Link>
+            <p className="mt-4 text-sm text-white/60">{t.hero_micro}</p>
           </div>
         </section>
 
+        {/* ── Three reasons, nothing more ───────────────────────────────── */}
+        <section className="bg-[#0A0A0A] px-4 py-20 sm:px-6" id="why">
+          <div className="mx-auto grid w-full max-w-6xl gap-5 md:grid-cols-3">
+            {[
+              { icon: "auto_awesome", title: t.why_page_t, body: t.why_page_d, color: "text-[#ff51fa]" },
+              { icon: "flight_takeoff", title: t.why_travel_t, body: t.why_travel_d, color: "text-[#00F5FF]" },
+              { icon: "home", title: t.why_host_t, body: t.why_host_d, color: "text-[#c1fffe]" },
+            ].map((item) => (
+              <div key={item.title} className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
+                <span className={`material-symbols-outlined text-3xl ${item.color}`}>{item.icon}</span>
+                <h2 className="mt-4 text-xl font-bold text-white">{item.title}</h2>
+                <p className="mt-2 text-sm leading-relaxed text-white/60">{item.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {landingEvents.length > 0 ? (
         <section className="border-b border-white/5 bg-[#121212] px-4 py-20 sm:px-6">
           <div className="mx-auto w-full max-w-7xl">
             <div className="text-center">
@@ -638,41 +492,7 @@ export default async function LandingPage(props: PageProps) {
             </div>
           </div>
         </section>
-
-        <section className="bg-[#0A0A0A] px-4 py-20 sm:px-6" id="safety">
-          <div className="mx-auto w-full max-w-7xl">
-            <div className="glass-card relative overflow-hidden rounded-[2rem] p-8 text-center sm:p-12">
-              <div className="pointer-events-none absolute -left-20 -top-20 h-52 w-52 rounded-full bg-[#00F5FF]/10 blur-[70px]" />
-              <h2 className="text-3xl font-extrabold text-white sm:text-4xl">{t.safety_h2}</h2>
-              <p className="mx-auto mt-4 max-w-2xl text-white/55">
-                {t.safety_sub}
-              </p>
-
-              <div className="mx-auto mt-10 grid max-w-4xl grid-cols-2 gap-6 lg:grid-cols-4">
-                {[
-                  ["verified_user", t.safety_ref],
-                  ["badge", t.safety_verified],
-                  ["gavel", t.safety_guidelines],
-                  ["report", t.safety_report],
-                ].map(([icon, label]) => (
-                  <div key={label} className="flex flex-col items-center gap-2">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/5 text-[#00F5FF]">
-                      <span className="material-symbols-outlined text-[30px]">{icon}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-white/80">{label}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mx-auto mt-10 max-w-2xl border-t border-white/10 pt-7">
-                <p className="text-lg italic text-white/75">
-                  {t.safety_quote}
-                </p>
-                <p className="mt-2 text-sm font-bold text-[#00F5FF]">{t.safety_quote_author}</p>
-              </div>
-            </div>
-          </div>
-        </section>
+        ) : null}
 
         <section className="relative overflow-hidden border-t border-white/5 border-b border-white/5 px-4 py-24 text-center sm:px-6">
           <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[#00F5FF]/15 to-[#FF00FF]/15 blur-[130px]" />

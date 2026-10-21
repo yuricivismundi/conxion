@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED, paidUpgradeHint } from "@/lib/billing/early-access";
 import dynamic from "next/dynamic";
 import { Suspense, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PullToRefreshIndicator from "@/components/PullToRefreshIndicator";
@@ -7891,7 +7892,7 @@ function MessagesPageContent() {
         current: displayCurrent,
         limit,
         reached: limit !== null && current >= limit,
-        upgradeHint: "Upgrade to Plus to create more events this month.",
+        upgradeHint: paidUpgradeHint("Upgrade to Plus to create more events this month."),
         compact: true,
       };
     }
@@ -7905,7 +7906,7 @@ function MessagesPageContent() {
         current: displayCurrent,
         limit,
         reached: limit !== null && dbJoined >= limit,
-        upgradeHint: "Leave a group or upgrade to Plus to have more group slots.",
+        upgradeHint: paidUpgradeHint("Leave a group or upgrade to Plus to have more group slots."),
         compact: true,
       };
     }
@@ -7923,7 +7924,7 @@ function MessagesPageContent() {
         limit,
         reached,
         compact: false,
-        upgradeHint: "Upgrade to Plus to send more booking requests per month.",
+        upgradeHint: paidUpgradeHint("Upgrade to Plus to send more booking requests per month."),
       };
     }
     if (kindFilter === "service") {
@@ -7940,7 +7941,7 @@ function MessagesPageContent() {
         limit,
         reached,
         compact: false,
-        upgradeHint: "Upgrade to Plus to send more service inquiries per month.",
+        upgradeHint: paidUpgradeHint("Upgrade to Plus to send more service inquiries per month."),
       };
     }
     const concurrentLimit = messagingSummary?.activeLimit ?? 10;
@@ -7963,7 +7964,7 @@ function MessagesPageContent() {
       compact: false,
       upgradeHint: concurrentReached
         ? `You have ${concurrentLimit} active conversations. Archive one to start a new one.`
-        : `Upgrade to Plus to activate more conversations per month.`,
+        : paidUpgradeHint("Upgrade to Plus to activate more conversations per month."),
     };
   }, [activeTab, bookingUsage, kindCounts.group, kindFilter, messagingSummary?.activeCount, messagingSummary?.activeLimit, serviceUsage, tabCounts, threadQuotaSummary, threads]);
   const inboxSectionLabel = useMemo(() => {
@@ -8572,9 +8573,10 @@ function MessagesPageContent() {
       return {
         tone: "border-fuchsia-300/30 bg-fuchsia-500/10 text-fuchsia-100",
         title: `You've used all ${limit} conversation starts this period`,
-        body: `${resetLabel}. Upgrade to activate more conversations.`,
-        ctaLabel: "Upgrade to continue",
-        ctaHref: "/pricing",
+        body: EARLY_ACCESS_ENABLED
+          ? `${resetLabel}. Monthly limits keep Conxion spam-free during early access.`
+          : `${resetLabel}. Upgrade to activate more conversations.`,
+        ...(EARLY_ACCESS_ENABLED ? {} : { ctaLabel: "Upgrade to continue", ctaHref: "/pricing" }),
       };
     }
 
@@ -9330,7 +9332,7 @@ function MessagesPageContent() {
                 <div className="flex shrink-0 items-center gap-2">
                   {headerQuotaMeta ? (
                     <div className="flex flex-col items-end gap-0.5 text-right">
-                      {headerQuotaMeta.reached ? (
+                      {headerQuotaMeta.reached && !EARLY_ACCESS_ENABLED ? (
                         <Link
                           href="/pricing"
                           title={headerQuotaMeta.upgradeHint}
@@ -11349,7 +11351,7 @@ function MessagesPageContent() {
                             composerLockReason
                               ? composerLockReason
                               : monthlyLimitReachedForStart
-                              ? "Upgrade to activate more conversations."
+                              ? paidUpgradeHint("Upgrade to activate more conversations.")
                               : concurrentLimitReachedForStart
                               ? "Archive one active conversation to continue."
                               : "Type a message..."

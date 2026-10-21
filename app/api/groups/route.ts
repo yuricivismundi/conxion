@@ -1,3 +1,4 @@
+import { paidUpgradeHint } from "@/lib/billing/early-access";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
@@ -156,7 +157,7 @@ export async function POST(req: Request) {
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("group_limit_reached")) {
         return NextResponse.json(
-          { ok: false, error: "You've reached your group limit. Upgrade to Plus to create more groups." },
+          { ok: false, error: paidUpgradeHint("You've reached your group limit. Upgrade to Plus to create more groups.") },
           { status: 403 }
         );
       }

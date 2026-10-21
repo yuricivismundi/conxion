@@ -1,5 +1,6 @@
 "use client";
 
+import { HOSTING_TRUST_GATE_ENABLED, evaluateHostingTrust, type HostingTrustRequirement } from "@/lib/hosting/trust-gate";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import ProfileCompletionNudge from "@/components/ProfileCompletionNudge";
@@ -678,7 +679,9 @@ function ConnectionsPageContent() {
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [myCity, setMyCity] = useState<string | null>(null);
   const [myCountry, setMyCountry] = useState<string | null>(null);
-  const [viewerVerified, setViewerVerified] = useState(false);
+  // "viewerVerified" = may request hosting (complete profile + admin-approved photo).
+  const [viewerVerified, setViewerVerified] = useState(!HOSTING_TRUST_GATE_ENABLED);
+  const [viewerHostingMissing, setViewerHostingMissing] = useState<HostingTrustRequirement[] | undefined>(undefined);
   const [viewerAvatarStatus, setViewerAvatarStatus] = useState<string | null>(null);
   const [photoGateOpen, setPhotoGateOpen] = useState(false);
   const [myRoles, setMyRoles] = useState<string[]>([]);
@@ -1508,7 +1511,8 @@ function ConnectionsPageContent() {
           }
           const { data: myProfile } = await supabase
             .from("profiles")
-            .select("city,country,roles,languages,dance_skills,verified,verified_label,avatar_status")
+            // includes the hosting trust-gate columns (see HOSTING_TRUST_PROFILE_COLUMNS)
+            .select("city,country,roles,languages,dance_skills,avatar_status,verified,verified_label,display_name,avatar_path,avatar_url,bio")
             .eq("user_id", user.id)
             .maybeSingle();
           const city = isNonEmptyString((myProfile as { city?: string | null } | null)?.city)
@@ -1540,7 +1544,10 @@ function ConnectionsPageContent() {
           if (canCommit()) {
             setMyCity(city);
             setMyCountry(country);
-            setViewerVerified(isPaymentVerified((myProfile ?? null) as Record<string, unknown> | null));
+            // "viewerVerified" = viewer may request hosting (Verified badge, or the free early-access trust gate).
+            const hostingTrust = evaluateHostingTrust((myProfile ?? null) as Record<string, unknown> | null, user.created_at);
+            setViewerVerified(hostingTrust.allowed);
+            setViewerHostingMissing(hostingTrust.missing);
             setViewerAvatarStatus((myProfile as { avatar_status?: string | null } | null)?.avatar_status ?? null);
             setMyRoles(myRoleList);
             setMyLangCodes(myLangList);
@@ -5300,6 +5307,7 @@ function ConnectionsPageContent() {
       ) : null}
 
       <VerificationRequiredDialog
+        missing={viewerHostingMissing}
         open={verificationModalOpen}
         resumePayload={verificationResumePayload}
         onClose={() => setVerificationModalOpen(false)}

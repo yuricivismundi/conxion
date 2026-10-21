@@ -118,18 +118,33 @@ function buildSuggestions(profile: ProfileRow | null): Suggestion[] {
     priority: 9,
   });
 
-  // 3. Role-specific suggestion
+  // 3. Dance Page: the one thing every member gets value from on day one
+  if (!isTeacher) {
+    suggestions.push({
+      id: "dance-page",
+      icon: "badge",
+      iconBg: "border-amber-300/35 bg-amber-400/10",
+      iconColor: "text-amber-300",
+      title: "Create your Dance Page",
+      body: "One link for your dance bio, videos, upcoming events and competitions. Put it in your Instagram bio.",
+      cta: "Create Dance Page",
+      href: "/me/edit/teacher-profile",
+      priority: 12,
+    });
+  }
+
+  // 4. Role-specific suggestion
   if (isTeacher) {
     suggestions.push({
       id: "teacher-profile",
       icon: "school",
       iconBg: "border-amber-300/35 bg-amber-400/10",
       iconColor: "text-amber-300",
-      title: "Set up your teacher profile",
-      body: "Add classes, services, and availability so students can find and book you.",
-      cta: "Open teacher profile",
+      title: "Set up your Dance Page",
+      body: "One shareable link with your classes, events and availability, so students can find and book you.",
+      cta: "Create Dance Page",
       href: "/me/edit/teacher-profile",
-      priority: 11,
+      priority: 12,
     });
   } else if (isOrganizer) {
     suggestions.push({

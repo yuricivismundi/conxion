@@ -1,5 +1,6 @@
 "use client";
 
+import { paidUpgradeHint } from "@/lib/billing/early-access";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
@@ -667,7 +668,7 @@ export default function TripsPage({ onCanCreate, externalQuery, externalStatusFi
                   current={activeTrips.length}
                   limit={tripLimit}
                   compact
-                  upgradeHint="Upgrade to Plus to have more active trips."
+                  upgradeHint={paidUpgradeHint("Upgrade to Plus to have more active trips.")}
                 />
                 <label className="group relative w-full lg:max-w-[300px]">
                   <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-white/35 transition-colors group-focus-within:text-cyan-300">
