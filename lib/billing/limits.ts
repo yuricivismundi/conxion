@@ -1,4 +1,5 @@
 import type { PlanId } from "@/lib/billing/plans";
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 
 export type PlanLimits = {
   activeChatThreadsPerMonth: number | null;
@@ -77,6 +78,8 @@ export function getPlanLimits(planId: PlanId) {
 }
 
 export function getPlanIdFromMeta(meta: Record<string, unknown>, isVerified = false): PlanId {
+  // Early access: everyone gets Plus-level limits and features for free.
+  if (EARLY_ACCESS_ENABLED) return "pro";
   // Pro status is stored as billing_pro_status in user_metadata
   const proStatus = typeof meta.billing_pro_status === "string" ? meta.billing_pro_status : null;
   if (proStatus === "active" || proStatus === "trialing" || proStatus === "past_due") return "pro";

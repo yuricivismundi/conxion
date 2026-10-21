@@ -1,9 +1,9 @@
+import { HOSTING_TRUST_PROFILE_COLUMNS, evaluateHostingTrust, hostingTrustErrorMessage } from "@/lib/hosting/trust-gate";
 import { NextResponse } from "next/server";
 import { getBillingAccountState } from "@/lib/billing/account-state";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
 import { findPendingPairRequestConflict } from "@/lib/requests/pending-pair-conflicts";
 import { getSupabaseServiceClient } from "@/lib/supabase/service-role";
-import { isPaymentVerified } from "@/lib/verification";
 import {
   ensureLinkedMemberPairThread,
   mergeLinkedMemberContextMetadata,
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
     if (requestType === "request_hosting") {
       const profileRes = await supabase
         .from("profiles")
-        .select("verified,verified_label")
+        .select(HOSTING_TRUST_PROFILE_COLUMNS)
         .eq("user_id", authData.user.id)
         .maybeSingle();
 
@@ -128,9 +128,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: profileRes.error.message }, { status: 400 });
       }
 
-      if (!isPaymentVerified((profileRes.data ?? null) as Record<string, unknown> | null)) {
+      const trust = evaluateHostingTrust(
+        (profileRes.data ?? null) as Record<string, unknown> | null,
+        authData.user.created_at
+      );
+      if (!trust.allowed) {
         return NextResponse.json(
-          { ok: false, error: "Request hosting requires verification." },
+          { ok: false, error: hostingTrustErrorMessage(trust), code: "hosting_trust_required", missing: trust.missing },
           { status: 403 }
         );
       }

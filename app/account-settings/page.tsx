@@ -359,7 +359,7 @@ export default function AccountSettingsPage() {
       if (err) throw err;
       setMe((prev) => prev ? { ...prev, teacherProfileEnabled: enabled } : prev);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update teacher profile visibility.");
+      setError(err instanceof Error ? err.message : "Could not update Dance Page visibility.");
     } finally {
       setBusyVisibility(null);
     }
@@ -519,9 +519,9 @@ export default function AccountSettingsPage() {
             <SectionHeader icon="visibility" label="Visibility" />
             <div className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 divide-y divide-white/[0.05]">
               <SettingRow
-                icon="school"
-                label="Teacher profile"
-                description="Show your teacher profile tab to other members"
+                icon="badge"
+                label="Dance Page"
+                description="Show your public Dance Page (events, competitions, classes) to anyone with the link"
               >
                 <Toggle
                   enabled={me?.teacherProfileEnabled ?? false}

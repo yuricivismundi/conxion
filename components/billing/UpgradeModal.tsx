@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Link from "next/link";
 import { getPlanDefinition, type PlanId } from "@/lib/billing/plans";
 import { getUpgradeReasonContent, type UpgradeReason } from "@/lib/billing/upgrade-reasons";
@@ -13,9 +14,10 @@ type Props = {
 };
 
 export default function UpgradeModal({ open, reason, onClose, onUpgrade }: Props) {
-  useBodyScrollLock(open);
+  useBodyScrollLock(open && !EARLY_ACCESS_ENABLED);
 
-  if (!open) return null;
+  // Early access: no paid plans to upsell.
+  if (!open || EARLY_ACCESS_ENABLED) return null;
 
   const content = getUpgradeReasonContent(reason);
   const plan = getPlanDefinition(content.recommendedPlan);

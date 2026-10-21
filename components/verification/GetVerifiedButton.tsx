@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import { type ReactNode, useState } from "react";
 import VerificationCheckoutModal from "@/components/verification/VerificationCheckoutModal";
 import { type VerificationResumePayload } from "@/lib/verification-client";
@@ -26,6 +27,9 @@ export default function GetVerifiedButton({
   onError,
 }: Props) {
   const [open, setOpen] = useState(false);
+
+  // Early access: paid verification is switched off.
+  if (EARLY_ACCESS_ENABLED) return null;
 
   return (
     <>

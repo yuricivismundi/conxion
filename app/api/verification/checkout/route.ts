@@ -1,3 +1,4 @@
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import { NextResponse } from "next/server";
 import { createVerifiedCheckoutLineItem, getRequestOrigin, getStripeClient } from "@/lib/billing/stripe";
 import { getBearerToken, getSupabaseUserClient } from "@/lib/supabase/user-server-client";
@@ -14,6 +15,13 @@ type CheckoutPayload = {
 };
 
 export async function POST(req: Request) {
+  if (EARLY_ACCESS_ENABLED) {
+    return NextResponse.json(
+      { ok: false, error: "Paid verification is paused during early access." },
+      { status: 410 }
+    );
+  }
+
   try {
     const token = getBearerToken(req);
     if (!token) {

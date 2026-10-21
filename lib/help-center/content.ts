@@ -1,4 +1,5 @@
 import { LEGAL_PROFILE } from "@/lib/legal-profile";
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 
 export type HelpArticle = {
   slug: string;
@@ -8,6 +9,8 @@ export type HelpArticle = {
   updatedAt: string;
   body: string[];
   related: string[];
+  /** Shown only while early access is on (everything free). */
+  earlyAccessOnly?: boolean;
 };
 
 export type HelpCategoryKey =
@@ -27,7 +30,8 @@ export type HelpCategory = {
   accent: string;
 };
 
-export const HELP_CATEGORIES: HelpCategory[] = [
+/** Every category, including the ones hidden during early access. Kept for when paid plans return. */
+export const ALL_HELP_CATEGORIES: HelpCategory[] = [
   {
     key: "using-conxion",
     title: "Using ConXion",
@@ -79,7 +83,38 @@ export const HELP_CATEGORIES: HelpCategory[] = [
   },
 ];
 
-export const HELP_ARTICLES: HelpArticle[] = [
+/** Every article, including the ones hidden during early access. Kept for when paid plans return. */
+export const ALL_HELP_ARTICLES: HelpArticle[] = [
+  {
+    slug: "is-conxion-free",
+    title: "Is ConXion free?",
+    summary: "Yes. During early access every feature is free for every member. Monthly fair-use limits keep the community spam-free.",
+    category: "using-conxion",
+    updatedAt: "2026-10-20",
+    earlyAccessOnly: true,
+    body: [
+      "While we build the community, every account gets the full product for free: no card, no trial, no paid plans.",
+      "Fair-use limits still apply so inboxes stay full of real dancers: 60 connection requests, 30 chat activations, 5 trips, 10 trip requests, 5 events and 10 hosting offers per month, plus up to 2 showcase videos and 3 showcase photos. Monthly counters reset on the 1st of each month.",
+      "Everyone who joins during early access keeps a Founding Member badge on their profile and gets first access to new features. If paid plans come back, founding members will hear about it first.",
+    ],
+    related: ["what-is-a-dance-page", "how-connections-and-activities-work"],
+  },
+  {
+    slug: "what-is-a-dance-page",
+    title: "What is a Dance Page?",
+    summary: "A public page any member can turn on and share: your label, bio, videos, upcoming events, competition history and references.",
+    category: "using-conxion",
+    updatedAt: "2026-10-20",
+    earlyAccessOnly: true,
+    body: [
+      "Your Dance Page is a public link you can put in your Instagram or TikTok bio, or share in WhatsApp groups and festival chats. Anyone with the link can see it, even without a ConXion account.",
+      "Turn it on from Edit profile → Dance Page. Pick the label that fits you best: Teacher, Artist, Performer, Competitor, DJ, Organizer, Studio Owner or Social Dancer.",
+      "What it shows: your headline and bio, showcase videos, the upcoming public events you host or attend, your competition history, festivals you taught or performed at, and references.",
+      "Teachers also get private-class booking, weekly classes and service inquiries on their page.",
+      "Your competition history and upcoming public events are visible to anyone while your Dance Page is on. Turn the page off at any time to hide it.",
+    ],
+    related: ["is-conxion-free", "how-teacher-booking-works"],
+  },
   {
     slug: "activities-and-reference-rules-by-category",
     title: "How do activity categories and reference rules work?",
@@ -141,7 +176,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     updatedAt: "2026-05-08",
     body: [
       "To use the teacher booking flow you need a Verified account — this is required to unlock teacher and service inquiry access.",
-      "Teachers: set your open availability slots in your teacher profile settings (Edit Profile → Teacher Profile → Availability). Each slot has a date, start time, and end time. Slots marked available will appear to visitors on your teacher profile.",
+      "Teachers: set your open availability slots in your teacher profile settings (Edit Profile → Dance Page → Booking). Each slot has a date, start time, and end time. Slots marked available will appear to visitors on your teacher profile.",
       "Students: visit a teacher's profile page and open the booking section. Select a date from the calendar, pick a time slot, add an optional note about your level and goals, then tap Send booking request.",
       "The teacher receives a notification and can accept or decline the request from their Bookings manager. Accepting a booking marks the slot as taken and automatically declines any competing requests for the same slot.",
       "Bookings are limited to dates within the next 3 months. Past dates and already-accepted slots are filtered out automatically.",
@@ -304,6 +339,46 @@ export const HELP_ARTICLES: HelpArticle[] = [
     related: ["recover-account-and-access-support", "how-to-report-a-member-or-reference"],
   },
 ];
+
+// ── Early access visibility ─────────────────────────────────────────────────
+// Paid-plan and verification content is hidden (not deleted) while everything
+// is free. Flip NEXT_PUBLIC_EARLY_ACCESS=false to bring it all back.
+
+const HIDDEN_CATEGORIES_DURING_EARLY_ACCESS = new Set<HelpCategoryKey>(["billing-plans"]);
+const HIDDEN_ARTICLES_DURING_EARLY_ACCESS = new Set<string>(["when-do-i-need-verification-for-hosting"]);
+
+/** Sentences that mention paid plans or verification, swapped during early access. */
+const EARLY_ACCESS_LINE_OVERRIDES: Record<string, Record<string, string>> = {
+  "how-teacher-booking-works": {
+    "To use the teacher booking flow you need a Verified account — this is required to unlock teacher and service inquiry access.":
+      "Booking a private class is free during early access. Any signed-in member can send a booking request to a teacher.",
+  },
+  "travel-and-hosting-safety-basics": {
+    "Offering hosting can stay on Starter. If you want to request hosting for yourself, use Verified first so the trust layer is in place before you ask someone to host you.":
+      "Anyone can offer hosting. To request hosting for yourself you need a complete profile (name, bio, city, country, dance styles, role) and a profile photo approved by our team. If your photo or profile needs changes, an admin will message you in your inbox. Before you agree to a stay, check the other person's profile, references and interaction history.",
+  },
+};
+
+function isVisibleDuringEarlyAccess(article: HelpArticle) {
+  return (
+    !HIDDEN_CATEGORIES_DURING_EARLY_ACCESS.has(article.category) &&
+    !HIDDEN_ARTICLES_DURING_EARLY_ACCESS.has(article.slug)
+  );
+}
+
+function applyEarlyAccessOverrides(article: HelpArticle): HelpArticle {
+  const overrides = EARLY_ACCESS_LINE_OVERRIDES[article.slug];
+  if (!overrides) return article;
+  return { ...article, body: article.body.map((line) => overrides[line] ?? line) };
+}
+
+export const HELP_CATEGORIES: HelpCategory[] = EARLY_ACCESS_ENABLED
+  ? ALL_HELP_CATEGORIES.filter((category) => !HIDDEN_CATEGORIES_DURING_EARLY_ACCESS.has(category.key))
+  : ALL_HELP_CATEGORIES;
+
+export const HELP_ARTICLES: HelpArticle[] = EARLY_ACCESS_ENABLED
+  ? ALL_HELP_ARTICLES.filter(isVisibleDuringEarlyAccess).map(applyEarlyAccessOverrides)
+  : ALL_HELP_ARTICLES.filter((article) => !article.earlyAccessOnly);
 
 export function getHelpArticle(slug: string) {
   return HELP_ARTICLES.find((article) => article.slug === slug) ?? null;

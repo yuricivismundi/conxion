@@ -13,7 +13,7 @@ export default function ShareTeacherProfileButton({ displayName, size = "compact
   function handleShare() {
     const url = typeof window !== "undefined" ? window.location.href : "";
     if (navigator.share) {
-      void navigator.share({ title: `${displayName} — Teacher on ConXion`, url });
+      void navigator.share({ title: `${displayName} on ConXion`, url });
     } else {
       void navigator.clipboard.writeText(url).then(() => {
         setCopied(true);
@@ -28,7 +28,7 @@ export default function ShareTeacherProfileButton({ displayName, size = "compact
     <button
       type="button"
       onClick={handleShare}
-      title="Share teacher profile"
+      title="Share Dance Page"
       className={
         isCompact
           ? "inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full border border-white/15 bg-white/[0.04] text-white/60 transition hover:bg-white/[0.08] hover:border-white/25 hover:text-white text-[10px] font-medium uppercase tracking-wider"

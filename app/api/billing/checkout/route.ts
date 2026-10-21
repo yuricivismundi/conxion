@@ -1,3 +1,4 @@
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { getBillingAccountState } from "@/lib/billing/account-state";
@@ -24,6 +25,13 @@ function isSelectablePlan(planId: PlanId | null | undefined): planId is "verifie
 }
 
 export async function POST(req: Request) {
+  if (EARLY_ACCESS_ENABLED) {
+    return NextResponse.json(
+      { ok: false, error: "Conxion is free during early access. There is nothing to pay for." },
+      { status: 410 }
+    );
+  }
+
   try {
     const token = getBearerToken(req);
     if (!token) {

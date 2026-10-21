@@ -23,7 +23,7 @@ type TabKey = "dashboard" | "moderation" | "event-covers" | "privacy-claims" | "
 type DateFilterKey = "7d" | "30d" | "90d" | "180d";
 type ReportStatusFilter = "all" | "open" | "resolved" | "dismissed";
 type ModerateAction = "resolve" | "dismiss" | "reopen";
-type PhotoModerateAction = "approve" | "reject";
+type PhotoModerateAction = "approve" | "reject" | "request_update";
 type EventModerateAction = "approve_cover" | "reject_cover" | "hide" | "unhide" | "cancel" | "publish";
 
 type DanceSkill = { level?: string; verified?: boolean };
@@ -838,9 +838,13 @@ export default function AdminSpacePage() {
       setActionError("Rejecting a photo requires a note for the member.");
       return;
     }
+    if (action === "request_update" && !message?.trim()) {
+      setActionError("Write the feedback you want to send to the member.");
+      return;
+    }
 
     setPhotoActionBusyId(userId);
-    setPhotoReviewBusy(action === "reject");
+    setPhotoReviewBusy(action !== "approve");
     setActionError(null);
     setActionInfo(null);
 
@@ -867,10 +871,17 @@ export default function AdminSpacePage() {
         return;
       }
 
+      const deliveredSuffix = json?.threadToken
+        ? ". Member notified in Messages."
+        : json?.notificationWarning
+          ? ` (${json.notificationWarning})`
+          : ".";
       setActionInfo(
         action === "approve"
-          ? `Profile photo approved${json?.threadToken ? ". Member notified in Messages." : json?.notificationWarning ? ` (${json.notificationWarning})` : "."}`
-          : `Profile photo rejected${json?.threadToken ? ". Member notified in Messages." : json?.notificationWarning ? ` (${json.notificationWarning})` : "."}`
+          ? `Profile photo approved${deliveredSuffix}`
+          : action === "request_update"
+            ? `Feedback sent, photo kept in review${deliveredSuffix}`
+            : `Profile photo rejected${deliveredSuffix}`
       );
       setPhotoReviewDialog({ open: false, userId: "", displayName: "", action: "reject" });
       setPhotoReviewMsg("");
@@ -1407,6 +1418,15 @@ export default function AdminSpacePage() {
                                   className="rounded-full border border-rose-300/30 bg-rose-300/12 px-2.5 py-1 text-xs font-semibold text-rose-100 hover:bg-rose-300/20 disabled:opacity-60"
                                 >
                                   {busy ? "…" : "Reject"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => openPhotoReviewDialog(profile, "request_update")}
+                                  title="Keep the photo in review and message the member"
+                                  className="rounded-full border border-amber-300/30 bg-amber-300/12 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-300/20 disabled:opacity-60"
+                                >
+                                  {busy ? "…" : "Feedback"}
                                 </button>
                                 <Link
                                   href={`/profile/${profile.userId}`}
@@ -2158,6 +2178,19 @@ export default function AdminSpacePage() {
                                     ) : null}
                                     {p.avatar_status === "rejected" ? (
                                       <span className="rounded-full border border-rose-300/30 bg-rose-300/12 px-2 py-0.5 text-[10px] font-semibold text-rose-100">Photo rejected</span>
+                                    ) : p.avatar_status !== "approved" ? (
+                                      <span className="rounded-full border border-amber-300/30 bg-amber-300/12 px-2 py-0.5 text-[10px] font-semibold text-amber-100">Photo not approved</span>
+                                    ) : null}
+                                    {p.avatar_status !== "approved" && !locked ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setPhotoReviewDialog({ open: true, userId: p.user_id, displayName: p.display_name, action: "request_update" })
+                                        }
+                                        className="rounded-full border border-amber-300/30 bg-black/20 px-2 py-0.5 text-[10px] font-semibold text-amber-100 hover:bg-amber-300/15"
+                                      >
+                                        Send feedback
+                                      </button>
                                     ) : null}
                                   </div>
                                   <p className="mt-0.5 text-xs text-slate-500">
@@ -2423,26 +2456,40 @@ export default function AdminSpacePage() {
         title={
           photoReviewDialog.action === "approve"
             ? `Approve profile photo for ${photoReviewDialog.displayName || "member"}?`
-            : `Reject profile photo for ${photoReviewDialog.displayName || "member"}?`
+            : photoReviewDialog.action === "request_update"
+              ? `Send feedback to ${photoReviewDialog.displayName || "member"}`
+              : `Reject profile photo for ${photoReviewDialog.displayName || "member"}?`
         }
         description={
           photoReviewDialog.action === "approve"
-            ? "This marks the avatar as approved."
-            : "Rejecting removes the current avatar and sends your note to the member in the admin Messages thread."
+            ? "This marks the avatar as approved. Approved photo + complete profile unlocks requesting hosting."
+            : photoReviewDialog.action === "request_update"
+              ? "Keeps the current photo in review and opens a support thread in the member's Messages with your feedback (e.g. missing bio, photo doesn't show the face)."
+              : "Rejecting removes the current avatar and sends your note to the member in the admin Messages thread."
         }
         summary={
-          photoReviewDialog.action === "reject" ? (
+          photoReviewDialog.action !== "approve" ? (
             <textarea
               rows={4}
               value={photoReviewMsg}
               onChange={(event) => setPhotoReviewMsg(event.target.value)}
-              placeholder="Explain what needs to change in the photo."
+              placeholder={
+                photoReviewDialog.action === "request_update"
+                  ? "What should the member change? e.g. Please add a bio and a photo where your face is visible."
+                  : "Explain what needs to change in the photo."
+              }
               className="w-full rounded-2xl border border-white/10 bg-[#101a24] px-3 py-3 text-sm text-white placeholder:text-slate-500 focus:border-rose-300/35 focus:outline-none"
             />
           ) : null
         }
-        confirmLabel={photoReviewDialog.action === "approve" ? "Approve photo" : "Reject photo"}
-        confirmVariant={photoReviewDialog.action === "approve" ? "primary" : "danger"}
+        confirmLabel={
+          photoReviewDialog.action === "approve"
+            ? "Approve photo"
+            : photoReviewDialog.action === "request_update"
+              ? "Send feedback"
+              : "Reject photo"
+        }
+        confirmVariant={photoReviewDialog.action === "reject" ? "danger" : "primary"}
         busy={photoReviewBusy}
         onCancel={() => {
           setPhotoReviewDialog({ open: false, userId: "", displayName: "", action: "reject" });
@@ -2452,7 +2499,7 @@ export default function AdminSpacePage() {
           void moderatePhoto(
             photoReviewDialog.userId,
             photoReviewDialog.action,
-            photoReviewDialog.action === "reject" ? photoReviewMsg : undefined
+            photoReviewDialog.action !== "approve" ? photoReviewMsg : undefined
           )
         }
       />

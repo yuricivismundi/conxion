@@ -26,7 +26,7 @@ export default function TeacherOwnerActions({ profileUserId, socialProfileHref, 
       {isSelf && (
         <Link
           href="/me/edit/teacher-profile"
-          title="Teacher profile settings"
+          title="Dance Page settings"
           className={
             isCompact
               ? "inline-flex items-center justify-center w-7 h-7 rounded-full border border-white/15 bg-white/[0.05] text-white/60 transition hover:bg-white/[0.1] hover:border-white/30 hover:text-white"

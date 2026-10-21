@@ -126,7 +126,8 @@ function AuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [mode, setMode] = useState<AuthMode>("signup");
+  // /auth?mode=login opens the Log in tab (landing page "Log in" button); default is Sign up.
+  const [mode, setMode] = useState<AuthMode>(() => (searchParams.get("mode") === "login" ? "login" : "signup"));
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);

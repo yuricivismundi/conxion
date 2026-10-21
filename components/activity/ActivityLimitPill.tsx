@@ -1,3 +1,4 @@
+import { EARLY_ACCESS_ENABLED, FAIR_USE_HINT } from "@/lib/billing/early-access";
 import Link from "next/link";
 
 type ActivityLimitPillProps = {
@@ -18,7 +19,14 @@ export default function ActivityLimitPill({ label, current, limit, compact = fal
       <span className={reached ? "text-[11px] font-bold text-[#FFC6FA]" : "text-[11px] font-bold text-[#00F5FF]/70"}>
         {current}/{limit ?? "∞"}
       </span>
-      {reached ? (
+      {reached && EARLY_ACCESS_ENABLED ? (
+        <span
+          title={FAIR_USE_HINT}
+          className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/50"
+        >
+          Resets monthly
+        </span>
+      ) : reached ? (
         <Link
           href="/pricing"
           title={upgradeHint ?? fallbackHint}

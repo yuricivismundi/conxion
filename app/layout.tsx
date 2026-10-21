@@ -1,4 +1,5 @@
 // app/layout.tsx
+import BetaFeedbackButton from "@/components/feedback/BetaFeedbackButton";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppFooter from "@/components/AppFooter";
@@ -77,6 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <OfflineBanner />
                 <PwaInstallBanner />
                 <IosInstallBanner />
+                <BetaFeedbackButton />
                 <ServiceWorkerRegistrar />
               </ErrorBoundary>
             </TourShellLoader>

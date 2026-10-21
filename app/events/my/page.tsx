@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED, paidUpgradeHint } from "@/lib/billing/early-access";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 
@@ -718,7 +719,7 @@ export default function MyEventsPage({ onCanCreate, searchQuery: externalQuery }
                   Create Event
                 </span>
                 <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1a1a2e] border border-white/10 px-3 py-1.5 text-[12px] font-semibold text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                  Upgrade to Plus to create more events
+                  {EARLY_ACCESS_ENABLED ? "Monthly event limit reached, resets next month" : "Upgrade to Plus to create more events"}
                 </span>
               </div>
             ) : (

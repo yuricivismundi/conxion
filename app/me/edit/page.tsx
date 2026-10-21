@@ -1,5 +1,6 @@
 "use client";
 
+import { EARLY_ACCESS_ENABLED } from "@/lib/billing/early-access";
 import dynamic from "next/dynamic";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -100,7 +101,7 @@ const ProfileMediaManager = dynamic(() => import("@/components/profile/ProfileMe
 
 const TeacherProfilePage = dynamic(() => import("@/app/me/edit/teacher-profile/page"), {
   ssr: false,
-  loading: () => <TabPanelLoading label="teacher profile" />,
+  loading: () => <TabPanelLoading label="Dance Page" />,
 });
 
 const LEVELS = [
@@ -757,7 +758,7 @@ function EditMePage() {
     { id: "profile", label: "Profile info" },
     { id: "media", label: "Media" },
     { id: "hosting", label: "Hosting" },
-    { id: "teacher_profile", label: "Teacher profile" },
+    { id: "teacher_profile", label: "Dance Page" },
   ];
 
   const countryIso = useMemo(() => countriesAll.find((entry) => entry.name === country)?.isoCode ?? "", [countriesAll, country]);
@@ -1055,7 +1056,7 @@ function EditMePage() {
               if (tpRes.data) {
                 const endsAt = tpRes.data.teacher_profile_trial_ends_at as string | null;
                 const startedAt = tpRes.data.teacher_profile_trial_started_at as string | null;
-                if (endsAt) {
+                if (endsAt && !EARLY_ACCESS_ENABLED) {
                   const diff = new Date(endsAt).getTime() - Date.now();
                   if (diff > 0) {
                     setTrialDaysLeft(Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -1735,7 +1736,7 @@ function EditMePage() {
               </div>
             </div>
 
-            {!paymentVerified && (
+            {!paymentVerified && !EARLY_ACCESS_ENABLED && (
               <div className="mt-3 xl:hidden">
                 <GetVerifiedButton
                   className="w-full rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-cyan-400/15 via-fuchsia-500/15 to-purple-500/15 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:brightness-110"
@@ -1819,7 +1820,7 @@ function EditMePage() {
               </div>
             </div>
 
-            {!paymentVerified && (
+            {!paymentVerified && !EARLY_ACCESS_ENABLED && (
               <div className="mt-3 hidden w-72 xl:block">
                 <GetVerifiedButton
                   className="w-full rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-cyan-400/15 via-fuchsia-500/15 to-purple-500/15 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:brightness-110"
